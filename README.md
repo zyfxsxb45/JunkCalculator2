@@ -113,31 +113,36 @@ The executable is self-contained with no external dependencies.
 
 ## Project Structure
 
-    +-- main.cpp              Entry point, REPL, workspace I/O
-    +-- Lexer.h/cpp           Tokenizer (55+ token types)
-    +-- Parser.h/cpp          Recursive descent parser (30+ AST nodes)
-    +-- Evaluator.h/cpp       Visitor-pattern tree walker (180+ builtins)
-    +-- Value.h               Dynamic type system (std::variant)
-    +-- Expr.h                AST node definitions
-    +-- Token.h               Token types and utilities
-    +-- Complex.h             Complex numbers + transcendental functions
-    +-- Matrix.h              Generic matrix template + linear algebra
-    +-- BigInt.h              Arbitrary-precision integers + number theory
-    +-- Fraction.h            Exact rational arithmetic
-    +-- Base.h                Multi-radix number system + bitwise ops
-    +-- Tolerance.h           IEEE 754 dynamic floating-point tolerance
-    +-- Image.h               BMP image generation engine
-    +-- Probability.h         Distribution classes + special functions
-    +-- Highlight.h           ANSI terminal colorization
-    +-- HelpText.h            25-topic help system (compile-time embedded)
-    +-- Module.h              Native C++ module registration framework
+    +-- main.cpp                    Entry point, REPL, workspace I/O
+    +-- Lexer.h/cpp                 Tokenizer (55+ token types)
+    +-- Parser.h/cpp                Recursive descent parser (30+ AST nodes)
+    +-- Evaluator.h/cpp             Visitor-pattern tree walker (180+ builtins)
+    +-- Value.h                     Dynamic type system (std::variant)
+    +-- Expr.h                      AST node definitions
+    +-- Token.h                     Token types and utilities
+    +-- Complex.h                   Complex numbers + transcendental functions
+    +-- Matrix.h                    Generic matrix template + linear algebra
+    +-- BigInt.h                    Arbitrary-precision integers + number theory
+    +-- Fraction.h                  Exact rational arithmetic
+    +-- Base.h                      Multi-radix number system + bitwise ops
+    +-- Tolerance.h                 IEEE 754 dynamic floating-point tolerance
+    +-- Image.h                     BMP image generation engine
+    +-- Probability.h               Distribution classes + special functions
+    +-- Highlight.h                 ANSI terminal colorization
+    +-- HelpText.h                  25-topic help system (compile-time embedded)
+    +-- Module.h                    Native C++ module registration framework
     +-- modules/
-    |   +-- json_module.h     JSON serialization native module
-    |   +-- image_module.h    Image engine native module
-    |   +-- prob_module.h     Probability native module
+    |   +-- json_module.h           JSON serialization native module
+    |   +-- image_module.h          Image engine native module
+    |   +-- prob_module.h           Probability native module
     +-- lib/
-    |   +-- regex.jc2         Regular expression engine (pure JC2)
-    +-- jc2-language/         VS Code extension (syntax + runner)
+    |   +-- regex.jc2               Regular expression engine (pure JC2)
+    +-- jc2-language/               VS Code extension (syntax + runner)
+        +-- package.json            VS Code extension manifest
+        +-- language-configuration.json  VS Code language configuration
+        +-- extension.js            VS Code extension entry point (registers runner)
+        +-- syntaxes/         
+            +-- jc2.tmLanguage.json TextMate grammar for JC2 syntax highlighting
 
 ---
 
