@@ -131,6 +131,7 @@ The executable is self-contained with no external dependencies.
     +-- Highlight.h                 ANSI terminal colorization
     +-- HelpText.h                  25-topic help system (compile-time embedded)
     +-- Module.h                    Native C++ module registration framework
+    +-- README.md                   This file
     +-- modules/
     |   +-- json_module.h           JSON serialization native module
     |   +-- image_module.h          Image engine native module
@@ -139,10 +140,10 @@ The executable is self-contained with no external dependencies.
     |   +-- regex.jc2               Regular expression engine (pure JC2)
     +-- jc2-language/               VS Code extension (syntax + runner)
         +-- package.json            VS Code extension manifest
-        +-- language-configuration.json  VS Code language configuration
+        +-- language-configuration.json     VS Code language configuration
         +-- extension.js            VS Code extension entry point (registers runner)
         +-- syntaxes/         
-            +-- jc2.tmLanguage.json TextMate grammar for JC2 syntax highlighting
+            +-- jc2.tmLanguage.json         TextMate grammar for JC2 syntax highlighting
 
 ---
 
