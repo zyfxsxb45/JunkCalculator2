@@ -478,7 +478,7 @@ int main(int argc, char* argv[]) {
     }
     std::cout << jc::col(jc::Ansi::BRIGHT_CYAN)
         << "=================================================" << std::endl
-        << "   Junk Calculator 2.0 [Build 2026.04]" << std::endl
+        << "   Junk Calculator 2.1.0 [Build 2026.04]" << std::endl
         << "   Developed by Yu Liangyang, Tsinghua University" << std::endl
         << "   Powered by AST Engine & C++20" << std::endl
         << "=================================================" << jc::col(jc::Ansi::RESET) << std::endl
