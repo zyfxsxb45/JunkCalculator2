@@ -139,11 +139,6 @@ The executable is self-contained with no external dependencies.
     +-- lib/
     |   +-- regex.jc2               Regular expression engine (pure JC2)
     +-- jc2-language/               VS Code extension (syntax + runner)
-        +-- package.json            VS Code extension manifest
-        +-- language-configuration.json     VS Code language configuration
-        +-- extension.js            VS Code extension entry point (registers runner)
-        +-- syntaxes/         
-            +-- jc2.tmLanguage.json         TextMate grammar for JC2 syntax highlighting
 
 ---
 
