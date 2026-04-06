@@ -137,7 +137,7 @@ The executable is self-contained with no external dependencies.
     |   +-- prob_module.h     Probability native module
     +-- lib/
     |   +-- regex.jc2         Regular expression engine (pure JC2)
-    +-- jc2-vscode/           VS Code extension (syntax + runner)
+    +-- jc2-language/         VS Code extension (syntax + runner)
 
 ---
 

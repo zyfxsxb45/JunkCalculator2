@@ -1,0 +1,526 @@
+// ═══════════════════════════════════════════════════════════════
+// regex.jc2 — Regular Expression Engine
+// Pure JC2 Implementation (Backtracking NFA)
+//
+// Supported syntax:
+//   .             Any character (except newline)
+//   \d \w \s      Digit, word char, whitespace
+//   \D \W \S      Negated versions
+//   [abc]         Character class
+//   [a-z]         Range in class
+//   [^abc]        Negated class
+//   ^  $          Start / end anchors
+//   *  +  ?       Greedy quantifiers
+//   (...)         Capturing group
+//   |             Alternation
+//   \.  \\  etc.  Escape special characters
+//
+// API:
+//   re_compile(pattern)               → compiled regex dict
+//   re_test(pattern, text)            → 1 or 0
+//   re_match(pattern, text)           → match dict or 0
+//   re_search(pattern, text)          → match dict or 0
+//   re_findall(pattern, text)         → list of matched strings
+//   re_replace(pattern, text, repl)   → new string
+//   re_split(pattern, text)           → list of substrings
+// ═══════════════════════════════════════════════════════════════
+
+// ─── Character Classification ─────────────────────────────────
+
+_re_is_digit(c) = { o = ord(c); return o >= 48 && o <= 57 }
+
+_re_is_alpha(c) = {
+    o = ord(c)
+    return (o >= 65 && o <= 90) || (o >= 97 && o <= 122)
+}
+
+_re_is_word(c) = _re_is_alpha(c) || _re_is_digit(c) || c == "_"
+
+_re_is_space(c) = c == " " || c == "\t" || c == "\n" || c == "\r"
+
+_re_shorthand(kind, c) = {
+    if (kind == "d") { return _re_is_digit(c) }
+    if (kind == "D") { return !_re_is_digit(c) }
+    if (kind == "w") { return _re_is_word(c) }
+    if (kind == "W") { return !_re_is_word(c) }
+    if (kind == "s") { return _re_is_space(c) }
+    if (kind == "S") { return !_re_is_space(c) }
+    return false
+}
+
+// ─── Parse State (reference semantics for mutation) ───────────
+
+class _RePS {
+    init(pat) = {
+        self.s = pat
+        self.p = 0
+        self.n = len(pat)
+        self.gc = 0
+    }
+    pk() = self.p < self.n ? charAt(self.s, self.p) : ""
+    nx() = { c = self.pk(); self.p += 1; return c }
+    ok() = self.p < self.n
+}
+
+// ─── Capture Storage (reference semantics) ────────────────────
+
+class _ReCaps {
+    init(numGroups) = {
+        self.data = list()
+        for (_ in range(numGroups + 1)) {
+            self.data = push(self.data, list(-1, -1))
+        }
+    }
+    set(idx, s, e) = { self.data[idx] = list(s, e) }
+    getStart(idx) = self.data[idx][0]
+    getEnd(idx) = self.data[idx][1]
+}
+
+// ─── Parser: Pattern → Compiled Node Tree ─────────────────────
+
+re_compile(pattern) = {
+    st = _RePS(pattern)
+    nodes = _rp_alt(st)
+    if (st.ok()) { throw f"Regex Error: Unexpected '{st.pk()}' at position {st.p}" }
+    return {nodes: nodes, groups: st.gc, pattern: pattern}
+}
+
+_rp_alt(st) = {
+    left = _rp_seq(st)
+    if (st.ok() && st.pk() == "|") {
+        st.nx()
+        right = _rp_alt(st)
+        return list({type: "alt", a: left, b: right})
+    }
+    return left
+}
+
+_rp_seq(st) = {
+    nodes = list()
+    while (st.ok() && st.pk() != ")" && st.pk() != "|") {
+        nodes = push(nodes, _rp_quant(st))
+    }
+    return nodes
+}
+
+_rp_quant(st) = {
+    node = _rp_atom(st)
+    if (st.ok()) {
+        c = st.pk()
+        if (c == "*") { st.nx(); return {type: "star", inner: node} }
+        if (c == "+") { st.nx(); return {type: "plus", inner: node} }
+        if (c == "?") { st.nx(); return {type: "opt", inner: node} }
+    }
+    return node
+}
+
+_rp_atom(st) = {
+    if (!st.ok()) { throw "Regex Error: Unexpected end of pattern" }
+    c = st.pk()
+
+    // Group
+    if (c == "(") {
+        st.nx()
+        st.gc += 1
+        idx = st.gc
+        inner = _rp_alt(st)
+        if (!st.ok() || st.pk() != ")") { throw "Regex Error: Unmatched '('" }
+        st.nx()
+        return {type: "group", inner: inner, idx: idx}
+    }
+
+    // Character class
+    if (c == "[") { return _rp_class(st) }
+
+    // Dot
+    if (c == ".") { st.nx(); return {type: "dot"} }
+
+    // Anchors
+    if (c == "^") { st.nx(); return {type: "start"} }
+    if (c == "$") { st.nx(); return {type: "end"} }
+
+    // Escape
+    if (c == "\\") {
+        st.nx()
+        if (!st.ok()) { throw "Regex Error: Trailing backslash" }
+        e = st.nx()
+        if (e in "dDwWsS") { return {type: "esc", kind: e} }
+        return {type: "lit", ch: e}
+    }
+
+    // Error on bare quantifier/close
+    if (c in ")*+?") { throw f"Regex Error: Unexpected '{c}' at position {st.p}" }
+
+    // Literal
+    st.nx()
+    return {type: "lit", ch: c}
+}
+
+_rp_class(st) = {
+    st.nx()   // consume [
+    neg = false
+    if (st.ok() && st.pk() == "^") { neg = true; st.nx() }
+
+    specs = list()
+
+    // ] as first char is literal
+    if (st.ok() && st.pk() == "]") {
+        specs = push(specs, {t: "c", v: "]"})
+        st.nx()
+    }
+
+    while (st.ok() && st.pk() != "]") {
+        c = st.nx()
+        if (c == "\\" && st.ok()) {
+            e = st.nx()
+            if (e in "dDwWsS") { specs = push(specs, {t: "sh", v: e}) }
+            else { specs = push(specs, {t: "c", v: e}) }
+        } else if (st.ok() && st.pk() == "-") {
+            st.nx()   // consume -
+            if (st.ok() && st.pk() != "]") {
+                hi = st.nx()
+                specs = push(specs, {t: "r", lo: c, hi: hi})
+            } else {
+                specs = push(specs, {t: "c", v: c})
+                specs = push(specs, {t: "c", v: "-"})
+            }
+        } else {
+            specs = push(specs, {t: "c", v: c})
+        }
+    }
+
+    if (!st.ok()) { throw "Regex Error: Unmatched '['" }
+    st.nx()   // consume ]
+    return {type: "class", specs: specs, neg: neg}
+}
+
+// ─── Character Class Test ─────────────────────────────────────
+
+_re_in_class(node, ch) = {
+    found = false
+    for (spec in node.specs) {
+        if (spec.t == "c" && ch == spec.v) { found = true; break }
+        if (spec.t == "r" && ord(ch) >= ord(spec.lo) && ord(ch) <= ord(spec.hi)) {
+            found = true; break
+        }
+        if (spec.t == "sh" && _re_shorthand(spec.v, ch)) { found = true; break }
+    }
+    return node.neg ? !found : found
+}
+
+// ─── Match Engine ─────────────────────────────────────────────
+
+// Match a single atomic node at `pos`. Returns new position or -1.
+_rm_one(node, text, pos, tl) = {
+    tp = node.type
+    if (tp == "lit") {
+        if (pos < tl && charAt(text, pos) == node.ch) { return pos + 1 }
+        return -1
+    }
+    if (tp == "dot") {
+        if (pos < tl && charAt(text, pos) != "\n") { return pos + 1 }
+        return -1
+    }
+    if (tp == "esc") {
+        if (pos < tl && _re_shorthand(node.kind, charAt(text, pos))) { return pos + 1 }
+        return -1
+    }
+    if (tp == "class") {
+        if (pos < tl && _re_in_class(node, charAt(text, pos))) { return pos + 1 }
+        return -1
+    }
+    return -1
+}
+
+// Match a single node (may be group/alt) without continuation.
+_rm_single(node, text, pos, tl, caps) = {
+    tp = node.type
+    if (tp == "lit" || tp == "dot" || tp == "esc" || tp == "class") {
+        return _rm_one(node, text, pos, tl)
+    }
+    if (tp == "group") {
+        r = _rm(node.inner, 0, text, pos, tl, caps)
+        if (r >= 0) { caps.set(node.idx, pos, r) }
+        return r
+    }
+    if (tp == "alt") {
+        ra = _rm(node.a, 0, text, pos, tl, caps)
+        if (ra >= 0) { return ra }
+        return _rm(node.b, 0, text, pos, tl, caps)
+    }
+    return _rm_one(node, text, pos, tl)
+}
+
+// Main recursive matcher: match nodes[idx..] at `pos`.
+// Returns end position on success, -1 on failure.
+_rm(nodes, idx, text, pos, tl, caps) = {
+    if (idx >= len(nodes)) { return pos }
+
+    node = nodes[idx]
+    tp = node.type
+
+    // ── Capture Start Marker ──
+    if (tp == "_cs") {
+        caps.set(node.idx, pos, -1)
+        return _rm(nodes, idx + 1, text, pos, tl, caps)
+    }
+
+    // ── Capture End Marker ──
+    if (tp == "_ce") {
+        caps.set(node.idx, caps.getStart(node.idx), pos)
+        return _rm(nodes, idx + 1, text, pos, tl, caps)
+    }
+
+    // ── Simple atoms ──
+    if (tp == "lit" || tp == "dot" || tp == "esc" || tp == "class") {
+        np = _rm_one(node, text, pos, tl)
+        if (np >= 0) { return _rm(nodes, idx + 1, text, np, tl, caps) }
+        return -1
+    }
+
+    // ── Anchors ──
+    if (tp == "start") {
+        if (pos == 0) { return _rm(nodes, idx + 1, text, pos, tl, caps) }
+        return -1
+    }
+    if (tp == "end") {
+        if (pos == tl) { return _rm(nodes, idx + 1, text, pos, tl, caps) }
+        return -1
+    }
+
+    // ── Group (continuation splicing for correct backtracking) ──
+    if (tp == "group") {
+        // ★ 核心修复：把 group 展开为 [_cs, inner..., _ce, rest...]
+        // 这样 group 内的量词能"看到"group 之后的节点，触发回溯
+        combined = list({type: "_cs", idx: node.idx})
+        for (n in node.inner) { combined = push(combined, n) }
+        combined = push(combined, {type: "_ce", idx: node.idx})
+        for (k in range(idx + 1, len(nodes))) {
+            combined = push(combined, nodes[k])
+        }
+        return _rm(combined, 0, text, pos, tl, caps)
+    }
+
+    // ── Alternation ──
+    if (tp == "alt") {
+        ra = _rm(node.a, 0, text, pos, tl, caps)
+        if (ra >= 0) {
+            rest = _rm(nodes, idx + 1, text, ra, tl, caps)
+            if (rest >= 0) { return rest }
+        }
+        rb = _rm(node.b, 0, text, pos, tl, caps)
+        if (rb >= 0) {
+            return _rm(nodes, idx + 1, text, rb, tl, caps)
+        }
+        return -1
+    }
+
+    // ── Greedy Star (*) ──
+    if (tp == "star") {
+        positions = list(pos)
+        cur = pos
+        while (true) {
+            np = _rm_single(node.inner, text, cur, tl, caps)
+            if (np < 0 || np == cur) { break }
+            positions = push(positions, np)
+            cur = np
+        }
+        for (k in range(len(positions) - 1, -1, -1)) {
+            rest = _rm(nodes, idx + 1, text, positions[k], tl, caps)
+            if (rest >= 0) { return rest }
+        }
+        return -1
+    }
+
+    // ── Greedy Plus (+) ──
+    if (tp == "plus") {
+        first = _rm_single(node.inner, text, pos, tl, caps)
+        if (first < 0 || first == pos) { return -1 }
+        positions = list(first)
+        cur = first
+        while (true) {
+            np = _rm_single(node.inner, text, cur, tl, caps)
+            if (np < 0 || np == cur) { break }
+            positions = push(positions, np)
+            cur = np
+        }
+        for (k in range(len(positions) - 1, -1, -1)) {
+            rest = _rm(nodes, idx + 1, text, positions[k], tl, caps)
+            if (rest >= 0) { return rest }
+        }
+        return -1
+    }
+
+    // ── Greedy Optional (?) ──
+    if (tp == "opt") {
+        one = _rm_single(node.inner, text, pos, tl, caps)
+        if (one >= 0) {
+            rest = _rm(nodes, idx + 1, text, one, tl, caps)
+            if (rest >= 0) { return rest }
+        }
+        return _rm(nodes, idx + 1, text, pos, tl, caps)
+    }
+
+    throw f"Regex Error: Unknown node type '{tp}'"
+}
+
+// ─── Internal: Run match from a specific position ─────────────
+
+_re_run(compiled, text, startPos) = {
+    tl = len(text)
+    caps = _ReCaps(compiled.groups)
+    endPos = _rm(compiled.nodes, 0, text, startPos, tl, caps)
+    if (endPos < 0) { return 0 }
+
+    // Build result dict
+    matched = substr(text, startPos, endPos - startPos)
+    groups = list()
+    for (gi in range(1, compiled.groups + 1)) {
+        gs = caps.getStart(gi)
+        ge = caps.getEnd(gi)
+        if (gs >= 0 && ge >= 0) {
+            groups = push(groups, substr(text, gs, ge - gs))
+        } else {
+            groups = push(groups, "")
+        }
+    }
+
+    return {
+        matched: matched,
+        start: startPos,
+        end: endPos,
+        groups: groups
+    }
+}
+
+// ─── Internal: Auto-compile helper ────────────────────────────
+
+_re_ensure(patternOrCompiled) = {
+    if (type(patternOrCompiled) == "String") {
+        return re_compile(patternOrCompiled)
+    }
+    return patternOrCompiled
+}
+
+// ═══ Public API ═══════════════════════════════════════════════
+
+// Test if pattern matches anywhere in text. Returns 1 or 0.
+re_test(pattern, text) = {
+    compiled = _re_ensure(pattern)
+    tl = len(text)
+    for (i in range(tl + 1)) {
+        caps = _ReCaps(compiled.groups)
+        if (_rm(compiled.nodes, 0, text, i, tl, caps) >= 0) { return 1 }
+    }
+    return 0
+}
+
+// Match pattern at the START of text. Returns match dict or 0.
+re_match(pattern, text) = {
+    compiled = _re_ensure(pattern)
+    return _re_run(compiled, text, 0)
+}
+
+// Find first match ANYWHERE in text. Returns match dict or 0.
+re_search(pattern, text) = {
+    compiled = _re_ensure(pattern)
+    tl = len(text)
+    for (i in range(tl + 1)) {
+        result = _re_run(compiled, text, i)
+        if (result != 0) { return result }
+    }
+    return 0
+}
+
+// Find all non-overlapping matches. Returns list of match strings.
+re_findall(pattern, text) = {
+    compiled = _re_ensure(pattern)
+    tl = len(text)
+    results = list()
+    i = 0
+    while (i <= tl) {
+        result = _re_run(compiled, text, i)
+        if (result != 0) {
+            results = push(results, result.matched)
+            // Advance past this match (at least 1 char to avoid infinite loops)
+            i = result.end
+            if (result.end == result.start) { i += 1 }
+        } else {
+            i += 1
+        }
+    }
+    return results
+}
+
+// Replace all matches with `repl` string.
+// In `repl`, $1 $2 etc. refer to captured groups.
+re_replace(pattern, text, repl) = {
+    compiled = _re_ensure(pattern)
+    tl = len(text)
+    result = ""
+    i = 0
+    while (i <= tl) {
+        m = _re_run(compiled, text, i)
+        if (m != 0) {
+            // Build replacement with group substitution
+            r = ""
+            j = 0
+            rl = len(repl)
+            while (j < rl) {
+                c = charAt(repl, j)
+                if (c == "$" && j + 1 < rl) {
+                    nc = charAt(repl, j + 1)
+                    if (_re_is_digit(nc)) {
+                        gi = ord(nc) - 48
+                        if (gi >= 1 && gi <= len(m.groups)) {
+                            r = r + m.groups[gi - 1]
+                        }
+                        j += 2
+                        continue
+                    }
+                    if (nc == "&") {
+                        r = r + m.matched
+                        j += 2
+                        continue
+                    }
+                }
+                r = r + c
+                j += 1
+            }
+            result = result + r
+            i = m.end
+            if (m.end == m.start) {
+                if (i < tl) { result = result + charAt(text, i) }
+                i += 1
+            }
+        } else {
+            if (i < tl) { result = result + charAt(text, i) }
+            i += 1
+        }
+    }
+    return result
+}
+
+// Split text by pattern. Returns list of substrings.
+re_split(pattern, text) = {
+    compiled = _re_ensure(pattern)
+    tl = len(text)
+    parts = list()
+    lastEnd = 0
+    i = 0
+    while (i <= tl) {
+        m = _re_run(compiled, text, i)
+        if (m != 0 && m.end > lastEnd) {
+            parts = push(parts, substr(text, lastEnd, m.start - lastEnd))
+            lastEnd = m.end
+            i = m.end
+            if (m.end == m.start) { i += 1 }
+        } else {
+            i += 1
+        }
+    }
+    parts = push(parts, substr(text, lastEnd))
+    return parts
+}
+
+print("[System] regex.jc2 loaded successfully.")

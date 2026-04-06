@@ -1,0 +1,106 @@
+{
+    "name": "jc2-language",
+    "displayName": "JC2 Language Support",
+    "description": "Syntax highlighting and script runner for Junk Calculator 2.0 (.jc2)",
+    "version": "1.1.0",
+    "publisher": "yuliangyang",
+    "engines": {
+        "vscode": "^1.80.0"
+    },
+    "categories": [
+        "Programming Languages"
+    ],
+    "activationEvents": [
+        "onLanguage:jc2"
+    ],
+    "main": "./extension.js",
+    "contributes": {
+        "languages": [
+            {
+                "id": "jc2",
+                "aliases": [
+                    "JC2",
+                    "Junk Calculator 2"
+                ],
+                "extensions": [
+                    ".jc2"
+                ],
+                "configuration": "./language-configuration.json"
+            }
+        ],
+        "grammars": [
+            {
+                "language": "jc2",
+                "scopeName": "source.jc2",
+                "path": "./syntaxes/jc2.tmLanguage.json"
+            }
+        ],
+        "commands": [
+            {
+                "command": "jc2.run",
+                "title": "JC2: Run Current Script",
+                "icon": "$(play)"
+            },
+            {
+                "command": "jc2.runSelection",
+                "title": "JC2: Run Selection"
+            },
+            {
+                "command": "jc2.setExecutable",
+                "title": "JC2: Set Executable Path"
+            }
+        ],
+        "keybindings": [
+            {
+                "command": "jc2.run",
+                "key": "ctrl+shift+r",
+                "mac": "cmd+shift+r",
+                "when": "editorLangId == jc2"
+            },
+            {
+                "command": "jc2.runSelection",
+                "key": "ctrl+shift+e",
+                "mac": "cmd+shift+e",
+                "when": "editorLangId == jc2 && editorHasSelection"
+            }
+        ],
+        "menus": {
+            "editor/title": [
+                {
+                    "command": "jc2.run",
+                    "when": "editorLangId == jc2",
+                    "group": "navigation"
+                }
+            ],
+            "editor/context": [
+                {
+                    "command": "jc2.run",
+                    "when": "editorLangId == jc2",
+                    "group": "jc2@1"
+                },
+                {
+                    "command": "jc2.runSelection",
+                    "when": "editorLangId == jc2 && editorHasSelection",
+                    "group": "jc2@2"
+                }
+            ]
+        },
+        "configuration": {
+            "title": "JC2 Language",
+            "properties": {
+                "jc2.executablePath": {
+                    "type": "string",
+                    "default": "",
+                    "description": "Absolute path to JunkCalculator2.exe. If empty, tries PATH."
+                }
+            }
+        }
+    },
+    "scripts": {
+        "test": "echo \"Error: no test specified\" && exit 1"
+    },
+    "keywords": [],
+    "author": "",
+    "license": "ISC",
+    "type": "commonjs"
+}
