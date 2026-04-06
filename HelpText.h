@@ -1,0 +1,1679 @@
+#ifndef JC2_HELP_TEXT_H
+#define JC2_HELP_TEXT_H
+
+#include <map>
+#include <string>
+
+namespace jc {
+
+    const std::map<std::string, std::string> BuiltinHelp = {
+        {"main", R"HELP(
+===================== Junk Calculator 2.0 — Help =====================
+
+  Session Commands
+  ────────────────────────────────────────────────────────────────────
+    help                  Show this overview
+    help <topic>          Dive into a specific topic (see list below)
+    vars                  List every variable currently in memory
+    clear                 Wipe all user-defined variables
+    exit / quit           Leave the calculator
+    color on / color off   Enable/disable REPL syntax highlighting
+
+  Workspace & Scripts
+  ────────────────────────────────────────────────────────────────────
+    save <name>           Snapshot variables + config  → data/<name>.jc2
+    load <name>           Restore a previously saved workspace
+    workspace             Show current workspace directory
+    workspace <path>      Change workspace directory
+    ls                    List .jc2/.txt/.csv files in workspace
+    ls <path>             List files in specified directory
+    ls *                  List ALL files in workspace
+    ls <path> .csv        List only .csv files in <path>
+    run  <file>           Execute a script (sets relative path context)
+    import "lib"          Load a library (deduplicates automatically)
+
+  Topics (type "help <topic>")
+  ────────────────────────────────────────────────────────────────────
+    basic       Operators, constants, formatting, elementary functions
+    complex     Complex number creation, properties, promotion rules
+    fraction    Exact rational arithmetic with BigInt backing
+    matrix      Matrix construction, indexing A[i,j], row/col ops
+    linalg      Determinant, inverse, rank, decompositions, eigenvalues
+    lineq       Solving Ax = b (unique / infinite / least-squares)
+    matfunc     Matrix-level exp, sin, cos, log, sqrt, matpow
+    vector      Dot, cross, projection, angle, parallelism tests
+    poly        Closed-form polynomial solver (degree 1–4)
+    calculus    User functions (single & multi-var), diff, integ, table
+    stat        Descriptive statistics, percentiles, regression
+    bigint      Arbitrary-precision integers & number-theoretic functions
+    base        Radix conversion, display shells, bitwise operations
+    sys         RNG, prime engine, workspace, scripting, colors
+    control     if/else, while, for, for-in, switch, break/continue/return
+    scope       auto-local, global, const, delete, ref, closures
+    string      String functions, indexing, slicing, escape sequences
+    array       Array (row vector) manipulation, functional programming
+    list        Heterogeneous list (any type, nestable)
+    dict        Dictionary (key-value store)
+    class       Classes, instances, inheritance, operator overloading
+    error       Error handling (try/catch/throw/pcall)
+    fileio      File I/O (read, write, CSV, directory)
+    import      Code reuse (import libraries and scripts)
+
+  Native Modules (require `import` before use)
+  ────────────────────────────────────────────────────────────────────
+    image       BMP image generation (import "image")
+    prob        Probability distributions & hypothesis tests (import "prob")
+    json        JSON encode/decode/pretty (import "json")
+
+    Type `modules()` in the REPL to see all available native modules.
+
+  Quick-Start Cheatsheet
+  ────────────────────────────────────────────────────────────────────
+    x = 3.14                       assign a real
+    const G = 9.81                 immutable constant
+    z = 3 + 4i                     complex number
+    A = [1, 2; 3, 4]               2×2 matrix
+    A[0, 1] = 99                   in-place modify
+    [a, b] = [1, 2]                destructuring assignment
+    [x, y] = [y, x]                swap variables
+    v = [1; 2; 3]                  column vector (math)
+    arr = [1, 2, 3]                row vector (data/array)
+    L = list(1, "hi", [1,2])       heterogeneous list
+    L = [1, "hi", [1,2]]           same as above (list literal)
+    d = {a: 1, b: 2}               dictionary literal
+    d.a = 99                       dictionary dot operator
+    f(x, y = 0) = x + y            function with default parameter
+    (x) => x^2                     lambda expression
+    class Dog extends Animal {...} inheritance
+    p = Point(3, 4)                instance creation
+    p.dist()                       method call
+    super.init(name)               call parent constructor
+    __add__(o) = ...               operator overloading
+    10 / 3                         exact fraction → 10/3
+    3 > 2 && !false                comparison + logic
+    x > 0 ? x : -x                 ternary operator
+    format("x={:.2f}", PI)         string formatting → "x=3.14"
+    f"x = {x}, pi = {PI:.2f}"      string interpolation (f-string)
+    switch (x) { case 1: {...} }   pattern matching
+    for ([k, v] in d) { ... }      destructured for-in
+    [x^2 for x in range(10)]       list comprehension
+    import "math_utils"            load a library
+    try { 1/0 } catch (e) { e }    error handling
+    // comment                     everything after // is ignored
+    resetConst()                   restore PI, E, i, I, true, false
+    delete x                       remove a variable
+    data |> sort |> unique         pipe operator (left-to-right)
+
+======================================================================
+)HELP"},
+
+        {"basic", R"HELP(
+═══ Constants, Operators & Elementary Functions ═══
+
+  Comments
+  ──────────────────────
+    // text              Everything after // is ignored until end of line.
+                         Works in expressions, blocks, functions, and scripts.
+
+  Arithmetic Operators
+  ──────────────────────
+    +  -  *  /          Standard four operations
+    \                   Left division: a\b ≡ inv(a) * b
+    ^                   Power             2^10 → 1024
+    %                   Truncated modulo  (-7) % 3 → -1
+    =                   Assignment        x = 42
+
+  Compound Assignment
+  ──────────────────────
+    x += expr           x -= expr           x *= expr
+    x /= expr           x %= expr           x ^= expr
+    Also works on indexed elements: A[i, j] += 1
+
+  Destructuring Assignment
+  ──────────────────────
+    [a, b, c] = [10, 20, 30]
+    a              →  10
+
+    Works with any iterable on the right side:
+      [a, b] = [1; 2]                    Column vector
+      [a, b] = list("hello", 42)          List
+      [name, score] = ["Alice", 95]       StringMatrix row
+
+    Variable Swap:
+      x = 1; y = 2
+      [x, y] = [y, x]
+
+    Discard with underscore:
+      [_, second, _] = [10, 20, 30]
+
+    Multi-return functions:
+      minmax(v) = [min(v), max(v)]
+      [lo, hi] = minmax([3, 1, 4, 1, 5])
+
+  Lambda (Anonymous Functions)
+  ──────────────────────
+    (x) => expr                    Single parameter
+    (x, y) => { stmt1; stmt2; }    Multi parameter block body
+
+  List Comprehension
+  ──────────────────────
+    [expr for var in iterable]                Basic
+    [expr for var in iterable if condition]    With filter
+    [expr for x in A for y in B]              Nested (cartesian product)
+    [expr for [a, b] in pairs]                Destructured
+
+    Examples:
+      [x^2 for x in range(10)]               → [0, 1, 4, 9, ..., 81]
+      [x for x in range(20) if x % 2 == 0]   → [0, 2, 4, ..., 18]
+      [x*y for x in range(3) for y in range(3)] → [0,0,0, 0,1,2, 0,2,4]
+      [f"{k}={v}" for [k,v] in dict("a",1)]  → ["a=1"]
+
+    Returns a row vector if all elements are real numbers, otherwise a List.
+    Replaces verbose map/filter chains:
+      // Before:  map((x) => x^2, filter((x) => x % 2 == 0, range(20)))
+      // After:   [x^2 for x in range(20) if x % 2 == 0]
+
+  Pipe Operator (|>)
+  ──────────────────────
+    expr |> function                 Passes expr as the argument to function.
+    Equivalent to function(expr), but reads left-to-right.
+
+    Chaining:
+      [3,1,4,1,5] |> sort |> unique |> reverse
+      // Equivalent to: reverse(unique(sort([3,1,4,1,5])))
+
+    With lambdas:
+      [1,2,3,4,5]
+        |> (v) => filter((x) => x > 2, v)
+        |> (v) => map((x) => x^2, v)
+        |> sum
+      // → 50 (= 9 + 16 + 25)
+
+    Works with any callable (builtins, user functions, lambdas):
+      100 |> factorial |> digits      // digit count of 100!
+      "hello world" |> upper          // → "HELLO WORLD"
+      [5,3,1] |> sort |> first        // → 1
+
+    Multi-line pipes: place |> at the END of the line. JC2 will 
+    automatically read the next line as a continuation:
+      data |>
+        sort |>
+        unique |>
+        reverse
+
+  Default Parameter Values
+  ──────────────────────
+    f(x, y = 0, z = 1) = x + y * z
+    f(5)                →  5       (y=0, z=1)
+    f(5, 3)             →  8       (z=1)
+
+    Rules:
+    • Parameters with defaults must come AFTER required parameters.
+    • Defaults are evaluated once at definition time.
+    • Works in named functions, lambdas, class methods, and constructors.
+
+  Comparison Operators (return 1 = true, 0 = false)
+  ──────────────────────
+    ==  !=  <  <=  >  >=
+    • BigInt / Fraction  — exact, no rounding
+    • double             — tolerance-aware (IEEE 754 ULP neighbourhood)
+    • Complex            — == and != compare both parts
+    • Matrix / String    — == / != element-wise; ordering throws error
+
+    in                Membership / containment test (returns 1 or 0)
+                        3 in [1,2,3]          → 1
+
+  Logical Operators (short-circuit, return 1 or 0)
+  ──────────────────────
+    &&                AND    (right side not evaluated if left is false)
+    ||                OR     (right side not evaluated if left is true)
+    !expr             NOT    (prefix unary)
+    Truthiness:
+      Falsy:  0, 0.0, BigInt(0), Fraction(0/n), none, ""
+      Truthy: everything else
+
+  Built-in Constants (preset, overridable)
+  ──────────────────────
+    PI          3.14159265358979…
+    E           2.71828182845904…
+    i  /  I     Imaginary unit (i² = −1)
+    true / false 1.0 / 0.0
+
+    resetConst()      restores PI, E, i, I, true, false
+
+    Tip: Prefer the literal suffix 3i / 4i over the variable i, because
+    the variable can be overwritten (e.g., by a for loop).
+
+  Elementary Functions
+  ──────────────────────
+    abs(x)              Absolute value
+    sqrt(x)             Square root     sqrt(−4) → 2i
+    exp(x)              e^x
+    log(x) / ln(x)      Natural logarithm  log(−1) → πi
+    log(base, x)        Custom-base logarithm
+    pow(x, y)           Same as x^y
+    len(x)              Length / element count
+
+  Trigonometric & Hyperbolic  (also accept Complex & Matrix)
+  ──────────────────────
+    sin  cos  tan       asin  acos  atan
+    sinh  cosh  tanh
+
+  Rounding & Sign  (scalar / Complex / Matrix)
+  ──────────────────────
+    floor(x, n)         Floor to n decimal places
+    ceil(x, n)          Ceiling
+    round(x, n)         Round half-away-from-zero
+    trunc(x, n)         Truncate toward zero
+    sgn(x)              Sign: −1, 0, or 1
+
+  Formatting & I/O
+  ──────────────────────
+    format(fmt, ...)    Python-style string formatting
+                          format("{:>10.2f}", PI)
+    input()             Read a line from stdin
+    clock()             High-resolution timer (seconds since epoch)
+    sleep(seconds)      Pause execution
+
+  Ternary Operator
+  ──────────────────────
+    cond ? a : b        Only the selected branch is evaluated.
+                        Right-associative: x==1 ? "one" : "other"
+
+  String Interpolation (f-strings)
+  ──────────────────────
+    f"text {expr} more text"
+    f"x = {x}, y = {y}"           →  "x = 3, y = 4"
+    f"pi = {PI::.4f}"             →  "pi = 3.1416"
+    f"hex = {255::x}"             →  "hex = ff"
+    f"{name::>10}"                →  "     Alice"
+
+    Format specs use :: separator: {expr::spec}
+      spec = [<>^][width][.prec][fdex]
+    No ambiguity with ternary operator:
+      f"{x > 0 ? x : -x}"         Works perfectly (single : is part of ternary)
+
+  Raw Strings (r-strings)
+  ──────────────────────
+    r"C:\path\to\file"          Backslashes are literal, no escaping.
+    r"(content with "quotes")"  Custom delimiter (empty tag).
+    r"TAG(content)TAG"          Named delimiter for maximum safety.
+)HELP"},
+
+        {"complex", R"HELP(
+═══ Complex Numbers ═══
+
+    Construction
+  ──────────────────────
+    z = 3 + 4i           Imaginary suffix (recommended)
+    w = 2i               Pure imaginary
+    z = 3 + 4*i          Also works (i is a preset variable)
+    sqrt(-1)             Automatic promotion → 1i
+
+    The 'i' suffix is a lexical literal — it cannot be accidentally
+    overwritten by loops or variable assignments:
+      for (i in range(10)) { ... }   // variable 'i' is overwritten
+      3 + 4i                          // still works! (4i is a literal)
+      3 + 4*i                         // BROKEN (i is now 9)
+
+    Numeric forms supported:
+      1i                  Imaginary unit
+      3.14i               Floating point imaginary
+      1e3i                Scientific notation imaginary
+      -2i                 Negative imaginary (unary minus applied)
+
+  Property Extraction
+  ──────────────────────
+    Re(z)               Real part
+    Im(z)               Imaginary part
+    abs(z)              Modulus |z|
+    arg(z)              Argument (radians, ∈ (−π, π])
+    conj(z)             Complex conjugate
+
+  Automatic Promotion
+  ──────────────────────
+    All elementary functions (sin, cos, exp, log, sqrt, asin, acos …)
+    seamlessly accept complex arguments and return complex results.
+
+    exp(PI * i) + 1     →  0       (Euler's identity)
+    asin(2)             →  complex
+
+    Matrix operations also auto-promote:
+    [1, 2] * i          → ComplexMatrix
+    A + 3i              → ComplexMatrix
+)HELP"},
+
+        {"fraction", R"HELP(
+═══ Exact Rational Arithmetic (Fractions) ═══
+
+  Fractions use BigInt numerator/denominator and auto-reduce via GCD.
+  This allows infinite-precision rational arithmetic without floating
+  point inaccuracies.
+
+  Creation
+  ──────────────────────
+    frac(a, b)          Explicit:  frac(1, 3) → 1/3
+    10 / 3              Integer ÷ Integer yields exact fraction
+
+  Properties
+  ──────────────────────
+    num(f)              Numerator (BigInt)
+    den(f)              Denominator (BigInt, always positive)
+
+  Arithmetic
+  ──────────────────────
+    Fraction ⊕ Fraction   → exact Fraction
+    Fraction ⊕ BigInt     → exact Fraction
+    Fraction ⊕ double     → degrades to double
+    Fraction ⊕ Complex    → degrades to Complex
+
+  Examples
+  ──────────────────────
+    f = frac(1, 3)
+    f * 3               →  1           (exact, reduced to BigInt if den=1)
+    f + frac(1, 6)      →  1/2         (auto-reduced)
+    f + 0.5             →  0.833333…   (double)
+)HELP"},
+
+        {"matrix", R"HELP(
+═══ Matrix Construction, Access & Manipulation ═══
+
+  Construction
+  ──────────────────────
+    A = [1, 2; 3, 4]            2×2 matrix
+    B = [1, 2, 3]               1×3 row vector
+    v = [1; 2; 3]               3×1 column vector
+    
+    Elements may be expressions:  [sin(PI), 2*i; 0, 1]
+    Any complex element auto-promotes the whole matrix to ComplexMatrix.
+    If any element is a string, the entire matrix becomes a StringMatrix.
+
+  Arithmetic & Scalars
+  ──────────────────────
+    A + B, A − B                Element-wise  (dimensions must match)
+    A * B                       Matrix multiplication
+    A / B                       Right division: A * inv(B)
+    A ^ n                       Integer power (n<0 uses inverse)
+    
+    A + c,  c + A               ≡ A + c·I   (square only, diagonal shift)
+    
+    addS(A, c)  subS(A, c)  mulS(A, c)  divS(A, c)  powS  modS
+      (Element-wise scalar broadcasting across ANY shape)
+
+  Dimensions & Element Access
+  ──────────────────────
+    row(A) / cols(A)    Number of rows / columns
+    len(A)              Total element count
+    
+    A[i, j]             Read/Write element at row i, col j
+    A[i]                Vector element, or matrix row i (as vector)
+    
+    Submatrix Slicing (MATLAB/Python style):
+      A[1:4, 2:5]       Extract block from row 1 to 3, col 2 to 4
+      A[i, :]           Extract entire row i
+      A[:, j]           Extract entire column j
+      A[::-1, :]        Reverse matrix rows vertically
+
+      *Assignments into slices work flawlessly as long as dimensions align!
+        A[1:3, :] = [9, 9]     (Broadcast scalar)
+        A[:, 0] = [1; 2; 3]    (Vector injection)
+
+    get(A, r, c)        Function form of A[r,c]
+    set(A, r, c, val)   Return new matrix with element changed (pure)
+
+  Row / Column Operations
+  ──────────────────────
+    getR  getC  delR  delC  swapR  swapC  multiR  multiC  addR  addC
+
+  Concatenation & Block Matrix Assembly
+  ──────────────────────
+    You can build matrices cleanly directly via sub-matrices merging internally:
+      A = [1, 2; 3, 4]
+      B = [5, 6; 7, 8]
+      
+      C = [A, B]          Produces: [1, 2, 5, 6; 3, 4, 7, 8] (Horizontal concat)
+      D = [A; B]          Produces: [1, 2; 3, 4; 5, 6; 7, 8] (Vertical concat)
+
+      [A, zeros(2, 2); id(2), B]  Build a 4x4 matrix from blocks!
+
+    Function equivalents:
+      integR(A, B)        Horizontal  [A | B]
+      integC(A, B)        Vertical    [A ; B]
+      integD(A, B)        Diagonal block
+
+  Structure & Generators
+  ──────────────────────
+    trans(A)            Transpose  Aᵀ
+    ctrans(A)           Conjugate transpose  A*
+    gauss(A)            Reduced row echelon form (RREF)
+    reshape(A, r, c)    Reshape  (element count must match)
+   
+    id(n)               n×n identity
+    ones(n,c)           All-ones
+    zeros(n,c)          All-zeros
+    magic(n)            Magic square  (n ≥ 3)
+
+  Conversion
+  ──────────────────────
+    toList(A)           Matrix → List of Lists (2D structure)
+    toMatrix(L)         List of Lists → matrix (reverse)
+    toArray(L)          Flat List → row vector
+)HELP"},
+
+        {"linalg", R"HELP(
+═══ Linear Algebra ═══
+  All functions transparently support real and complex matrices.
+
+  Scalar Properties
+  ──────────────────────
+    det(A)              Determinant
+    rank(A)             Rank
+    tr(A)               Trace
+    norm(A)             Frobenius norm  ‖A‖_F
+    cond(A)             Condition number  ‖A‖·‖A⁻¹‖
+
+  Operations & Cofactors
+  ──────────────────────
+    inv(A)              Inverse  (Gauss-Jordan)
+    adj(A)              Classical adjugate
+    mpow(A, n)          A^n for integer n
+    sub(A, r, c)        Matrix with row r & col c removed
+    cof(A, r, c)        Cofactor: det(sub(A,r,c))
+    Acof(A, r, c)       Algebraic cofactor: (−1)^(r+c) · cof
+
+  Decompositions & Spectra
+  ──────────────────────
+    qr_Q(A), qr_R(A)           QR Decomposition (Modified Gram-Schmidt)
+    lu_L(A), lu_U(A), lu_P(A)  PA = LU (Partial pivoting Doolittle)
+    orth(A)                    Orthonormal column basis (Q from QR)
+    null(A)                    Null-space basis (Homogeneous solution)
+    eig(A)                     Eigenvalues (Hessenberg + QR iteration)
+    eigvec(A)                  Eigenvector matrix
+    diag(A)                    Diagonal eigenvalue matrix D
+    diagP(A)                   Change-of-basis matrix P   (A = P D P⁻¹)
+)HELP"},
+
+        {"lineq", R"HELP(
+═══ Linear Equation Systems  Ax = b ═══
+
+  Primary Solver
+  ──────────────────────
+    lsolve(A, b)        Automatic solver via Gaussian Elimination:
+                          • Unique solution     → exact x
+                          • Infinite solutions  → one particular solution
+                          • No solution         → least-squares approximation
+                        A must be an M×N matrix, b must be an M×1 column vector.
+
+  Diagnostics
+  ──────────────────────
+    linfo(A, b)         Print rank info and classify the system:
+                          Outputs whether the system has a unique solution,
+                          infinite solutions, or no exact solution.
+    residual(A, x, b)   Residual vector  r = b − A*x
+
+  Least-Squares (forced)
+  ──────────────────────
+    lstsq(A, b)         Normal-equation path: solves (A*A)x = A*b
+)HELP"},
+
+        {"matfunc", R"HELP(
+═══ Matrix Transcendental Functions ═══
+  Under the hood, JC2 evaluates these using Taylor series expansion 
+  (with scaling-and-squaring) or matrix diagonalization.
+
+  Functions
+  ──────────────────────
+    exp(A)              Matrix exponential  (e^A = I + A + A²/2! + ...)
+    log(A) / ln(A)      Matrix logarithm    (inverse of exp)
+    sqrt(A)             Matrix square root
+    sin(A), cos(A)      Matrix trigonometric functions
+    tan(A)              sin(A) * inv(cos(A))
+    sinh(A), cosh(A)    Matrix hyperbolic functions
+    tanh(A)             sinh(A) * inv(cosh(A))
+    matpow(A, B)        General matrix-to-matrix power: exp(B * ln(A))
+
+  Sanity-Check Identities
+  ──────────────────────
+    exp(A) * exp(−A)           ≈ I
+    sin(A)^2 + cos(A)^2        ≈ I
+
+  Tip: For pure integer powers, ALWAYS use mpow(A, n) or the ^ operator.
+)HELP"},
+
+        {"vector", R"HELP(
+═══ Vector Geometry ═══
+  Mathematical vectors are explicitly N×1 column matrices:  v = [1; 2; 3]
+  (Row vectors like [1, 2, 3] are arrays — see 'help array')
+
+  Generation
+  ──────────────────────
+    seq(a, b)           Produces column vectors for math use.
+                          seq(1, 3)    → [1; 2; 3]
+
+  Properties
+  ──────────────────────
+    dim(v)               Number of components (rows)
+    vnorm(v)             Euclidean length / magnitude  ‖v‖
+    normalize(v)         Unit vector  v / ‖v‖
+
+  Products
+  ──────────────────────
+    dot(a, b)           Hermitian inner product (a* · b). Works in ℂ.
+    cross(a, b)         Cross product (strictly 3-D).
+    triple(a, b, c)     Scalar triple product: dot(a, cross(b, c))
+
+  Projections & Angles
+  ──────────────────────
+    sproj(a, b)         Scalar projection of 'a' onto 'b'
+    vproj(a, b)         Vector projection of 'a' onto 'b'
+    angle(a, b)         Angle between 'a' and 'b' (in radians)
+
+  Boolean Tests (return 1 or 0)
+  ──────────────────────
+    isperp(a, b)        Are vectors perpendicular?
+    isparallel(a, b)    Are vectors parallel?
+)HELP"},
+
+        {"poly", R"HELP(
+═══ Polynomial Equation Solver (degree 1–4) ═══
+  JC2 internally features exact closed-form algebraic formulas
+  (Linear, Quadratic, Cardano's, Ferrari's) to find all roots over ℂ.
+  
+  Returns a complex column vector of roots.
+
+  Usage
+  ──────────────────────
+    solve(a, b)                  ax + b = 0             (linear)
+    solve(a, b, c)               ax² + bx + c = 0       (quadratic)
+    solve(a, b, c, d)            ax³ + … = 0            (Cardano)
+    solve(a, b, c, d, e)         ax⁴ + … = 0            (Ferrari)
+    
+  Examples
+  ──────────────────────
+    solve(1, 0, −1)              x² = 1   → [1; −1]
+    solve(1, 0, 0, −1)           x³ = 1   → cube roots of unity
+    solve(i, −2, 4*i, 3, −1)     Complex coefficients work perfectly!
+)HELP"},
+
+        {"calculus", R"HELP(
+═══ Functions, Calculus & Tabulation ═══
+
+  Defining Functions
+  ──────────────────────
+    f(x) = sin(x) + x^2                Single variable
+    g(x, y) = sqrt(x^2 + y^2)          Multi variable
+    h(a, b) = { local t = a+b; t^2 }   Block body
+    f(x, k = 1) = sin(k * x)           Default parameters supported!
+
+    Functions are compiled into AST closures and persist in memory.
+    They automatically capture the surrounding scope.
+
+  Numerical Calculus (single-variable)
+  ──────────────────────
+    diff(f, x0)          Derivative f′(x₀)
+    integ(f, a, b)       Definite integral   (Simpson's 1/3)
+    integ(f, a, b, n)    Custom slice count n
+    solveE(f, x0)        Find a root of f(x) = 0 near x₀
+
+  Tabulation (multivariate supported)
+  ──────────────────────
+    table(f, start, step, n)   1-D: evaluate f over an arithmetic sequence
+    table(f, M)                M is N×k — evaluates f on each row
+    table(f, v1, v2, …)        Bind multiple column vectors to f's parameters
+
+  Lambda Functions (Shorthand)
+  ──────────────────────
+    Useful for higher-order functions:
+      map((x) => x^2, v)              Square every element
+      filter((x) => x > 0, v)         Keep positives
+      reduce((a, b) => a + b, v, 0)   Sum all elements
+)HELP"},
+
+        {"stat", R"HELP(
+═══ Descriptive Statistics & Regression ═══
+
+  Data lives in matrices or vectors (both row and column shapes are accepted).
+
+  Central Tendency & Dispersion
+  ──────────────────────
+    mean(X)             Arithmetic mean
+    median(X)           Median (50th percentile)
+    mode(X)             Mode  (returns a row array if multimodal)
+    var(X)              Population variance       (divided by N)
+    svar(X)             Sample variance           (divided by N−1)
+    std(X)              Population std dev
+    sstd(X)             Sample std dev
+    span(X)             Statistical range: max(X) − min(X)
+
+  Extremes & Quantiles
+  ──────────────────────
+    max(X), min(X)      Extreme values
+    perc(X, p)          p-th percentile  (0 ≤ p ≤ 100)
+    sort(X)             Sorted copy  (always returns a row array)
+
+  Bivariate Analysis
+  ──────────────────────
+    X and Y must have the exact same number of elements.
+    
+    cov(X, Y)           Population covariance
+    corr(X, Y)          Pearson correlation coefficient  r
+    rsq(X, Y)           Coefficient of determination  R²
+    regress(X, Y)       Linear regression Y = a + bX
+                        Automatically prints the model equation & returns [a, b].
+)HELP"},
+
+        { "prob", R"HELP(
+═══ Probability Distributions & Hypothesis Tests — Native Module ═══
+
+  Requires: import "prob"
+
+  Distributions are first-class objects backed by native C++ code.
+  After importing, Distribution objects are class instances
+  (type → "Distribution").
+
+  Creating Distributions
+  ──────────────────────
+    import "prob"
+
+    CONTINUOUS:
+      Normal()              Standard normal N(0,1)
+      Normal(mu, sigma)     General normal N(μ, σ²)
+      TDist(df)             Student's t-distribution
+      Chi2(df)              Chi-squared
+      FDist(d1, d2)         F-distribution
+      ExpDist(lambda)       Exponential
+      GammaDist(shape,rate) Gamma
+      BetaDist(a, b)        Beta
+      Uniform(a, b)         Continuous uniform on [a,b)
+
+    DISCRETE:
+      Binom(n, p)           Binomial
+      Poisson(lambda)       Poisson
+      Geom(p)               Geometric (# trials until first success)
+
+  Generic Operations (work on ANY distribution type)
+  ──────────────────────
+    pdf(D, x)             Probability density / mass
+    cdf(D, x)             Cumulative distribution P(X ≤ x)
+    quantile(D, p)        Inverse CDF: find x such that P(X ≤ x) = p
+    mean(D)               Distribution mean  (also: dmean(D))
+    var(D)                Distribution variance (also: dvar(D))
+    std(D)                Distribution std dev (also: dstd(D))
+    distInfo(D)           Print summary (type, mean, var, std)
+    sample(D, n)          Draw n random samples → returns a row array
+
+  Special Math Functions (available after import "prob")
+  ──────────────────────
+    gamma(x)              Gamma function Γ(x)
+    lgamma(x)             Log-gamma ln(Γ(x))
+    betaFn(a, b)          Beta function B(a,b) = Γ(a)Γ(b)/Γ(a+b)
+    erf(x)                Error function
+    erfc(x)               Complementary error function 1-erf(x)
+
+  Hypothesis Tests (returns [statistic, df, p-value])
+  ──────────────────────
+    ttest(X)              One-sample t-test:  H0: μ = 0
+    ttest(X, mu0)         One-sample t-test:  H0: μ = μ0
+    ttest2(X, Y)          Welch two-sample:   H0: μ_X = μ_Y
+    ttestP(X, Y)          Paired t-test:      H0: mean(X-Y) = 0
+    chi2test(obs, exp)    Chi-squared goodness-of-fit
+
+    Significance levels: *** (p<0.001)  ** (p<0.01)  * (p<0.05)  n.s.
+
+  Example
+  ──────────────────────
+    import "prob"
+    d = Normal(100, 15)
+    cdf(d, 130)                  → 0.9772  (97.72%)
+    quantile(d, 0.95)            → 124.67
+    mean(d)                      → 100
+    s = sample(d, 1000)
+    mean(s)                      ≈ 100
+)HELP" },
+
+        {"bigint", R"HELP(
+═══ Arbitrary-Precision Integers & Number Theory ═══
+
+  Every integer literal in JC2 is parsed natively as a base-10⁹ BigInt.
+  It can grow to millions of digits. Memory is your only limit.
+
+  Integer ÷ Integer → Exact Fraction.
+
+  Combinatorics (Exact BigInt Results)
+  ──────────────────────
+    factorial(n)         n!
+    fib(n)               Fibonacci Fₙ
+    C(n, k)              Binomial coefficient
+    A(n, k)              Permutations (Arrangements)
+    catalan(n)           Catalan number
+
+  Divisibility & Primes
+  ──────────────────────
+    gcd(a, b), lcm(a, b), digits(n)
+    isPrime(n)           Deterministic Miller-Rabin test
+    nextPrime(n)         Smallest prime > n
+    nthPrime(k)          k-th prime (requires mounted Prime.txt)
+    primePi(n)           π(n) — number of primes ≤ n
+    factor(n)            Returns an N×2 matrix: [Prime, Exponent]
+
+  Arithmetic Functions & Modular Arithmetic
+  ──────────────────────
+    phi(n)               Euler's totient
+    divisors(n)          Divisor count
+    sigma(n, k)          Sum of k-th powers of divisors
+    omega(n), bigOmega(n) Prime factor counts
+    mobius(n)            Möbius function
+    isPerfect(n)         Perfect number test
+    mod(a, b)            Mathematical mod (always ≥ 0)
+    modpow(a, e, m)      aᵉ mod m
+)HELP"},
+
+        {"base", R"HELP(
+═══ Radix Conversion & Bitwise Operations ═══
+
+  BaseNum wraps a standard decimal BigInt inside a radix shell (2 to 36+).
+
+  Conversion Functions
+  ──────────────────────
+    base(val, r)         Wrap an integer `val` in a base-`r` display shell.
+                           base(255, 16) → [FF]_16
+    bnum("str", r)       Parse a string directly as base `r`.
+                           bnum("FF", 16)     bnum("45_63_2", 64)
+    changeBase(v, r)     Re-display an existing BaseNum in a new base `r`.
+    data(b)              Strip the radix shell → return plain BigInt.
+
+  Arithmetic Assimilation
+  ──────────────────────
+    BaseNums support  +  −  *  /  %  ^  with base assimilation:
+    If one operand is base 10 (or a plain integer), the result inherits the 
+    BaseNum's radix. Two different non-10 bases cannot be mixed.
+
+  Bitwise Operations (Base-2 Exclusive)
+  ──────────────────────
+    (Wrap your inputs using `base(x, 2)` before passing them here).
+
+    bitand(a, b)         AND
+    bitor(a, b)          OR
+    bitxor(a, b)         XOR
+    bitnot(a, w)         NOT (auto-aligns to bytes, or explicitly w-bits)
+    bitshift(a, n)       Logical Shift: Left (n > 0) / Right (n < 0)
+)HELP"},
+
+        {"sys", R"HELP(
+═══ System, Generators & I/O ═══
+
+  Random Number Generation (Mersenne Twister)
+  ──────────────────────
+    rand()  /  rand(min, max)            Continuous [min, max)
+    randint(min, max)                    Discrete [min, max]
+    randmat(r, c, min, max)              Matrix of doubles
+    randimat(r, c, min, max)             Matrix of integers
+    randc() / randcmat()                 Complex equivalents
+
+  System Constants
+  ──────────────────────
+    resetConst()                 Restore PI, E, i, I, true, false.
+
+  Prime Engine (Paged Streaming I/O)
+  ──────────────────────
+    JC2 streams `Prime.txt` via 64 KB zero-RAM buffers.
+    sysinfo()                    Current prime database status
+    mountPrimes("path")          Redirect the engine to a custom prime file
+    buildIndex()                 Build an O(1) anchor tree in RAM
+
+  Workspace Directory Management
+  ──────────────────────
+    workspace                    Show current workspace directory
+    workspace <path>             Change workspace directory for save/load/ls
+    workspace "D:/my_data"       Absolute path
+    workspace ./projects         Relative path (resolved from current context)
+
+    setWorkspace("path")         Function form (usable in scripts)
+    setWorkspace("default")      Reset to ./data/
+    getWorkspace()               Returns current workspace path as string
+    pwd()                        Print both script dir and workspace dir
+
+    ls                           List .jc2, .txt, .csv in workspace
+    ls <path>                    List files in specific directory
+    ls *                         List ALL files in workspace
+    ls <path> .csv               List only .csv files in <path>
+
+  Scripts Execution & Path Context
+  ──────────────────────
+    run <file>                   Terminal command: run a `.jc2` script file
+    run("path")                  Function form
+
+    Executing a script automatically pushes its directory onto the Execution 
+    Path Stack. All relative file operations (`readFile`, `import`) inside the 
+    script will resolve relative to the script's own location.
+
+  REPL Syntax Highlighting
+  ──────────────────────
+    JC2 automatically colorizes the REPL output by value type:
+      Numbers (double/BigInt/Fraction)   → Yellow
+      Complex                            → Magenta
+      Strings                            → Green
+      Matrices                           → White
+      Functions/Classes                  → Blue
+      Dicts/Lists                        → Cyan
+      Errors                             → Red
+
+    Commands:
+      color on              Enable colors (default)
+      color off             Disable colors (for piping output)
+      color("on")           Function form (usable in scripts)
+      highlight("code")     Returns a colorized version of JC2 code
+
+    Colors are automatically enabled on Windows via Virtual Terminal Processing.
+
+  Native Module System
+  ──────────────────────
+    JC2 supports native C++ modules that are compiled into the executable.
+    They provide high-performance functionality without external files.
+    modules()                   List all available native modules
+    import "moduleName"         Load a module (deduplicated, instant)
+    Currently available modules:
+      image    BMP image generation, plotting, drawing primitives
+      prob     Probability distributions, special functions, hypothesis tests
+      json     JSON serialization & deserialization
+    To see details:
+      help image                help prob                help json
+    Native modules register functions, classes, and variables into the
+    global environment. After import, their functions are indistinguishable
+)HELP"},
+
+        {"control", R"HELP(
+═══ Control Flow ═══
+
+  Truthiness
+  ──────────────────────
+    Falsy:  0, 0.0, BigInt(0), Fraction(0/n), none, ""
+    Truthy: Everything else (non-empty strings, matrices, classes, instances)
+    bool(x)             Explicit conversion to 1.0 or 0.0
+
+  Logical Operators
+  ──────────────────────
+    && (short-circuit AND), || (short-circuit OR), !expr (NOT)
+
+  If / Else
+  ──────────────────────
+    if (cond) { body } else if (c2) { body } else { body }
+    Returns the value of the final evaluated expression in the block.
+
+  For / While Loops
+  ──────────────────────
+    while (cond) { body }
+    for (init; cond; update) { body }
+
+  For-In Loop
+  ──────────────────────
+    for (x in iterable) { body }
+    Supported: arrays, column vectors, matrix rows, strings, lists, dicts.
+
+    Destructured For-In:
+      for ([var1, var2] in iterable) { body }
+      for ([key, val] in dict("a", 1)) { ... }
+      for ([num, letter] in zip(list1, list2)) { ... }
+
+  Switch
+  ──────────────────────
+    switch (expr) {
+        case val1, val2: { body }
+        default:         { body }
+    }
+    Expression returns the matched branch value. No fall-through.
+
+  Control Statements
+  ──────────────────────
+    break              Exit innermost loop
+    continue           Skip to next iteration
+    return expr        Exit function returning the evaluated expr
+)HELP"},
+
+        {"scope", R"HELP(
+═══ Variable Scoping (Python-Style) ═══
+
+  Top Level (REPL)
+  ──────────────────────
+    All variables assigned at the top level are global. 
+    Blocks `{}`, `for`, and `while` do NOT create isolated scopes at the top.
+
+  Inside Functions (Auto-Local)
+  ──────────────────────
+    All *newly assigned* variables inside a function or a method are 
+    automatically local to that function's execution scope.
+
+  Global Declaration
+  ──────────────────────
+    To conceptually read and *modify* an outer/global variable from 
+    inside an isolated function, declare it via `global` FIRST:
+      bump() = { global counter; counter += 1 }
+
+  Closures (Automatic Environment Capture)
+  ──────────────────────
+    Lambdas and inner functions automatically capture the enclosing 
+    environment at creation time (via deep value copy).
+      makeAdder(n) = { return (x) => x + n }
+
+  Pass-by-Reference (ref)
+  ──────────────────────
+    Force the function parameter to mutate the original outer variable.
+      addOne(ref x) = { x = x + 1 }
+
+  Default Parameter Values
+  ──────────────────────
+    f(x, y = 0) = x + y
+    Required parameters must precede parameters possessing defaults.
+    Defaults are evaluated *once at definition time*.
+
+  Destructuring & Scope
+  ──────────────────────
+    Destructured variables naturally abide by auto-local rules:
+      f() = { [a, b] = [10, 20]; return a + b } // a, b are safe
+    You may utilize 'global' to project destructuring into an outer scope.
+    
+  Constants (const)
+  ──────────────────────
+    const G = 9.81       Immutable variable (modification throws error)
+    delete G             Permitted: remove a const entirely
+)HELP"},
+
+        {"string", R"HELP(
+═══ String Functions ═══
+
+  Strings are cleanly created with double quotes:  s = "hello world"
+
+  Conversion
+  ──────────────────────
+    str(x)              Converts any native value → string
+    eval("expr")        Parse & securely evaluate the string as JC2 code
+    type(x)             Returns the internal type name ("double", "String")
+    ord("A") / chr(65)  ASCII code conversion
+
+  Escape Sequences
+  ──────────────────────
+    \n  \t  \\  \"  \r  \0
+
+  Length & Indexing (0-based, negative safely wraps)
+  ──────────────────────
+    len(s)              String length                  
+    s[i] / s[-1]        Character substring at index   
+    s[start : end]      Targeted slice [start, end)
+    s[start:end:step]   Targeted slice with stepping
+                          "hello"[::-1] → "olleh" (String reversal!)
+
+  Substrings
+  ──────────────────────
+    substr(s, start)          From start index to string end
+    substr(s, start, length)  Length characters from start index
+
+  Search
+  ──────────────────────
+    find(s, sub, pos)         Start boundary position of first hit (-1 if absent)
+    contains(s, sub)          1 if captured, 0 otherwise
+    startsWith / endsWith     1 or 0
+    "sub" in s                Boolean test (identical to contains)
+
+  Transformation
+  ──────────────────────
+    upper(s) / lower(s) / trim(s) / replace(s, old, new) / repeat(s, n)
+
+  Concatenation & Splitting
+  ──────────────────────
+    "a" + "b"                   Native String addition
+    concat(a, b, c, ...)        Arbitrary datatype concatenation
+    split(s, delim)             Fragment into a List data-structure
+
+  String Interpolation (f-strings)
+  ──────────────────────
+    f"text {expr} text"              Embed any expression directly
+    f"Hello, {name}!"               Variable interpolation
+    f"{x + 1} items"                Expression interpolation
+    f"area = {PI * r^2::.2f}"       With format spec (:: separator)
+    f"{val::>10.3f}"                Right-aligned, 10 wide, 3 decimals
+
+    Format spec syntax: {expr::[<>^][width][.precision][type]}
+      <  left align       f  fixed float
+      >  right align      e  scientific
+      ^  center           d  integer
+                          x  hexadecimal
+
+    The :: separator is unambiguous — no conflict with ternary (?:) or other syntax.
+      f"{score >= 60 ? \"pass\" : \"fail\"}"     ✓ works (single : is ternary)
+      f"{PI::.4f}"                               ✓ works (:: is format spec)
+
+    Escape sequences (\n, \t, \\, \") work normally in f-strings.
+    Nested expressions with braces are supported:
+      f"result = {x > 0 ? x : -x}"
+
+  Raw Strings (r-strings)
+  ──────────────────────
+    r"text"              No escape processing — backslashes are literal.
+    r"C:\Users\name"     → "C:\Users\name"  (no \U or \n interpretation)
+    r"hello\nworld"      → "hello\nworld"   (literal backslash + n)
+
+    Custom Delimiter (like C++):
+      r"(can contain "quotes" freely)"
+      r"TAG(anything goes, even ) and " here)TAG"
+      r"END(
+          multi-line content
+          with "quotes" and \backslashes\
+      )END"
+
+      Syntax: r"DELIM( content )DELIM"
+        DELIM = any combination of letters, digits, underscores (can be empty).
+        Content is captured verbatim until the exact sequence )DELIM" is found.
+
+    Useful for file paths, regex patterns, JSON templates, or any text
+    that would require excessive escaping in a normal string.
+
+  StringMatrix — Table String Representation
+  ──────────────────────
+    Providing a string literal inside brackets `["hello", "word"]`
+    unconditionally elevates the entire block to `StringMatrix`.
+    All standard matrix bounds and manipulations function symmetrically.
+    See: `help matrix`
+)HELP"},
+
+        {"array", R"HELP(
+═══ Array / Data Functions ═══
+  Arrays are structurally defined as row vectors (1×N matrices): `[1, 2, 3]`
+  All array functions natively return row vectors.
+  For mathematical column vectors, refer to: `help vector`
+
+  Element Access
+  ──────────────────────
+    v[i]                Element extracted at zero-indexed component
+    v[i] = val          Modify internal memory securely
+    first(v) / last(v)  Endpoints
+    pop(v)              Return tail element
+    len(v)              Array size
+
+  Adding & Removing  (Returns mutated matrices)
+  ──────────────────────
+    push(v, val)        Append val trailing array bound
+    prepend(v, val)     Prefix val preceding array bound
+    insert(v, idx, val) Inject at indexed bound
+    removeAt(v, idx)    Strip specific boundary cell
+
+  Slicing & Memory Structure
+  ──────────────────────
+    v[start : end]            Extract elements [start, end)
+    v[start : end : step]     Extract with step exactly like Python
+    v[start :]                From start to the end
+    v[: end]                  From beginning to end
+    v[:]                      Full copy
+
+    All indices smartly wrap negative boundaries:
+      v[-3 : -1]              Extract 3rd-to-last to 2nd-to-last
+
+    slice(...)               Function alternative retains backward-compatibility.
+    reverse(v) / flatten(M) / unique(v)
+
+  Destructuring
+  ──────────────────────
+    [a, b, c] = [10, 20, 30]         Unpack array into memory variables
+    [first, _, last] = [1, 2, 3]     Discard intermediate components utilizing `_`
+
+  Generation
+  ──────────────────────
+    range(n)            [0, 1, ..., n-1]
+    range(a, b, step)   Custom stepping threshold
+    fill(val, n)        n iterations of val
+    linspace(a, b, n)   n proportionately spread points intersecting bounds
+
+  List Comprehension
+  ──────────────────────
+    [x^2 for x in range(10)]              Generate arrays inline
+    [x for x in data if x > 0]           Filter + transform in one step
+    See: `help basic` (List Comprehension section)
+
+  Functional Programming
+  ──────────────────────
+    map(f, v)           Map function output across elements
+    filter(f, v)        Scrub data returning conditional matches
+    reduce(f, v, init)  Left folding algorithm
+    any(f, v) / all(f, v) / countIf(f, v)
+
+  Pipe Operator
+  ──────────────────────
+    Chains data through multiple transformations left-to-right:
+      [5,3,1,4,2] |> sort |> reverse |> (v) => slice(v, 0, 3)
+      // → [5, 4, 3]
+
+    See: `help basic` (Pipe Operator section)
+
+  Concatenation
+  ──────────────────────
+    cat(a, b, ...)      Process multi-matrix elements horizontally forming new bounds
+    join(v, delim)      Aggregatively fuse bounds producing string
+    zip(a, b)           Pair-wise merge creating N×2 matrix
+)HELP"},
+
+        {"list", R"HELP(
+═══ List (Heterogeneous Dynamic Array) ═══
+  Lists can store ANY value type available in JC2, including other Lists, 
+  Dicts, matrices, strings, and function closures.
+
+  Creation
+  ──────────────────────
+    list()                         Creates an empty list
+    list(1, "hello", [1;2])        Stores mixed types seamlessly
+    toList([1, 2, 3])              Convert array → list of doubles
+    toArray(L)                     Convert flat list → row vector (must be numeric)
+    toMatrix(L)                    Convert nested List → Matrix/StringMatrix
+    Auto-Degradation from [...]:
+      JC2 automatically degrades a [...] literal to a List if any element
+      is a non-scalar type (List, Dict, Instance, Function, Matrix):
+        [1, 2, 3]                    → RealMatrix (all numbers)
+        [1, "hello"]                 → StringMatrix (contains string)
+        [1, list(2, 3)]              → List  (contains a List)
+        [Point(1,2), Point(3,4)]     → List  (contains instances)
+        [sin, cos, tan]              → List  (contains functions)
+        [{a: 1}, {b: 2}]             → List  (contains Dicts)
+        [[1,2], [3,4]]               → List  (contains matrices)
+      Multi-row auto-degradation produces a List of Lists:
+        [1, list(2); "a", dict()]    → List([1, [2]], ["a", {}])
+      This means you can use [...] as a universal container:
+        points = [Point(1,0), Point(3,4), Point(0,5)]
+        fns = [sin, cos, (x) => x^2]
+        configs = [{debug: true}, {debug: false}]
+
+  Access & Modification (0-indexed, negative wraps)
+  ──────────────────────
+    L[i]                Read element at index i
+    L[i] = val          Write or replace element
+    nested[1][0]        Chained indexing works natively
+
+  Adding & Removing
+  ──────────────────────
+    push(L, val)            Append value to the end (returns new list)
+    prepend(L, val)         Insert value at the beginning
+    insert(L, idx, val)     Insert value at a specific index
+    removeAt(L, idx)        Remove the element at specific index
+
+  Element Access
+  ──────────────────────
+    first(L) / last(L)     Endpoints
+    pop(L)                  Returns the last element (Note: does not mutate L)
+    len(L)                  Number of elements
+
+  Structure
+  ──────────────────────
+    L[start : end]          List slice [start, end)
+    L[start : end : step]   List slice with stepping (negative wraps)
+    
+    slice(L, start, end)    Function alternative retains backward-compatibility.
+    reverse(L)              Returns a reversed copy
+    cat(L1, L2, ...)        Concatenate multiple lists into one flat list
+    flatten(L)              Recursively flatten nested lists into a 1D list
+                              flatten(list(1, list(2, 3))) → [1, 2, 3]
+    unique(L)               Remove duplicates (uses deep equality checks)
+
+  Destructuring
+  ──────────────────────
+    [name, age] = list("Alice", 30)
+    name       →  "Alice"
+    age        →  30
+    Destructured iteration:
+      for ([key, val] in list(list("a",1), list("b",2))) { ... }
+
+  Search
+  ──────────────────────
+    indexOf(L, val)         First index of val (-1 if absent)
+    count(L, val)           Count number of matching occurrences
+    val in L                Membership test → returns 1 or 0
+
+  Sorting
+  ──────────────────────
+    sort(L)                 Sorts elements by string representation (lexicographic)
+    sort(L, cmp)            Sort with a custom boolean comparator function
+                              sort(L, (a, b) => a < b)
+    Sorting Dicts by a specific field:
+      users = [{name: "Bob", age: 20}, {name: "Alice", age: 30}]
+      sort(users, (a, b) => a.age < b.age)
+
+  Functional Programming
+  ──────────────────────
+    map(f, L)               Apply f(x) to each element, returns a new list
+    filter(f, L)            Keep elements where f(x) evaluates to truthy
+    reduce(f, L)            Left fold, utilizing the first element as initial state
+    reduce(f, L, init)      Left fold with an explicit starting accumulator
+    any(f, L)               Returns 1 if ANY f(x) is truthy
+    all(f, L)               Returns 1 if ALL f(x) are truthy
+    countIf(f, L)           Count elements where f(x) is truthy
+
+  String Interop
+  ──────────────────────
+    join(L, ", ")           Join all elements into a single string
+    zip(L1, L2)             Pair-wise merge → returns a list of 2-element lists
+
+  Conversion
+  ──────────────────────
+    toList(matrix)          Matrix → List of Lists (2D structure)
+    toList(vector)          Vector/Array → Flat List
+    toMatrix(L)             List → Matrix (auto-detects type constraints)
+                              list(1,2,3) → [1, 2, 3]  (row vector)
+                              list(list(1,2), list(3,4)) → [1,2; 3,4]
+
+  When to use List vs Array?
+  ──────────────────────
+    Array   [1, 2, 3]        Homogeneous doubles. Fast math. Use for numerics.
+                             Because scalars are natively broadcastable, [A, B]
+                             horizontally concatenates numeric matrices natively.
+    List    [Point(1,2), ...]Automatically created when [...] contains
+                             non-scalar types (instances, functions, dicts, etc.)
+                             Unlike arrays, [list1, list2] will NOT fuse elements,
+                             it creates a 2D List: [ [..], [..] ].
+    list()  list(1, "a")     Explicit creation for any heterogeneous data.
+
+)HELP" },
+
+        {"dict", R"HELP(
+═══ Dictionary (Key-Value Store) ═══
+
+  Dicts store unordered key-value string mappings in JC2. Keys are exclusively
+  strings, but values can be of any type.
+
+  Creation
+  ──────────────────────
+    d = dict()                          Empty dictionary
+    d = dict("name", "Alice", "age", 30) Function form (key-value alternating)
+
+    d = {name: "Alice", age: 30}        ★ Literal syntax (recommended)
+    d = {"name": "Alice", "age": 30}    Quoted string keys also work
+    d = {1: "one", 2: "two"}            Numeric keys (auto-converted to strings)
+
+    Bare identifiers as keys are treated as string literals (JavaScript style):
+      {name: "Alice"}      → key is "name" (NOT the value of variable 'name')
+      {"name": "Alice"}    → identical result
+
+    Trailing commas are allowed:
+      d = {a: 1, b: 2,}
+
+    For computed keys, use the function form:
+      key = "dynamic"
+      dict(key, 42)                     → {"dynamic": 42}
+
+  Access & Modification
+  ──────────────────────
+    d["key"]                            Read / Write the value 
+    d["key"] += 1                       Compound assignment directly on the value
+
+  Dot Operator Syntax Sugar
+  ──────────────────────
+    The dot operator works identically to bracket syntax for string keys:
+      d.name                     → "Alice"     (same as d["name"])
+      d.age = 31                 → modifies    (same as d["age"] = 31)
+      d.score = 95               → adds new key
+
+  Inspection & Manipulation
+  ──────────────────────
+    len(d) / dictSize(d)Number of key-value entries
+    type(d)             Returns "Dict"
+    hasKey(d, "key")    Returns 1 if the key exists
+    keys(d)             Returns all keys as a StringMatrix row
+    values(d)           Returns all values
+    dictPairs(d)        Returns an N×2 StringMatrix of [key, value] rows
+    removeKey(d, "key") Returns a new Dict with the specified key removed
+    dictMerge(d1, d2)   Merges d2 into d1
+
+  Iteration & Membership
+  ──────────────────────
+    for (k in d) { ... }             Iterate over keys
+    "key" in d                       Returns 1 if the key exists, 0 otherwise
+
+    Destructured iteration (extracts key-value pairs simultaneously):
+      for ([k, v] in d) {
+          print(k, "=", v)
+      }
+)HELP"},
+
+        {"class", R"HELP(
+═══ Classes, Instances, Inheritance & Operator Overloading ═══
+
+  ─────────────────────────────────────────────────────────────
+  Defining a Class
+  ─────────────────────────────────────────────────────────────
+    class ClassName {
+        init(params) = { body }         Constructor (optional)
+        methodName(params) = expr       Method definition
+    }
+
+    • 'init' executes automatically upon instance creation.
+    • Inside methods, `self` refers to the active instance context.
+    • Methods support default parameters: `method(x, y = 0) = ...`
+
+  ─────────────────────────────────────────────────────────────
+  Field Access (Dot Operator) & Instantiation
+  ─────────────────────────────────────────────────────────────
+    p = Point(3, 4)              Calls init(3, 4)
+    p.x                          Read field
+    p.x = 10                     Write field (creates if absent)
+
+    Instance structures mandate reference semantics (C++ `shared_ptr` backing).
+
+  ─────────────────────────────────────────────────────────────
+  Inheritance (extends / super)
+  ─────────────────────────────────────────────────────────────
+    class ChildClass extends ParentClass {
+        init(...) = { super.init(...); ... }
+        method() = ...         // Override parent method
+    }
+
+    • Single inheritance only. Child inherits all methods.
+    • `super` dispatches to the parent class's methods securely.
+
+  ─────────────────────────────────────────────────────────────
+  Operator Overloading (Dunder Methods)
+  ─────────────────────────────────────────────────────────────
+    Classes can inject logic into global operator behavior using double 
+    underscores. Dunder methods are symmetrically inherited.
+
+    Arithmetic:
+      __add__ (+)  __sub__ (-)  __mul__ (*)  __div__ (/)  __mod__ (%)  __pow__ (^)
+
+    Reverse arithmetic (when left operand is not an instance):
+      __radd__  __rsub__  __rmul__  __rdiv__  __rmod__  __rpow__
+
+    Comparison & Logical:
+      __eq__ (==)  __neq__ (!=)  __lt__ (<)  __le__ (<=)  __gt__ (>)  __ge__ (>=)
+      __contains__(x)   Membership (x in a)
+
+    Indexing & Hooks:
+      __getitem__(i) / __getitem__(i, j)   Read via index
+      __setitem__(i, v) / __setitem__(i,j, v) Write via index
+      __str__()    str(a), print(a), format("{}", a)
+      __len__()    len(a)
+      __abs__()    abs(a)
+      __bool__()   bool(a)
+
+  ─────────────────────────────────────────────────────────────
+  Destructuring with Methods
+  ─────────────────────────────────────────────────────────────
+    Methods can organically return arrays/lists facilitating destructured bounds:
+      class Point { coords() = [self.x, self.y] }
+      [px, py] = Point(3, 4).coords()
+
+  ─────────────────────────────────────────────────────────────
+  Introspection
+  ─────────────────────────────────────────────────────────────
+    type(p)                  Class name → "Point"
+    isinstance(p, Point)     1 if p is (or inherits from) Point structure
+    hasField(p, "x")         Returns truthiness mapping
+    getFields(p)             Isolates all allocated field names 
+    getClass(p)              Retrieves the core class definition blueprint
+    getParent(Dog)           Outputs parent class mapping or `none`
+)HELP"},
+
+        {"error", R"HELP(
+═══ Error Handling ═══
+
+  In JC2, errors generated by invalid math operations, type mismatches, 
+  or explicit `throw` statements will normally terminate the current script.
+
+  Throwing Errors
+  ──────────────────────
+    throw "message"             Throws an exact string error message
+    throw expr                  Throws any evaluated value
+    error("message")            Function form (acts exactly like `throw`)
+
+  Try / Catch Blocks
+  ──────────────────────
+    try {
+        risky_code()
+    } catch (e) {
+        print("Caught an error:", e)
+    }
+
+    The `catch` variable (e.g., `e`) receives the error message as a string.
+    `try`/`catch` is an expression. It natively returns the value of the 
+    `try` block if successful, or the value of the `catch` block if an error occurred.
+
+  Re-throwing & Control Flow
+  ──────────────────────
+    You can trigger `throw e` inside a catch block to bubble unhandled errors up.
+    Control flow signals (`break`, `continue`, and `return`) pass through 
+    `try`/`catch` boundaries completely unaffected.
+
+  Protected Call (pcall)
+  ──────────────────────
+    `pcall(f)` provides a functional alternative to `try`/`catch`.
+    It executes a zero-argument function `f` and captures the result safely into a List.
+
+    Returns `[1, result]` on success.
+    Returns `[0, errorMsg]` on failure.
+
+      status = pcall(riskyFunc)
+      isError(status)       → 1 if error, 0 if success
+)HELP"},
+
+        {"fileio", R"HELP(
+═══ File I/O ═══
+
+  Text Files
+  ──────────────────────
+    readFile(path)              Reads the entire file into a single string.
+    writeFile(path, content)    Writes a string to the file (overwrites existing).
+    appendFile(path, content)   Appends a string to the end of the file.
+    readLines(path)             Reads the file line-by-line into a List of strings.
+    writeLines(path, list)      Writes a List of elements as separate lines.
+
+  CSV Files (Data Analysis)
+  ──────────────────────
+    readCSV(path, delim)        Reads a CSV into a List of Lists.
+    readCSVMat(path, delim)     Reads a CSV directly into a StringMatrix.
+    parseCSVNum(path, delim)    Reads a CSV into a mathematical RealMatrix.
+    writeCSV(path, data, delim) Writes a Matrix or List out to a CSV file.
+
+  Path Resolution (Script-Centric)
+  ──────────────────────
+    JC2 resolves all relative file paths based on the location of the 
+    CURRENTLY EXECUTING script, not the terminal's working directory.
+
+    If `C:/project/src/main.jc2` calls `readFile("data.txt")`, it will
+    look for `C:/project/src/data.txt`. This allows you to build standalone,
+    portable JC2 packages and libraries that bundle their own data files.
+
+    If you are typing interactively in the REPL, relative paths resolve
+    from the directory where you launched the executable.
+
+  File System Operations
+  ──────────────────────
+    fileExists(path)            Returns 1 if the file/folder exists, 0 otherwise.
+    fileSize(path)              Returns the physical file size in bytes.
+    deleteFile(path)            Permanently deletes the specified file.
+    listDir(path)               Returns a List of filenames in the specified directory.
+)HELP"},
+
+        { "json", R"HELP(
+═══ JSON Module — Native Module ═══
+
+  Requires: import "json"
+
+  Provides JSON serialization and deserialization between JC2 values
+  and JSON strings. Backed by native C++ for performance.
+
+  Functions
+  ──────────────────────
+    json_encode(value)              Convert any JC2 value → JSON string
+    json_decode(str)                Parse JSON string → JC2 value
+    json_pretty(value)              Pretty-print with indentation
+    json_pretty(value, indent)      Custom indent width (default: 2)
+
+  Type Mapping (JC2 → JSON)
+  ──────────────────────
+    double / BigInt / Fraction   →  number
+    String                       →  string (escaped)
+    List                         →  array
+    Dict                         →  object
+    RealMatrix (row)             →  array of numbers
+    RealMatrix (2D)              →  array of arrays
+    Complex                      →  {"real": r, "imag": i}
+    none                         →  null
+    true (1.0) / false (0.0)     →  number (use booleans explicitly)
+
+  Type Mapping (JSON → JC2)
+  ──────────────────────
+    number (integer)             →  BigInt
+    number (float)               →  double
+    string                       →  String
+    array                        →  List
+    object                       →  Dict
+    true                         →  1.0
+    false                        →  0.0
+    null                         →  none
+
+  Examples
+  ──────────────────────
+    import "json"
+
+    // Encode
+    d = {name: "Alice", age: 30, scores: [85, 92, 78]}
+    s = json_encode(d)
+    // → {"name":"Alice","age":30,"scores":[85,92,78]}
+
+    // Pretty print
+    print(json_pretty(d))
+    // → {
+    //     "name": "Alice",
+    //     "age": 30,
+    //     ...
+    //   }
+
+    // Decode
+    data = json_decode(r"({"x": 3.14, "items": [1, true, null]})")
+    data["x"]           → 3.14
+    data["items"][2]     → none
+
+    // Round-trip
+    original = {users: [{name: "Bob"}, {name: "Eve"}]}
+    restored = json_decode(json_encode(original))
+    restored.users[0].name    → "Bob"
+
+    // File I/O
+    writeFile("data.json", json_pretty(d))
+    loaded = json_decode(readFile("data.json"))
+)HELP" },
+
+        { "import", R"HELP(
+═══ Import (Code Reuse & Native Modules) ═══
+
+  The `import` command loads code into the current environment.
+  It supports both JC2 script files (.jc2) and native C++ modules.
+
+  Syntax
+  ──────────────────────
+    import "path"               Loads and executes a .jc2 file
+    import "image"              Loads the native Image module
+    import "prob"               Loads the native Probability module
+    import "json"               Loads the native JSON module
+
+  Native Modules (built into the executable)
+  ──────────────────────
+    Native modules are written in C++ and compiled into JunkCalculator2.
+    They load instantly with zero file I/O overhead.
+
+    modules()                   List all available native modules
+    import "moduleName"         Load a native module
+
+    Currently available:
+      image     BMP image generation & plotting
+      prob      11 probability distributions + hypothesis tests
+      json      JSON encode / decode / pretty-print
+
+    Native modules take priority over .jc2 files with the same name.
+    Importing the same module twice is a safe no-op (deduplicated).
+
+  Script Modules (.jc2 files)
+  ──────────────────────
+    import "math_utils"         Loads math_utils.jc2
+
+  Smart Path Resolution (Script-Centric)
+  ──────────────────────
+    `import` resolves relative paths based on the directory of the
+    currently running script, NOT the terminal's working directory.
+
+    Search order for `import "utils"` inside C:/project/src/main.jc2:
+    1. C:/project/src/utils
+    2. C:/project/src/utils.jc2
+    3. C:/project/src/data/utils.jc2
+    4. C:/project/src/lib/utils.jc2
+    5. <workspace>/utils.jc2
+    6. <exe_dir>/lib/utils.jc2  (global fallback)
+
+    Once a library starts executing, its own directory becomes the
+    path context for any further imports or file operations within it.
+
+  Features & Safeguards
+  ──────────────────────
+    • Deduplication: Importing the same file/module twice is a no-op.
+    • Chained imports: A library can safely `import` other libraries.
+    • Error propagation: Errors inside an imported file abort the import.
+    • All definitions become globally available in the caller.
+)HELP" },
+
+        { "image", R"HELP(
+═══ Image Engine — Native Module ═══
+
+  Requires: import "image"
+
+  JC2 includes a native, zero-dependency graphics engine capable of rendering
+  and saving 24-bit uncompressed BMP images. After importing, Image objects
+  are class instances (type → "Image").
+
+  Creation & Basics
+  ──────────────────────
+    import "image"
+    c = img(w, h)                   White canvas
+    c = img(w, h, "black")          Custom background color
+    imgWidth(c) / imgHeight(c)      Returns dimensions
+    imgClear(c, color)              Erases all pixels
+    type(c)                         → "Image"
+
+  Drawing Primitives
+  ──────────────────────
+    imgPixel(c, x, y, color)
+    imgLine(c, x0,y0, x1,y1, color [,thick])
+    imgRect(c, x,y, w,h, color [,thick])
+    imgFillRect(c, x,y, w,h, color)
+    imgCircle(c, cx,cy, r, color [,thick])
+    imgFillCircle(c, cx,cy, r, color)
+
+  Data Plotting
+  ──────────────────────
+    imgAxes(c, xMin, xMax, yMin, yMax [,color])
+        Draws X/Y coordinate axes and a background grid.
+
+    imgPlot(c, f, xMin, xMax, yMin, yMax, color [,thick])
+        Plots a continuous single-variable function f(x).
+
+    imgScatter(c, xArr, yArr, xMin, xMax, yMin, yMax [,color])
+        Plots Cartesian data points from two arrays.
+
+  Saving
+  ──────────────────────
+    imgSave(c, "path.bmp")          Writes the image to disk.
+
+  Color Parsing
+  ──────────────────────
+    Hex RGB:       "#FF0000" (Red), "#00FF00" (Lime)
+    Named Colors:  "red", "blue", "green", "black", "white", "yellow",
+                   "cyan", "magenta", "orange", "purple", "pink",
+                   "gray", "brown", "lime", "navy", "teal", "maroon",
+                   "silver", "olive"
+
+  Example
+  ──────────────────────
+    import "image"
+    c = img(800, 600, "white")
+    imgAxes(c, -10, 10, -1.5, 1.5)
+    imgPlot(c, sin, -10, 10, -1.5, 1.5, "red", 2)
+    imgPlot(c, cos, -10, 10, -1.5, 1.5, "blue", 2)
+    imgSave(c, "plot.bmp")
+)HELP" },
+    };
+
+} // namespace jc
+
+#endif // JC2_HELP_TEXT_H

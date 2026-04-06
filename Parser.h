@@ -1,0 +1,59 @@
+#ifndef JC2_PARSER_H
+#define JC2_PARSER_H
+
+#include <vector>
+#include <memory>
+#include <stdexcept>
+#include "Token.h"
+#include "Expr.h"
+
+namespace jc {
+
+    class Parser {
+    private:
+        std::vector<Token> tokens;
+        int current = 0;
+
+        // --- 文法规则 (优先级从低到高) ---
+        std::unique_ptr<Expr> expression();
+        std::unique_ptr<Expr> assignment();
+        std::unique_ptr<Expr> comparison();
+        std::unique_ptr<Expr> addition();
+        std::unique_ptr<Expr> multiplication();
+        std::unique_ptr<Expr> power();
+        std::unique_ptr<Expr> unary();
+        std::unique_ptr<Expr> call();
+        std::unique_ptr<Expr> primary();
+        std::unique_ptr<Expr> logicalOr();       // ★ 新增
+        std::unique_ptr<Expr> logicalAnd();      // ★ 新增
+        std::unique_ptr<Expr> ternary();
+
+        // ★ 新增：控制流解析
+        std::unique_ptr<Expr> parseBlock();
+        std::unique_ptr<Expr> ifExpr();
+        std::unique_ptr<Expr> whileExpr();
+        std::unique_ptr<Expr> forExpr();
+        std::unique_ptr<Expr> forInExpr(Token varName);
+        std::unique_ptr<Expr> switchExpr();
+        std::unique_ptr<Expr> classDefExpr();  // ★
+        std::unique_ptr<Expr> parseFString(const std::string& raw);  // ★
+        std::unique_ptr<Expr> parseListComp(std::unique_ptr<Expr> valueExpr);  // ★
+        std::unique_ptr<Expr> pipe();
+        std::unique_ptr<Expr> parseDictLiteral();  // ★
+
+        // --- 游标工具 ---
+        bool match(std::initializer_list<TokenType> types);
+        bool check(TokenType type) const;
+        bool isAtEnd() const;
+        Token advance();
+        Token peek() const;
+        Token previous() const;
+        Token consume(TokenType type, const std::string& message);
+
+    public:
+        explicit Parser(std::vector<Token> tokens) : tokens(std::move(tokens)) {}
+        std::unique_ptr<Expr> parse();
+    };
+
+} // namespace jc
+#endif // JC2_PARSER_H

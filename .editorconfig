@@ -1,0 +1,13 @@
+# 顶层 EditorConfig 文件
+root = true
+
+# 匹配所有的 C++ 源文件和头文件
+[*.{cpp,h}]
+# 强制使用 UTF-8 编码
+charset = utf-8
+# 强制缩进风格（可选，保持代码整洁）
+indent_style = space
+indent_size = 4
+# 强制使用 Windows 风格的换行符 (CRLF) (可选，对 Git 非常友好)
+end_of_line = crlf
+insert_final_newline = true
