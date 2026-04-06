@@ -90,19 +90,16 @@ endif()
 # 1. 拷贝核心程序
 install(TARGETS JunkCalculator2 DESTINATION bin)
 
-# 2. 拷贝资源文件夹
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data")
-    install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/data/ DESTINATION bin/data)
-endif()
-
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/lib")
-    install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/lib/ DESTINATION bin/lib)
-endif()
+# 2. 强制创建并拷贝资源文件夹
+# 如果源码目录下没有这两个文件夹，CMake 也会在打包时在 bin 里建出来
+install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/data" DESTINATION bin)
+install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/lib" DESTINATION bin)
 
 # 3. 拷贝文档与许可协议 (消除打包软件的无协议警告，兼容带后缀的情况)
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/README.md")
     install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/README.md" DESTINATION .)
 endif()
+
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
     install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE" DESTINATION .)
 elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.txt")
