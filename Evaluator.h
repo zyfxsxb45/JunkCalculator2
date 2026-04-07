@@ -1,22 +1,21 @@
 #ifndef JC2_EVALUATOR_H
 #define JC2_EVALUATOR_H
 
-#include <any>
-#include <map>
-#include <set>
-#include <string>
-#include <vector>
-#include <stdexcept>
-#include <functional>
 #include "Expr.h"
 #include "Value.h"
+#include <any>
+#include <functional>
+#include <map>
+#include <set>
+#include <stdexcept>
+#include <string>
+#include <vector>
 
 namespace jc {
 
     struct BreakSignal {};
     struct ContinueSignal {};
     struct ReturnSignal { Value value; };
-    struct ErrorSignal { std::string message; };
 
     // ★ 更新：作用域帧——仅由函数调用创建
     struct ScopeFrame {
@@ -91,6 +90,7 @@ namespace jc {
         Value readSingleIndex(Value& container, const std::vector<std::unique_ptr<Expr>>& indexExprs);
         void writeSingleIndex(Value& container, const std::vector<std::unique_ptr<Expr>>& indexExprs, const Value& val);
         std::pair<std::vector<int>, bool> buildIndices(Expr* expr, int dimSize);
+        void writeBackExpr(Expr* expr, const Value& val);
 
     public:
         Evaluator();
@@ -134,7 +134,7 @@ namespace jc {
         std::any visitListCompExpr(ListCompExpr* expr) override;  // ★
         std::any visitDictLiteral(DictLiteral* expr) override;  // ★
         std::any visitSliceExpr(SliceExpr* expr) override;  // ★ 新增
-        
+
 
         void showVariables() const;
         void clearVariables();
@@ -152,6 +152,7 @@ namespace jc {
         bool loadNativeModule(const std::string& name);
         bool hasNativeModule(const std::string& name) const;
         std::vector<std::string> listNativeModules() const;
+        const std::map<std::string, NativeCallable>& getBuiltins() const { return builtins; }
     };
 
 } // namespace jc

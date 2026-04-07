@@ -1,13 +1,13 @@
 #ifndef JC2_MATRIX_H
 #define JC2_MATRIX_H
 
-#include <vector>
-#include <iostream>
-#include <stdexcept>
-#include <cmath>
-#include <sstream>
 #include "Complex.h"
 #include "Tolerance.h"
+#include <cmath>
+#include <iostream>
+#include <sstream>
+#include <stdexcept>
+#include <vector>
 
 namespace jc {
 
@@ -30,7 +30,7 @@ namespace jc {
         }
 
         Matrix(T num) : rows(1), cols(1), data(1, num) {}
-        Matrix() : rows(0), cols(0), data(){}
+        Matrix() : rows(0), cols(0), data() {}
 
         // --- 基础访问 ---
         int getRows() const { return rows; }
@@ -1106,7 +1106,7 @@ namespace jc {
                 xnorm += mag * mag;
             }
             xnorm = std::sqrt(xnorm);
-            if (jc::Tol::isEq(xnorm, 0.0)) continue; 
+            if (jc::Tol::isEq(xnorm, 0.0)) continue;
             Complex alpha = H(k + 1, k);
             Complex signAlpha = (jc::Tol::isEq(alpha.modulus(), 0.0))
                 ? Complex(1.0)
@@ -1309,31 +1309,32 @@ namespace jc {
 
 
     inline ComplexMatrix matSqrtIterative(const ComplexMatrix& A) {
-    if (A.getRows() != A.getCols())
-        throw std::invalid_argument("Math Error: Matrix sqrt requires a square matrix.");
-    int n = A.getRows();
-    ComplexMatrix Y = A;
-    ComplexMatrix Z = ComplexMatrix::identity(n);
-    for (int iter = 0; iter < 100; ++iter) {
-        ComplexMatrix Yinv, Zinv;
-        try {
-            Yinv = Y.inverse();
-            Zinv = Z.inverse();
-        } catch (...) {
-            throw std::runtime_error(
-                "Math Error: Matrix square root failed (singular intermediate matrix).");
+        if (A.getRows() != A.getCols())
+            throw std::invalid_argument("Math Error: Matrix sqrt requires a square matrix.");
+        int n = A.getRows();
+        ComplexMatrix Y = A;
+        ComplexMatrix Z = ComplexMatrix::identity(n);
+        for (int iter = 0; iter < 100; ++iter) {
+            ComplexMatrix Yinv, Zinv;
+            try {
+                Yinv = Y.inverse();
+                Zinv = Z.inverse();
+            }
+            catch (...) {
+                throw std::runtime_error(
+                    "Math Error: Matrix square root failed (singular intermediate matrix).");
+            }
+            ComplexMatrix Ynew = (Y + Zinv) * Complex(0.5);
+            ComplexMatrix Znew = (Z + Yinv) * Complex(0.5);
+            double diff = (Ynew - Y).norm();
+            Y = Ynew;
+            Z = Znew;
+            if (Tol::clean(diff, Y.norm(), 1e4) == 0.0)
+                return Y;
         }
-        ComplexMatrix Ynew = (Y + Zinv) * Complex(0.5);
-        ComplexMatrix Znew = (Z + Yinv) * Complex(0.5);
-        double diff = (Ynew - Y).norm();
-        Y = Ynew;
-        Z = Znew;
-        if (Tol::clean(diff, Y.norm(), 1e4) == 0.0)
-            return Y;
+        throw std::runtime_error(
+            "Math Error: Matrix square root iteration did not converge.");
     }
-    throw std::runtime_error(
-        "Math Error: Matrix square root iteration did not converge.");
-}
 
 
     inline ComplexMatrix matSqrt(const ComplexMatrix& A);

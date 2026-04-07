@@ -1,5 +1,5 @@
-#include "Parser.h"
 #include "Lexer.h"  // ★ f-string 子解析需要
+#include "Parser.h"
 
 namespace jc {
 
@@ -95,7 +95,7 @@ namespace jc {
     }
 
     std::unique_ptr<Expr> Parser::assignment() {
-        auto expr  = ternary();
+        auto expr = ternary();
 
         if (match({ TokenType::PLUS_ASSIGN, TokenType::MINUS_ASSIGN,
                     TokenType::STAR_ASSIGN, TokenType::SLASH_ASSIGN,

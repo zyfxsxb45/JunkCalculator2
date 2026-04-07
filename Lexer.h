@@ -1,9 +1,9 @@
 #ifndef JC2_LEXER_H
 #define JC2_LEXER_H
 
+#include "Token.h"
 #include <string>
 #include <vector>
-#include "Token.h"
 
 namespace jc {
 

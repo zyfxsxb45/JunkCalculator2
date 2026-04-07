@@ -1,15 +1,15 @@
 #ifndef JC2_PROBABILITY_H
 #define JC2_PROBABILITY_H
 
-#include <cmath>
-#include <stdexcept>
-#include <vector>
-#include <string>
-#include <sstream>
-#include <random>
-#include <memory>
 #include <algorithm>
+#include <cmath>
 #include <iomanip>
+#include <memory>
+#include <random>
+#include <sstream>
+#include <stdexcept>
+#include <string>
+#include <vector>
 
 namespace jc {
 

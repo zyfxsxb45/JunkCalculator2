@@ -1,9 +1,9 @@
 #ifndef JC2_TOLERANCE_H
 #define JC2_TOLERANCE_H
 
-#include <limits>
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 namespace jc {
 

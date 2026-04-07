@@ -1,17 +1,18 @@
 #include "Evaluator.h"
+#include "Highlight.h"       
+#include "Image.h"
 #include "Lexer.h"       // ★ 新增：eval() 需要
+#include "Module.h"
 #include "Parser.h"      // ★ 新增：eval() 需要
-#include <cmath>
-#include <iostream>
-#include <random>
+#include "Probability.h"
+#include "VM.h"
 #include <algorithm>     // ★ 新增：transform
 #include <cctype>        // ★ 新增：toupper/tolower
 #include <chrono>
+#include <cmath>
+#include <iostream>
+#include <random>
 #include <thread>
-#include "Highlight.h"       
-#include "Module.h"
-#include "Image.h"
-#include "Probability.h"
 
 namespace jc {
     using CapturedEnv = std::map<std::string, Value>;
@@ -100,6 +101,53 @@ namespace jc {
                     " missing required argument '" + cl->paramNames[i] + "'.");
         }
         return args;
+    }
+
+    void Evaluator::writeBackExpr(Expr* expr, const Value& val) {
+        // ═══ 终止条件 1：变量 ═══
+        if (auto* var = dynamic_cast<Variable*>(expr)) {
+            assertNotConst(var->name.lexeme);
+            if (functionDepth > 0 && !scopeStack.empty() &&
+                !isGlobal(var->name.lexeme))
+                declareLocal(var->name.lexeme);
+            environment[var->name.lexeme] = val;
+            return;
+        }
+
+        // ═══ 终止条件 2：DotAccess → 设置字段，递归回写父级 ═══
+        if (auto* dot = dynamic_cast<DotAccess*>(expr)) {
+            Value parent = evaluate(dot->object.get());
+
+            // Instance = 引用语义，直接修改，无需递归
+            if (std::holds_alternative<std::shared_ptr<Instance>>(parent.data)) {
+                std::get<std::shared_ptr<Instance>>(parent.data)->fields.set(
+                    dot->field.lexeme, std::make_any<Value>(val));
+                return;
+            }
+
+            // Dict = 值语义，修改拷贝后递归回写
+            if (std::holds_alternative<Dict>(parent.data)) {
+                std::get<Dict>(parent.data).set(
+                    dot->field.lexeme, std::make_any<Value>(val));
+                writeBackExpr(dot->object.get(), parent);
+                return;
+            }
+
+            throw std::runtime_error(
+                "Type Error: Cannot write back field '" +
+                dot->field.lexeme + "' on this type.");
+        }
+
+        // ═══ IndexAccess → 设置索引，递归回写父级 ═══
+        if (auto* idx = dynamic_cast<IndexAccess*>(expr)) {
+            Value parent = evaluate(idx->object.get());
+            writeSingleIndex(parent, idx->indices, val);
+            writeBackExpr(idx->object.get(), parent);
+            return;
+        }
+
+        throw std::runtime_error(
+            "Type Error: Cannot write back to this expression type.");
     }
 
     bool Evaluator::loadNativeModule(const std::string& name) {
@@ -231,6 +279,23 @@ namespace jc {
         }
     }
 
+    static void syncClosureCaptures(std::shared_ptr<FunctionClosure>& closure,
+        const std::map<std::string, Value>& env) {
+        if (!closure->hasCaptures()) return;
+        try {
+            auto& cap = std::any_cast<CapturedEnv&>(closure->capturedEnv);
+            for (auto& [k, v] : cap) {
+                bool isParam = false;
+                for (const auto& p : closure->paramNames)
+                    if (k == p) { isParam = true; break; }
+                if (isParam) continue;
+                auto it = env.find(k);
+                if (it != env.end()) v = it->second;
+            }
+        }
+        catch (...) {}
+    }
+
     static std::vector<Value> extractElements(const Value& val) {
         std::vector<Value> elements;
         if (std::holds_alternative<RealMatrix>(val.data)) {
@@ -257,7 +322,7 @@ namespace jc {
         return elements;
     }
 
-    
+
 
     // =================================================================
     // 比较运算核心引擎
@@ -927,7 +992,7 @@ namespace jc {
             if (std::holds_alternative<ComplexMatrix>(args[0].data)) return Value(std::get<ComplexMatrix>(args[0].data).transpose());
             if (std::holds_alternative<StringMatrix>(args[0].data)) return Value(std::get<StringMatrix>(args[0].data).transpose());  // ★
             throw std::runtime_error("Type Error: trans() requires a matrix.");
-            });        
+            });
         reg("gauss", { 1 }, [](const std::vector<Value>& args) -> Value { if (args.size() != 1) throw std::runtime_error("Runtime Error: expects 1 arg."); if (std::holds_alternative<RealMatrix>(args[0].data)) return Value(std::get<RealMatrix>(args[0].data).gaussianElimination().first); if (std::holds_alternative<ComplexMatrix>(args[0].data)) return Value(std::get<ComplexMatrix>(args[0].data).gaussianElimination().first); throw std::runtime_error("Type Error: gauss() requires a matrix."); });
 
         reg("rank", { 1 }, [matrixDispatch1](const std::vector<Value>& args) -> Value { if (args.size() != 1) throw std::runtime_error("Runtime Error: expects 1 arg."); return matrixDispatch1(args[0], [](const auto& m) { return static_cast<double>(m.rank()); }); });
@@ -951,7 +1016,7 @@ namespace jc {
             if (std::holds_alternative<StringMatrix>(args[0].data))                              // ★
                 return Value(static_cast<double>(std::get<StringMatrix>(args[0].data).getRows()));// ★
             throw std::runtime_error("Type Error: row() requires a matrix.");
-            });        
+            });
         reg("col", { 1 }, [](const std::vector<Value>& args) -> Value {
             if (args.size() != 1) throw std::runtime_error("Runtime Error: expects 1 arg.");
             if (std::holds_alternative<RealMatrix>(args[0].data))
@@ -961,7 +1026,7 @@ namespace jc {
             if (std::holds_alternative<StringMatrix>(args[0].data))                              // ★
                 return Value(static_cast<double>(std::get<StringMatrix>(args[0].data).getCols()));// ★
             throw std::runtime_error("Type Error: col() requires a matrix.");
-            });        
+            });
         reg("rows", { 1 }, builtins["row"]);
         reg("cols", { 1 }, builtins["col"]);
 
@@ -974,7 +1039,7 @@ namespace jc {
             if (std::holds_alternative<ComplexMatrix>(args[0].data)) return Value(std::get<ComplexMatrix>(args[0].data)(r, c));
             if (std::holds_alternative<StringMatrix>(args[0].data)) return Value(std::get<StringMatrix>(args[0].data)(r, c));  // ★
             throw std::runtime_error("Type Error: get() requires a matrix.");
-            });        
+            });
         reg("set", { 4 }, [](const std::vector<Value>& args) -> Value {
             if (args.size() != 4) throw std::runtime_error("Runtime Error: set() expects 4 arguments.");
             int r = static_cast<int>(std::round(args[1].asDouble())), c = static_cast<int>(std::round(args[2].asDouble()));
@@ -996,7 +1061,7 @@ namespace jc {
             if (std::holds_alternative<ComplexMatrix>(args[0].data)) return Value(std::get<ComplexMatrix>(args[0].data).getRow(r));
             if (std::holds_alternative<StringMatrix>(args[0].data)) return Value(std::get<StringMatrix>(args[0].data).getRow(r));  // ★
             throw std::runtime_error("Type Error: requires a matrix.");
-            });        
+            });
         reg("getC", { 2 }, [](const std::vector<Value>& args) -> Value {
             if (args.size() != 2) throw std::runtime_error("Runtime Error: expects 2 args.");
             int c = static_cast<int>(std::round(args[1].asDouble()));
@@ -1004,7 +1069,7 @@ namespace jc {
             if (std::holds_alternative<ComplexMatrix>(args[0].data)) return Value(std::get<ComplexMatrix>(args[0].data).getCol(c));
             if (std::holds_alternative<StringMatrix>(args[0].data)) return Value(std::get<StringMatrix>(args[0].data).getCol(c));  // ★
             throw std::runtime_error("Type Error: requires a matrix.");
-            });        
+            });
         reg("delR", { 2 }, [](const std::vector<Value>& args) -> Value {
             if (args.size() != 2) throw std::runtime_error("Runtime Error: expects 2 args.");
             int r = static_cast<int>(std::round(args[1].asDouble()));
@@ -1012,7 +1077,7 @@ namespace jc {
             if (std::holds_alternative<ComplexMatrix>(args[0].data)) return Value(std::get<ComplexMatrix>(args[0].data).deleteRow(r));
             if (std::holds_alternative<StringMatrix>(args[0].data)) return Value(std::get<StringMatrix>(args[0].data).deleteRow(r));  // ★
             throw std::runtime_error("Type Error: requires a matrix.");
-            });        
+            });
         reg("delC", { 2 }, [](const std::vector<Value>& args) -> Value {
             if (args.size() != 2) throw std::runtime_error("Runtime Error: expects 2 args.");
             int c = static_cast<int>(std::round(args[1].asDouble()));
@@ -1028,7 +1093,7 @@ namespace jc {
             if (std::holds_alternative<ComplexMatrix>(args[0].data)) { ComplexMatrix m = std::get<ComplexMatrix>(args[0].data); m.swapRows(r1, r2); return Value(m); }
             if (std::holds_alternative<StringMatrix>(args[0].data)) { StringMatrix m = std::get<StringMatrix>(args[0].data); m.swapRows(r1, r2); return Value(m); }  // ★
             throw std::runtime_error("Type Error: requires a matrix.");
-            });        
+            });
         reg("swapC", { 3 }, [](const std::vector<Value>& args) -> Value {
             if (args.size() != 3) throw std::runtime_error("Runtime Error: swapC() expects 3 args.");
             int c1 = static_cast<int>(std::round(args[1].asDouble())), c2 = static_cast<int>(std::round(args[2].asDouble()));
@@ -1036,7 +1101,7 @@ namespace jc {
             if (std::holds_alternative<ComplexMatrix>(args[0].data)) { ComplexMatrix m = std::get<ComplexMatrix>(args[0].data); m.swapCols(c1, c2); return Value(m); }
             if (std::holds_alternative<StringMatrix>(args[0].data)) { StringMatrix m = std::get<StringMatrix>(args[0].data); m.swapCols(c1, c2); return Value(m); }  // ★
             throw std::runtime_error("Type Error: requires a matrix.");
-            });        
+            });
         reg("multiR", { 3 }, [](const std::vector<Value>& args) -> Value { if (args.size() != 3) throw std::runtime_error("Runtime Error: multiR() expects 3 args."); int r = static_cast<int>(std::round(args[1].asDouble())); if (std::holds_alternative<RealMatrix>(args[0].data)) { RealMatrix m = std::get<RealMatrix>(args[0].data); m.multiplyRow(r, args[2].asDouble()); return Value(m); } if (std::holds_alternative<ComplexMatrix>(args[0].data)) { ComplexMatrix m = std::get<ComplexMatrix>(args[0].data); m.multiplyRow(r, args[2].asComplex()); return Value(m); } throw std::runtime_error("Type Error: requires a matrix."); });
         reg("multiC", { 3 }, [](const std::vector<Value>& args) -> Value { if (args.size() != 3) throw std::runtime_error("Runtime Error: multiC() expects 3 args."); int c = static_cast<int>(std::round(args[1].asDouble())); if (std::holds_alternative<RealMatrix>(args[0].data)) { RealMatrix m = std::get<RealMatrix>(args[0].data); double s = args[2].asDouble(); for (int r = 0; r < m.getRows(); ++r) m(r, c) = m(r, c) * s; return Value(m); } if (std::holds_alternative<ComplexMatrix>(args[0].data)) { ComplexMatrix m = std::get<ComplexMatrix>(args[0].data); Complex s = args[2].asComplex(); for (int r = 0; r < m.getRows(); ++r) m(r, c) = m(r, c) * s; return Value(m); } throw std::runtime_error("Type Error: requires a matrix."); });
         reg("addR", { 4 }, [](const std::vector<Value>& args) -> Value { if (args.size() != 4) throw std::runtime_error("Runtime Error: addR() expects 4 args."); int r1 = static_cast<int>(std::round(args[1].asDouble())), r2 = static_cast<int>(std::round(args[2].asDouble())); if (std::holds_alternative<RealMatrix>(args[0].data)) { RealMatrix m = std::get<RealMatrix>(args[0].data); m.addRows(r1, r2, args[3].asDouble()); return Value(m); } if (std::holds_alternative<ComplexMatrix>(args[0].data)) { ComplexMatrix m = std::get<ComplexMatrix>(args[0].data); m.addRows(r1, r2, args[3].asComplex()); return Value(m); } throw std::runtime_error("Type Error: requires a matrix."); });
@@ -1049,7 +1114,7 @@ namespace jc {
             if (std::holds_alternative<ComplexMatrix>(args[0].data)) return Value(std::get<ComplexMatrix>(args[0].data).reshape(r, c));
             if (std::holds_alternative<StringMatrix>(args[0].data)) return Value(std::get<StringMatrix>(args[0].data).reshape(r, c));  // ★
             throw std::runtime_error("Type Error: reshape() requires a matrix.");
-            });        
+            });
         reg("sub", { 3 }, [](const std::vector<Value>& args) -> Value { if (args.size() != 3) throw std::runtime_error("Runtime Error: sub() expects 3 args."); int r = static_cast<int>(std::round(args[1].asDouble())), c = static_cast<int>(std::round(args[2].asDouble())); if (std::holds_alternative<RealMatrix>(args[0].data)) return Value(std::get<RealMatrix>(args[0].data).subMatrix(r, c)); if (std::holds_alternative<ComplexMatrix>(args[0].data)) return Value(std::get<ComplexMatrix>(args[0].data).subMatrix(r, c)); throw std::runtime_error("Type Error: requires a matrix."); });
         reg("cof", { 3 }, [](const std::vector<Value>& args) -> Value { if (args.size() != 3) throw std::runtime_error("Runtime Error: cof() expects 3 args."); int r = static_cast<int>(std::round(args[1].asDouble())), c = static_cast<int>(std::round(args[2].asDouble())); if (std::holds_alternative<RealMatrix>(args[0].data)) return Value(std::get<RealMatrix>(args[0].data).cofactor(r, c)); if (std::holds_alternative<ComplexMatrix>(args[0].data)) return Value(std::get<ComplexMatrix>(args[0].data).cofactor(r, c)); throw std::runtime_error("Type Error: requires a matrix."); });
         reg("Acof", { 3 }, [](const std::vector<Value>& args) -> Value { if (args.size() != 3) throw std::runtime_error("Runtime Error: Acof() expects 3 args."); int r = static_cast<int>(std::round(args[1].asDouble())), c = static_cast<int>(std::round(args[2].asDouble())); if (std::holds_alternative<RealMatrix>(args[0].data)) return Value(std::get<RealMatrix>(args[0].data).algebraicCofactor(r, c)); if (std::holds_alternative<ComplexMatrix>(args[0].data)) return Value(std::get<ComplexMatrix>(args[0].data).algebraicCofactor(r, c)); throw std::runtime_error("Type Error: requires a matrix."); });
@@ -1061,7 +1126,7 @@ namespace jc {
             if (std::holds_alternative<StringMatrix>(args[0].data) && std::holds_alternative<StringMatrix>(args[1].data))  // ★
                 return Value(std::get<StringMatrix>(args[0].data).integR(std::get<StringMatrix>(args[1].data)));          // ★
             return Value(args[0].asComplexMatrix().integR(args[1].asComplexMatrix()));
-            });        
+            });
         reg("integC", { 2 }, [](const std::vector<Value>& args) -> Value {
             if (args.size() != 2) throw std::runtime_error("Runtime Error: expects 2 args.");
             if (std::holds_alternative<RealMatrix>(args[0].data) && std::holds_alternative<RealMatrix>(args[1].data))
@@ -1069,7 +1134,7 @@ namespace jc {
             if (std::holds_alternative<StringMatrix>(args[0].data) && std::holds_alternative<StringMatrix>(args[1].data))  // ★
                 return Value(std::get<StringMatrix>(args[0].data).integC(std::get<StringMatrix>(args[1].data)));          // ★
             return Value(args[0].asComplexMatrix().integC(args[1].asComplexMatrix()));
-            });        
+            });
         reg("integD", { 2 }, [](const std::vector<Value>& args) -> Value { if (args.size() != 2) throw std::runtime_error("Runtime Error: expects 2 args."); if (std::holds_alternative<RealMatrix>(args[0].data) && std::holds_alternative<RealMatrix>(args[1].data)) return Value(std::get<RealMatrix>(args[0].data).integD(std::get<RealMatrix>(args[1].data))); return Value(args[0].asComplexMatrix().integD(args[1].asComplexMatrix())); });
 
         reg("id", { 1 }, [](const std::vector<Value>& args) -> Value { if (args.size() != 1) throw std::runtime_error("Runtime Error: expects 1 arg."); int n = static_cast<int>(std::round(args[0].asDouble())); if (n < 1) throw std::runtime_error("Runtime Error: Size must be positive."); return Value(RealMatrix::identity(n)); });
@@ -1383,7 +1448,7 @@ namespace jc {
             };
         auto valToAny = [](const Value& v) -> std::any {
             return std::make_any<Value>(v);
-            }; 
+            };
         reg("sort", { 1, 2 }, [this, anyToVal, valToAny](const std::vector<Value>& args) -> Value {
             // sort(array) — 数值排序（原有）
             if (args.size() == 1 && std::holds_alternative<RealMatrix>(args[0].data)) {
@@ -1727,25 +1792,13 @@ namespace jc {
             });
 
         reg("pcall", { 1 }, [this](const std::vector<Value>& args) -> Value {
-            // pcall(f) — protected call: 执行零参函数，返回 list(true, result) 或 list(false, error_msg)
             if (args.size() != 1) throw std::runtime_error("Runtime Error: pcall() expects 1 argument.");
             auto cl = args[0].asFunction();
-            if (!cl->paramNames.empty())
+            if (!cl->acceptsArgCount(0))
                 throw std::runtime_error("Runtime Error: pcall() expects a zero-parameter function.");
 
             try {
-                pushScope();
-                functionDepth++;
-                auto capSaved = injectCaptures(environment, cl->capturedEnv, cl->paramNames);
-                Value result;
-                {
-                    EnvGuard guard(environment, cl->paramNames, {});
-                    try { result = evaluate(cl->body.get()); }
-                    catch (ReturnSignal& sig) { result = sig.value; }
-                }
-                functionDepth--;
-                restoreCaptures(environment, capSaved);
-                popScope();
+                Value result = callFunction(cl, {});  // ★ 统一走 callFunction（自动处理 native/AST）
 
                 List L;
                 L.push_back(std::make_any<Value>(Value(1.0)));
@@ -1755,16 +1808,12 @@ namespace jc {
             catch (BreakSignal&) { throw; }
             catch (ContinueSignal&) { throw; }
             catch (ErrorSignal& sig) {
-                functionDepth--;
-                popScope();
                 List L;
                 L.push_back(std::make_any<Value>(Value(0.0)));
                 L.push_back(std::make_any<Value>(Value(sig.message)));
                 return Value(L);
             }
             catch (const std::exception& ex) {
-                functionDepth--;
-                popScope();
                 List L;
                 L.push_back(std::make_any<Value>(Value(0.0)));
                 L.push_back(std::make_any<Value>(Value(std::string(ex.what()))));
@@ -1884,7 +1933,7 @@ namespace jc {
                 if (m.getRows() == 1) return Value(static_cast<double>(m.getCols()));
                 return Value(static_cast<double>(m.getRows() * m.getCols()));
             }
-            if (std::holds_alternative<Dict>(args[0].data)) 
+            if (std::holds_alternative<Dict>(args[0].data))
                 return Value(static_cast<double>(std::get<Dict>(args[0].data).size()));
             if (std::holds_alternative<List>(args[0].data))
                 return Value(static_cast<double>(std::get<List>(args[0].data).size()));
@@ -2210,7 +2259,7 @@ namespace jc {
             return Value(RealMatrix(1, n, v));
             };
 
-        
+
 
         reg("first", { 1 }, [anyToVal](const std::vector<Value>& args) -> Value {
             if (args.size() != 1) throw std::runtime_error("Runtime Error: first() expects 1 argument.");
@@ -2916,11 +2965,11 @@ namespace jc {
             if (n == 0) return Value(RealMatrix(1, 0));
             return Value(RealMatrix(1, n, flat));
             });
-// =================================================================
-// [18] 字符串矩阵引擎 (StringMatrix Engine)
-// =================================================================
+        // =================================================================
+        // [18] 字符串矩阵引擎 (StringMatrix Engine)
+        // =================================================================
 
-// ── 创建 ──
+        // ── 创建 ──
 
         reg("strmat", {}, [](const std::vector<Value>& args) -> Value {
             // strmat(rows, cols, s1, s2, ...) 或 strmat(rows, cols) 创建空矩阵
@@ -3106,11 +3155,11 @@ namespace jc {
             throw std::runtime_error("Type Error: toStrMat() expects a matrix.");
             });
 
-// =================================================================
-// [19] 字典引擎 (Dict Engine)
-// =================================================================
+        // =================================================================
+        // [19] 字典引擎 (Dict Engine)
+        // =================================================================
 
-// 辅助：将任意 Value 转为 dict key（字符串）
+        // 辅助：将任意 Value 转为 dict key（字符串）
         auto toKey = [](const Value& v) -> std::string {
             if (std::holds_alternative<std::string>(v.data))
                 return std::get<std::string>(v.data);
@@ -3231,7 +3280,7 @@ namespace jc {
         // [20] List 引擎 (异构动态数组)
         // =================================================================
 
-        
+
         reg("list", {}, [valToAny](const std::vector<Value>& args) -> Value {
             List L;
             for (const auto& a : args)
@@ -3499,7 +3548,7 @@ namespace jc {
             oss << file.rdbuf();
             file.close();
             return Value(oss.str());
-        });
+            });
 
         reg("writeFile", { 2 }, [this](const std::vector<Value>& args) -> Value {
             if (!std::holds_alternative<std::string>(args[0].data))
@@ -3824,9 +3873,9 @@ namespace jc {
             });
 
 
-    // =================================================================
-    // [24] Class / Instance 引擎
-    // =================================================================
+        // =================================================================
+        // [24] Class / Instance 引擎
+        // =================================================================
 
         reg("isinstance", { 2 }, [](const std::vector<Value>& args) -> Value {
             if (!std::holds_alternative<std::shared_ptr<Instance>>(args[0].data))
@@ -4123,6 +4172,7 @@ namespace jc {
                 throw;
             }
         }
+        syncClosureCaptures(closure, environment);
         functionDepth--;
         restoreCaptures(environment, capSaved);
         popScope();
@@ -4374,6 +4424,7 @@ namespace jc {
                         throw;
                     }
                 }
+                syncClosureCaptures(closure, environment);
                 functionDepth--;
                 restoreCaptures(environment, capSaved);
                 popScope();
@@ -4580,6 +4631,7 @@ namespace jc {
                         throw;
                     }
                 }
+                syncClosureCaptures(closure, environment);
                 functionDepth--;
                 restoreCaptures(environment, capSaved);
                 popScope();
@@ -4932,21 +4984,18 @@ namespace jc {
                     writeSingleIndex(chain[i], expr->indexChain[i], chain[i + 1]);
                 container = chain[0];
             }
-            if (auto* dotExpr = dynamic_cast<DotAccess*>(expr->objectExpr.get())) {
-                Value obj = evaluate(dotExpr->object.get());
-                if (std::holds_alternative<std::shared_ptr<Instance>>(obj.data)) {
-                    std::get<std::shared_ptr<Instance>>(obj.data)->fields.set(dotExpr->field.lexeme, std::make_any<Value>(container));
-                }
-            }
-            if (auto* varExpr = dynamic_cast<Variable*>(expr->objectExpr.get())) {
-                environment[varExpr->name.lexeme] = container;
-            }
+
+            // ★★★ 替换原有的单层回写 → 使用递归引擎 ★★★
+            writeBackExpr(expr->objectExpr.get(), container);
             return val;
         }
 
+        // ═══ 以下为变量根的原有逻辑（保持不变）═══
         assertNotConst(expr->name.lexeme);
         auto it = environment.find(expr->name.lexeme);
-        if (it == environment.end()) throw std::runtime_error("Runtime Error: Undefined variable '" + expr->name.lexeme + "'.");
+        if (it == environment.end())
+            throw std::runtime_error("Runtime Error: Undefined variable '" +
+                expr->name.lexeme + "'.");
 
         if (depth == 1) {
             writeSingleIndex(it->second, expr->indexChain[0], val);
@@ -5186,11 +5235,12 @@ namespace jc {
             return computedVal;
         }
 
-        // ★ 情况 3：obj.field += e
+        // ★ 情况 3：obj.field += e（支持任意深度嵌套）
         if (auto* dotNode = dynamic_cast<DotAccess*>(expr->target.get())) {
             Value obj = evaluate(dotNode->object.get());
             const std::string& field = dotNode->field.lexeme;
 
+            // Instance — 引用语义，直接修改，无需回写
             if (std::holds_alternative<std::shared_ptr<Instance>>(obj.data)) {
                 auto inst = std::get<std::shared_ptr<Instance>>(obj.data);
                 auto* fval = inst->fields.get(field);
@@ -5201,19 +5251,17 @@ namespace jc {
                 return result;
             }
 
-            // Dict compound assign (variable root only)
-            if (auto* varExpr = dynamic_cast<Variable*>(dotNode->object.get())) {
-                auto envIt = environment.find(varExpr->name.lexeme);
-                if (envIt != environment.end() && std::holds_alternative<Dict>(envIt->second.data)) {
-                    auto& d = std::get<Dict>(envIt->second.data);
-                    auto* fval = d.get(field);
-                    if (!fval) throw std::runtime_error("Runtime Error: Key '" + field + "' not found.");
-                    Value curVal = std::any_cast<Value>(*fval);
-                    Value result = applyOp(curVal, rhs, expr->op);
-                    d.set(field, std::make_any<Value>(result));
-                    return result;
-                }
+            // Dict — 值语义，修改后递归回写整条链
+            if (std::holds_alternative<Dict>(obj.data)) {
+                auto* fval = std::get<Dict>(obj.data).get(field);
+                if (!fval) throw std::runtime_error("Runtime Error: Key '" + field + "' not found.");
+                Value curVal = std::any_cast<Value>(*fval);
+                Value result = applyOp(curVal, rhs, expr->op);
+                std::get<Dict>(obj.data).set(field, std::make_any<Value>(result));
+                writeBackExpr(dotNode->object.get(), obj);
+                return result;
             }
+
             throw std::runtime_error("Runtime Error: Cannot compound-assign field on this type.");
         }
         throw std::runtime_error("Runtime Error: Invalid compound assignment target.");
@@ -5302,6 +5350,7 @@ namespace jc {
                 throw;
             }
         }
+        syncClosureCaptures(closure, environment);
         functionDepth--;
         restoreCaptures(environment, capSaved);
         popScope();
@@ -5780,29 +5829,20 @@ namespace jc {
         Value val = evaluate(expr->value.get());
         const std::string& field = expr->field.lexeme;
 
-        // 先求值 object
         Value obj = evaluate(expr->object.get());
 
-        // ═══ Instance (shared_ptr 引用语义，直接修改) ═══
+        // ═══ Instance (引用语义，直接修改) ═══
         if (std::holds_alternative<std::shared_ptr<Instance>>(obj.data)) {
             auto inst = std::get<std::shared_ptr<Instance>>(obj.data);
             inst->fields.set(field, std::make_any<Value>(val));
             return val;
         }
 
-        // ═══ Dict (值语义，需要回写到变量) ═══
-        if (auto* varExpr = dynamic_cast<Variable*>(expr->object.get())) {
-            auto envIt = environment.find(varExpr->name.lexeme);
-            if (envIt != environment.end()) {
-                assertNotConst(varExpr->name.lexeme);
-                if (std::holds_alternative<Dict>(envIt->second.data)) {
-                    if (functionDepth > 0 && !scopeStack.empty() &&
-                        !isGlobal(varExpr->name.lexeme))
-                        declareLocal(varExpr->name.lexeme);
-                    std::get<Dict>(envIt->second.data).set(field, std::make_any<Value>(val));
-                    return val;
-                }
-            }
+        // ═══ Dict (值语义，需要递归回写) ═══
+        if (std::holds_alternative<Dict>(obj.data)) {
+            std::get<Dict>(obj.data).set(field, std::make_any<Value>(val));
+            writeBackExpr(expr->object.get(), obj);
+            return val;
         }
 
         throw std::runtime_error("Type Error: Cannot assign field on this type.");
@@ -5923,8 +5963,46 @@ namespace jc {
         if (!closure)
             throw std::runtime_error("Runtime Error: No method '" + methodName +
                 "' on '" + inst->classDef->name + "' instance.");
-
         std::vector<Value> finalArgs = fillDefaults(closure, args, methodName);
+        // ★★★ NativeCallable 快速路径（VM 编译闭包 / C++ 原生包装）★★★
+        if (closure->nativeFn.has_value() &&
+            closure->nativeFn.type() == typeid(NativeCallable)) {
+            // 保存旧 self / __class__
+            auto oldSelf = environment.count("self") ?
+                std::make_pair(true, environment["self"]) :
+                std::make_pair(false, Value::none());
+            auto oldClass = environment.count("__class__") ?
+                std::make_pair(true, environment["__class__"]) :
+                std::make_pair(false, Value::none());
+            // 设置 self（Evaluator 环境）
+            environment["self"] = Value(inst);
+            environment["__class__"] = Value(owningClass);
+            // ★ 跨边界：如果 VM 活跃，同步设置 VM globals
+            if (VM::activeVM) {
+                VM::activeVM->setGlobal("self", Value(inst));
+                VM::activeVM->setGlobal("__class__", Value(owningClass));
+            }
+            auto& fn = std::any_cast<NativeCallable&>(closure->nativeFn);
+            Value result;
+            try {
+                result = fn(finalArgs);
+            }
+            catch (...) {
+                // 恢复
+                if (oldSelf.first) environment["self"] = oldSelf.second;
+                else environment.erase("self");
+                if (oldClass.first) environment["__class__"] = oldClass.second;
+                else environment.erase("__class__");
+                throw;
+            }
+            // 恢复
+            if (oldSelf.first) environment["self"] = oldSelf.second;
+            else environment.erase("self");
+            if (oldClass.first) environment["__class__"] = oldClass.second;
+            else environment.erase("__class__");
+            return result;
+        }
+        // ═══ 以下为原有 AST 执行路径（保持完全不变）═══
 
         if (++recursionDepth > MAX_RECURSION_DEPTH) {
             recursionDepth = 0;

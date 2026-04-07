@@ -1,13 +1,13 @@
 #ifndef JC2_IMAGE_H
 #define JC2_IMAGE_H
 
-#include <vector>
-#include <string>
-#include <cstdint>
-#include <cmath>
-#include <fstream>
 #include <algorithm>
+#include <cmath>
+#include <cstdint>
+#include <fstream>
+#include <string>
 #include <unordered_map>
+#include <vector>
 
 namespace jc {
 

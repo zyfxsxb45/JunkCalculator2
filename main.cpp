@@ -3,12 +3,16 @@
 #include <cstdlib>
 #include <fstream>
 #include <filesystem>
+#include <chrono>
+#include <iomanip>
 #include "Lexer.h"
 #include "Parser.h"
 #include "Evaluator.h"
 #include "Value.h"
 #include "HelpText.h"
 #include "Highlight.h"  // ★
+#include "Compiler.h"
+#include "VM.h"
 #include "Module.h"
 #include "modules/json_module.h"
 #include "modules/image_module.h"    // ★
@@ -475,6 +479,369 @@ int main(int argc, char* argv[]) {
             runScript(arg, evaluator);
             return 0;
         }
+    }
+    // ★ VM 模式：--vm "code" 或 --vm file.jc2 [-d]
+    if (argc >= 3 && std::string(argv[1]) == "--vm") {
+        std::string arg = argv[2];
+        bool showDisasm = (argc >= 4 && std::string(argv[3]) == "-d");
+
+        // ★ 文件搜索
+        namespace fs = std::filesystem;
+        std::vector<std::string> searchPaths = {
+            arg, (fs::current_path() / arg).string(),
+            (fs::current_path() / "data" / arg).string(),
+        };
+#ifdef _WIN32
+        {
+            char buf[2048];
+            if (GetModuleFileNameA(nullptr, buf, sizeof(buf))) {
+                fs::path exeDir = fs::path(buf).parent_path();
+                searchPaths.push_back((exeDir / arg).string());
+                searchPaths.push_back((exeDir / "data" / arg).string());
+            }
+        }
+#endif
+        // ★ 判断是文件还是内联代码
+        std::vector<std::string> lines;
+        bool isFile = false;
+
+        for (const auto& p : searchPaths) {
+            if (fs::exists(p) && !fs::is_directory(p)) {
+                std::ifstream file(p);
+                if (file.is_open()) {
+                    std::string rawLine;
+                    while (std::getline(file, rawLine)) {
+                        if (!rawLine.empty() && rawLine.back() == '\r') rawLine.pop_back();
+                        lines.push_back(rawLine);
+                    }
+                    file.close();
+                    isFile = true;
+                    break;
+                }
+            }
+        }
+
+        if (!isFile) {
+            // 内联代码：单行直接执行
+            lines.push_back(arg);
+        }
+
+        // ★ 逐语句编译执行（与 --run 保持一致的语句提取逻辑）
+        jc::VM vm;
+        for (const auto& [name, fn] : evaluator.getBuiltins()) {
+            vm.registerBuiltin(name, fn);
+        }
+
+        // 收集所有编译出的函数
+        std::vector<std::shared_ptr<jc::CompiledFunction>> allFunctions;
+
+        int lineNum = 0;
+        int executed = 0;
+        size_t lineIdx = 0;
+
+        while (lineIdx < lines.size()) {
+            lineNum = static_cast<int>(lineIdx) + 1;
+
+            // 提取一条语句（去注释 + 多行续读）
+            std::string line = lines[lineIdx++];
+
+            // 去首尾空白
+            {
+                size_t s = line.find_first_not_of(" \t");
+                if (s == std::string::npos) continue;
+                size_t e = line.find_last_not_of(" \t");
+                line = line.substr(s, e - s + 1);
+            }
+            if (line.empty()) continue;
+            if (line.size() >= 2 && line[0] == '/' && line[1] == '/') continue;
+
+            // 剥离行尾注释
+            {
+                size_t cp = line.find("//");
+                if (cp != std::string::npos) line = line.substr(0, cp);
+                size_t s = line.find_first_not_of(" \t");
+                if (s == std::string::npos) continue;
+                size_t e = line.find_last_not_of(" \t");
+                line = line.substr(s, e - s + 1);
+                if (line.empty()) continue;
+            }
+
+            // 多行续读（未闭合括号/行尾运算符）
+            {
+                int braces = 0, parens = 0, brackets = 0;
+                for (char c : line) {
+                    if (c == '{') braces++;  else if (c == '}') braces--;
+                    if (c == '(') parens++;  else if (c == ')') parens--;
+                    if (c == '[') brackets++; else if (c == ']') brackets--;
+                }
+                while ((braces > 0 || parens > 0 || brackets > 0 ||
+                    endsWithContinuation(line)) && lineIdx < lines.size()) {
+                    std::string nextRaw = lines[lineIdx++];
+                    size_t cp = nextRaw.find("//");
+                    std::string stripped = (cp != std::string::npos)
+                        ? nextRaw.substr(0, cp) : nextRaw;
+                    line += " " + stripped;
+                    for (char c : stripped) {
+                        if (c == '{') braces++;  else if (c == '}') braces--;
+                        if (c == '(') parens++;  else if (c == ')') parens--;
+                        if (c == '[') brackets++; else if (c == ']') brackets--;
+                    }
+                }
+            }
+
+            // ★ 编译 + 执行
+            try {
+                jc::Lexer lexer(line);
+                auto tokens = lexer.tokenize();
+                jc::Parser parser(tokens);
+                auto ast = parser.parse();
+
+                jc::Compiler compiler;
+                compiler.setFunctionIndexOffset(static_cast<int>(allFunctions.size()));
+                // 传入已有的函数表（让编译器知道之前定义的函数索引）
+                // 不需要了——每条语句独立编译，函数通过 globals 传递
+
+                jc::Chunk chunk = compiler.compile(ast.get());
+
+                if (showDisasm) {
+                    std::cout << "  [line " << lineNum << "]" << std::endl;
+                    chunk.disassemble("  ");
+                }
+
+                // 合并新编译的函数
+                auto& newFns = compiler.getCompiledFunctions();
+                for (auto& fn : newFns) {
+                    allFunctions.push_back(fn);
+                }
+                vm.setCompiledFunctions(allFunctions);
+
+                jc::Value result = vm.execute(chunk);
+
+                if (!result.isNone()) {
+                    vm.setGlobal("ANS", result);
+                }
+                executed++;
+            }
+            catch (const std::exception& ex) {
+                std::cerr << "[VM] Error at line " << lineNum << ": " << ex.what() << std::endl;
+                std::cerr << "  >>> " << (line.size() > 80 ? line.substr(0, 77) + "..." : line) << std::endl;
+                if (isFile) {
+                    std::cerr << "[VM] Script aborted at line " << lineNum
+                        << ": " << executed << " statements executed." << std::endl;
+                }
+                return 1;
+            }
+        }
+
+        if (isFile) {
+            std::cout << "[VM] Script finished: " << executed << " statements executed." << std::endl;
+        }
+        return 0;
+    }
+    if (argc >= 3 && std::string(argv[1]) == "--bench") {
+        std::string arg = argv[2];
+
+        // ★ 多路径搜索文件
+        namespace fs = std::filesystem;
+        std::vector<std::string> searchPaths = {
+            arg,
+            (fs::current_path() / arg).string(),
+            (fs::current_path() / "data" / arg).string(),
+        };
+#ifdef _WIN32
+        {
+            char buf[2048];
+            if (GetModuleFileNameA(nullptr, buf, sizeof(buf))) {
+                fs::path exeDir = fs::path(buf).parent_path();
+                searchPaths.push_back((exeDir / arg).string());
+                searchPaths.push_back((exeDir / "data" / arg).string());
+            }
+        }
+#endif
+
+        // ★ 读取文件行
+        std::vector<std::string> rawLines;
+        bool isFile = false;
+        std::string resolvedPath;
+
+        for (const auto& p : searchPaths) {
+            if (fs::exists(p) && !fs::is_directory(p)) {
+                std::ifstream file(p);
+                if (file.is_open()) {
+                    std::string line;
+                    while (std::getline(file, line)) {
+                        if (!line.empty() && line.back() == '\r') line.pop_back();
+                        rawLines.push_back(line);
+                    }
+                    file.close();
+                    isFile = true;
+                    resolvedPath = p;
+                    break;
+                }
+            }
+        }
+
+        if (!isFile) {
+            // 当作直接代码（单行）
+            rawLines.push_back(arg);
+        }
+
+        // ★ 使用与 --run / --vm 完全一致的语句提取逻辑
+        std::vector<std::string> statements;
+        size_t lineIdx = 0;
+
+        while (lineIdx < rawLines.size()) {
+            std::string line = rawLines[lineIdx++];
+
+            // 去首尾空白
+            {
+                size_t s = line.find_first_not_of(" \t");
+                if (s == std::string::npos) continue;
+                size_t e = line.find_last_not_of(" \t");
+                line = line.substr(s, e - s + 1);
+            }
+            if (line.empty()) continue;
+            if (line.size() >= 2 && line[0] == '/' && line[1] == '/') continue;
+
+            // 剥离行尾注释
+            {
+                size_t cp = line.find("//");
+                if (cp != std::string::npos) line = line.substr(0, cp);
+                size_t s = line.find_first_not_of(" \t");
+                if (s == std::string::npos) continue;
+                size_t e = line.find_last_not_of(" \t");
+                line = line.substr(s, e - s + 1);
+                if (line.empty()) continue;
+            }
+
+            // 多行续读（未闭合括号 / 行尾运算符）
+            {
+                int braces = 0, parens = 0, brackets = 0;
+                for (char c : line) {
+                    if (c == '{') braces++;  else if (c == '}') braces--;
+                    if (c == '(') parens++;  else if (c == ')') parens--;
+                    if (c == '[') brackets++; else if (c == ']') brackets--;
+                }
+                while ((braces > 0 || parens > 0 || brackets > 0 ||
+                    endsWithContinuation(line)) && lineIdx < rawLines.size()) {
+                    std::string nextRaw = rawLines[lineIdx++];
+                    size_t cp = nextRaw.find("//");
+                    std::string stripped = (cp != std::string::npos)
+                        ? nextRaw.substr(0, cp) : nextRaw;
+                    line += " " + stripped;
+                    for (char c : stripped) {
+                        if (c == '{') braces++;  else if (c == '}') braces--;
+                        if (c == '(') parens++;  else if (c == ')') parens--;
+                        if (c == '[') brackets++; else if (c == ']') brackets--;
+                    }
+                }
+            }
+
+            statements.push_back(line);
+        }
+
+        if (statements.empty()) {
+            std::cerr << "  Error: No code to benchmark." << std::endl;
+            return 1;
+        }
+
+        std::cout << "\n=== Performance Benchmark ===" << std::endl;
+        if (isFile) {
+            std::cout << "  File:       " << resolvedPath << std::endl;
+            std::cout << "  Statements: " << statements.size() << std::endl;
+        }
+        else {
+            std::cout << "  Code: " << arg << std::endl;
+        }
+        std::cout << std::endl;
+
+        // ══════════════════════════════════════════
+        // Tree-Walk Evaluator
+        // ══════════════════════════════════════════
+        {
+            jc::Evaluator eval;
+            bool ok = true;
+            auto t0 = std::chrono::high_resolution_clock::now();
+            for (size_t i = 0; i < statements.size(); ++i) {
+                try {
+                    jc::Lexer lexer(statements[i]);
+                    auto tokens = lexer.tokenize();
+                    jc::Parser parser(tokens);
+                    auto ast = parser.parse();
+                    jc::Value result = eval.calculate(ast.get());
+                    if (!result.isNone()) eval.setVariable("ANS", result);
+                }
+                catch (const std::exception& ex) {
+                    std::cerr << "  [Evaluator]  ERROR at stmt " << (i + 1) << ": " << ex.what() << std::endl;
+                    std::cerr << "    >>> " << (statements[i].size() > 80
+                        ? statements[i].substr(0, 77) + "..." : statements[i]) << std::endl;
+                    ok = false;
+                    break;
+                }
+            }
+            auto t1 = std::chrono::high_resolution_clock::now();
+            double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
+            if (ok) {
+                auto envIt = eval.getEnvironment().find("ANS");
+                if (envIt != eval.getEnvironment().end())
+                    std::cout << "  [Evaluator]  Result: " << envIt->second << std::endl;
+                else
+                    std::cout << "  [Evaluator]  Result: <none>" << std::endl;
+            }
+            std::cout << "               Time:   " << std::fixed << std::setprecision(3) << ms << " ms" << std::endl;
+        }
+
+        std::cout << std::endl;
+
+        // ══════════════════════════════════════════
+        // Bytecode VM
+        // ══════════════════════════════════════════
+        {
+            jc::VM vm;
+            for (const auto& [name, fn] : evaluator.getBuiltins()) {
+                vm.registerBuiltin(name, fn);
+            }
+            std::vector<std::shared_ptr<jc::CompiledFunction>> allFunctions;
+            bool ok = true;
+
+            auto t0 = std::chrono::high_resolution_clock::now();
+            for (size_t i = 0; i < statements.size(); ++i) {
+                try {
+                    jc::Lexer lexer(statements[i]);
+                    auto tokens = lexer.tokenize();
+                    jc::Parser parser(tokens);
+                    auto ast = parser.parse();
+
+                    jc::Compiler compiler;
+                    compiler.setFunctionIndexOffset(static_cast<int>(allFunctions.size()));
+                    jc::Chunk chunk = compiler.compile(ast.get());
+
+                    auto& newFns = compiler.getCompiledFunctions();
+                    for (auto& fn : newFns)
+                        allFunctions.push_back(fn);
+                    vm.setCompiledFunctions(allFunctions);
+
+                    jc::Value result = vm.execute(chunk);
+                    if (!result.isNone())
+                        vm.setGlobal("ANS", result);
+                }
+                catch (const std::exception& ex) {
+                    std::cerr << "  [VM]         ERROR at stmt " << (i + 1) << ": " << ex.what() << std::endl;
+                    std::cerr << "    >>> " << (statements[i].size() > 80
+                        ? statements[i].substr(0, 77) + "..." : statements[i]) << std::endl;
+                    ok = false;
+                    break;
+                }
+            }
+            auto t1 = std::chrono::high_resolution_clock::now();
+            double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
+            if (ok)
+                std::cout << "  [VM]         Result: <completed>" << std::endl;
+            std::cout << "               Time:   " << std::fixed << std::setprecision(3) << ms << " ms" << std::endl;
+        }
+
+        std::cout << "\n==============================" << std::endl;
+        return 0;
     }
     std::cout << jc::col(jc::Ansi::BRIGHT_CYAN)
         << "=================================================" << std::endl

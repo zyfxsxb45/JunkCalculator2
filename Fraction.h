@@ -3,9 +3,9 @@
 
 #include "BigInt.h"
 #include "Complex.h"
+#include <iostream>
 #include <stdexcept>
 #include <string>
-#include <iostream>
 
 namespace jc {
 

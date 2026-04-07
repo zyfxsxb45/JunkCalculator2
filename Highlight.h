@@ -1,11 +1,11 @@
 #ifndef JC2_HIGHLIGHT_H
 #define JC2_HIGHLIGHT_H
 
-#include <string>
-#include <set>
-#include <vector>
-#include "Token.h"
 #include "Lexer.h"
+#include "Token.h"
+#include <set>
+#include <string>
+#include <vector>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -27,23 +27,23 @@ namespace jc {
     // ANSI 颜色码
     // ═══════════════════════════════════════════
     namespace Ansi {
-        inline const char* RESET       = "\033[0m";
-        inline const char* BOLD        = "\033[1m";
-        inline const char* DIM         = "\033[2m";
-        inline const char* RED         = "\033[31m";
-        inline const char* GREEN       = "\033[32m";
-        inline const char* YELLOW      = "\033[33m";
-        inline const char* BLUE        = "\033[34m";
-        inline const char* MAGENTA     = "\033[35m";
-        inline const char* CYAN        = "\033[36m";
-        inline const char* GRAY        = "\033[90m";
-        inline const char* BRIGHT_RED  = "\033[91m";
-        inline const char* BRIGHT_GREEN= "\033[92m";
-        inline const char* BRIGHT_YELLOW="\033[93m";
+        inline const char* RESET = "\033[0m";
+        inline const char* BOLD = "\033[1m";
+        inline const char* DIM = "\033[2m";
+        inline const char* RED = "\033[31m";
+        inline const char* GREEN = "\033[32m";
+        inline const char* YELLOW = "\033[33m";
+        inline const char* BLUE = "\033[34m";
+        inline const char* MAGENTA = "\033[35m";
+        inline const char* CYAN = "\033[36m";
+        inline const char* GRAY = "\033[90m";
+        inline const char* BRIGHT_RED = "\033[91m";
+        inline const char* BRIGHT_GREEN = "\033[92m";
+        inline const char* BRIGHT_YELLOW = "\033[93m";
         inline const char* BRIGHT_BLUE = "\033[94m";
-        inline const char* BRIGHT_MAGENTA="\033[95m";
+        inline const char* BRIGHT_MAGENTA = "\033[95m";
         inline const char* BRIGHT_CYAN = "\033[96m";
-        inline const char* WHITE       = "\033[97m";
+        inline const char* WHITE = "\033[97m";
     }
 
     // ═══════════════════════════════════════════
@@ -161,7 +161,7 @@ namespace jc {
 
             // 根据 token 类型着色
             switch (tok.type) {
-            // 关键字
+                // 关键字
             case TokenType::IF: case TokenType::ELSE: case TokenType::WHILE:
             case TokenType::FOR: case TokenType::IN: case TokenType::BREAK:
             case TokenType::CONTINUE: case TokenType::RETURN: case TokenType::CLASS:
@@ -172,24 +172,24 @@ namespace jc {
                 result += col(Ansi::BRIGHT_MAGENTA) + srcText + col(Ansi::RESET);
                 break;
 
-            // 数字
+                // 数字
             case TokenType::NUMBER:
                 result += col(Ansi::BRIGHT_YELLOW) + srcText + col(Ansi::RESET);
                 break;
 
-            // 虚数
+                // 虚数
             case TokenType::IMAGINARY:
                 result += col(Ansi::BRIGHT_YELLOW) + srcText + col(Ansi::RESET);
                 break;
 
-            // 字符串
+                // 字符串
             case TokenType::STRING:
             case TokenType::FSTRING:
             case TokenType::RSTRING:
                 result += col(Ansi::BRIGHT_GREEN) + srcText + col(Ansi::RESET);
                 break;
 
-            // 运算符
+                // 运算符
             case TokenType::PLUS: case TokenType::MINUS: case TokenType::STAR:
             case TokenType::SLASH: case TokenType::CARET: case TokenType::PERCENT:
             case TokenType::BACKSLASH: case TokenType::PIPE:
@@ -201,14 +201,14 @@ namespace jc {
                 result += col(Ansi::CYAN) + srcText + col(Ansi::RESET);
                 break;
 
-            // 比较
+                // 比较
             case TokenType::EQUAL: case TokenType::BANG_EQUAL:
             case TokenType::LESS: case TokenType::LESS_EQUAL:
             case TokenType::GREATER: case TokenType::GREATER_EQUAL:
                 result += col(Ansi::CYAN) + srcText + col(Ansi::RESET);
                 break;
 
-            // 标识符
+                // 标识符
             case TokenType::IDENTIFIER:
                 if (constants.count(tok.lexeme)) {
                     result += col(Ansi::BRIGHT_CYAN) + srcText + col(Ansi::RESET);
@@ -218,7 +218,7 @@ namespace jc {
                 }
                 break;
 
-            // 括号和标点
+                // 括号和标点
             case TokenType::LPAREN: case TokenType::RPAREN:
             case TokenType::LBRACKET: case TokenType::RBRACKET:
             case TokenType::LBRACE: case TokenType::RBRACE:

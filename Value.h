@@ -1,6 +1,11 @@
 #ifndef JC2_VALUE_H
 #define JC2_VALUE_H
 
+#ifdef _MSC_VER
+#pragma warning(push)
+#pragma warning(disable: 4702) // unreachable code (MSVC if-constexpr false positive)
+#endif
+
 #include <variant>
 #include <string>
 #include <stdexcept>
@@ -11,6 +16,7 @@
 #include <sstream>
 #include <iomanip>
 #include <numeric> 
+#include <map>
 #include "Complex.h"
 #include "Matrix.h"
 #include "BigInt.h"
@@ -799,29 +805,29 @@ namespace jc {
                     os << "<class " << arg->name << ">";
                 }
                 else if constexpr (std::is_same_v<T, std::shared_ptr<Instance>>) {
-                    // ★ 优先检查 nativeData 的友好打印
                     if (arg->nativeData.has_value()) {
                         if (arg->nativeData.type() == typeid(std::shared_ptr<Image>)) {
                             auto& img = std::any_cast<std::shared_ptr<Image>&>(arg->nativeData);
                             os << "<Image " << img->width() << "x" << img->height() << ">";
-                            return;
                         }
-                        if (arg->nativeData.type() == typeid(std::shared_ptr<Distribution>)) {
+                        else if (arg->nativeData.type() == typeid(std::shared_ptr<Distribution>)) {
                             auto& dist = std::any_cast<std::shared_ptr<Distribution>&>(arg->nativeData);
                             os << dist->toString();
-                            return;
                         }
+                        else { goto printInstance; }
                     }
-                    // ★ 普通 Instance 打印
-                    os << "<" << arg->classDef->name << " {";
-                    const auto& entries = arg->fields.getEntries();
-                    for (size_t ii = 0; ii < entries.size(); ++ii) {
-                        if (ii > 0) os << ", ";
-                        os << entries[ii].first << ": ";
-                        try { os << std::any_cast<const jc::Value&>(entries[ii].second); }
-                        catch (...) { os << "?"; }
+                    else {
+                    printInstance:
+                        os << "<" << arg->classDef->name << " {";
+                        const auto& entries = arg->fields.getEntries();
+                        for (size_t ii = 0; ii < entries.size(); ++ii) {
+                            if (ii > 0) os << ", ";
+                            os << entries[ii].first << ": ";
+                            try { os << std::any_cast<const jc::Value&>(entries[ii].second); }
+                            catch (...) { os << "?"; }
+                        }
+                        os << "}>";
                     }
-                    os << "}>";
                 }
                 else if constexpr (std::is_same_v<T, SuperProxyPtr>) {
                     os << "<super>";
@@ -1006,5 +1012,12 @@ namespace jc {
         }
     };
 
+    struct ErrorSignal { std::string message; };
+
 } // namespace jc
+
+#ifdef _MSC_VER
+#pragma warning(pop)
+#endif
+
 #endif // JC2_VALUE_H

@@ -1,11 +1,12 @@
 #ifndef JC2_EXPR_H
 #define JC2_EXPR_H
 
-#include <memory>
-#include <vector>
-#include <string>
-#include <any>
 #include "Token.h"
+#include <any>
+#include <memory>
+#include <stdexcept>   // ★ std::runtime_error
+#include <string>
+#include <vector>
 
 namespace jc {
 

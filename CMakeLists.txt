@@ -30,6 +30,9 @@ set(JC2_HEADERS
     "Probability.h"
     "Highlight.h"
     "HelpText.h"
+    "Bytecode.h"
+    "Compiler.h"
+    "VM.h"
     "Module.h"
     "modules/json_module.h"
     "modules/image_module.h"
@@ -40,6 +43,8 @@ set(JC2_SOURCES
     "Lexer.cpp"
     "Parser.cpp"
     "Evaluator.cpp"
+    "Compiler.cpp"
+    "VM.cpp"
     "main.cpp"
 )
 
@@ -52,7 +57,7 @@ target_include_directories(JunkCalculator2 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 if(MSVC)
     # /utf-8: 强制国际化字符编码，防止中文乱码
     # /W4 /WX: 严苛警告并视为错误
-    target_compile_options(JunkCalculator2 PRIVATE /W4 /WX /utf-8)
+    target_compile_options(JunkCalculator2 PRIVATE /W4 /WX /utf-8 /bigobj)
     
     # 开启 Release 模式下最高级别的全程序优化 (Link Time Code Generation)
     # /MT: 强制把 C++ 运行库静态打进 exe 肚子里，实现单文件纯绿色版！

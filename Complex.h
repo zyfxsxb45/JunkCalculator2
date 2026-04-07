@@ -1,11 +1,11 @@
 #ifndef JC2_COMPLEX_H
 #define JC2_COMPLEX_H
 
-#include <iostream>
+#include "Tolerance.h"
 #include <cmath>
+#include <iostream>
 #include <stdexcept>
 #include <vector>
-#include "Tolerance.h"
 
 namespace jc {
 
@@ -314,8 +314,8 @@ namespace jc {
             };
             cleanRoots(roots);
             return roots;
-        }    
-};
+        }
+    };
 
 } // namespace jc
 #endif // JC2_COMPLEX_H

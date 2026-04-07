@@ -1,11 +1,11 @@
 #ifndef JC2_PARSER_H
 #define JC2_PARSER_H
 
-#include <vector>
+#include "Expr.h"
+#include "Token.h"
 #include <memory>
 #include <stdexcept>
-#include "Token.h"
-#include "Expr.h"
+#include <vector>
 
 namespace jc {
 

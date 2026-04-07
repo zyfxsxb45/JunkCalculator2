@@ -2,12 +2,12 @@
 #define JC2_BASE_H
 
 #include "BigInt.h"
-#include <string>
-#include <vector>
-#include <stdexcept>
-#include <iostream>
 #include <algorithm>
 #include <cctype>
+#include <iostream>
+#include <stdexcept>
+#include <string>
+#include <vector>
 
 namespace jc {
 

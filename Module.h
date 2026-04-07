@@ -1,12 +1,12 @@
 #ifndef JC2_MODULE_H
 #define JC2_MODULE_H
 
-#include <string>
+#include "Value.h"
 #include <functional>
 #include <map>
 #include <set>
+#include <string>
 #include <vector>
-#include "Value.h"
 
 namespace jc {
 
