@@ -399,9 +399,17 @@ namespace jc {
             emit16(static_cast<uint16_t>(slot), expr->callee.position);
         }
         else {
-            uint16_t idx = identifierConstant(name);
-            emit(OpCode::OP_GET_GLOBAL, expr->callee.position);
-            emit16(idx, expr->callee.position);
+            // ★ 新增：尝试 upvalue（闭包变量作为函数调用）
+            int upvalue = resolveUpvalue(name);
+            if (upvalue != -1) {
+                emit(OpCode::OP_GET_UPVALUE, expr->callee.position);
+                emit16(static_cast<uint16_t>(upvalue), expr->callee.position);
+            }
+            else {
+                uint16_t idx = identifierConstant(name);
+                emit(OpCode::OP_GET_GLOBAL, expr->callee.position);
+                emit16(idx, expr->callee.position);
+            }
         }
         for (auto& argExpr : expr->arguments) {
             compileNode(argExpr.get());

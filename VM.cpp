@@ -1403,6 +1403,36 @@ namespace jc {
                                 elements.push_back(std::make_any<Value>(Value(m.getRow(ii))));
                         }
                     }
+                    else if (std::holds_alternative<StringMatrix>(iterable.data)) {
+                        const auto& m = std::get<StringMatrix>(iterable.data);
+                        if (m.getRows() == 1) {
+                            for (int j = 0; j < m.getCols(); ++j)
+                                elements.push_back(std::make_any<Value>(Value(m(0, j))));
+                        }
+                        else if (m.getCols() == 1) {
+                            for (int ii = 0; ii < m.getRows(); ++ii)
+                                elements.push_back(std::make_any<Value>(Value(m(ii, 0))));
+                        }
+                        else {
+                            for (int ii = 0; ii < m.getRows(); ++ii)
+                                elements.push_back(std::make_any<Value>(Value(m.getRow(ii))));
+                        }
+                    }
+                    else if (std::holds_alternative<ComplexMatrix>(iterable.data)) {
+                        const auto& m = std::get<ComplexMatrix>(iterable.data);
+                        if (m.getRows() == 1) {
+                            for (int j = 0; j < m.getCols(); ++j)
+                                elements.push_back(std::make_any<Value>(Value(m(0, j))));
+                        }
+                        else if (m.getCols() == 1) {
+                            for (int ii = 0; ii < m.getRows(); ++ii)
+                                elements.push_back(std::make_any<Value>(Value(m(ii, 0))));
+                        }
+                        else {
+                            for (int ii = 0; ii < m.getRows(); ++ii)
+                                elements.push_back(std::make_any<Value>(Value(m.getRow(ii))));
+                        }
+                    }
                     else if (std::holds_alternative<List>(iterable.data)) {
                         elements = std::get<List>(iterable.data);
                     }
@@ -2091,31 +2121,29 @@ namespace jc {
                         else if (std::holds_alternative<std::shared_ptr<Instance>>(obj.data)) {
                             auto inst = std::get<std::shared_ptr<Instance>>(obj.data);
                             auto c = inst->classDef;
+                            std::shared_ptr<FunctionClosure> getitemMethod;
                             while (c) {
                                 auto it = c->methods.find("__getitem__");
                                 if (it != c->methods.end()) {
-                                    // 简化：通过全局变量传递 self，调用 __getitem__(idx)
-                                    globals["self"] = Value(inst);
-                                    auto& fc = it->second;
-                                    if (fc->nativeFn.has_value()) {
-                                        std::string tag = std::any_cast<std::string>(fc->nativeFn);
-                                        if (tag.substr(0, 5) == "__fn:") {
-                                            int fnIdx = std::stoi(tag.substr(5));
-                                            auto& fn = compiledFunctions[fnIdx];
-                                            CallFrame newFrame;
-                                            newFrame.function = fn.get();
-                                            newFrame.ip = 0;
-                                            newFrame.stackBase = static_cast<int>(stack.size());
-                                            push(idx); // 参数
-                                            frames.push_back(newFrame);
-                                            goto indexGetDone;
-                                        }
-                                    }
+                                    getitemMethod = it->second;
                                     break;
                                 }
                                 c = c->parent;
                             }
-                            throw std::runtime_error("VM Error: Cannot index this instance (no __getitem__).");
+                            if (getitemMethod) {
+                                globals["self"] = Value(inst);
+                                if (getitemMethod->nativeFn.has_value() &&
+                                    getitemMethod->nativeFn.type() == typeid(NativeCallable)) {
+                                    auto& fn = std::any_cast<NativeCallable&>(getitemMethod->nativeFn);
+                                    push(fn({ idx }));
+                                }
+                                else {
+                                    throw std::runtime_error("VM Error: __getitem__ has no callable implementation.");
+                                }
+                            }
+                            else {
+                                throw std::runtime_error("VM Error: Cannot index this instance (no __getitem__).");
+                            }
                         }
                         else {
                             throw std::runtime_error("VM Error: Cannot index this type.");
@@ -2156,7 +2184,6 @@ namespace jc {
                     else {
                         throw std::runtime_error("VM Error: Unsupported index dimensionality.");
                     }
-                indexGetDone:
                     break;
                 }
 
@@ -2256,6 +2283,34 @@ namespace jc {
                                 std::get<std::string>(val.data).size() != 1)
                                 throw std::runtime_error("VM Error: String element assignment requires a single character.");
                             s[i] = std::get<std::string>(val.data)[0];
+                        }
+                        // ── Instance (__setitem__) ──
+                        else if (std::holds_alternative<std::shared_ptr<Instance>>(obj.data)) {
+                            auto inst = std::get<std::shared_ptr<Instance>>(obj.data);
+                            auto c = inst->classDef;
+                            std::shared_ptr<FunctionClosure> setitemMethod;
+                            while (c) {
+                                auto it = c->methods.find("__setitem__");
+                                if (it != c->methods.end()) {
+                                    setitemMethod = it->second;
+                                    break;
+                                }
+                                c = c->parent;
+                            }
+                            if (setitemMethod) {
+                                globals["self"] = Value(inst);
+                                if (setitemMethod->nativeFn.has_value() &&
+                                    setitemMethod->nativeFn.type() == typeid(NativeCallable)) {
+                                    auto& fn = std::any_cast<NativeCallable&>(setitemMethod->nativeFn);
+                                    fn({ idx, val });
+                                }
+                                else {
+                                    throw std::runtime_error("VM Error: __setitem__ has no callable implementation.");
+                                }
+                            }
+                            else {
+                                throw std::runtime_error("VM Error: Cannot assign index on this instance (no __setitem__).");
+                            }
                         }
                         else {
                             throw std::runtime_error("VM Error: Cannot assign index on this type.");

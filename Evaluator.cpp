@@ -4972,6 +4972,19 @@ namespace jc {
         if (expr->hasObjectExpr()) {
             Value container = evaluate(expr->objectExpr.get());
             if (depth == 1) {
+                // ★ Instance __setitem__ 优先
+                if (std::holds_alternative<std::shared_ptr<Instance>>(container.data)) {
+                    auto inst = std::get<std::shared_ptr<Instance>>(container.data);
+                    if (resolveMethod(inst->classDef, "__setitem__").first) {
+                        std::vector<Value> args;
+                        for (auto& ie : expr->indexChain[0])
+                            args.push_back(evaluate(ie.get()));
+                        args.push_back(val);
+                        callInstanceMethod(inst, "__setitem__", args);
+                        writeBackExpr(expr->objectExpr.get(), container);
+                        return val;
+                    }
+                }
                 writeSingleIndex(container, expr->indexChain[0], val);
             }
             else {
@@ -4998,6 +5011,18 @@ namespace jc {
                 expr->name.lexeme + "'.");
 
         if (depth == 1) {
+            // ★ Instance __setitem__ 优先
+            if (std::holds_alternative<std::shared_ptr<Instance>>(it->second.data)) {
+                auto inst = std::get<std::shared_ptr<Instance>>(it->second.data);
+                if (resolveMethod(inst->classDef, "__setitem__").first) {
+                    std::vector<Value> args;
+                    for (auto& ie : expr->indexChain[0])
+                        args.push_back(evaluate(ie.get()));
+                    args.push_back(val);
+                    callInstanceMethod(inst, "__setitem__", args);
+                    return val;
+                }
+            }
             writeSingleIndex(it->second, expr->indexChain[0], val);
             return val;
         }
