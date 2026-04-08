@@ -79,32 +79,38 @@ jc::Value evalCode(const std::string& code, bool isFile = false) {
     compiler.setFunctionIndexOffset(static_cast<int>(allFunctions.size()));
     jc::Chunk chunk = compiler.compile(ast.get());
 
-    // ★ 新增：如果开启了 -d，吐出编译好的字节码
     if (g_showDisasm) {
         chunk.disassemble(isFile ? "Script Chunk" : "REPL Chunk");
     }
 
     auto& newFns = compiler.getCompiledFunctions();
+    int rootLocalCount = 0;
+    if (!newFns.empty()) {
+        rootLocalCount = newFns[0]->localCount;
+    }
+    // ★ 不再强制 localCount = 8
+
     for (auto& fn : newFns) allFunctions.push_back(fn);
     vm.setCompiledFunctions(allFunctions);
 
-    // 如果是内部 evalCall，用临时函数嵌套调用防止破坏物理栈
-    if (!isFile) {
-        auto evalFn = std::make_shared<jc::CompiledFunction>();
-        evalFn->name = "<eval>";
-        evalFn->chunk = chunk;
-        int evalIdx = static_cast<int>(allFunctions.size());
-        allFunctions.push_back(evalFn);
-        vm.setCompiledFunctions(allFunctions);
-        return vm.callVMFunction(evalIdx, {});
-    }
+    auto evalFn = std::make_shared<jc::CompiledFunction>();
+    evalFn->name = isFile ? "<script>" : "<eval>";
+    evalFn->arity = 0;
+    evalFn->maxArity = 0;
+    evalFn->localCount = rootLocalCount;
+    evalFn->chunk = chunk;
 
-    return vm.execute(chunk);
+    int evalIdx = static_cast<int>(allFunctions.size());
+    allFunctions.push_back(evalFn);
+    vm.setCompiledFunctions(allFunctions);
+
+    return vm.callVMFunction(evalIdx, {});
 }
 
 void runScript(const std::string& filepath) {
     std::string resolvedPath = jc::helpers::safeResolvePath(filepath);
-    if (!std::filesystem::exists(resolvedPath)) resolvedPath = jc::helpers::safeResolvePath(filepath + ".jc2");
+    if (!std::filesystem::exists(resolvedPath))
+        resolvedPath = jc::helpers::safeResolvePath(filepath + ".jc2");
     if (!std::filesystem::exists(resolvedPath)) {
         std::cerr << "   IO Error: Cannot open script '" << filepath << "'." << std::endl;
         return;
@@ -114,70 +120,26 @@ void runScript(const std::string& filepath) {
         std::cerr << "   IO Error: Cannot open script '" << filepath << "'." << std::endl;
         return;
     }
-    // 维持与原来同样强健的一条一条吃代码的策略
-    int lineNum = 0;
-    int executed = 0;
-    std::string rawLine;
-    // ★ 如果这是 import 的库，将相对路径基底压入栈！以便它自己执行内部文件读写
-    jc::helpers::g_scriptDirStack.push_back(std::filesystem::path(resolvedPath).parent_path().string());
-    while (std::getline(file, rawLine)) {
-        lineNum++;
-        size_t s = rawLine.find_first_not_of(" \t");
-        size_t e = rawLine.find_last_not_of(" \t\r\n");
-        if (s == std::string::npos) continue;
-        std::string line = rawLine.substr(s, e - s + 1);
-        if (line.empty()) continue;
-        if (line.size() >= 2 && line[0] == '/' && line[1] == '/') continue;
-        {
-            size_t commentPos = line.find("//");
-            if (commentPos != std::string::npos) line = line.substr(0, commentPos);
-            size_t ss = line.find_first_not_of(" \t");
-            if (ss == std::string::npos) continue;
-            line = line.substr(ss);
-            size_t ee = line.find_last_not_of(" \t");
-            line = line.substr(0, ee + 1);
-            if (line.empty()) continue;
-        }
-        {
-            int braces = 0, parens = 0, brackets = 0;
-            for (char c : line) {
-                if (c == '{') braces++; else if (c == '}') braces--;
-                if (c == '(') parens++; else if (c == ')') parens--;
-                if (c == '[') brackets++; else if (c == ']') brackets--;
-            }
-            while ((braces > 0 || parens > 0 || brackets > 0 || endsWithContinuation(line)) && std::getline(file, rawLine)) {
-                lineNum++;
-                size_t commentPos = rawLine.find("//");
-                std::string stripped = (commentPos != std::string::npos) ? rawLine.substr(0, commentPos) : rawLine;
-                line += " " + stripped;
-                for (char c : stripped) {
-                    if (c == '{') braces++; else if (c == '}') braces--;
-                    if (c == '(') parens++; else if (c == ')') parens--;
-                    if (c == '[') brackets++; else if (c == ']') brackets--;
-                }
-            }
-        }
-        try {
-            jc::Value result = evalCode(line, true);
-            if (!result.isNone()) {
-                vm.setGlobal("ANS", result);
-            }
-            executed++;
-        }
-        catch (const std::exception& ex) {
-            std::cerr << jc::col(jc::Ansi::BRIGHT_RED) << "   [VM] Error at line " << lineNum
-                << ": " << ex.what() << jc::col(jc::Ansi::RESET) << std::endl;
-            std::cerr << jc::col(jc::Ansi::DIM) << "   >>> " << line << jc::col(jc::Ansi::RESET) << std::endl;
-            file.close();
-            jc::helpers::g_scriptDirStack.pop_back(); // 出错弹栈
-            std::cout << "   Script '" << resolvedPath << "' aborted at line " << lineNum
-                << ": " << executed << " statements executed." << std::endl;
-            return;
-        }
-    }
+
+    // ★ 一次性读取整个文件
+    std::string code, line;
+    while (std::getline(file, line)) code += line + "\n";
     file.close();
-    jc::helpers::g_scriptDirStack.pop_back(); // 完成后弹栈
-    std::cout << "   Script '" << resolvedPath << "' finished: " << executed << " statements executed." << std::endl;
+
+    jc::helpers::g_scriptDirStack.push_back(
+        std::filesystem::path(resolvedPath).parent_path().string());
+
+    try {
+        jc::Value result = evalCode(code, true);
+        if (!result.isNone()) vm.setGlobal("ANS", result);
+    }
+    catch (const std::exception& ex) {
+        std::cerr << jc::col(jc::Ansi::BRIGHT_RED)
+            << "   [VM] Script Error in '" << resolvedPath << "':\n    "
+            << ex.what() << jc::col(jc::Ansi::RESET) << std::endl;
+    }
+
+    jc::helpers::g_scriptDirStack.pop_back();
 }
 
 void saveWorkspace(const std::string& filename) {
@@ -236,6 +198,7 @@ int main(int argc, char* argv[]) {
     vm.setGlobal("I", jc::Value(jc::Complex(0.0, 1.0)));
     vm.setGlobal("true", jc::Value(1.0));
     vm.setGlobal("false", jc::Value(0.0));
+    vm.setGlobal("none", jc::Value::none());
 
     // 绑定虚拟机外包服务给系统级运行时回调！
     jc::helpers::setGlobalCallback = [](const std::string& name, const jc::Value& val) { vm.setGlobal(name, val); };
@@ -315,7 +278,7 @@ int main(int argc, char* argv[]) {
             std::string line;
             std::cout << jc::col(jc::Ansi::BRIGHT_CYAN) << "...  " << jc::col(jc::Ansi::RESET);
             if (!std::getline(std::cin, line)) break;
-            input += " " + line;
+            input += "\n" + line;
             for (char c : line) {
                 if (c == '{') braces++; else if (c == '}') braces--;
                 else if (c == '(') parens++; else if (c == ')') parens--;

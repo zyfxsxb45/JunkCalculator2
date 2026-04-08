@@ -62,10 +62,11 @@ namespace jc {
             const std::string& name = var->name.lexeme;
             int slot = resolveLocal(name);
 
-            // ★ Auto-local
             if (stateStack.size() > 1 && slot == -1 && current().globalNames.count(name) == 0) {
-                addLocal(name);
-                slot = resolveLocal(name);
+                if (resolveUpvalue(name) == -1) {  // ★ 新增：如果是来自于更外层的闭包，绝不当做新局部变量看待
+                    addLocal(name);
+                    slot = resolveLocal(name);
+                }
             }
 
             if (slot != -1) {
@@ -244,7 +245,7 @@ namespace jc {
     }
 
     void Compiler::beginLoop(int loopStart) {
-        loopStack.push_back({ loopStart, {}, current().scopeDepth });
+        loopStack.push_back({ loopStart, {}, {}, current().scopeDepth, current().tryDepth });
     }
 
     void Compiler::endLoop() {
@@ -264,6 +265,10 @@ namespace jc {
         initCompiler(mainFn.get());
         compileNode(ast);
         emit(OpCode::OP_RETURN, 0);
+
+        // ★ 在 pop 之前记录正确的 localCount
+        mainFn->localCount = current().maxLocals;
+
         stateStack.pop_back();
         return mainFn->chunk;
     }
@@ -512,7 +517,6 @@ namespace jc {
         current().scopeDepth--;
         while (!current().locals.empty() &&
             current().locals.back().depth > current().scopeDepth) {
-            emit(OpCode::OP_POP, 0);
             current().locals.pop_back();
         }
         return {};
@@ -544,7 +548,13 @@ namespace jc {
         int exitJump = chunk()->emitJump(OpCode::OP_JUMP_IF_FALSE, 0);
         emit(OpCode::OP_POP, 0);
         compileNode(expr->body.get());
-        emit(OpCode::OP_POP, 0);
+
+        // ★ continue 跳转目标：就在 POP body result 之前
+        for (int offset : loopStack.back().continueJumps) {
+            chunk()->patchJump(offset);
+        }
+
+        emit(OpCode::OP_POP, 0);   // POP body result（或 continue 填充的 NONE）
         chunk()->emitLoop(loopStart, 0);
 
         chunk()->patchJump(exitJump);
@@ -569,9 +579,15 @@ namespace jc {
         int exitJump = chunk()->emitJump(OpCode::OP_JUMP_IF_FALSE, 0);
         emit(OpCode::OP_POP, 0);
         compileNode(expr->body.get());
-        emit(OpCode::OP_POP, 0);
+
+        // ★ continue 跳转目标：POP body result，然后执行 update
+        for (int offset : loopStack.back().continueJumps) {
+            chunk()->patchJump(offset);
+        }
+
+        emit(OpCode::OP_POP, 0);   // POP body result
         compileNode(expr->update.get());
-        emit(OpCode::OP_POP, 0);
+        emit(OpCode::OP_POP, 0);   // POP update result
         chunk()->emitLoop(loopStart, 0);
 
         chunk()->patchJump(exitJump);
@@ -587,7 +603,14 @@ namespace jc {
 
     std::any Compiler::visitFunctionDef(FunctionDef* expr) {
         const std::string& funcName = expr->name.lexeme;
-
+        // ★ 修复：先在当前外层注册函数的 Local / Upvalue 引用权限，确保允许在内部自递归捕获
+        int outerSlot = resolveLocal(funcName);
+        if (stateStack.size() > 1 && outerSlot == -1 && current().globalNames.count(funcName) == 0) {
+            if (resolveUpvalue(funcName) == -1) {
+                addLocal(funcName);
+            }
+        }
+        outerSlot = resolveLocal(funcName);
         auto fn = std::make_shared<CompiledFunction>();
         fn->name = funcName;
         fn->maxArity = static_cast<int>(expr->params.size());
@@ -626,23 +649,27 @@ namespace jc {
         emit(OpCode::OP_CLOSURE, expr->name.position);
         emit16(fnIdx, expr->name.position);
 
-        // ★ Auto-local function names (matches python rules)
-        int slot = resolveLocal(funcName);
-        if (stateStack.size() > 1 && slot == -1 && current().globalNames.count(funcName) == 0) {
-            addLocal(funcName);
-            slot = resolveLocal(funcName);
-        }
-
-        if (slot != -1) {
+        // ★ 使用提前抢占好的 outerSlot 并设定值
+        if (outerSlot != -1) {
             emit(OpCode::OP_SET_LOCAL, expr->name.position);
-            emit16(static_cast<uint16_t>(slot), expr->name.position);
+            emit16(static_cast<uint16_t>(outerSlot), expr->name.position);
+
+            uint16_t globalIdx = identifierConstant(funcName);
+            emit(OpCode::OP_SET_GLOBAL, expr->name.position);
+            emit16(globalIdx, expr->name.position);
         }
         else {
-            uint16_t nameIdx = identifierConstant(funcName);
-            emit(OpCode::OP_SET_GLOBAL, expr->name.position);
-            emit16(nameIdx, expr->name.position);
+            int upvalue = resolveUpvalue(funcName);
+            if (upvalue != -1) {
+                emit(OpCode::OP_SET_UPVALUE, expr->name.position);
+                emit16(static_cast<uint16_t>(upvalue), expr->name.position);
+            }
+            else {
+                uint16_t nameIdx = identifierConstant(funcName);
+                emit(OpCode::OP_SET_GLOBAL, expr->name.position);
+                emit16(nameIdx, expr->name.position);
+            }
         }
-
         return {};
     }
 
@@ -726,34 +753,32 @@ namespace jc {
         else {
             emit(OpCode::OP_NONE, 0);
         }
+
+        // ★ 如果此 return 身处一个巨大的 try 块内，将其强制截断抛弃
+        for (int i = 0; i < current().tryDepth; ++i) emit(OpCode::OP_TRY_END, 0);
         emit(OpCode::OP_RETURN, 0);
         return {};
     }
 
     std::any Compiler::visitBreakExpr(BreakExpr*) {
-        if (loopStack.empty())
-            throw std::runtime_error("Compiler Error: 'break' outside loop.");
-        int loopDepth = loopStack.back().scopeDepth;
-        auto& locals = current().locals;
-        for (int i = static_cast<int>(locals.size()) - 1; i >= 0; --i) {
-            if (locals[i].depth <= loopDepth) break;
-            emit(OpCode::OP_POP, 0);
-        }
+        if (loopStack.empty()) throw std::runtime_error("Compiler Error: 'break' outside loop.");
+
+        // ★ 智能发散机制：清理掉在这层跳出沿途中遇到的所有 Try 处理器
+        int diff = current().tryDepth - loopStack.back().tryDepth;
+        for (int i = 0; i < diff; ++i) emit(OpCode::OP_TRY_END, 0);
         int jump = chunk()->emitJump(OpCode::OP_JUMP, 0);
         loopStack.back().breakJumps.push_back(jump);
         return {};
     }
 
     std::any Compiler::visitContinueExpr(ContinueExpr*) {
-        if (loopStack.empty())
-            throw std::runtime_error("Compiler Error: 'continue' outside loop.");
-        int loopDepth = loopStack.back().scopeDepth;
-        auto& locals = current().locals;
-        for (int i = static_cast<int>(locals.size()) - 1; i >= 0; --i) {
-            if (locals[i].depth <= loopDepth) break;
-            emit(OpCode::OP_POP, 0);
-        }
-        chunk()->emitLoop(loopStack.back().loopStart, 0);
+        if (loopStack.empty()) throw std::runtime_error("Compiler Error: 'continue' outside loop.");
+        emit(OpCode::OP_NONE, 0);
+        // ★ 同样智能清理
+        int diff = current().tryDepth - loopStack.back().tryDepth;
+        for (int i = 0; i < diff; ++i) emit(OpCode::OP_TRY_END, 0);
+        int jump = chunk()->emitJump(OpCode::OP_JUMP, 0);
+        loopStack.back().continueJumps.push_back(jump);
         return {};
     }
 
@@ -860,21 +885,12 @@ namespace jc {
             for (int j = n - 1; j >= 0; --j) {
                 const std::string& name = expr->destructNames[j].lexeme;
                 if (name == "_") { emit(OpCode::OP_POP, 0); continue; }
-
                 int slot = resolveLocal(name);
                 if (stateStack.size() > 1 && slot == -1 && current().globalNames.count(name) == 0) {
-                    addLocal(name);
-                    slot = resolveLocal(name);
+                    addLocal(name); slot = resolveLocal(name);
                 }
-                if (slot != -1) {
-                    emit(OpCode::OP_SET_LOCAL, 0);
-                    emit16(static_cast<uint16_t>(slot), 0);
-                }
-                else {
-                    uint16_t idx = identifierConstant(name);
-                    emit(OpCode::OP_SET_GLOBAL, 0);
-                    emit16(idx, 0);
-                }
+                if (slot != -1) { emit(OpCode::OP_SET_LOCAL, 0); emit16(static_cast<uint16_t>(slot), 0); }
+                else { uint16_t idx = identifierConstant(name); emit(OpCode::OP_SET_GLOBAL, 0); emit16(idx, 0); }
                 emit(OpCode::OP_POP, 0);
             }
         }
@@ -882,32 +898,29 @@ namespace jc {
             const std::string& varName = expr->varName.lexeme;
             int slot = resolveLocal(varName);
             if (stateStack.size() > 1 && slot == -1 && current().globalNames.count(varName) == 0) {
-                addLocal(varName);
-                slot = resolveLocal(varName);
+                addLocal(varName); slot = resolveLocal(varName);
             }
-            if (slot != -1) {
-                emit(OpCode::OP_SET_LOCAL, 0);
-                emit16(static_cast<uint16_t>(slot), 0);
-            }
-            else {
-                uint16_t idx = identifierConstant(varName);
-                emit(OpCode::OP_SET_GLOBAL, 0);
-                emit16(idx, 0);
-            }
+            if (slot != -1) { emit(OpCode::OP_SET_LOCAL, 0); emit16(static_cast<uint16_t>(slot), 0); }
+            else { uint16_t idx = identifierConstant(varName); emit(OpCode::OP_SET_GLOBAL, 0); emit16(idx, 0); }
             emit(OpCode::OP_POP, 0);
         }
 
         compileNode(expr->body.get());
-        emit(OpCode::OP_POP, 0);
 
+        // ★ continue 跳转目标：POP body result
+        for (int offset : loopStack.back().continueJumps) {
+            chunk()->patchJump(offset);
+        }
+
+        emit(OpCode::OP_POP, 0);   // POP body result
         chunk()->emitLoop(loopStart, 0);
         chunk()->patchJump(exitJump);
 
         emitBreakJumps();
         endLoop();
 
-        emit(OpCode::OP_POP, 0);
-        emit(OpCode::OP_POP, 0);
+        emit(OpCode::OP_POP, 0);   // pop iterator element
+        emit(OpCode::OP_POP, 0);   // pop List
         emit(OpCode::OP_NONE, 0);
         return {};
     }
@@ -949,8 +962,8 @@ namespace jc {
                 }
                 else {
                     compileNode(idx.get());
-                    emit(OpCode::OP_NONE, 0);
-                    emit(OpCode::OP_NONE, 0);
+                    emit(OpCode::OP_NONE, 0);       // end = none
+                    chunk()->emitConstant(Value(0.0), 0);  // ★ step = 0 (点索引标记)
                 }
             }
             emit(OpCode::OP_SLICE_GET, 0);
@@ -980,7 +993,12 @@ namespace jc {
             else {
                 int slot = resolveLocal(expr->name.lexeme);
                 if (slot != -1) { emit(OpCode::OP_GET_LOCAL, 0); emit16(static_cast<uint16_t>(slot), 0); }
-                else { uint16_t idx = identifierConstant(expr->name.lexeme); emit(OpCode::OP_GET_GLOBAL, 0); emit16(idx, 0); }
+                else {
+                    // ★ 修改：引入 Upvalue 读取
+                    int upvalue = resolveUpvalue(expr->name.lexeme);
+                    if (upvalue != -1) { emit(OpCode::OP_GET_UPVALUE, 0); emit16(static_cast<uint16_t>(upvalue), 0); }
+                    else { uint16_t idx = identifierConstant(expr->name.lexeme); emit(OpCode::OP_GET_GLOBAL, 0); emit16(idx, 0); }
+                }
             }
 
             for (auto& idx : expr->indexChain[0]) {
@@ -992,7 +1010,7 @@ namespace jc {
                 else {
                     compileNode(idx.get());
                     emit(OpCode::OP_NONE, 0);
-                    emit(OpCode::OP_NONE, 0);
+                    chunk()->emitConstant(Value(0.0), 0);  // ★ step = 0 (点索引标记)
                 }
             }
 
@@ -1003,10 +1021,17 @@ namespace jc {
             if (!expr->hasObjectExpr()) {
                 int slot = resolveLocal(expr->name.lexeme);
                 if (stateStack.size() > 1 && slot == -1 && current().globalNames.count(expr->name.lexeme) == 0) {
-                    addLocal(expr->name.lexeme); slot = resolveLocal(expr->name.lexeme);
+                    if (resolveUpvalue(expr->name.lexeme) == -1) { // ★ 防火墙
+                        addLocal(expr->name.lexeme); slot = resolveLocal(expr->name.lexeme);
+                    }
                 }
                 if (slot != -1) { emit(OpCode::OP_SET_LOCAL, 0); emit16(static_cast<uint16_t>(slot), 0); }
-                else { uint16_t idx = identifierConstant(expr->name.lexeme); emit(OpCode::OP_SET_GLOBAL, 0); emit16(idx, 0); }
+                else {
+                    // ★ 修改：引入 Upvalue 写入
+                    int upvalue = resolveUpvalue(expr->name.lexeme);
+                    if (upvalue != -1) { emit(OpCode::OP_SET_UPVALUE, 0); emit16(static_cast<uint16_t>(upvalue), 0); }
+                    else { uint16_t idx = identifierConstant(expr->name.lexeme); emit(OpCode::OP_SET_GLOBAL, 0); emit16(idx, 0); }
+                }
             }
             else { emitStoreTarget(expr->objectExpr.get()); }
             return {};
@@ -1018,7 +1043,12 @@ namespace jc {
             else {
                 int slot = resolveLocal(expr->name.lexeme);
                 if (slot != -1) { emit(OpCode::OP_GET_LOCAL, 0); emit16(static_cast<uint16_t>(slot), 0); }
-                else { uint16_t nameIdx = identifierConstant(expr->name.lexeme); emit(OpCode::OP_GET_GLOBAL, 0); emit16(nameIdx, 0); }
+                else {
+                    // ★ 修改引入读取环境
+                    int upvalue = resolveUpvalue(expr->name.lexeme);
+                    if (upvalue != -1) { emit(OpCode::OP_GET_UPVALUE, 0); emit16(static_cast<uint16_t>(upvalue), 0); }
+                    else { uint16_t nameIdx = identifierConstant(expr->name.lexeme); emit(OpCode::OP_GET_GLOBAL, 0); emit16(nameIdx, 0); }
+                }
             }
             };
 
@@ -1026,10 +1056,17 @@ namespace jc {
             if (!expr->hasObjectExpr()) {
                 int slot = resolveLocal(expr->name.lexeme);
                 if (stateStack.size() > 1 && slot == -1 && current().globalNames.count(expr->name.lexeme) == 0) {
-                    addLocal(expr->name.lexeme); slot = resolveLocal(expr->name.lexeme);
+                    if (resolveUpvalue(expr->name.lexeme) == -1) { // ★ 加入判断防火墙
+                        addLocal(expr->name.lexeme); slot = resolveLocal(expr->name.lexeme);
+                    }
                 }
                 if (slot != -1) { emit(OpCode::OP_SET_LOCAL, 0); emit16(static_cast<uint16_t>(slot), 0); }
-                else { uint16_t nameIdx = identifierConstant(expr->name.lexeme); emit(OpCode::OP_SET_GLOBAL, 0); emit16(nameIdx, 0); }
+                else {
+                    // ★ 修改引入写入环境
+                    int upvalue = resolveUpvalue(expr->name.lexeme);
+                    if (upvalue != -1) { emit(OpCode::OP_SET_UPVALUE, 0); emit16(static_cast<uint16_t>(upvalue), 0); }
+                    else { uint16_t nameIdx = identifierConstant(expr->name.lexeme); emit(OpCode::OP_SET_GLOBAL, 0); emit16(nameIdx, 0); }
+                }
             }
             else emitStoreTarget(expr->objectExpr.get());
             };
@@ -1178,7 +1215,9 @@ namespace jc {
         int offsetSlot = static_cast<int>(chunk()->code.size());
         emit16(0, 0);
         emit16(catchNameIdx, 0);
+        current().tryDepth++;                 // ★ 进入 try 块
         compileNode(expr->tryBody.get());
+        current().tryDepth--;                 // ★ 离开 try 块
         emit(OpCode::OP_TRY_END, 0);
         int skipCatch = chunk()->emitJump(OpCode::OP_JUMP, 0);
 
@@ -1295,23 +1334,53 @@ namespace jc {
         const std::string& className = expr->name.lexeme;
         uint16_t nameIdx = identifierConstant(className);
 
+        // 1. 生成空的类定义对象
         emit(OpCode::OP_CLASS, 0);
         emit16(nameIdx, 0);
 
+        // 2. 将类保存进环境（局部/闭包/全局 安全判定）
         int slot = resolveLocal(className);
         if (stateStack.size() > 1 && slot == -1 && current().globalNames.count(className) == 0) {
-            addLocal(className); slot = resolveLocal(className);
+            if (resolveUpvalue(className) == -1) {
+                addLocal(className);
+                slot = resolveLocal(className);
+            }
         }
-        if (slot != -1) { emit(OpCode::OP_SET_LOCAL, 0); emit16(static_cast<uint16_t>(slot), 0); }
-        else { emit(OpCode::OP_SET_GLOBAL, 0); emit16(nameIdx, 0); }
+        if (slot != -1) {
+            emit(OpCode::OP_SET_LOCAL, 0); emit16(static_cast<uint16_t>(slot), 0);
+        }
+        else {
+            int upvalue = resolveUpvalue(className);
+            if (upvalue != -1) { emit(OpCode::OP_SET_UPVALUE, 0); emit16(static_cast<uint16_t>(upvalue), 0); }
+            else { emit(OpCode::OP_SET_GLOBAL, 0); emit16(nameIdx, 0); }
+        }
 
+        // ★ 智能加载宏：无论这个类在何处，精准找到它
+        auto emitLoadClass = [&]() {
+            if (slot != -1) { emit(OpCode::OP_GET_LOCAL, 0); emit16(static_cast<uint16_t>(slot), 0); }
+            else {
+                int upvalue = resolveUpvalue(className);
+                if (upvalue != -1) { emit(OpCode::OP_GET_UPVALUE, 0); emit16(static_cast<uint16_t>(upvalue), 0); }
+                else { emit(OpCode::OP_GET_GLOBAL, 0); emit16(nameIdx, 0); }
+            }
+            };
+
+        // 3. 继承逻辑（修复：彻底兼容局部/闭包父类）
         if (!expr->superClassName.empty()) {
             uint16_t superIdx = identifierConstant(expr->superClassName);
-            emit(OpCode::OP_GET_GLOBAL, 0); emit16(nameIdx, 0);
-            emit(OpCode::OP_GET_GLOBAL, 0); emit16(superIdx, 0);
+            emitLoadClass(); // 取出当前子类
+
+            int sSlot = resolveLocal(expr->superClassName);
+            if (sSlot != -1) { emit(OpCode::OP_GET_LOCAL, 0); emit16(static_cast<uint16_t>(sSlot), 0); }
+            else {
+                int sUpvalue = resolveUpvalue(expr->superClassName);
+                if (sUpvalue != -1) { emit(OpCode::OP_GET_UPVALUE, 0); emit16(static_cast<uint16_t>(sUpvalue), 0); }
+                else { emit(OpCode::OP_GET_GLOBAL, 0); emit16(superIdx, 0); }
+            }
             emit(OpCode::OP_INHERIT, 0);
         }
 
+        // 4. 方法注册逻辑
         for (auto& md : expr->methods) {
             auto fn = std::make_shared<CompiledFunction>();
             fn->name = md.name.lexeme;
@@ -1339,7 +1408,8 @@ namespace jc {
             endScope();
             stateStack.pop_back();
 
-            emit(OpCode::OP_GET_GLOBAL, 0); emit16(nameIdx, 0);
+            // ★ 修复：放弃无脑 GET_GLOBAL，智能获取正处于挂载态的方法主类
+            emitLoadClass();
 
             uint16_t fnIdx = makeConstant(Value(static_cast<double>(thisFnIndex)));
             emit(OpCode::OP_CLOSURE, 0); emit16(fnIdx, 0);

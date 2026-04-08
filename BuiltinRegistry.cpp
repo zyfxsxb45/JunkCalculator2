@@ -65,6 +65,7 @@ void BuiltinRegistry::registerMath() {
     reg("pi", { 0 }, [](const std::vector<Value>&) -> Value { return Value(3.14159265358979323846); });
     reg("e", { 0 }, [](const std::vector<Value>&) -> Value { return Value(2.71828182845904523536); });
     reg("i", { 0 }, [](const std::vector<Value>&) -> Value { return Value(Complex(0.0, 1.0)); });
+    reg("none", { 0 }, [](const std::vector<Value>&) -> Value { return Value::none(); });
     reg("complex", { 1, 2 }, [](const std::vector<Value>& args) -> Value {
         if (args.size() == 1) {
             // complex(x) → Complex(x, 0) 或保留已有复数
@@ -413,8 +414,31 @@ void BuiltinRegistry::registerMatrixOps() {
     reg("cond", { 1 }, [matrixDispatch1](const std::vector<Value>& args) -> Value { return matrixDispatch1(args[0], [](const auto& m) { return m.condition(); }); });
     reg("adj", { 1 }, [matrixDispatch1](const std::vector<Value>& args) -> Value { return matrixDispatch1(args[0], [](const auto& m) { return m.adjugate(); }); });
     reg("perm", { 1 }, [matrixDispatch1](const std::vector<Value>& args) -> Value { return matrixDispatch1(args[0], [](const auto& m) { return m.permanent(); }); });
-    reg("sum", { 1 }, [matrixDispatch1](const std::vector<Value>& args) -> Value { return matrixDispatch1(args[0], [](const auto& m) { return m.sum(); }); });
-    reg("prod", { 1 }, [matrixDispatch1](const std::vector<Value>& args) -> Value { return matrixDispatch1(args[0], [](const auto& m) { return m.product(); }); });
+    reg("sum", { 1 }, [matrixDispatch1](const std::vector<Value>& args) -> Value {
+        // ★ 新增：无缝支持 List 容器
+        if (std::holds_alternative<List>(args[0].data)) {
+            const auto& L = std::get<List>(args[0].data);
+            Value s = Value(0.0);
+            for (const auto& e : L.raw()) {
+                s = s + helpers::anyToVal(e);  // 利用 Value 的重载 +
+            }
+            return s;
+        }
+        return matrixDispatch1(args[0], [](const auto& m) { return m.sum(); });
+        });
+
+    reg("prod", { 1 }, [matrixDispatch1](const std::vector<Value>& args) -> Value {
+        // ★ 新增：无缝支持 List 容器
+        if (std::holds_alternative<List>(args[0].data)) {
+            const auto& L = std::get<List>(args[0].data);
+            Value p = Value(1.0);
+            for (const auto& e : L.raw()) {
+                p = p * helpers::anyToVal(e);  // 利用 Value 的重载 *
+            }
+            return p;
+        }
+        return matrixDispatch1(args[0], [](const auto& m) { return m.product(); });
+        });    
     reg("null", { 1 }, [matrixDispatch1](const std::vector<Value>& args) -> Value { return matrixDispatch1(args[0], [](const auto& m) { return m.nullSpace(); }); });
     reg("orth", { 1 }, [matrixDispatch1](const std::vector<Value>& args) -> Value { return matrixDispatch1(args[0], [](const auto& m) { return m.orthogonalize(); }); });
     reg("ctrans", { 1 }, [matrixDispatch1](const std::vector<Value>& args) -> Value { return matrixDispatch1(args[0], [](const auto& m) { return m.conjugateTranspose(); }); });
@@ -530,7 +554,14 @@ void BuiltinRegistry::registerLinearSolvers() {
 void BuiltinRegistry::registerVectors() {
     auto assertVec = [](const Value& v, const std::string& f) { if (std::holds_alternative<RealMatrix>(v.data)) { if (std::get<RealMatrix>(v.data).getCols() != 1) throw std::runtime_error(f + "() expects Nx1 column vector."); } else if (std::holds_alternative<ComplexMatrix>(v.data)) { if (std::get<ComplexMatrix>(v.data).getCols() != 1) throw std::runtime_error(f + "() expects Nx1 column vector."); } else throw std::runtime_error(f + "() requires a matrix."); };
 
-    reg("dim", { 1 }, [assertVec](const std::vector<Value>& args) -> Value { assertVec(args[0], "dim"); if (std::holds_alternative<RealMatrix>(args[0].data)) return Value(static_cast<double>(std::get<RealMatrix>(args[0].data).getRows())); return Value(static_cast<double>(std::get<ComplexMatrix>(args[0].data).getRows())); });
+    reg("dim", { 1 }, [assertVec](const std::vector<Value>& args) -> Value {
+        if (std::holds_alternative<List>(args[0].data))
+            return Value(static_cast<double>(std::get<List>(args[0].data).size()));
+        assertVec(args[0], "dim");
+        if (std::holds_alternative<RealMatrix>(args[0].data))
+            return Value(static_cast<double>(std::get<RealMatrix>(args[0].data).getRows()));
+        return Value(static_cast<double>(std::get<ComplexMatrix>(args[0].data).getRows()));
+        });    
     reg("dot", { 2 }, [assertVec](const std::vector<Value>& args) -> Value { assertVec(args[0], "dot"); assertVec(args[1], "dot"); ComplexMatrix a = args[0].asComplexMatrix(), b = args[1].asComplexMatrix(); if (a.getRows() != b.getRows()) throw std::runtime_error("Math Error: Dimension mismatch."); return Value((a.conjugateTranspose() * b)(0, 0)); });
     reg("vnorm", { 1 }, [assertVec](const std::vector<Value>& args) -> Value { assertVec(args[0], "vnorm"); ComplexMatrix v = args[0].asComplexMatrix(); return Value(std::sqrt((v.conjugateTranspose() * v)(0, 0).real)); });
     reg("normalize", { 1 }, [assertVec](const std::vector<Value>& args) -> Value { assertVec(args[0], "normalize"); ComplexMatrix v = args[0].asComplexMatrix(); double len = std::sqrt((v.conjugateTranspose() * v)(0, 0).real); if (jc::Tol::isEq(len, 0.0)) throw std::runtime_error("Math Error: Cannot normalize a zero vector."); return Value(v / Complex(len)); });
@@ -607,9 +638,58 @@ void BuiltinRegistry::registerStatistics() {
     reg("svar", { 1 }, [](const std::vector<Value>& args) -> Value { auto d = extractDS(args[0], "svar"); if (d.size()<2) throw std::runtime_error("Math Error: Sample variance requires at least 2 data points."); return Value(computeSvar(d)); });
     reg("std", { 1 }, [](const std::vector<Value>& args) -> Value { auto d = extractDS(args[0], "std"); return Value(computeStd(d)); });
     reg("sstd", { 1 }, [](const std::vector<Value>& args) -> Value { auto d = extractDS(args[0], "sstd"); if (d.size()<2) throw std::runtime_error("Math Error: Sample std requires at least 2 data points."); return Value(std::sqrt(computeSvar(d))); });
-    reg("max", { 1 }, [](const std::vector<Value>& args) -> Value { auto d = extractDS(args[0], "max"); double mx = d[0]; for (double v : d) if (v > mx) mx = v; return Value(mx); });
-    reg("min", { 1 }, [](const std::vector<Value>& args) -> Value { auto d = extractDS(args[0], "min"); double mn = d[0]; for (double v : d) if (v < mn) mn = v; return Value(mn); });
-    reg("span", { 1 }, [](const std::vector<Value>& args) -> Value { auto d = extractDS(args[0], "span"); double mx = d[0], mn = d[0]; for (double v : d) { if (v > mx) mx = v; if (v < mn) mn = v; } return Value(mx - mn); });
+    reg("max", { 1 }, [](const std::vector<Value>& args) -> Value {
+        if (std::holds_alternative<List>(args[0].data)) {
+            const auto& L = std::get<List>(args[0].data);
+            if (L.empty()) throw std::runtime_error("Math Error: Cannot compute max of empty list.");
+            Value mx = anyToVal(L.raw()[0]);
+            for (size_t i = 1; i < L.size(); ++i) {
+                Value v = anyToVal(L.raw()[i]);
+                // ★ 正确的 C++ 比较
+                if (helpers::checkGreater(v, mx)) mx = v;
+            }
+            return mx;
+        }
+        auto d = extractDS(args[0], "max");
+        double mx = d[0]; for (double v : d) if (v > mx) mx = v; return Value(mx);
+        });
+
+    reg("min", { 1 }, [](const std::vector<Value>& args) -> Value {
+        if (std::holds_alternative<List>(args[0].data)) {
+            const auto& L = std::get<List>(args[0].data);
+            if (L.empty()) throw std::runtime_error("Math Error: Cannot compute min of empty list.");
+            Value mn = anyToVal(L.raw()[0]);
+            for (size_t i = 1; i < L.size(); ++i) {
+                Value v = anyToVal(L.raw()[i]);
+                // ★ 正确的 C++ 比较
+                if (helpers::checkLess(v, mn)) mn = v;
+            }
+            return mn;
+        }
+        auto d = extractDS(args[0], "min");
+        double mn = d[0]; for (double v : d) if (v < mn) mn = v; return Value(mn);
+        });
+
+    reg("span", { 1 }, [](const std::vector<Value>& args) -> Value {
+        if (std::holds_alternative<List>(args[0].data)) {
+            const auto& L = std::get<List>(args[0].data);
+            if (L.empty()) throw std::runtime_error("Math Error: Cannot compute span of empty list.");
+            Value mn = anyToVal(L.raw()[0]);
+            Value mx = anyToVal(L.raw()[0]);
+            for (size_t i = 1; i < L.size(); ++i) {
+                Value v = anyToVal(L.raw()[i]);
+                // ★ 正确的 C++ 比较
+                if (helpers::checkGreater(v, mx)) mx = v;
+                if (helpers::checkLess(v, mn)) mn = v;
+            }
+            // 利用 Value 的重载减法返回 span
+            return mx - mn;
+        }
+        auto d = extractDS(args[0], "span");
+        double mx = d[0], mn = d[0];
+        for (double v : d) { if (v > mx) mx = v; if (v < mn) mn = v; }
+        return Value(mx - mn);
+        });
 
     reg("perc", { 2 }, [](const std::vector<Value>& args) -> Value {
         auto d = extractDS(args[0], "perc");
@@ -856,9 +936,59 @@ void BuiltinRegistry::registerArrayFunctions() {
 
     reg("fill", { 2 }, [](const std::vector<Value>& args) -> Value { int n=static_cast<int>(std::round(args[1].asDouble())); if (n<0) throw std::runtime_error("Runtime Error: fill() count must be non-negative."); double val=args[0].asDouble(); return Value(RealMatrix(1,n,std::vector<double>(n,val))); });
     reg("linspace", { 3 }, [](const std::vector<Value>& args) -> Value { double a=args[0].asDouble(),b=args[1].asDouble(); int n=static_cast<int>(std::round(args[2].asDouble())); if (n<1) throw std::runtime_error("Runtime Error: linspace() requires n >= 1."); std::vector<double> v(n); if (n==1) v[0]=a; else { for (int i=0;i<n;++i) v[i]=a+(b-a)*i/(n-1); } return Value(RealMatrix(1,n,v)); });
-    reg("cumsum", { 1 }, [](const std::vector<Value>& args) -> Value { auto v=toVecHelper(args[0],"cumsum"); for (size_t i=1;i<v.size();++i) v[i]+=v[i-1]; return toRowVec(v); });
-    reg("cumprod", { 1 }, [](const std::vector<Value>& args) -> Value { auto v=toVecHelper(args[0],"cumprod"); for (size_t i=1;i<v.size();++i) v[i]*=v[i-1]; return toRowVec(v); });
-    reg("diffs", { 1 }, [](const std::vector<Value>& args) -> Value { auto v=toVecHelper(args[0],"diffs"); if (v.size()<2) throw std::runtime_error("Runtime Error: diffs() requires at least 2 elements."); std::vector<double> d(v.size()-1); for (size_t i=0;i<d.size();++i) d[i]=v[i+1]-v[i]; return toRowVec(d); });
+    reg("cumsum", { 1 }, [](const std::vector<Value>& args) -> Value {
+        if (std::holds_alternative<List>(args[0].data)) {
+            const auto& L = std::get<List>(args[0].data);
+            List result;
+            if (L.empty()) return Value(result);
+            Value sum = anyToVal(L.raw()[0]);
+            result.push_back(valToAny(sum));
+            for (size_t i = 1; i < L.size(); ++i) {
+                sum = sum + anyToVal(L.raw()[i]);
+                result.push_back(valToAny(sum));
+            }
+            return Value(result);
+        }
+        auto v = toVecHelper(args[0], "cumsum");
+        for (size_t i = 1; i < v.size(); ++i) v[i] += v[i - 1];
+        return toRowVec(v);
+        });
+
+    reg("cumprod", { 1 }, [](const std::vector<Value>& args) -> Value {
+        if (std::holds_alternative<List>(args[0].data)) {
+            const auto& L = std::get<List>(args[0].data);
+            List result;
+            if (L.empty()) return Value(result);
+            Value prod = anyToVal(L.raw()[0]);
+            result.push_back(valToAny(prod));
+            for (size_t i = 1; i < L.size(); ++i) {
+                prod = prod * anyToVal(L.raw()[i]);
+                result.push_back(valToAny(prod));
+            }
+            return Value(result);
+        }
+        auto v = toVecHelper(args[0], "cumprod");
+        for (size_t i = 1; i < v.size(); ++i) v[i] *= v[i - 1];
+        return toRowVec(v);
+        });
+
+    reg("diffs", { 1 }, [](const std::vector<Value>& args) -> Value {
+        if (std::holds_alternative<List>(args[0].data)) {
+            const auto& L = std::get<List>(args[0].data);
+            if (L.size() < 2) throw std::runtime_error("Runtime Error: diffs() requires at least 2 elements.");
+            List result;
+            for (size_t i = 0; i < L.size() - 1; ++i) {
+                Value diff = anyToVal(L.raw()[i + 1]) - anyToVal(L.raw()[i]);
+                result.push_back(valToAny(diff));
+            }
+            return Value(result);
+        }
+        auto v = toVecHelper(args[0], "diffs");
+        if (v.size() < 2) throw std::runtime_error("Runtime Error: diffs() requires at least 2 elements.");
+        std::vector<double> d(v.size() - 1);
+        for (size_t i = 0; i < d.size(); ++i) d[i] = v[i + 1] - v[i];
+        return toRowVec(d);
+        });
 
     reg("indexOf", { 2 }, [](const std::vector<Value>& args) -> Value { if (std::holds_alternative<List>(args[0].data)) { const auto& L=std::get<List>(args[0].data); for (size_t i=0;i<L.size();++i) { std::ostringstream a,b; a<<anyToVal(L.raw()[i]); b<<args[1]; if (a.str()==b.str()) return Value(static_cast<double>(i)); } return Value(-1.0); } auto v=toVecHelper(args[0],"indexOf"); double target=args[1].asDouble(); for (size_t i=0;i<v.size();++i) if (Tol::isEq(v[i],target,1e4)) return Value(static_cast<double>(i)); return Value(-1.0); });
     reg("count", { 2 }, [](const std::vector<Value>& args) -> Value { if (std::holds_alternative<List>(args[0].data)) { const auto& L=std::get<List>(args[0].data); int c=0; std::ostringstream bs; bs<<args[1]; std::string bstr=bs.str(); for (const auto& e:L.raw()) { std::ostringstream as; as<<anyToVal(e); if (as.str()==bstr) c++; } return Value(static_cast<double>(c)); } auto v=toVecHelper(args[0],"count"); double target=args[1].asDouble(); int c=0; for (double x:v) if (Tol::isEq(x,target,1e4)) c++; return Value(static_cast<double>(c)); });
@@ -1577,6 +1707,7 @@ void BuiltinRegistry::registerSystemShell() {
             helpers::setGlobalCallback("I", Value(Complex(0.0, 1.0)));
             helpers::setGlobalCallback("true", Value(1.0));
             helpers::setGlobalCallback("false", Value(0.0));
+            helpers::setGlobalCallback("none", Value::none());
         }
         std::cout << "System constants restored: PI, E, i, I, true, false" << std::endl;
         return Value::none();

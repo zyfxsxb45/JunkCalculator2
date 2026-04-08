@@ -93,7 +93,7 @@ namespace jc {
     d.a = 99                       dictionary dot operator
     f(x, y = 0) = x + y            function with default parameter
     (x) => x^2                     lambda expression
-    class Dog extends Animal {...}  inheritance
+    class Dog extends Animal {...} inheritance
     p = Point(3, 4)                instance creation
     p.dist()                       method call
     super.init(name)               call parent constructor
@@ -102,17 +102,17 @@ namespace jc {
     int(3.7)                       truncate to integer → 3
     double(frac(1,3))              convert to float → 0.333...
     3 > 2 && !false                comparison + logic
-    x > 0 ? x : -x                ternary operator
+    x > 0 ? x : -x                 ternary operator
     format("x={:.2f}", PI)         string formatting → "x=3.14"
-    f"x = {x}, pi = {PI::.2f}"    string interpolation (f-string)
+    f"x = {x}, pi = {PI::.2f}"     string interpolation (f-string)
     switch (x) { case 1: {...} }   pattern matching
     for ([k, v] in d) { ... }      destructured for-in
     [x^2 for x in range(10)]       list comprehension
     import "math_utils"            load a library
-    try { 1/0 } catch (e) { e }   error handling
+    try { 1/0 } catch (e) { e }    error handling
     // comment                     everything after // is ignored
     resetConst()                   restore PI, E, i, I, true, false
-    pi()  e()  i()                 constant factory functions (always available)
+    pi()  e()  i()  none()         constant factory functions (always available)
     isint(x)  isstring(x)          type predicates (see: help typecheck)
     delete x                       remove any variable (including const)
     data |> sort |> unique         pipe operator (left-to-right)
@@ -242,7 +242,8 @@ namespace jc {
     PI          3.14159265358979…        (overridable, deletable)
     E           2.71828182845904…        (overridable, deletable)
     i  /  I     Imaginary unit (i² = −1) (overridable, deletable)
-    true / false 1.0 / 0.0
+    none        None value                (overridable, deletable)
+    true / false 1.0 / 0.0                (overridable, deletable)
 
     Constants are ordinary global variables — you CAN overwrite or delete
     them. To restore them, use any of:
@@ -250,11 +251,13 @@ namespace jc {
       PI = pi()         Restore individually via factory function
       E = e()
       i = i()           (or just use the literal suffix: 3 + 4i)
+      none = none()     
 
     Factory functions (always available, cannot be shadowed):
       pi()              → 3.14159265358979…
       e()               → 2.71828182845904…
       i()               → imaginary unit (0+1i)
+      none()            → none value
 
     Tip: Prefer the literal suffix 3i / 4i over the variable i, because
     the variable can be overwritten (e.g., by a for loop). The suffix is
@@ -964,11 +967,13 @@ namespace jc {
     PI = pi()             Restore individually via factory function
     E = e()               (factory functions are built-in and permanent)
     i = i()               (or just use the literal suffix: 3 + 4i)
+    none = none()         
 
     Factory functions (always available, cannot be shadowed):
       pi()    → 3.14159265358979…
       e()     → 2.71828182845904…
       i()     → imaginary unit (0+1i)
+      none()  → none value (falsy, used to represent "no value")
 
   Prime Engine (Paged Streaming I/O)
   ──────────────────────

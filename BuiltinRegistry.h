@@ -175,6 +175,65 @@ namespace helpers {
     // ★ 可注入的 runFile 回调（导入脚本使用）
     inline std::function<void(const std::string&)> runFileCallback = nullptr;
     inline std::vector<std::string> g_scriptDirStack;
+
+    // ═══════════════════════════════════════════
+// 值比较引擎 (Value Comparison)
+// ═══════════════════════════════════════════
+    inline bool checkEqual(const Value& lhs, const Value& rhs) {
+        if (lhs.data.index() == rhs.data.index()) {
+            if (std::holds_alternative<std::monostate>(lhs.data)) return true;
+            if (std::holds_alternative<double>(lhs.data))
+                return Tol::isEq(std::get<double>(lhs.data), std::get<double>(rhs.data));
+            if (std::holds_alternative<BigInt>(lhs.data))
+                return std::get<BigInt>(lhs.data) == std::get<BigInt>(rhs.data);
+            if (std::holds_alternative<Complex>(lhs.data))
+                return std::get<Complex>(lhs.data) == std::get<Complex>(rhs.data);
+            if (std::holds_alternative<Fraction>(lhs.data))
+                return std::get<Fraction>(lhs.data) == std::get<Fraction>(rhs.data);
+            if (std::holds_alternative<std::string>(lhs.data))
+                return std::get<std::string>(lhs.data) == std::get<std::string>(rhs.data);
+            if (std::holds_alternative<BaseNum>(lhs.data))
+                return std::get<BaseNum>(lhs.data).getValue() == std::get<BaseNum>(rhs.data).getValue();
+            // 不支持矩阵等深度结构直接比较
+            return false;
+        }
+
+        if (std::holds_alternative<BigInt>(lhs.data) && std::holds_alternative<Fraction>(rhs.data))
+            return Fraction(std::get<BigInt>(lhs.data)) == std::get<Fraction>(rhs.data);
+        if (std::holds_alternative<Fraction>(lhs.data) && std::holds_alternative<BigInt>(rhs.data))
+            return std::get<Fraction>(lhs.data) == Fraction(std::get<BigInt>(rhs.data));
+
+        try { return lhs.asComplex() == rhs.asComplex(); }
+        catch (...) { return false; }
+    }
+
+    inline bool checkLess(const Value& lhs, const Value& rhs) {
+        if (std::holds_alternative<std::string>(lhs.data) && std::holds_alternative<std::string>(rhs.data))
+            return std::get<std::string>(lhs.data) < std::get<std::string>(rhs.data);
+
+        if (std::holds_alternative<std::string>(lhs.data) || std::holds_alternative<std::string>(rhs.data))
+            throw std::runtime_error("Type Error: Cannot compare string with non-string type.");
+
+        if (std::holds_alternative<BigInt>(lhs.data) && std::holds_alternative<BigInt>(rhs.data))
+            return std::get<BigInt>(lhs.data) < std::get<BigInt>(rhs.data);
+
+        if (std::holds_alternative<Fraction>(lhs.data) && std::holds_alternative<Fraction>(rhs.data))
+            return std::get<Fraction>(lhs.data) < std::get<Fraction>(rhs.data);
+
+        if ((std::holds_alternative<BigInt>(lhs.data) && std::holds_alternative<Fraction>(rhs.data)) ||
+            (std::holds_alternative<Fraction>(lhs.data) && std::holds_alternative<BigInt>(rhs.data))) {
+            Fraction a = std::holds_alternative<Fraction>(lhs.data) ? std::get<Fraction>(lhs.data) : Fraction(std::get<BigInt>(lhs.data));
+            Fraction b = std::holds_alternative<Fraction>(rhs.data) ? std::get<Fraction>(rhs.data) : Fraction(std::get<BigInt>(rhs.data));
+            return a < b;
+        }
+
+        double a = lhs.asDouble(), b = rhs.asDouble();
+        return (a < b && !Tol::isEq(a, b));
+    }
+
+    inline bool checkGreater(const Value& lhs, const Value& rhs) {
+        return checkLess(rhs, lhs);
+    }
 } // namespace helpers
 
 // ═══════════════════════════════════════════

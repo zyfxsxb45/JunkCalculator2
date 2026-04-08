@@ -14,6 +14,7 @@ namespace jc {
 
         int start = 0;              // 当前正在扫描的单词的起始位置
         int current = 0;            // 当前扫描到的字符位置
+        int parenBracketDepth = 0;
 
         // --- 内部核心扫描逻辑 ---
         void scanToken();           // 识别下一个单词

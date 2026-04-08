@@ -56,7 +56,7 @@ namespace jc {
 
 
         // --- 特殊标记 ---
-        END_OF_FILE, ERROR
+        NEWLINE, END_OF_FILE, ERROR
     };
 
     struct Token {
@@ -131,6 +131,7 @@ namespace jc {
         case TokenType::REF:           return "REF";
         case TokenType::CONST:         return "CONST";
         case TokenType::DELETE:        return "DELETE";
+        case TokenType::NEWLINE:       return "NEWLINE";
         case TokenType::END_OF_FILE:   return "EOF";
         case TokenType::ERROR:         return "ERROR";
         case TokenType::THROW:         return "THROW";

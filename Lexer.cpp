@@ -30,6 +30,41 @@ namespace jc {
         {"super",    TokenType::SUPER},
     };
 
+    static bool isContinuationToken(TokenType t) {
+        switch (t) {
+            // 二元运算符
+        case TokenType::PLUS: case TokenType::MINUS:
+        case TokenType::STAR: case TokenType::SLASH:
+        case TokenType::CARET: case TokenType::BACKSLASH:
+        case TokenType::PERCENT:
+            // 赋值
+        case TokenType::ASSIGN:
+        case TokenType::PLUS_ASSIGN: case TokenType::MINUS_ASSIGN:
+        case TokenType::STAR_ASSIGN: case TokenType::SLASH_ASSIGN:
+        case TokenType::PERCENT_ASSIGN: case TokenType::CARET_ASSIGN:
+            // 比较
+        case TokenType::EQUAL: case TokenType::BANG_EQUAL:
+        case TokenType::LESS: case TokenType::LESS_EQUAL:
+        case TokenType::GREATER: case TokenType::GREATER_EQUAL:
+            // 逻辑
+        case TokenType::AND_AND: case TokenType::OR_OR:
+            // 管道与箭头
+        case TokenType::PIPE: case TokenType::ARROW:
+            // 标点
+        case TokenType::COMMA: case TokenType::DOT:
+        case TokenType::COLON: case TokenType::QUESTION:
+        case TokenType::SEMICOLON:
+            // 开括号
+        case TokenType::LPAREN: case TokenType::LBRACKET:
+        case TokenType::LBRACE:
+            // 已有 NEWLINE 不重复发射
+        case TokenType::NEWLINE:
+            return true;
+        default:
+            return false;
+        }
+    }
+
     Lexer::Lexer(std::string source) : source(std::move(source)) {}
 
     std::vector<Token> Lexer::tokenize() {
@@ -108,7 +143,16 @@ namespace jc {
         case '>':
             addToken(match('=') ? TokenType::GREATER_EQUAL : TokenType::GREATER);
             break;
-        case ' ': case '\r': case '\t': case '\n':
+        case ' ': case '\r': case '\t': 
+            break;
+        case '\n':
+            // ★ 智能换行符：当不在 () 或 [] 内部、且上一个 token 不是续行符时发射
+            if (parenBracketDepth == 0 && !tokens.empty()) {
+                TokenType lastType = tokens.back().type;
+                if (!isContinuationToken(lastType)) {
+                    tokens.emplace_back(TokenType::NEWLINE, "\\n", current - 1);
+                }
+            }
             break;
         default:
             if (std::isdigit(c)) { number(); }

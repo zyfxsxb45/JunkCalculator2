@@ -40,38 +40,17 @@ namespace jc {
     std::unique_ptr<Expr> Parser::parse() {
         try {
             std::vector<std::unique_ptr<Expr>> stmts;
-
-            // ★ 循环解析，直到吃完所有的 Token (遇到 EOF)
             while (!isAtEnd()) {
-                // 跳过可能开头的多余分号 (如 ;;; a=1)
-                while (match({ TokenType::SEMICOLON })) {}
-
+                while (match({ TokenType::SEMICOLON, TokenType::NEWLINE })) {}  // ★
                 if (isAtEnd()) break;
-
                 stmts.push_back(expression());
-
-                // 每条语句结束后，允许并吃掉任意多个分号分隔符
-                while (match({ TokenType::SEMICOLON })) {}
+                while (match({ TokenType::SEMICOLON, TokenType::NEWLINE })) {}  // ★
             }
-
-            // 如果整个输入解析出来是个空，塞个 0 进去防崩
-            if (stmts.empty()) {
-                return std::make_unique<Literal>("0");
-            }
-
-            // ★ 优化：如果只有一条语句，直接拔出来返回
-            // 这样如果是单行普通计算，AST 就不会徒增不必要的 Block 节点
-            if (stmts.size() == 1) {
-                return std::move(stmts[0]);
-            }
-
-            // ★ 否则，把它打包成一个隐式的系统级大代码块！
-            // Block 默认行为就是挨个执行，最后返回最末尾那条语句的值
+            if (stmts.empty()) return std::make_unique<Literal>("0");
+            if (stmts.size() == 1) return std::move(stmts[0]);
             return std::make_unique<Block>(std::move(stmts));
         }
-        catch (const std::exception&) {
-            throw;
-        }
+        catch (const std::exception&) { throw; }
     }
 
     std::unique_ptr<Expr> Parser::ternary() {
@@ -286,17 +265,21 @@ namespace jc {
         while (true) {
             if (match({ TokenType::LPAREN })) {
                 std::vector<std::unique_ptr<Expr>> args;
+                while (match({ TokenType::NEWLINE })) {}  // ★
                 if (!check(TokenType::RPAREN)) {
-                    do { args.push_back(assignment()); } while (match({ TokenType::COMMA }));
+                    do {
+                        while (match({ TokenType::NEWLINE })) {}  // ★
+                        args.push_back(assignment());
+                        while (match({ TokenType::NEWLINE })) {}  // ★
+                    } while (match({ TokenType::COMMA }));
                 }
+                while (match({ TokenType::NEWLINE })) {}  // ★
                 consume(TokenType::RPAREN, "Parser Error: Expect ')' after arguments.");
 
                 if (auto* varExpr = dynamic_cast<Variable*>(expr.get())) {
-                    // ★ 标识符调用：sin(x), f(1, 2) 等
                     expr = std::make_unique<Call>(varExpr->name, std::move(args));
                 }
                 else {
-                    // ★ 表达式调用：(() => 42)(), getLambda()(x) 等
                     expr = std::make_unique<InvokeExpr>(std::move(expr), std::move(args));
                 }
             }
@@ -304,51 +287,78 @@ namespace jc {
                 std::vector<std::unique_ptr<Expr>> indices;
 
                 auto parseSliceArg = [this]() -> std::unique_ptr<Expr> {
+                    // ★ 增加安全检查：如果该维度完全是空的，但不是被切片符(:)占据，
+                    // 说明用户写了 M[,] 或者 M[0,] 这是非法的，必须填写参数或由切片代替
+                    if (check(TokenType::COMMA) || check(TokenType::RBRACKET)) {
+                        throw std::runtime_error("Syntax Error: Missing index expression.");
+                    }
+
                     std::unique_ptr<Expr> st, en, sp;
                     bool isSl = false;
-                    // 读取 start (如果有)
+                    while (match({ TokenType::NEWLINE })) {}
+
                     if (!check(TokenType::COLON) && !check(TokenType::COMMA) && !check(TokenType::RBRACKET)) {
                         st = expression();
                     }
-                    // 检测是否被切开
                     if (match({ TokenType::COLON })) {
                         isSl = true;
-                        // 读取 end (如果有)
+                        while (match({ TokenType::NEWLINE })) {}
                         if (!check(TokenType::COLON) && !check(TokenType::COMMA) && !check(TokenType::RBRACKET)) {
                             en = expression();
                         }
-                        // 读取 step (如果有)
                         if (match({ TokenType::COLON })) {
+                            while (match({ TokenType::NEWLINE })) {}
                             if (!check(TokenType::COMMA) && !check(TokenType::RBRACKET)) {
                                 sp = expression();
                             }
                         }
                     }
+                    // ★ 允许单纯的 ":" 成为合法的切片 (st, en, sp 皆 nullptr)
+                    // 上面的 check 拦截的是彻头彻尾的空。如果是 ":" 起手，那么 isSl 为 true，合法。
                     if (isSl) return std::make_unique<SliceExpr>(std::move(st), std::move(en), std::move(sp));
                     return st;
                     };
 
-                indices.push_back(parseSliceArg());
-                if (match({ TokenType::COMMA })) {
+                // ★ 切片/索引语法的起点校验：如果是纯粹的 [:] 也要兼容
+                if (check(TokenType::COLON)) {
                     indices.push_back(parseSliceArg());
                 }
+                else {
+                    indices.push_back(parseSliceArg());
+                }
+
+                if (match({ TokenType::COMMA })) {
+                    while (match({ TokenType::NEWLINE })) {}
+                    // ★ 拦截 M[0, ] 这种尾随逗号缺少参数的情况
+                    if (check(TokenType::RBRACKET)) {
+                        throw std::runtime_error("Syntax Error: Missing index expression after comma.");
+                    }
+                    indices.push_back(parseSliceArg());
+                }
+
+                while (match({ TokenType::NEWLINE })) {}
                 consume(TokenType::RBRACKET, "Parser Error: Expect ']' after index.");
                 expr = std::make_unique<IndexAccess>(std::move(expr), std::move(indices));
             }
             else if (match({ TokenType::DOT })) {
+                while (match({ TokenType::NEWLINE })) {}  // ★
                 Token field = consume(TokenType::IDENTIFIER,
                     "Parser Error: Expect field/method name after '.'.");
                 if (match({ TokenType::LPAREN })) {
-                    // obj.method(args)
                     std::vector<std::unique_ptr<Expr>> args;
+                    while (match({ TokenType::NEWLINE })) {}  // ★
                     if (!check(TokenType::RPAREN)) {
-                        do { args.push_back(assignment()); } while (match({ TokenType::COMMA }));
+                        do {
+                            while (match({ TokenType::NEWLINE })) {}  // ★
+                            args.push_back(assignment());
+                            while (match({ TokenType::NEWLINE })) {}  // ★
+                        } while (match({ TokenType::COMMA }));
                     }
+                    while (match({ TokenType::NEWLINE })) {}  // ★
                     consume(TokenType::RPAREN, "Parser Error: Expect ')' after method arguments.");
                     expr = std::make_unique<MethodCallExpr>(std::move(expr), field, std::move(args));
                 }
                 else {
-                    // obj.field
                     expr = std::make_unique<DotAccess>(std::move(expr), field);
                 }
             }
@@ -361,13 +371,14 @@ namespace jc {
     // ★ 新增：块 { stmt1; stmt2; ... }
     // =================================================================
     std::unique_ptr<Expr> Parser::parseBlock() {
+        while (match({ TokenType::NEWLINE })) {}  // ★ 跳过 { 前的换行
         consume(TokenType::LBRACE, "Parser Error: Expect '{'.");
         std::vector<std::unique_ptr<Expr>> stmts;
         while (!check(TokenType::RBRACE) && !isAtEnd()) {
+            while (match({ TokenType::SEMICOLON, TokenType::NEWLINE })) {}  // ★
+            if (check(TokenType::RBRACE)) break;
             stmts.push_back(expression());
-            // ★ 修复：分号作为可选分隔符，吃掉所有连续的分号
-            //   这样 for(){} result 和 for(){}; result 都合法
-            while (match({ TokenType::SEMICOLON })) {}
+            while (match({ TokenType::SEMICOLON, TokenType::NEWLINE })) {}  // ★
         }
         consume(TokenType::RBRACE, "Parser Error: Expect '}' after block.");
         return std::make_unique<Block>(std::move(stmts));
@@ -377,16 +388,18 @@ namespace jc {
     // ★ 新增：if (cond) { ... } else { ... }
     // =================================================================
     std::unique_ptr<Expr> Parser::ifExpr() {
+        while (match({ TokenType::NEWLINE })) {}
         consume(TokenType::LPAREN, "Parser Error: Expect '(' after 'if'.");
         auto condition = expression();
         consume(TokenType::RPAREN, "Parser Error: Expect ')' after if condition.");
         auto thenBranch = parseBlock();
 
         std::unique_ptr<Expr> elseBranch = nullptr;
+        while (match({ TokenType::NEWLINE })) {}  // ★ 跳过 } 和 else 之间的换行
         if (match({ TokenType::ELSE })) {
+            while (match({ TokenType::NEWLINE })) {}  // ★ 跳过 else 后的换行
             if (check(TokenType::IF)) {
-                // else if 链：递归解析下一个 if
-                advance(); // 消费 'if'
+                advance();
                 elseBranch = ifExpr();
             }
             else {
@@ -400,6 +413,7 @@ namespace jc {
     // ★ 新增：while (cond) { ... }
     // =================================================================
     std::unique_ptr<Expr> Parser::whileExpr() {
+        while (match({ TokenType::NEWLINE })) {}
         consume(TokenType::LPAREN, "Parser Error: Expect '(' after 'while'.");
         auto condition = expression();
         consume(TokenType::RPAREN, "Parser Error: Expect ')' after while condition.");
@@ -411,6 +425,7 @@ namespace jc {
     // ★ 新增：for (init; cond; update) { ... }
     // =================================================================
     std::unique_ptr<Expr> Parser::forExpr() {
+        while (match({ TokenType::NEWLINE })) {}
         consume(TokenType::LPAREN, "Parser Error: Expect '(' after 'for'.");
 
         // ★ 解构 for-in: for ([a, b, ...] in iterable)
@@ -526,11 +541,10 @@ namespace jc {
         if (match({ TokenType::BREAK }))    return std::make_unique<BreakExpr>();
         if (match({ TokenType::CONTINUE })) return std::make_unique<ContinueExpr>();
         if (match({ TokenType::RETURN })) {
-            // return 后面可以跟表达式，也可以什么都不跟（裸 return）
-            // 裸 return 的判定：下一个 token 是 } 或 ; 或 EOF
             std::unique_ptr<Expr> value = nullptr;
             if (!check(TokenType::RBRACE) &&
                 !check(TokenType::SEMICOLON) &&
+                !check(TokenType::NEWLINE) &&      // ★ 新增
                 !check(TokenType::END_OF_FILE)) {
                 value = expression();
             }
@@ -542,6 +556,7 @@ namespace jc {
         }
         if (match({ TokenType::TRY })) {
             auto tryBody = parseBlock();
+            while (match({ TokenType::NEWLINE })) {}  // ★ 跳过 } 和 catch 之间的换行
             consume(TokenType::CATCH, "Parser Error: Expect 'catch' after try block.");
             consume(TokenType::LPAREN, "Parser Error: Expect '(' after 'catch'.");
             Token catchName = consume(TokenType::IDENTIFIER, "Parser Error: Expect variable name in catch.");
@@ -581,10 +596,15 @@ namespace jc {
 
         // ★ 裸块 { ... } 或字典字面量 { key: value, ... }
         if (check(TokenType::LBRACE)) {
-            // 快速前瞻：{ 后面是 (IDENTIFIER|STRING|NUMBER) 紧跟 COLON → 字典
-            if (current + 2 < static_cast<int>(tokens.size())) {
-                TokenType first = tokens[current + 1].type;
-                TokenType second = tokens[current + 2].type;
+            // ★ 修改 lookahead：跳过 { 后的 NEWLINE 再检查是否为 dict
+            int peekPos = current + 1;
+            while (peekPos < static_cast<int>(tokens.size()) &&
+                tokens[peekPos].type == TokenType::NEWLINE) {
+                peekPos++;
+            }
+            if (peekPos + 1 < static_cast<int>(tokens.size())) {
+                TokenType first = tokens[peekPos].type;
+                TokenType second = tokens[peekPos + 1].type;
                 if (second == TokenType::COLON &&
                     (first == TokenType::IDENTIFIER || first == TokenType::STRING ||
                         first == TokenType::NUMBER || first == TokenType::FSTRING ||
@@ -755,6 +775,7 @@ namespace jc {
                 if (!currentRow.empty()) matrixElements.push_back(std::move(currentRow));
             }
 
+            while (match({ TokenType::NEWLINE })) {}
             consume(TokenType::RBRACKET, "Parser Error: Expect ']' after matrix structure.");
             if (!matrixElements.empty()) {
                 size_t cols = matrixElements[0].size();
@@ -771,14 +792,16 @@ namespace jc {
         consume(TokenType::LPAREN, "Parser Error: Expect '(' after 'switch'.");
         auto subject = expression();
         consume(TokenType::RPAREN, "Parser Error: Expect ')' after switch expression.");
+        while (match({ TokenType::NEWLINE })) {}  // ★
         consume(TokenType::LBRACE, "Parser Error: Expect '{' to open switch body.");
 
         std::vector<std::pair<std::vector<std::unique_ptr<Expr>>, std::unique_ptr<Expr>>> cases;
         std::unique_ptr<Expr> defaultBody = nullptr;
 
         while (!check(TokenType::RBRACE) && !isAtEnd()) {
+            while (match({ TokenType::SEMICOLON, TokenType::NEWLINE })) {}  // ★
+            if (check(TokenType::RBRACE)) break;
             if (match({ TokenType::CASE })) {
-                // 解析一到多个匹配值：case v1, v2, v3:
                 std::vector<std::unique_ptr<Expr>> values;
                 values.push_back(expression());
                 while (match({ TokenType::COMMA })) {
@@ -787,14 +810,12 @@ namespace jc {
                 consume(TokenType::COLON, "Parser Error: Expect ':' after case value(s).");
                 auto body = parseBlock();
                 cases.push_back({ std::move(values), std::move(body) });
-
-                // 吃掉可选的分号
-                while (match({ TokenType::SEMICOLON })) {}
+                while (match({ TokenType::SEMICOLON, TokenType::NEWLINE })) {}  // ★
             }
             else if (match({ TokenType::DEFAULT })) {
                 consume(TokenType::COLON, "Parser Error: Expect ':' after 'default'.");
                 defaultBody = parseBlock();
-                while (match({ TokenType::SEMICOLON })) {}
+                while (match({ TokenType::SEMICOLON, TokenType::NEWLINE })) {}  // ★
             }
             else {
                 throw std::runtime_error("Parser Error: Expect 'case' or 'default' inside switch.");
@@ -804,26 +825,28 @@ namespace jc {
         consume(TokenType::RBRACE, "Parser Error: Expect '}' to close switch body.");
         return std::make_unique<SwitchExpr>(std::move(subject), std::move(cases), std::move(defaultBody));
     }
-
     // ★ 新增：整个方法
     std::unique_ptr<Expr> Parser::classDefExpr() {
         Token name = consume(TokenType::IDENTIFIER, "Parser Error: Expect class name after 'class'.");
 
-        // ★ 可选继承：class Child extends Parent { ... }
+        // ★ 跳过 class Name 和 extends 之间可能的换行
+        while (match({ TokenType::NEWLINE })) {}
+
         std::string superClassName;
         if (check(TokenType::IDENTIFIER) && peek().lexeme == "extends") {
-            advance(); // consume 'extends'
+            advance();
             Token superToken = consume(TokenType::IDENTIFIER,
                 "Parser Error: Expect parent class name after 'extends'.");
             superClassName = superToken.lexeme;
         }
 
+        while (match({ TokenType::NEWLINE })) {}  // ★
         consume(TokenType::LBRACE, "Parser Error: Expect '{' after class name.");
 
         std::vector<ClassDefExpr::MethodDef> methods;
 
         while (!check(TokenType::RBRACE) && !isAtEnd()) {
-            while (match({ TokenType::SEMICOLON })) {}
+            while (match({ TokenType::SEMICOLON, TokenType::NEWLINE })) {}  // ★
             if (check(TokenType::RBRACE)) break;
 
             Token methodName = consume(TokenType::IDENTIFIER,
@@ -862,11 +885,12 @@ namespace jc {
 
             std::string rawBody;
             for (int i = bodyStart; i < bodyEnd; ++i) {
+                if (tokens[i].type == TokenType::NEWLINE) continue;  // ★ 跳过 NEWLINE
                 if (tokens[i].type == TokenType::STRING)
                     rawBody += "\"" + tokens[i].lexeme + "\"";
                 else
                     rawBody += tokens[i].lexeme;
-                if (i < bodyEnd - 1) rawBody += " ";
+                if (i < bodyEnd - 1 && tokens[i + 1].type != TokenType::NEWLINE) rawBody += " ";
             }
 
             methods.push_back(ClassDefExpr::MethodDef{
@@ -878,7 +902,7 @@ namespace jc {
                 std::shared_ptr<Expr>(body.release())
                 });
 
-            while (match({ TokenType::SEMICOLON })) {}
+            while (match({ TokenType::SEMICOLON, TokenType::NEWLINE })) {}  // ★
         }
 
         consume(TokenType::RBRACE, "Parser Error: Expect '}' after class body.");
@@ -989,6 +1013,7 @@ namespace jc {
                     names.push_back(consume(TokenType::IDENTIFIER,
                         "Parser Error: Expect variable name after ',' in destructuring."));
                 }
+                while (match({ TokenType::NEWLINE })) {}  // ★
                 consume(TokenType::RBRACKET,
                     "Parser Error: Expect ']' after destructuring variables.");
                 consume(TokenType::IN,
@@ -1027,32 +1052,36 @@ namespace jc {
         std::vector<std::pair<std::unique_ptr<Expr>, std::unique_ptr<Expr>>> entries;
 
         while (!check(TokenType::RBRACE) && !isAtEnd()) {
-            // ★ 解析 key
+            while (match({ TokenType::NEWLINE })) {}  // ★ 跳过前导换行
+            if (check(TokenType::RBRACE)) break;
+
             std::unique_ptr<Expr> key;
             if (check(TokenType::IDENTIFIER) &&
                 current + 1 < static_cast<int>(tokens.size()) &&
                 tokens[current + 1].type == TokenType::COLON) {
-                // 裸标识符 → 自动当作字符串字面量（JavaScript 风格）
                 Token idTok = advance();
                 key = std::make_unique<Literal>(idTok.lexeme, true);
             }
             else {
-                // 其他情况：字符串、数字等表达式（求值后转字符串）
                 key = ternary();
             }
 
             consume(TokenType::COLON, "Parser Error: Expect ':' after dict key.");
 
-            // ★ 解析 value（用 ternary 避免 = 被当成赋值）
             auto value = ternary();
 
             entries.push_back({ std::move(key), std::move(value) });
 
-            if (!match({ TokenType::COMMA })) break;
-            // 允许尾部逗号
+            // ★ 接受逗号或换行作为分隔
+            if (!match({ TokenType::COMMA })) {
+                while (match({ TokenType::NEWLINE })) {}  // ★
+                break;
+            }
+            while (match({ TokenType::NEWLINE })) {}  // ★ 逗号后的换行
             if (check(TokenType::RBRACE)) break;
         }
 
+        while (match({ TokenType::NEWLINE })) {}  // ★ 最终 } 前的换行
         consume(TokenType::RBRACE, "Parser Error: Expect '}' after dict literal.");
         return std::make_unique<DictLiteral>(std::move(entries));
     }

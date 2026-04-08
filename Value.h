@@ -754,7 +754,7 @@ namespace jc {
             return std::visit([](auto&& arg) -> std::string {
                 using T = std::decay_t<decltype(arg)>;
 
-                if constexpr (std::is_same_v<T, std::monostate>) { return "0"; }
+                if constexpr (std::is_same_v<T, std::monostate>) { return "none()"; }
                 else if constexpr (std::is_same_v<T, double>) {
                     std::ostringstream oss;
                     oss << std::setprecision(16) << arg;
@@ -837,7 +837,7 @@ namespace jc {
                 else if constexpr (std::is_same_v<T, SuperProxyPtr>) {
                     return "\"<super>\"";
                 }
-                else { return "0"; }
+                else { return "none()"; }
                 }, data);
         }
 

@@ -23,11 +23,14 @@ namespace jc {
             std::vector<Local> locals;
             int maxLocals = 0;                  // ★ 新增：跟踪该函数所使用的最大局部变量数
             std::set<std::string> globalNames;
+            int tryDepth = 0;
         };
         struct LoopInfo {
             int loopStart;
             std::vector<int> breakJumps;
+            std::vector<int> continueJumps;   // ★ 新增
             int scopeDepth;
+            int tryDepth;
         };
         std::vector<LoopInfo> loopStack;
 

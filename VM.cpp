@@ -157,6 +157,7 @@ namespace jc {
         globals["I"] = Value(Complex(0.0, 1.0));
         globals["true"] = Value(1.0);
         globals["false"] = Value(0.0);
+        globals["none"] = Value::none();
 
         registerBuiltin("__vm_delete__", [this](const std::vector<Value>& args) -> Value {
             if (args.size() != 1 || !std::holds_alternative<std::string>(args[0].data))
@@ -264,6 +265,10 @@ namespace jc {
         auto savedRefWritebacks = pendingRefWritebacks;
         pendingRefWritebacks.clear();
 
+        // ★ 核心修复：记录调用前的真实物理栈和帧大小，以便在崩溃逃逸时完美回滚！
+        int originalStackSize = static_cast<int>(stack.size());
+        int originalFramesSize = static_cast<int>(frames.size());
+
         // 压入实际传入的参数
         for (const auto& arg : args)
             push(arg);
@@ -292,9 +297,15 @@ namespace jc {
         catch (...) {
             currentTargetFrameDepth = savedTargetFrameDepth;
             pendingRefWritebacks = savedRefWritebacks;
+
+            // ★ 完美回滚清理：将留在物理内存中、属于这个已崩溃函数的局部变量遗体全数弹栈销毁！
+            frames.resize(originalFramesSize);
+            stack.resize(originalStackSize);
+
             throw;
         }
 
+        // 恢复原有 writeback 等代码逻辑
         auto myRefWritebacks = pendingRefWritebacks;
 
         currentTargetFrameDepth = savedTargetFrameDepth;
@@ -614,9 +625,13 @@ namespace jc {
                         nullptr
                     );
 
-                    // ★ 核心改动：不再将闭包逻辑全部塞向 C++ 回调引发嵌套，记录它是字节码！
                     closure->compiledFnIndex = idx;
                     if (captures) {
+                        for (size_t i = 0; i < fn->upvalues.size(); ++i) {
+                            if (fn->upvalues[i].name == fn->name) {
+                                (*captures)[i] = Value(closure);
+                            }
+                        }
                         closure->capturedEnv = std::make_any<std::shared_ptr<std::vector<Value>>>(captures);
                     }
 
@@ -1104,7 +1119,6 @@ namespace jc {
                     Value result = pop();
                     int base = frame().stackBase;
                     std::string fnName = frame().function->name;
-
                     pendingRefWritebacks.clear();
                     const auto& refFlags = frame().function->paramIsRef;
                     if (!refFlags.empty()) {
@@ -1116,6 +1130,11 @@ namespace jc {
                                 }
                             }
                         }
+                    }
+
+                    while (!exceptionHandlers.empty() &&
+                        exceptionHandlers.back().frameIndex == static_cast<int>(frames.size()) - 1) {
+                        exceptionHandlers.pop_back();
                     }
 
                     frames.pop_back();
@@ -1194,7 +1213,15 @@ namespace jc {
                         std::pair<bool, int> end,
                         std::pair<bool, int> step) -> std::vector<int> {
                             int sp = step.first ? step.second : 1;
-                            if (sp == 0) throw std::runtime_error("VM Error: Slice step cannot be zero.");
+
+                            // ★ 点索引标记：step 被显式设置为 0
+                            if (step.first && sp == 0) {
+                                int idx = start.first ? start.second : 0;
+                                if (idx < 0) idx = dimSize + idx;
+                                if (idx < 0 || idx >= dimSize)
+                                    throw std::out_of_range("VM Error: Index out of bounds.");
+                                return { idx };
+                            }
 
                             int st, en;
                             if (sp > 0) {
@@ -1858,7 +1885,16 @@ namespace jc {
                         std::pair<bool, int> end,
                         std::pair<bool, int> step) -> std::vector<int> {
                             int sp = step.first ? step.second : 1;
-                            if (sp == 0) throw std::runtime_error("VM Error: Slice step cannot be zero.");
+
+                            // ★ 点索引标记：step 被显式设置为 0
+                            if (step.first && sp == 0) {
+                                int idx = start.first ? start.second : 0;
+                                if (idx < 0) idx = dimSize + idx;
+                                if (idx < 0 || idx >= dimSize)
+                                    throw std::out_of_range("VM Error: Index out of bounds.");
+                                return { idx };
+                            }
+
                             int st, en;
                             if (sp > 0) {
                                 st = start.first ? start.second : 0;
@@ -1868,8 +1904,10 @@ namespace jc {
                                 st = start.first ? start.second : dimSize - 1;
                                 en = end.first ? end.second : -1;
                             }
+
                             if (st < 0) st = dimSize + st;
                             if (en < 0 && end.first) en = dimSize + en;
+
                             if (sp > 0) {
                                 st = std::max(0, std::min(dimSize, st));
                                 en = std::max(0, std::min(dimSize, en));
@@ -1878,9 +1916,14 @@ namespace jc {
                                 st = std::max(-1, std::min(dimSize - 1, st));
                                 en = std::max(-1, std::min(dimSize - 1, en));
                             }
+
                             std::vector<int> ids;
-                            if (sp > 0) { for (int i = st; i < en; i += sp) ids.push_back(i); }
-                            else { for (int i = st; i > en; i += sp) ids.push_back(i); }
+                            if (sp > 0) {
+                                for (int i = st; i < en; i += sp) ids.push_back(i);
+                            }
+                            else {
+                                for (int i = st; i > en; i += sp) ids.push_back(i);
+                            }
                             return ids;
                         };
 
@@ -1903,20 +1946,39 @@ namespace jc {
                                 if (m.getRows() == 1) {
                                     for (int id : ids) m(0, id) = v;
                                 }
-                                else {
+                                else if (m.getCols() == 1) {
                                     for (int id : ids) m(id, 0) = v;
+                                }
+                                else {
+                                    // ★ 广播到这几行的所有列！
+                                    for (int id : ids)
+                                        for (int j = 0; j < m.getCols(); ++j) m(id, j) = v;
                                 }
                             }
                             else if (std::holds_alternative<RealMatrix>(val.data)) {
                                 const auto& src = std::get<RealMatrix>(val.data);
                                 auto srcFlat = src.rawData();
-                                if (static_cast<int>(srcFlat.size()) != static_cast<int>(ids.size()))
-                                    throw std::runtime_error("VM Error: Slice assignment size mismatch.");
-                                if (m.getRows() == 1) {
-                                    for (size_t k = 0; k < ids.size(); ++k) m(0, ids[k]) = srcFlat[k];
+
+                                if (m.getRows() == 1 || m.getCols() == 1) {
+                                    // 纯向量赋值
+                                    if (static_cast<int>(srcFlat.size()) != static_cast<int>(ids.size()))
+                                        throw std::runtime_error("VM Error: Slice assignment size mismatch.");
+                                    if (m.getRows() == 1) {
+                                        for (size_t k = 0; k < ids.size(); ++k) m(0, ids[k]) = srcFlat[k];
+                                    }
+                                    else {
+                                        for (size_t k = 0; k < ids.size(); ++k) m(ids[k], 0) = srcFlat[k];
+                                    }
                                 }
                                 else {
-                                    for (size_t k = 0; k < ids.size(); ++k) m(ids[k], 0) = srcFlat[k];
+                                    // 2D 矩阵的单维整行赋值（M[0:1] 意味着替换第0行的所有列）
+                                    if (static_cast<int>(srcFlat.size()) != static_cast<int>(ids.size()) * m.getCols())
+                                        throw std::runtime_error("VM Error: Slice assignment size mismatch for matrix row.");
+                                    for (size_t k = 0; k < ids.size(); ++k) {
+                                        for (int j = 0; j < m.getCols(); ++j) {
+                                            m(ids[k], j) = srcFlat[k * m.getCols() + j];
+                                        }
+                                    }
                                 }
                             }
                             else {
@@ -1954,13 +2016,25 @@ namespace jc {
                             auto ids = buildSliceIndices(n, start, end, step);
                             if (std::holds_alternative<ComplexMatrix>(val.data)) {
                                 auto srcFlat = std::get<ComplexMatrix>(val.data).rawData();
-                                if (static_cast<int>(srcFlat.size()) != static_cast<int>(ids.size()))
-                                    throw std::runtime_error("VM Error: Slice assignment size mismatch.");
-                                if (m.getRows() == 1) {
-                                    for (size_t k = 0; k < ids.size(); ++k) m(0, ids[k]) = srcFlat[k];
+
+                                if (m.getRows() == 1 || m.getCols() == 1) {
+                                    if (static_cast<int>(srcFlat.size()) != static_cast<int>(ids.size()))
+                                        throw std::runtime_error("VM Error: Slice assignment size mismatch.");
+                                    if (m.getRows() == 1) {
+                                        for (size_t k = 0; k < ids.size(); ++k) m(0, ids[k]) = srcFlat[k];
+                                    }
+                                    else {
+                                        for (size_t k = 0; k < ids.size(); ++k) m(ids[k], 0) = srcFlat[k];
+                                    }
                                 }
                                 else {
-                                    for (size_t k = 0; k < ids.size(); ++k) m(ids[k], 0) = srcFlat[k];
+                                    if (static_cast<int>(srcFlat.size()) != static_cast<int>(ids.size()) * m.getCols())
+                                        throw std::runtime_error("VM Error: Slice assignment size mismatch for matrix row.");
+                                    for (size_t k = 0; k < ids.size(); ++k) {
+                                        for (int j = 0; j < m.getCols(); ++j) {
+                                            m(ids[k], j) = srcFlat[k * m.getCols() + j];
+                                        }
+                                    }
                                 }
                             }
                             else {
@@ -1968,8 +2042,12 @@ namespace jc {
                                 if (m.getRows() == 1) {
                                     for (int id : ids) m(0, id) = cv;
                                 }
-                                else {
+                                else if (m.getCols() == 1) {
                                     for (int id : ids) m(id, 0) = cv;
+                                }
+                                else {
+                                    for (int id : ids)
+                                        for (int j = 0; j < m.getCols(); ++j) m(id, j) = cv;
                                 }
                             }
                         }
@@ -1979,24 +2057,41 @@ namespace jc {
                             auto ids = buildSliceIndices(n, start, end, step);
                             if (std::holds_alternative<StringMatrix>(val.data)) {
                                 auto srcFlat = std::get<StringMatrix>(val.data).rawData();
-                                if (static_cast<int>(srcFlat.size()) != static_cast<int>(ids.size()))
-                                    throw std::runtime_error("VM Error: Slice assignment size mismatch.");
-                                if (m.getRows() == 1) {
-                                    for (size_t k = 0; k < ids.size(); ++k) m(0, ids[k]) = srcFlat[k];
+
+                                if (m.getRows() == 1 || m.getCols() == 1) {
+                                    if (static_cast<int>(srcFlat.size()) != static_cast<int>(ids.size()))
+                                        throw std::runtime_error("VM Error: Slice assignment size mismatch.");
+                                    if (m.getRows() == 1) {
+                                        for (size_t k = 0; k < ids.size(); ++k) m(0, ids[k]) = srcFlat[k];
+                                    }
+                                    else {
+                                        for (size_t k = 0; k < ids.size(); ++k) m(ids[k], 0) = srcFlat[k];
+                                    }
                                 }
                                 else {
-                                    for (size_t k = 0; k < ids.size(); ++k) m(ids[k], 0) = srcFlat[k];
+                                    if (static_cast<int>(srcFlat.size()) != static_cast<int>(ids.size()) * m.getCols())
+                                        throw std::runtime_error("VM Error: Slice assignment size mismatch for matrix row.");
+                                    for (size_t k = 0; k < ids.size(); ++k) {
+                                        for (int j = 0; j < m.getCols(); ++j) {
+                                            m(ids[k], j) = srcFlat[k * m.getCols() + j];
+                                        }
+                                    }
                                 }
                             }
                             else {
                                 std::string sv;
                                 if (std::holds_alternative<std::string>(val.data)) sv = std::get<std::string>(val.data);
                                 else { std::ostringstream oss; oss << val; sv = oss.str(); }
+
                                 if (m.getRows() == 1) {
                                     for (int id : ids) m(0, id) = sv;
                                 }
-                                else {
+                                else if (m.getCols() == 1) {
                                     for (int id : ids) m(id, 0) = sv;
+                                }
+                                else {
+                                    for (int id : ids)
+                                        for (int j = 0; j < m.getCols(); ++j) m(id, j) = sv;
                                 }
                             }
                         }
@@ -2020,49 +2115,81 @@ namespace jc {
                             int dstR = static_cast<int>(rIds.size());
                             int dstC = static_cast<int>(cIds.size());
 
-                            using MatType = std::decay_t<decltype(m)>;
                             using ElemType = std::decay_t<decltype(m(0, 0))>;
 
-                            bool isScalar = false;
-                            ElemType scalarVal{};
-                            if constexpr (std::is_same_v<ElemType, double>) {
-                                if (std::holds_alternative<double>(val.data) ||
-                                    std::holds_alternative<BigInt>(val.data) ||
-                                    std::holds_alternative<Fraction>(val.data)) {
-                                    isScalar = true;
-                                    scalarVal = val.asDouble();
-                                }
-                            }
-                            else if constexpr (std::is_same_v<ElemType, Complex>) {
-                                try { scalarVal = val.asComplex(); isScalar = true; }
-                                catch (...) {}
-                                if (std::holds_alternative<ComplexMatrix>(val.data)) isScalar = false;
-                            }
-                            else if constexpr (std::is_same_v<ElemType, std::string>) {
-                                if (std::holds_alternative<std::string>(val.data)) {
-                                    isScalar = true;
-                                    scalarVal = std::get<std::string>(val.data);
-                                }
-                            }
+                            // 检测右值是否为一个矩阵
+                            bool isRhsMat = std::holds_alternative<RealMatrix>(val.data) ||
+                                std::holds_alternative<ComplexMatrix>(val.data) ||
+                                std::holds_alternative<StringMatrix>(val.data);
 
-                            if (isScalar) {
+                            if (isRhsMat) {
+                                int srcR = 0, srcC = 0;
+                                if (std::holds_alternative<RealMatrix>(val.data)) {
+                                    srcR = std::get<RealMatrix>(val.data).getRows();
+                                    srcC = std::get<RealMatrix>(val.data).getCols();
+                                }
+                                else if (std::holds_alternative<ComplexMatrix>(val.data)) {
+                                    srcR = std::get<ComplexMatrix>(val.data).getRows();
+                                    srcC = std::get<ComplexMatrix>(val.data).getCols();
+                                }
+                                else {
+                                    srcR = std::get<StringMatrix>(val.data).getRows();
+                                    srcC = std::get<StringMatrix>(val.data).getCols();
+                                }
+
+                                if (srcR != dstR || srcC != dstC)
+                                    throw std::runtime_error("VM Error: Slice assignment size mismatch.");
+
+                                for (int i = 0; i < dstR; ++i) {
+                                    for (int j = 0; j < dstC; ++j) {
+                                        if constexpr (std::is_same_v<ElemType, double>) {
+                                            if (std::holds_alternative<RealMatrix>(val.data))
+                                                m(rIds[i], cIds[j]) = std::get<RealMatrix>(val.data)(i, j);
+                                            else
+                                                throw std::runtime_error("VM Error: Cannot assign complex/string matrix to real matrix slice.");
+                                        }
+                                        else if constexpr (std::is_same_v<ElemType, Complex>) {
+                                            if (std::holds_alternative<ComplexMatrix>(val.data))
+                                                m(rIds[i], cIds[j]) = std::get<ComplexMatrix>(val.data)(i, j);
+                                            else if (std::holds_alternative<RealMatrix>(val.data))
+                                                m(rIds[i], cIds[j]) = Complex(std::get<RealMatrix>(val.data)(i, j));
+                                            else
+                                                throw std::runtime_error("VM Error: Cannot assign string matrix to complex matrix slice.");
+                                        }
+                                        else if constexpr (std::is_same_v<ElemType, std::string>) {
+                                            std::ostringstream oss;
+                                            if (std::holds_alternative<StringMatrix>(val.data))
+                                                oss << std::get<StringMatrix>(val.data)(i, j);
+                                            else if (std::holds_alternative<ComplexMatrix>(val.data))
+                                                oss << Value(std::get<ComplexMatrix>(val.data)(i, j));
+                                            else
+                                                oss << Value(std::get<RealMatrix>(val.data)(i, j));
+                                            m(rIds[i], cIds[j]) = oss.str();
+                                        }
+                                    }
+                                }
+                            }
+                            else {
+                                // 万能标量广播 (Scalar Broadcast)
+                                ElemType scalarVal{};
+                                if constexpr (std::is_same_v<ElemType, double>) {
+                                    scalarVal = val.asDouble(); // 可承接 int, double, fraction 等
+                                }
+                                else if constexpr (std::is_same_v<ElemType, Complex>) {
+                                    scalarVal = val.asComplex();
+                                }
+                                else if constexpr (std::is_same_v<ElemType, std::string>) {
+                                    if (std::holds_alternative<std::string>(val.data))
+                                        scalarVal = std::get<std::string>(val.data);
+                                    else {
+                                        std::ostringstream oss; oss << val; scalarVal = oss.str();
+                                    }
+                                }
+
                                 for (int ri : rIds)
                                     for (int ci : cIds)
                                         m(ri, ci) = scalarVal;
-                                return;
                             }
-
-                            if (std::holds_alternative<MatType>(val.data)) {
-                                const auto& src = std::get<MatType>(val.data);
-                                if (src.getRows() != dstR || src.getCols() != dstC)
-                                    throw std::runtime_error("VM Error: Slice assignment size mismatch.");
-                                for (int i = 0; i < dstR; ++i)
-                                    for (int j = 0; j < dstC; ++j)
-                                        m(rIds[i], cIds[j]) = src(i, j);
-                                return;
-                            }
-
-                            throw std::runtime_error("VM Error: Type mismatch in matrix slice assignment.");
                             };
 
                         if (std::holds_alternative<RealMatrix>(obj.data)) {
@@ -2276,15 +2403,28 @@ namespace jc {
 
                         if (std::holds_alternative<RealMatrix>(obj.data)) {
                             auto& m = std::get<RealMatrix>(obj.data);
-                            if (std::holds_alternative<Complex>(val.data)) {
+                            if (std::holds_alternative<Complex>(val.data) || std::holds_alternative<ComplexMatrix>(val.data)) {
                                 ComplexMatrix cm = m.toComplexMatrix();
-                                if (m.getRows() == 1) {
+                                if (cm.getRows() == 1) {
                                     if (i < 0) i = cm.getCols() + i;
                                     cm(0, i) = val.asComplex();
                                 }
-                                else if (m.getCols() == 1) {
+                                else if (cm.getCols() == 1) {
                                     if (i < 0) i = cm.getRows() + i;
                                     cm(i, 0) = val.asComplex();
+                                }
+                                else {
+                                    if (i < 0) i = cm.getRows() + i;
+                                    if (i < 0 || i >= cm.getRows()) throw std::out_of_range("VM Error: Row index out of bounds.");
+                                    if (std::holds_alternative<ComplexMatrix>(val.data)) {
+                                        auto srcFlat = std::get<ComplexMatrix>(val.data).rawData();
+                                        if (static_cast<int>(srcFlat.size()) != cm.getCols()) throw std::runtime_error("VM Error: Row assignment size mismatch.");
+                                        for (int j = 0; j < cm.getCols(); ++j) cm(i, j) = srcFlat[j];
+                                    }
+                                    else {
+                                        Complex cv = val.asComplex();
+                                        for (int j = 0; j < cm.getCols(); ++j) cm(i, j) = cv;
+                                    }
                                 }
                                 obj = Value(cm);
                             }
@@ -2296,6 +2436,22 @@ namespace jc {
                                 else if (m.getCols() == 1) {
                                     if (i < 0) i = m.getRows() + i;
                                     m(i, 0) = val.asDouble();
+                                }
+                                else {
+                                    // ★ 2D 矩阵整行赋值 / 广播
+                                    if (i < 0) i = m.getRows() + i;
+                                    if (i < 0 || i >= m.getRows()) throw std::out_of_range("VM Error: Row index out of bounds.");
+                                    if (std::holds_alternative<RealMatrix>(val.data)) {
+                                        const auto& src = std::get<RealMatrix>(val.data);
+                                        auto srcFlat = src.rawData();
+                                        if (static_cast<int>(srcFlat.size()) != m.getCols())
+                                            throw std::runtime_error("VM Error: Row assignment size mismatch.");
+                                        for (int j = 0; j < m.getCols(); ++j) m(i, j) = srcFlat[j];
+                                    }
+                                    else {
+                                        double dVal = val.asDouble();
+                                        for (int j = 0; j < m.getCols(); ++j) m(i, j) = dVal;
+                                    }
                                 }
                             }
                         }
@@ -2309,23 +2465,71 @@ namespace jc {
                                 if (i < 0) i = m.getRows() + i;
                                 m(i, 0) = val.asComplex();
                             }
+                            else {
+                                // ★ 2D 复数矩阵整行赋值 / 广播
+                                if (i < 0) i = m.getRows() + i;
+                                if (i < 0 || i >= m.getRows()) throw std::out_of_range("VM Error: Row index out of bounds.");
+
+                                if (std::holds_alternative<ComplexMatrix>(val.data)) {
+                                    auto srcFlat = std::get<ComplexMatrix>(val.data).rawData();
+                                    if (static_cast<int>(srcFlat.size()) != m.getCols()) throw std::runtime_error("VM Error: Row assignment size mismatch.");
+                                    for (int j = 0; j < m.getCols(); ++j) m(i, j) = srcFlat[j];
+                                }
+                                // ★ 补足支持对复数矩阵写入实值行向量：
+                                else if (std::holds_alternative<RealMatrix>(val.data)) {
+                                    auto srcFlat = std::get<RealMatrix>(val.data).rawData();
+                                    if (static_cast<int>(srcFlat.size()) != m.getCols()) throw std::runtime_error("VM Error: Row assignment size mismatch.");
+                                    for (int j = 0; j < m.getCols(); ++j) m(i, j) = Complex(srcFlat[j], 0.0);
+                                }
+                                else {
+                                    // 标量广播
+                                    Complex cv = val.asComplex();
+                                    for (int j = 0; j < m.getCols(); ++j) m(i, j) = cv;
+                                }
+                            }
                         }
                         else if (std::holds_alternative<StringMatrix>(obj.data)) {
                             auto& m = std::get<StringMatrix>(obj.data);
-                            std::string s;
-                            if (std::holds_alternative<std::string>(val.data))
-                                s = std::get<std::string>(val.data);
-                            else {
-                                std::ostringstream oss; oss << val;
-                                s = oss.str();
-                            }
+
                             if (m.getRows() == 1) {
                                 if (i < 0) i = m.getCols() + i;
-                                m(0, i) = s;
+                                if (std::holds_alternative<std::string>(val.data)) m(0, i) = std::get<std::string>(val.data);
+                                else { std::ostringstream oss; oss << val; m(0, i) = oss.str(); }
                             }
                             else if (m.getCols() == 1) {
                                 if (i < 0) i = m.getRows() + i;
-                                m(i, 0) = s;
+                                if (std::holds_alternative<std::string>(val.data)) m(i, 0) = std::get<std::string>(val.data);
+                                else { std::ostringstream oss; oss << val; m(i, 0) = oss.str(); }
+                            }
+                            else {
+                                // ★ 2D 字符串矩阵整行赋值 / 广播
+                                if (i < 0) i = m.getRows() + i;
+                                if (i < 0 || i >= m.getRows()) throw std::out_of_range("VM Error: Row index out of bounds.");
+
+                                if (std::holds_alternative<StringMatrix>(val.data)) {
+                                    auto srcFlat = std::get<StringMatrix>(val.data).rawData();
+                                    if (static_cast<int>(srcFlat.size()) != m.getCols()) throw std::runtime_error("VM Error: Row assignment size mismatch.");
+                                    for (int j = 0; j < m.getCols(); ++j) m(i, j) = srcFlat[j];
+                                }
+                                // ★ 将任何实数矩阵映射到字符串行中
+                                else if (std::holds_alternative<RealMatrix>(val.data)) {
+                                    auto srcFlat = std::get<RealMatrix>(val.data).rawData();
+                                    if (static_cast<int>(srcFlat.size()) != m.getCols()) throw std::runtime_error("VM Error: Row assignment size mismatch.");
+                                    for (int j = 0; j < m.getCols(); ++j) { std::ostringstream oss; oss << Value(srcFlat[j]); m(i, j) = oss.str(); }
+                                }
+                                // ★ 将任何复数矩阵映射到字符串行中
+                                else if (std::holds_alternative<ComplexMatrix>(val.data)) {
+                                    auto srcFlat = std::get<ComplexMatrix>(val.data).rawData();
+                                    if (static_cast<int>(srcFlat.size()) != m.getCols()) throw std::runtime_error("VM Error: Row assignment size mismatch.");
+                                    for (int j = 0; j < m.getCols(); ++j) { std::ostringstream oss; oss << Value(srcFlat[j]); m(i, j) = oss.str(); }
+                                }
+                                else {
+                                    // 标量广播
+                                    std::string s;
+                                    if (std::holds_alternative<std::string>(val.data)) s = std::get<std::string>(val.data);
+                                    else { std::ostringstream oss; oss << val; s = oss.str(); }
+                                    for (int j = 0; j < m.getCols(); ++j) m(i, j) = s;
+                                }
                             }
                         }
                         else if (std::holds_alternative<List>(obj.data)) {
