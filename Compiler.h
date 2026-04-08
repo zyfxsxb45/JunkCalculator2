@@ -6,6 +6,7 @@
 #include <map>
 #include <string>
 #include <vector>
+#include <set>
 
 namespace jc {
 
@@ -17,15 +18,16 @@ namespace jc {
     class Compiler : public ExprVisitor {
     private:
         struct CompilerState {
-            CompiledFunction* function = nullptr;  // ★ 初始化
+            CompiledFunction* function = nullptr;
             int scopeDepth = 0;
             std::vector<Local> locals;
+            int maxLocals = 0;                  // ★ 新增：跟踪该函数所使用的最大局部变量数
+            std::set<std::string> globalNames;
         };
-        // ★ 循环追踪（用于 break/continue）
         struct LoopInfo {
-            int loopStart;                // continue 跳转目标
-            std::vector<int> breakJumps;  // break 需要回填的偏移列表
-            int scopeDepth;               // 进入循环时的作用域深度
+            int loopStart;
+            std::vector<int> breakJumps;
+            int scopeDepth;
         };
         std::vector<LoopInfo> loopStack;
 
@@ -57,10 +59,9 @@ namespace jc {
         void compileCompClause(ListCompExpr* expr, size_t clauseIdx);
         void emitDefaultPreamble(const std::vector<std::shared_ptr<Expr>>& defaultExprs, int paramCount);
         int resolveUpvalue(const std::string& name);
-        int resolveUpvalueAt(int level, const std::string& name); // ★ 递归引擎
-        int addUpvalue(int level, const std::string& name,
-            bool isLocal, int index);                  // ★ 注册辅助
-        void emitStoreTarget(Expr* target);  // ★ 新增
+        int resolveUpvalueAt(int level, const std::string& name);
+        int addUpvalue(int level, const std::string& name, bool isLocal, int index);
+        void emitStoreTarget(Expr* target);
 
     public:
         Chunk compile(Expr* ast);
@@ -68,7 +69,6 @@ namespace jc {
         const std::vector<std::shared_ptr<CompiledFunction>>& getCompiledFunctions() const { return compiledFunctions; }
         void setFunctionIndexOffset(int offset) { functionIndexOffset = offset; }
 
-        // Visitor 接口实现
         std::any visitLiteral(Literal* expr) override;
         std::any visitVariable(Variable* expr) override;
         std::any visitAssign(Assign* expr) override;
@@ -80,7 +80,6 @@ namespace jc {
         std::any visitWhileExpr(WhileExpr* expr) override;
         std::any visitForExpr(ForExpr* expr) override;
 
-        // 未实现的暂时抛错
         std::any visitMatrixNode(MatrixNode*) override;
         std::any visitFunctionDef(FunctionDef*) override;
         std::any visitBreakExpr(BreakExpr*) override;
@@ -111,6 +110,5 @@ namespace jc {
         std::any visitSliceExpr(SliceExpr*) override;
     };
 
-} // namespace jc
-
-#endif // JC2_COMPILER_H
+}
+#endif
