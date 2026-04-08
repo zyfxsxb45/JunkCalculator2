@@ -1,144 +1,98 @@
-﻿# Junk Calculator 2.0
+﻿# Junk Calculator 2.2.0
 
-A full-featured scripting language and scientific calculator built from scratch in C++20.
+A scripting language and scientific calculator built from scratch in C++20. It features a custom bytecode compiler and a stack-based virtual machine, operating without any third-party dependencies.
 
-**Developed by Yu Liangyang, Tsinghua University**
-
----
-
-## Features
-
-### Language
-
-- Dynamic typing with 16+ value types (double, BigInt, Fraction, Complex, Matrix, String, Dict, List, Class instances...)
-- Classes with single inheritance, super, operator overloading (20+ dunder methods)
-- Closures, lambdas, default parameters, ref parameters
-- Control flow: if/else, while, for, for-in, switch/case, break/continue/return, try/catch/throw
-- Destructuring assignment: `[a, b] = [b, a]`
-- List comprehension: `[x^2 for x in range(10) if x % 2 == 0]`
-- Pipe operator: `data |> sort |> unique |> reverse`
-- F-strings: `f"Hello, {name}! Pi = {PI::.4f}"`
-- Raw strings: `r"TAG(content with "quotes")TAG"`
-- Imaginary literals: `3 + 4i` (lexical, survives variable override)
-- Dict literals: `{name: "Alice", age: 30}`
-- Matrix slicing: `A[1:3, :]`, `A[::-1, :]`
-- Block matrix assembly: `[A, B; C, D]`
-
-### Math Engine
-
-- Arbitrary-precision integers (base-10^9 compressed BigInt)
-- Exact fractions (auto-reduced via GCD)
-- Complex numbers with full transcendental function support
-- Matrix algebra: determinant, inverse, eigenvalues (Hessenberg QR), LU/QR decomposition
-- Matrix functions: exp, log, sin, cos, sqrt, power (Taylor + diagonalization)
-- Linear equation solver (unique / infinite / least-squares)
-- Polynomial solver (closed-form degree 1-4)
-- Numerical calculus: differentiation, integration (Simpson), root finding (Newton)
-- Number theory: primality (Miller-Rabin), factorization, Euler totient, Mobius, etc.
-- Streaming prime engine: 4MB paged buffer, anchor index for O(1) lookup
-
-### Native Modules (C++)
-
-    import "image"    // BMP image generation and function plotting
-    import "prob"     // 11 probability distributions + hypothesis tests
-    import "json"     // JSON encode / decode / pretty-print
-
-### Standard Libraries (JC2)
-
-    import "regex"    // Backtracking NFA regex engine (pure JC2)
-
-### Tooling
-
-- REPL with ANSI syntax-highlighted output
-- VS Code extension with syntax highlighting and one-click run
-- Script-centric path resolution (imports resolve relative to the script, not CWD)
-- Workspace management: save / load / ls / rm
-- 25-topic help system compiled into the binary
+Developed by Yu Liangyang, Tsinghua University.
 
 ---
 
-## Quick Start
+## Technical Overview
 
-    JC2> 2 + 3
-    5
+### Architecture
+- **Lexer**: Hand-written tokenizer supporting 55+ token types, including string interpolation (`f""`), raw strings with custom delimiters (`r"TAG()TAG"`), and imaginary suffixes (`3i`).
+- **Parser**: Recursive descent parser producing an AST (Abstract Syntax Tree) with 30+ node types. Supports operator precedence, block statements, and destructuring.
+- **Compiler**: AST-to-bytecode compiler (Visitor pattern). Handles lexical scoping, auto-local variable declaration, loop patching, and closure capture (upvalues).
+- **Virtual Machine**: Stack-based bytecode interpreter. Implements late-binding for function calls (`OP_CALL`), exception handling (`OP_TRY_BEGIN`), iterator protocols, and dynamic operator dispatching.
 
-    JC2> A = [1, 2; 3, 4]
-    [1, 2]
-    [3, 4]
+### Language Semantics
+- **Type System**: `std::variant`-backed dynamic typing supporting 16 internal types (double, BigInt, Fraction, Complex, BaseNum, String, RealMatrix, ComplexMatrix, StringMatrix, Dict, List, Function, Class, Instance).
+- **Object-Oriented Programming**: Single inheritance (`extends`), `super` proxy dispatcher, and runtime overriding via 20+ dunder methods (e.g., `__add__`, `__getitem__`).
+- **Control Flow**: `if/else`, `while`, C-style `for`, `for-in` (with array/dict destructuring), `switch/case`, `break/continue/return`.
+- **Error Handling**: `try/catch/throw` block constructs with call-stack unwinding.
+- **Functions**: First-class closures, lambdas `(x) => expr`, default parameters, and `ref` parameter binding for pass-by-reference semantics.
+- **Paradigms**: List comprehensions `[x^2 for x in arr if x > 0]`, pipe operator `|>` for left-to-right evaluation chains, and functional primitives (`map`, `filter`, `reduce`).
 
-    JC2> det(A)
-    -2
+### Math & Number Theory Engine
+- **Arbitrary-Precision**: Base-10^9 compressed `BigInt` layout. Implements high-base long division, GCD/LCM, and modular exponentiation.
+- **Exact Rationals**: `Fraction` type backed by `BigInt` with automatic cross-reduction to prevent intermediate overflow.
+- **Complex Analysis**: Native `Complex` structures with Euler identity implementations for `exp`, `log`, `sin`, `cos`, `sqrt`, and general exponentiation.
+- **Linear Algebra**: `Matrix<T>` template supporting Gaussian-Jordan elimination (with row-based IEEE 754 local scaling bounds), QR decomposition (Modified Gram-Schmidt), LU decomposition (Doolittle partial pivoting), and Eigenvalues (Householder to Hessenberg + Givens QR iteration, O(n³)).
+- **Matrix Calculus**: Matrix power `A^B` calculated via Taylor series expansion and scaling-and-squaring (`exp(B * ln(A))`).
+- **Solvers**: Closed-form polynomial roots over ℂ (degrees 1 through 4), linear equation systems (exact, infinite, or least-squares approximations), and Newton-Raphson single-variable root finding.
+- **Number Theory**: Miller-Rabin primality test, integer factorization. Streaming prime engine utilizing 64KB page buffers and O(1) anchor tracking across disk files.
 
-    JC2> [x^2 for x in range(5)]
-    [0, 1, 4, 9, 16]
-
-    JC2> class Point {
-    ...    init(x, y) = { self.x = x; self.y = y }
-    ...    dist() = sqrt(self.x^2 + self.y^2)
-    ...    __str__() = f"({self.x}, {self.y})"
-    ...  }
-
-    JC2> p = Point(3, 4)
-    <Point {x: 3, y: 4}>
-
-    JC2> p.dist()
-    5
-
-    JC2> f"distance = {p.dist()}"
-    distance = 5
-
-    JC2> [1, 4, 1, 5, 9, 2, 6] |> sort |> unique |> reverse
-    [9, 6, 5, 4, 2, 1]
+### Native Modules & Standard Library
+Native C++ extensions injected directly into the global execution context:
+- `image`: Zero-dependency 24-bit BMP generation, plotting functions, and Bresenham line drawing.
+- `prob`: 11 statistical distributions (PDF, CDF, Quantile via Newton iteration) and hypothesis tests (t-test, Welch, chi-squared).
+- `json`: Recursive serialization/deserialization between JC2 datasets and JSON strings.
+- `regex`: Standard library module (`regex.jc2`) implementing a backtracking NFA pattern matcher.
 
 ---
 
 ## Building
 
-Requires C++20 and CMake 3.15+.
+Requires a C++20 compliant compiler and CMake 3.15+.
 
     cmake -B build -DCMAKE_BUILD_TYPE=Release
     cmake --build build --config Release
 
-The executable is self-contained with no external dependencies.
+*Note: On MSVC, the CMake script enforces `/MT` static linkage and Link Time Code Generation (`/GL`, `/LTCG`) to produce a single, portable executable without external DLL dependencies.*
 
 ---
 
-## Command-Line Usage
+## Command-Line Interface
 
-    JunkCalculator2                    # Interactive REPL
-    JunkCalculator2 script.jc2         # Run a script
-    JunkCalculator2 --run script.jc2   # Run a script (explicit flag)
+    JunkCalculator2                    # Interactive REPL session
+    JunkCalculator2 script.jc2         # Execute a script
+    JunkCalculator2 --run script.jc2   # Execute a script (explicit flag)
+    JunkCalculator2 script.jc2 -d      # Execute and print bytecode disassembly
+    JunkCalculator2 -d                 # REPL session with real-time disassembly
+
+*Script Path Context: The `run` and `import` instructions automatically push the executing script's directory onto a virtual paths stack, ensuring relative I/O (`readFile`, `import`) resolves relative to the current file, not the terminal's working directory.*
 
 ---
 
-## Project Structure
+## Project Layout
 
-    +-- main.cpp                    Entry point, REPL, workspace I/O
-    +-- Lexer.h/cpp                 Tokenizer (55+ token types)
-    +-- Parser.h/cpp                Recursive descent parser (30+ AST nodes)
-    +-- Evaluator.h/cpp             Visitor-pattern tree walker (180+ builtins)
-    +-- Value.h                     Dynamic type system (std::variant)
-    +-- Expr.h                      AST node definitions
-    +-- Token.h                     Token types and utilities
-    +-- Complex.h                   Complex numbers + transcendental functions
-    +-- Matrix.h                    Generic matrix template + linear algebra
-    +-- BigInt.h                    Arbitrary-precision integers + number theory
-    +-- Fraction.h                  Exact rational arithmetic
-    +-- Base.h                      Multi-radix number system + bitwise ops
-    +-- Tolerance.h                 IEEE 754 dynamic floating-point tolerance
-    +-- Image.h                     BMP image generation engine
-    +-- Probability.h               Distribution classes + special functions
-    +-- Highlight.h                 ANSI terminal colorization
-    +-- HelpText.h                  25-topic help system (compile-time embedded)
-    +-- Module.h                    Native C++ module registration framework
-    +-- README.md                   This file
+    +-- main.cpp                    Entry point, CLI parser, and Workspace I/O
+    +-- Lexer.h/cpp                 Tokenizer logic
+    +-- Parser.h/cpp                Recursive descent parser
+    +-- Compiler.h/cpp              AST traversal and Bytecode emitter
+    +-- VM.h/cpp                    Stack-based Virtual Machine execution loop
+    +-- Bytecode.h                  OpCode definitions and Chunk representations
+    +-- BuiltinRegistry.h/cpp       180+ generic & stateless built-in functions
+    +-- Value.h                     std::variant Type System & Callables
+    +-- Expr.h                      AST Object Nodes
+    +-- Token.h                     Lexical Enums
+    +-- Complex.h                   Complex data and polynomial solvers
+    +-- Matrix.h                    Matrix template and Linear Algebra routines
+    +-- BigInt.h                    Large numerals and Number Theory engine
+    +-- Fraction.h                  Rational numeric wrapper
+    +-- Base.h                      Arbitrary-radix data types & bitwise ops
+    +-- Tolerance.h                 IEEE-754 dynamic floating point margins
+    +-- Image.h                     BMP memory buffer class
+    +-- Probability.h               Statistics distributions math backend
+    +-- Highlight.h                 ANSI sequence token colorizer
+    +-- HelpText.h                  Compile-time embedded help topics
+    +-- Module.h                    C++ module mounting macros
     +-- modules/
-    |   +-- json_module.h           JSON serialization native module
-    |   +-- image_module.h          Image engine native module
-    |   +-- prob_module.h           Probability native module
+    |   +-- json_module.h           JSON encode/decode native module
+    |   +-- image_module.h          Image wrapper native module
+    |   +-- prob_module.h           Probability distribution native module
     +-- lib/
-    |   +-- regex.jc2               Regular expression engine (pure JC2)
-    +-- jc2-language/               VS Code extension (syntax + runner)
+    |   +-- regex.jc2               Standard library (NFA Regex)
+    +-- jc2-language/               VS Code Language Support Extension
 
 ---
 

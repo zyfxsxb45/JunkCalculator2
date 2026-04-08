@@ -8,29 +8,35 @@ namespace jc {
 
     const std::map<std::string, std::string> BuiltinHelp = {
         {"main", R"HELP(
-===================== Junk Calculator 2.0 — Help =====================
+=================== Junk Calculator 2.2.0 [VM Edition] — Help ===================
 
   Session Commands
   ────────────────────────────────────────────────────────────────────
     help                  Show this overview
     help <topic>          Dive into a specific topic (see list below)
-    vars                  List every variable currently in memory
     clear                 Wipe all user-defined variables
     exit / quit           Leave the calculator
-    color on / color off   Enable/disable REPL syntax highlighting
+    color on / color off  Enable/disable REPL syntax highlighting
 
   Workspace & Scripts
   ────────────────────────────────────────────────────────────────────
-    save <name>           Snapshot variables + config  → data/<name>.jc2
+    save <name>           Snapshot variables  → data/<name>.jc2
     load <name>           Restore a previously saved workspace
-    workspace             Show current workspace directory
-    workspace <path>      Change workspace directory
-    ls                    List .jc2/.txt/.csv files in workspace
-    ls <path>             List files in specified directory
-    ls *                  List ALL files in workspace
-    ls <path> .csv        List only .csv files in <path>
     run  <file>           Execute a script (sets relative path context)
     import "lib"          Load a library (deduplicates automatically)
+
+    setWorkspace("path")  Change workspace directory (function form)
+    getWorkspace()        Returns current workspace path
+    pwd()                 Print script dir and workspace dir
+    modules()             List available native modules
+
+  Command-Line Usage
+  ────────────────────────────────────────────────────────────────────
+    JunkCalculator2                    Interactive REPL
+    JunkCalculator2 script.jc2         Run a script
+    JunkCalculator2 --run script.jc2   Run a script (explicit flag)
+    JunkCalculator2 script.jc2 -d      Run with bytecode disassembly output
+    JunkCalculator2 -d                 REPL with bytecode disassembly
 
   Topics (type "help <topic>")
   ────────────────────────────────────────────────────────────────────
@@ -47,6 +53,7 @@ namespace jc {
     stat        Descriptive statistics, percentiles, regression
     bigint      Arbitrary-precision integers & number-theoretic functions
     base        Radix conversion, display shells, bitwise operations
+    typecheck   Type predicates (isint, isstring, ismatrix, ...)
     sys         RNG, prime engine, workspace, scripting, colors
     control     if/else, while, for, for-in, switch, break/continue/return
     scope       auto-local, global, const, delete, ref, closures
@@ -70,9 +77,11 @@ namespace jc {
   Quick-Start Cheatsheet
   ────────────────────────────────────────────────────────────────────
     x = 3.14                       assign a real
-    const G = 9.81                 immutable constant
+    const G = 9.81                 immutable constant (delete G to remove)
     z = 3 + 4i                     complex number
+    z = complex(3, 4)              same, via constructor
     A = [1, 2; 3, 4]               2×2 matrix
+    A = matrix(2, 2, 1, 2, 3, 4)   same, via constructor
     A[0, 1] = 99                   in-place modify
     [a, b] = [1, 2]                destructuring assignment
     [x, y] = [y, x]                swap variables
@@ -84,30 +93,34 @@ namespace jc {
     d.a = 99                       dictionary dot operator
     f(x, y = 0) = x + y            function with default parameter
     (x) => x^2                     lambda expression
-    class Dog extends Animal {...} inheritance
+    class Dog extends Animal {...}  inheritance
     p = Point(3, 4)                instance creation
     p.dist()                       method call
     super.init(name)               call parent constructor
     __add__(o) = ...               operator overloading
     10 / 3                         exact fraction → 10/3
+    int(3.7)                       truncate to integer → 3
+    double(frac(1,3))              convert to float → 0.333...
     3 > 2 && !false                comparison + logic
-    x > 0 ? x : -x                 ternary operator
+    x > 0 ? x : -x                ternary operator
     format("x={:.2f}", PI)         string formatting → "x=3.14"
-    f"x = {x}, pi = {PI:.2f}"      string interpolation (f-string)
+    f"x = {x}, pi = {PI::.2f}"    string interpolation (f-string)
     switch (x) { case 1: {...} }   pattern matching
     for ([k, v] in d) { ... }      destructured for-in
     [x^2 for x in range(10)]       list comprehension
     import "math_utils"            load a library
-    try { 1/0 } catch (e) { e }    error handling
+    try { 1/0 } catch (e) { e }   error handling
     // comment                     everything after // is ignored
     resetConst()                   restore PI, E, i, I, true, false
-    delete x                       remove a variable
+    pi()  e()  i()                 constant factory functions (always available)
+    isint(x)  isstring(x)          type predicates (see: help typecheck)
+    delete x                       remove any variable (including const)
     data |> sort |> unique         pipe operator (left-to-right)
 
 ======================================================================
 )HELP"},
 
-        {"basic", R"HELP(
+        { "basic", R"HELP(
 ═══ Constants, Operators & Elementary Functions ═══
 
   Comments
@@ -169,9 +182,6 @@ namespace jc {
       [f"{k}={v}" for [k,v] in dict("a",1)]  → ["a=1"]
 
     Returns a row vector if all elements are real numbers, otherwise a List.
-    Replaces verbose map/filter chains:
-      // Before:  map((x) => x^2, filter((x) => x % 2 == 0, range(20)))
-      // After:   [x^2 for x in range(20) if x % 2 == 0]
 
   Pipe Operator (|>)
   ──────────────────────
@@ -188,11 +198,6 @@ namespace jc {
         |> (v) => map((x) => x^2, v)
         |> sum
       // → 50 (= 9 + 16 + 25)
-
-    Works with any callable (builtins, user functions, lambdas):
-      100 |> factorial |> digits      // digit count of 100!
-      "hello world" |> upper          // → "HELLO WORLD"
-      [5,3,1] |> sort |> first        // → 1
 
     Multi-line pipes: place |> at the END of the line. JC2 will 
     automatically read the next line as a continuation:
@@ -232,17 +237,28 @@ namespace jc {
       Falsy:  0, 0.0, BigInt(0), Fraction(0/n), none, ""
       Truthy: everything else
 
-  Built-in Constants (preset, overridable)
+  Built-in Constants & Constant Factory Functions
   ──────────────────────
-    PI          3.14159265358979…
-    E           2.71828182845904…
-    i  /  I     Imaginary unit (i² = −1)
+    PI          3.14159265358979…        (overridable, deletable)
+    E           2.71828182845904…        (overridable, deletable)
+    i  /  I     Imaginary unit (i² = −1) (overridable, deletable)
     true / false 1.0 / 0.0
 
-    resetConst()      restores PI, E, i, I, true, false
+    Constants are ordinary global variables — you CAN overwrite or delete
+    them. To restore them, use any of:
+      resetConst()      Restores all 6: PI, E, i, I, true, false
+      PI = pi()         Restore individually via factory function
+      E = e()
+      i = i()           (or just use the literal suffix: 3 + 4i)
+
+    Factory functions (always available, cannot be shadowed):
+      pi()              → 3.14159265358979…
+      e()               → 2.71828182845904…
+      i()               → imaginary unit (0+1i)
 
     Tip: Prefer the literal suffix 3i / 4i over the variable i, because
-    the variable can be overwritten (e.g., by a for loop).
+    the variable can be overwritten (e.g., by a for loop). The suffix is
+    a lexical token and is immune to variable shadowing.
 
   Elementary Functions
   ──────────────────────
@@ -253,6 +269,28 @@ namespace jc {
     log(base, x)        Custom-base logarithm
     pow(x, y)           Same as x^y
     len(x)              Length / element count
+
+  Type Conversion Functions
+  ──────────────────────
+    int(x)              Truncate to integer (toward zero)
+                          int(3.7)        → 3
+                          int(-3.7)       → -3
+                          int(frac(7,2))  → 3
+                          int(3+0i)       → 3
+                          int("42")       → 42
+    double(x)           Convert to floating point
+                          double(frac(1,3)) → 0.333...
+                          double(42)        → 42.0
+                          double(3+0i)      → 3.0
+    complex(x)          Convert to complex (imag=0)
+                          complex(1.5)      → 1.5+0i
+    complex(a, b)       Construct complex from parts
+                          complex(3, 4)     → 3+4i
+    matrix(r, c, ...)   Construct matrix from dimensions + elements
+                          matrix(2, 2, 1, 2, 3, 4)       → RealMatrix
+                          matrix(2, 2, 1+1i, 2, 3, 4)    → ComplexMatrix
+                          matrix(2, 2, "a", "b", "c", "d") → StringMatrix
+                          matrix(3, 3)                    → 3×3 zero matrix
 
   Trigonometric & Hyperbolic  (also accept Complex & Matrix)
   ──────────────────────
@@ -298,23 +336,41 @@ namespace jc {
     r"C:\path\to\file"          Backslashes are literal, no escaping.
     r"(content with "quotes")"  Custom delimiter (empty tag).
     r"TAG(content)TAG"          Named delimiter for maximum safety.
-)HELP"},
 
-        {"complex", R"HELP(
+  Built-in Function Overloading
+  ──────────────────────
+    Built-in functions (sin, cos, map, etc.) are protected against
+    accidental redefinition with the SAME parameter count:
+      sin(x) = x * 2             ✗ Error: conflicts with built-in (arity=1)
+      sin(a, b) = a + b          ✓ OK: different arity, creates an overload
+      sin(1)                     → 0.841... (built-in always takes priority)
+      sin(1, 2)                  → 3        (user overload, no conflict)
+    Variadic built-ins (print, list, cat, ...) cannot be overloaded at all.
+)HELP" },
+
+        { "complex", R"HELP(
 ═══ Complex Numbers ═══
 
-    Construction
+  Construction
   ──────────────────────
     z = 3 + 4i           Imaginary suffix (recommended)
     w = 2i               Pure imaginary
     z = 3 + 4*i          Also works (i is a preset variable)
     sqrt(-1)             Automatic promotion → 1i
 
+    z = complex(3, 4)    Constructor form → 3+4i
+    z = complex(1.5)     Real → Complex with imag=0 → 1.5
+    z = complex(3+4i)    Pass-through (already complex)
+
     The 'i' suffix is a lexical literal — it cannot be accidentally
     overwritten by loops or variable assignments:
       for (i in range(10)) { ... }   // variable 'i' is overwritten
       3 + 4i                          // still works! (4i is a literal)
       3 + 4*i                         // BROKEN (i is now 9)
+
+    To recover the variable i after it has been overwritten:
+      i = i()             // i() is a factory function, always available
+      // Or simply use the literal suffix: 3 + 4i
 
     Numeric forms supported:
       1i                  Imaginary unit
@@ -330,20 +386,29 @@ namespace jc {
     arg(z)              Argument (radians, ∈ (−π, π])
     conj(z)             Complex conjugate
 
+  Type Conversion
+  ──────────────────────
+    double(3+0i)        → 3.0    (only if imaginary part is zero)
+    double(3+4i)        → Error  (nonzero imaginary part)
+    int(3+0i)           → 3      (only if imaginary part is zero)
+    iscomplex(z)        → 1      (type predicate, see: help typecheck)
+    isreal(3+0i)        → 1      (real if imag ≈ 0)
+
   Automatic Promotion
   ──────────────────────
     All elementary functions (sin, cos, exp, log, sqrt, asin, acos …)
     seamlessly accept complex arguments and return complex results.
 
-    exp(PI * i) + 1     →  0       (Euler's identity)
+    exp(PI * 1i) + 1    →  0       (Euler's identity)
     asin(2)             →  complex
 
     Matrix operations also auto-promote:
-    [1, 2] * i          → ComplexMatrix
+    [1, 2] * 1i         → ComplexMatrix
     A + 3i              → ComplexMatrix
-)HELP"},
+    matrix(2, 2, 1+1i, 2, 3, 4-2i)  → ComplexMatrix via constructor
+)HELP" },
 
-        {"fraction", R"HELP(
+        { "fraction", R"HELP(
 ═══ Exact Rational Arithmetic (Fractions) ═══
 
   Fractions use BigInt numerator/denominator and auto-reduce via GCD.
@@ -367,15 +432,30 @@ namespace jc {
     Fraction ⊕ double     → degrades to double
     Fraction ⊕ Complex    → degrades to Complex
 
+  Type Conversion
+  ──────────────────────
+    double(frac(1,3))   → 0.333333…    (convert to floating point)
+    int(frac(7,2))      → 3             (truncate toward zero)
+    int(frac(-7,2))     → -3            (truncate toward zero)
+    evalf(frac(1,3))    → 0.333333…    (alias for double())
+
+  Type Predicates
+  ──────────────────────
+    isfrac(x)           → 1 if x is a Fraction type
+    isint(frac(6,3))    → 1 (denominator reduces to 1)
+    isreal(frac(1,3))   → 1 (fractions are real numbers)
+
   Examples
   ──────────────────────
     f = frac(1, 3)
     f * 3               →  1           (exact, reduced to BigInt if den=1)
     f + frac(1, 6)      →  1/2         (auto-reduced)
     f + 0.5             →  0.833333…   (double)
-)HELP"},
+    f ^ 2               →  1/9         (exact power)
+    f ^ -1              →  3           (reciprocal)
+)HELP" },
 
-        {"matrix", R"HELP(
+        { "matrix", R"HELP(
 ═══ Matrix Construction, Access & Manipulation ═══
 
   Construction
@@ -387,6 +467,17 @@ namespace jc {
     Elements may be expressions:  [sin(PI), 2*i; 0, 1]
     Any complex element auto-promotes the whole matrix to ComplexMatrix.
     If any element is a string, the entire matrix becomes a StringMatrix.
+
+  Constructor Function
+  ──────────────────────
+    matrix(r, c)                          r×c zero matrix
+    matrix(r, c, e1, e2, ..., eN)         r×c matrix filled with elements
+    
+    Auto-detects element type:
+      matrix(2, 2, 1, 2, 3, 4)             → RealMatrix
+      matrix(2, 2, 1+1i, 2, 3, 4-2i)       → ComplexMatrix
+      matrix(2, 2, "a", "b", "c", "d")     → StringMatrix
+      matrix(2, 2, 1, "mixed", 3, 4)       → StringMatrix (mixed → string)
 
   Arithmetic & Scalars
   ──────────────────────
@@ -414,7 +505,7 @@ namespace jc {
       A[:, j]           Extract entire column j
       A[::-1, :]        Reverse matrix rows vertically
 
-      *Assignments into slices work flawlessly as long as dimensions align!
+      Assignments into slices work as long as dimensions align:
         A[1:3, :] = [9, 9]     (Broadcast scalar)
         A[:, 0] = [1; 2; 3]    (Vector injection)
 
@@ -427,14 +518,13 @@ namespace jc {
 
   Concatenation & Block Matrix Assembly
   ──────────────────────
-    You can build matrices cleanly directly via sub-matrices merging internally:
+    You can build matrices directly via sub-matrix merging:
       A = [1, 2; 3, 4]
       B = [5, 6; 7, 8]
       
-      C = [A, B]          Produces: [1, 2, 5, 6; 3, 4, 7, 8] (Horizontal concat)
-      D = [A; B]          Produces: [1, 2; 3, 4; 5, 6; 7, 8] (Vertical concat)
-
-      [A, zeros(2, 2); id(2), B]  Build a 4x4 matrix from blocks!
+      C = [A, B]          Horizontal concat: [1,2,5,6; 3,4,7,8]
+      D = [A; B]          Vertical concat:   [1,2; 3,4; 5,6; 7,8]
+      [A, zeros(2,2); id(2), B]   Build a 4×4 block matrix!
 
     Function equivalents:
       integR(A, B)        Horizontal  [A | B]
@@ -453,12 +543,22 @@ namespace jc {
     zeros(n,c)          All-zeros
     magic(n)            Magic square  (n ≥ 3)
 
+  Type Predicates (see: help typecheck)
+  ──────────────────────
+    ismatrix(A)         Any matrix type
+    isrealmat(A)        RealMatrix specifically
+    iscomplexmat(A)     ComplexMatrix specifically
+    isstringmat(A)      StringMatrix specifically
+    isvector(A)         Row vector or column vector
+    issquare(A)         Square matrix
+
   Conversion
   ──────────────────────
     toList(A)           Matrix → List of Lists (2D structure)
     toMatrix(L)         List of Lists → matrix (reverse)
     toArray(L)          Flat List → row vector
-)HELP"},
+    toStrMat(A)         Any matrix → StringMatrix
+)HELP" },
 
         {"linalg", R"HELP(
 ═══ Linear Algebra ═══
@@ -595,25 +695,34 @@ namespace jc {
     solve(i, −2, 4*i, 3, −1)     Complex coefficients work perfectly!
 )HELP"},
 
-        {"calculus", R"HELP(
+        { "calculus", R"HELP(
 ═══ Functions, Calculus & Tabulation ═══
 
   Defining Functions
   ──────────────────────
     f(x) = sin(x) + x^2                Single variable
     g(x, y) = sqrt(x^2 + y^2)          Multi variable
-    h(a, b) = { local t = a+b; t^2 }   Block body
+    h(a, b) = { t = a+b; t^2 }         Block body (auto-local t)
     f(x, k = 1) = sin(k * x)           Default parameters supported!
 
-    Functions are compiled into AST closures and persist in memory.
-    They automatically capture the surrounding scope.
+    Functions are compiled into bytecode closures executed by the VM.
+    They automatically capture the surrounding scope at definition time.
+
+  Built-in Function Overloading
+  ──────────────────────
+    You can define a user function with the same name as a built-in,
+    as long as the parameter count is DIFFERENT:
+      exp(a, b, c) = a + b + c     ✓ OK (built-in exp takes 1 arg)
+      exp(x) = x                   ✗ Error (conflicts with built-in arity)
+    When calling, built-in functions always take priority if the argument
+    count matches a built-in signature.
 
   Numerical Calculus (single-variable)
   ──────────────────────
-    diff(f, x0)          Derivative f′(x₀)
-    integ(f, a, b)       Definite integral   (Simpson's 1/3)
+    diff(f, x0)          Derivative f′(x₀)  (5-point central difference)
+    integ(f, a, b)       Definite integral   (Simpson's 1/3, 100000 slices)
     integ(f, a, b, n)    Custom slice count n
-    solveE(f, x0)        Find a root of f(x) = 0 near x₀
+    solveE(f, x0)        Find a root of f(x) = 0 near x₀  (Newton-Raphson)
 
   Tabulation (multivariate supported)
   ──────────────────────
@@ -623,11 +732,15 @@ namespace jc {
 
   Lambda Functions (Shorthand)
   ──────────────────────
-    Useful for higher-order functions:
+    Useful for higher-order functions and inline calculus:
+      diff((x) => x^3, 2)             → 12.0  (derivative of x³ at x=2)
+      integ((x) => x, 0, 1)           → 0.5
+      solveE((x) => x^2 - 4, 3)       → 2.0
+
       map((x) => x^2, v)              Square every element
       filter((x) => x > 0, v)         Keep positives
       reduce((a, b) => a + b, v, 0)   Sum all elements
-)HELP"},
+)HELP" },
 
         {"stat", R"HELP(
 ═══ Descriptive Statistics & Regression ═══
@@ -731,13 +844,22 @@ namespace jc {
     mean(s)                      ≈ 100
 )HELP" },
 
-        {"bigint", R"HELP(
+        { "bigint", R"HELP(
 ═══ Arbitrary-Precision Integers & Number Theory ═══
 
   Every integer literal in JC2 is parsed natively as a base-10⁹ BigInt.
   It can grow to millions of digits. Memory is your only limit.
 
   Integer ÷ Integer → Exact Fraction.
+
+  Type Conversion
+  ──────────────────────
+    int(3.7)            → 3           (truncate toward zero)
+    int(-3.7)           → -3
+    int(frac(7,2))      → 3           (BigInt floor division)
+    int("12345")        → 12345       (parse from string)
+    double(42)          → 42.0        (to floating point)
+    isbigint(x)         → 1 if x is BigInt type
 
   Combinatorics (Exact BigInt Results)
   ──────────────────────
@@ -751,6 +873,7 @@ namespace jc {
   ──────────────────────
     gcd(a, b), lcm(a, b), digits(n)
     isPrime(n)           Deterministic Miller-Rabin test
+    isprime(n)           Lowercase alias (same function)
     nextPrime(n)         Smallest prime > n
     nthPrime(k)          k-th prime (requires mounted Prime.txt)
     primePi(n)           π(n) — number of primes ≤ n
@@ -766,7 +889,17 @@ namespace jc {
     isPerfect(n)         Perfect number test
     mod(a, b)            Mathematical mod (always ≥ 0)
     modpow(a, e, m)      aᵉ mod m
-)HELP"},
+
+  Numeric Predicates (see also: help typecheck)
+  ──────────────────────
+    isint(x)             Is x an integer? (BigInt, or integer-valued double/Fraction)
+    iseven(n)            Is n even?
+    isodd(n)             Is n odd?
+    isprime(n)           Is n prime?
+    ispositive(n)        Is n > 0?
+    isnegative(n)        Is n < 0?
+    iszero(n)            Is n = 0?
+)HELP" },
 
         {"base", R"HELP(
 ═══ Radix Conversion & Bitwise Operations ═══
@@ -799,8 +932,20 @@ namespace jc {
     bitshift(a, n)       Logical Shift: Left (n > 0) / Right (n < 0)
 )HELP"},
 
-        {"sys", R"HELP(
-═══ System, Generators & I/O ═══
+        { "sys", R"HELP(
+═══ System, Generators & Runtime ═══
+
+  Command-Line Usage
+  ──────────────────────
+    JunkCalculator2                    Interactive REPL
+    JunkCalculator2 script.jc2         Run a script file
+    JunkCalculator2 --run script.jc2   Run a script (explicit flag)
+    JunkCalculator2 script.jc2 -d      Run with bytecode disassembly output
+    JunkCalculator2 -d                 REPL with bytecode disassembly
+
+    The -d flag prints the compiled bytecode (opcode listing) for every
+    statement before executing it. Invaluable for debugging and learning
+    how the VM works internally.
 
   Random Number Generation (Mersenne Twister)
   ──────────────────────
@@ -810,9 +955,20 @@ namespace jc {
     randimat(r, c, min, max)             Matrix of integers
     randc() / randcmat()                 Complex equivalents
 
-  System Constants
+  System Constants & Recovery
   ──────────────────────
-    resetConst()                 Restore PI, E, i, I, true, false.
+    PI, E, i, I, true, false are ordinary global variables. They can be
+    freely overwritten or deleted. To recover them:
+
+    resetConst()          Restore all 6 constants at once
+    PI = pi()             Restore individually via factory function
+    E = e()               (factory functions are built-in and permanent)
+    i = i()               (or just use the literal suffix: 3 + 4i)
+
+    Factory functions (always available, cannot be shadowed):
+      pi()    → 3.14159265358979…
+      e()     → 2.71828182845904…
+      i()     → imaginary unit (0+1i)
 
   Prime Engine (Paged Streaming I/O)
   ──────────────────────
@@ -821,31 +977,27 @@ namespace jc {
     mountPrimes("path")          Redirect the engine to a custom prime file
     buildIndex()                 Build an O(1) anchor tree in RAM
 
-  Workspace Directory Management
+  Workspace & Path Management
   ──────────────────────
-    workspace                    Show current workspace directory
-    workspace <path>             Change workspace directory for save/load/ls
-    workspace "D:/my_data"       Absolute path
-    workspace ./projects         Relative path (resolved from current context)
+    All workspace operations are function-based:
 
-    setWorkspace("path")         Function form (usable in scripts)
+    setWorkspace("path")         Change workspace directory
     setWorkspace("default")      Reset to ./data/
     getWorkspace()               Returns current workspace path as string
     pwd()                        Print both script dir and workspace dir
 
-    ls                           List .jc2, .txt, .csv in workspace
-    ls <path>                    List files in specific directory
-    ls *                         List ALL files in workspace
-    ls <path> .csv               List only .csv files in <path>
+    save <name>                  REPL command: snapshot variables → data/<name>.jc2
+    load <name>                  REPL command: restore saved workspace
 
-  Scripts Execution & Path Context
+  Script Execution & Path Context
   ──────────────────────
-    run <file>                   Terminal command: run a `.jc2` script file
-    run("path")                  Function form
+    run("path")                  Execute a .jc2 script file (function form)
 
-    Executing a script automatically pushes its directory onto the Execution 
-    Path Stack. All relative file operations (`readFile`, `import`) inside the 
-    script will resolve relative to the script's own location.
+    Executing a script automatically pushes its directory onto the
+    Path Stack. All relative file operations (readFile, import) inside
+    the script resolve relative to the script's own location.
+
+    When the script finishes or errors out, the directory is popped.
 
   REPL Syntax Highlighting
   ──────────────────────
@@ -856,6 +1008,7 @@ namespace jc {
       Matrices                           → White
       Functions/Classes                  → Blue
       Dicts/Lists                        → Cyan
+      BaseNum                            → Bright Cyan
       Errors                             → Red
 
     Commands:
@@ -864,23 +1017,29 @@ namespace jc {
       color("on")           Function form (usable in scripts)
       highlight("code")     Returns a colorized version of JC2 code
 
-    Colors are automatically enabled on Windows via Virtual Terminal Processing.
+    Colors are automatically enabled on Windows via Virtual Terminal
+    Processing.
 
   Native Module System
   ──────────────────────
-    JC2 supports native C++ modules that are compiled into the executable.
+    JC2 supports native C++ modules compiled into the executable.
     They provide high-performance functionality without external files.
+
     modules()                   List all available native modules
     import "moduleName"         Load a module (deduplicated, instant)
-    Currently available modules:
+
+    Currently available:
       image    BMP image generation, plotting, drawing primitives
       prob     Probability distributions, special functions, hypothesis tests
       json     JSON serialization & deserialization
+
     To see details:
-      help image                help prob                help json
-    Native modules register functions, classes, and variables into the
-    global environment. After import, their functions are indistinguishable
-)HELP"},
+      help image              help prob              help json
+
+    Native modules take priority over .jc2 files with the same name.
+    Importing the same module twice is a safe no-op.
+    After import, module functions are indistinguishable from built-ins.
+)HELP" },
 
         {"control", R"HELP(
 ═══ Control Flow ═══
@@ -930,8 +1089,8 @@ namespace jc {
     return expr        Exit function returning the evaluated expr
 )HELP"},
 
-        {"scope", R"HELP(
-═══ Variable Scoping (Python-Style) ═══
+        { "scope", R"HELP(
+═══ Variable Scoping & Protection Rules ═══
 
   Top Level (REPL)
   ──────────────────────
@@ -945,8 +1104,9 @@ namespace jc {
 
   Global Declaration
   ──────────────────────
-    To conceptually read and *modify* an outer/global variable from 
-    inside an isolated function, declare it via `global` FIRST:
+    To read and *modify* an outer/global variable from inside a function,
+    declare it via `global` FIRST:
+      counter = 0
       bump() = { global counter; counter += 1 }
 
   Closures (Automatic Environment Capture)
@@ -957,38 +1117,79 @@ namespace jc {
 
   Pass-by-Reference (ref)
   ──────────────────────
-    Force the function parameter to mutate the original outer variable.
+    Force a function parameter to mutate the original outer variable.
       addOne(ref x) = { x = x + 1 }
 
   Default Parameter Values
   ──────────────────────
     f(x, y = 0) = x + y
-    Required parameters must precede parameters possessing defaults.
+    Required parameters must precede parameters with defaults.
     Defaults are evaluated *once at definition time*.
 
   Destructuring & Scope
   ──────────────────────
-    Destructured variables naturally abide by auto-local rules:
-      f() = { [a, b] = [10, 20]; return a + b } // a, b are safe
-    You may utilize 'global' to project destructuring into an outer scope.
-    
+    Destructured variables obey auto-local rules:
+      f() = { [a, b] = [10, 20]; return a + b }   // a, b are local
+    Use 'global' to project destructured variables into the outer scope.
+
   Constants (const)
   ──────────────────────
-    const G = 9.81       Immutable variable (modification throws error)
-    delete G             Permitted: remove a const entirely
-)HELP"},
+    const G = 9.81       Immutable — modification throws an error
+    G = 10               ✗ Error: Cannot modify const variable 'G'
+    delete G             ✓ Permitted: force-remove any variable, including const
 
-        {"string", R"HELP(
+    All variables (including const and system constants like PI) can be 
+    deleted with `delete`. Use `resetConst()` or factory functions like
+    `pi()` to recover system constants after deletion.
+
+  System Constants (PI, E, i, I, true, false)
+  ──────────────────────
+    These are ordinary global variables — they CAN be overwritten:
+      PI = 99             ✓ Allowed (PI is now 99)
+      delete PI           ✓ Allowed (PI is removed entirely)
+      PI = pi()           ✓ Restore via factory function
+      resetConst()        ✓ Restore all 6 at once
+
+  Built-in Function Protection
+  ──────────────────────
+    Built-in functions (sin, cos, map, sort, etc.) live in a separate
+    native table and CANNOT be deleted or directly overwritten.
+
+    However, you CAN create a user function with the same name if it
+    has a DIFFERENT parameter count (overloading):
+      sin(x) = x * 2             ✗ Error: conflicts with built-in (arity=1)
+      sin(a, b) = a + b          ✓ OK: different arity
+      sin(1)                     → 0.841... (built-in always wins)
+      sin(1, 2)                  → 3        (user overload kicks in)
+      delete sin                 → only removes the user overload
+
+    Variadic built-ins (print, list, cat, dict, ...) cannot be
+    overloaded at all — they accept any number of arguments.
+
+  Variable Lifecycle Summary
+  ──────────────────────
+    Entity            Overwrite?   Delete?    Recover?
+    ─────────────────────────────────
+    User variable     ✓            ✓          —
+    const variable    ✗            ✓          —
+    System constant   ✓            ✓          resetConst() / pi()
+    Built-in func     overload*     user only   automatic (native table)
+    
+    * Only with a different parameter count
+)HELP" },
+
+        { "string", R"HELP(
 ═══ String Functions ═══
 
-  Strings are cleanly created with double quotes:  s = "hello world"
+  Strings are created with double quotes:  s = "hello world"
 
   Conversion
   ──────────────────────
-    str(x)              Converts any native value → string
-    eval("expr")        Parse & securely evaluate the string as JC2 code
-    type(x)             Returns the internal type name ("double", "String")
+    str(x)              Converts any value → string (calls __str__ on instances)
+    eval("expr")        Parse & evaluate the string as JC2 code
+    type(x)             Returns the type name ("double", "String", etc.)
     ord("A") / chr(65)  ASCII code conversion
+    parseNum("42")      Parse string → number (BigInt or double)
 
   Escape Sequences
   ──────────────────────
@@ -997,20 +1198,20 @@ namespace jc {
   Length & Indexing (0-based, negative safely wraps)
   ──────────────────────
     len(s)              String length                  
-    s[i] / s[-1]        Character substring at index   
-    s[start : end]      Targeted slice [start, end)
-    s[start:end:step]   Targeted slice with stepping
+    s[i] / s[-1]        Character at index   
+    s[start : end]      Slice [start, end)
+    s[start:end:step]   Slice with stepping
                           "hello"[::-1] → "olleh" (String reversal!)
 
   Substrings
   ──────────────────────
-    substr(s, start)          From start index to string end
-    substr(s, start, length)  Length characters from start index
+    substr(s, start)          From start index to end
+    substr(s, start, length)  Length characters from start
 
   Search
   ──────────────────────
-    find(s, sub, pos)         Start boundary position of first hit (-1 if absent)
-    contains(s, sub)          1 if captured, 0 otherwise
+    find(s, sub, pos)         Index of first match (-1 if absent)
+    contains(s, sub)          1 if found, 0 otherwise
     startsWith / endsWith     1 or 0
     "sub" in s                Boolean test (identical to contains)
 
@@ -1020,9 +1221,24 @@ namespace jc {
 
   Concatenation & Splitting
   ──────────────────────
-    "a" + "b"                   Native String addition
-    concat(a, b, c, ...)        Arbitrary datatype concatenation
-    split(s, delim)             Fragment into a List data-structure
+    "a" + "b"                   String concatenation
+    concat(a, b, c, ...)        Arbitrary type concatenation → string
+    split(s, delim)             Split into a List
+
+  String Predicates (return 1 or 0)
+  ──────────────────────
+    isstring(x)         Is x a string type?
+    isalpha(s)          All characters are alphabetic?
+    isdigit(s)          All characters are digits?
+    isalnum(s)          All characters are alphanumeric?
+    isspace(s)          All characters are whitespace?
+    isupper(s)          All alphabetic characters are uppercase?
+    islower(s)          All alphabetic characters are lowercase?
+    isempty(s)          Is the string empty (length 0)?
+
+    These predicates return 0 for non-string arguments.
+    Empty strings return 0 for isalpha/isdigit/isalnum/isspace
+    (nothing to test) but 1 for isempty.
 
   String Interpolation (f-strings)
   ──────────────────────
@@ -1038,42 +1254,34 @@ namespace jc {
       ^  center           d  integer
                           x  hexadecimal
 
-    The :: separator is unambiguous — no conflict with ternary (?:) or other syntax.
-      f"{score >= 60 ? \"pass\" : \"fail\"}"     ✓ works (single : is ternary)
-      f"{PI::.4f}"                               ✓ works (:: is format spec)
-
-    Escape sequences (\n, \t, \\, \") work normally in f-strings.
-    Nested expressions with braces are supported:
-      f"result = {x > 0 ? x : -x}"
+    The :: separator is unambiguous — no conflict with ternary (?:):
+      f"{score >= 60 ? \"pass\" : \"fail\"}"     ✓ works
+      f"{PI::.4f}"                               ✓ works
 
   Raw Strings (r-strings)
   ──────────────────────
     r"text"              No escape processing — backslashes are literal.
-    r"C:\Users\name"     → "C:\Users\name"  (no \U or \n interpretation)
+    r"C:\Users\name"     → "C:\Users\name"
     r"hello\nworld"      → "hello\nworld"   (literal backslash + n)
 
-    Custom Delimiter (like C++):
+    Custom Delimiter (like C++ raw strings):
       r"(can contain "quotes" freely)"
       r"TAG(anything goes, even ) and " here)TAG"
-      r"END(
-          multi-line content
-          with "quotes" and \backslashes\
-      )END"
 
       Syntax: r"DELIM( content )DELIM"
-        DELIM = any combination of letters, digits, underscores (can be empty).
-        Content is captured verbatim until the exact sequence )DELIM" is found.
+        DELIM = any letters, digits, underscores (can be empty).
+        Content is captured verbatim until )DELIM" is found.
 
-    Useful for file paths, regex patterns, JSON templates, or any text
-    that would require excessive escaping in a normal string.
-
-  StringMatrix — Table String Representation
+  StringMatrix — Tabular String Data
   ──────────────────────
-    Providing a string literal inside brackets `["hello", "word"]`
-    unconditionally elevates the entire block to `StringMatrix`.
-    All standard matrix bounds and manipulations function symmetrically.
-    See: `help matrix`
-)HELP"},
+    Placing a string inside brackets `["hello", "world"]` creates a
+    StringMatrix. All standard matrix operations apply (indexing, slicing,
+    transpose, concatenation).
+    
+    matrix(2, 2, "a", "b", "c", "d")   StringMatrix via constructor
+    toStrMat(A)                         Convert any matrix → StringMatrix
+    See: help matrix
+)HELP" },
 
         {"array", R"HELP(
 ═══ Array / Data Functions ═══
@@ -1329,82 +1537,105 @@ namespace jc {
       }
 )HELP"},
 
-        {"class", R"HELP(
+        { "class", R"HELP(
 ═══ Classes, Instances, Inheritance & Operator Overloading ═══
 
-  ─────────────────────────────────────────────────────────────
   Defining a Class
-  ─────────────────────────────────────────────────────────────
+  ──────────────────────
     class ClassName {
         init(params) = { body }         Constructor (optional)
         methodName(params) = expr       Method definition
     }
 
     • 'init' executes automatically upon instance creation.
-    • Inside methods, `self` refers to the active instance context.
+    • Inside methods, `self` refers to the active instance.
     • Methods support default parameters: `method(x, y = 0) = ...`
 
-  ─────────────────────────────────────────────────────────────
   Field Access (Dot Operator) & Instantiation
-  ─────────────────────────────────────────────────────────────
+  ──────────────────────
     p = Point(3, 4)              Calls init(3, 4)
     p.x                          Read field
     p.x = 10                     Write field (creates if absent)
 
-    Instance structures mandate reference semantics (C++ `shared_ptr` backing).
+    Instances use reference semantics (C++ shared_ptr backing):
+      p2 = p1                    p2 and p1 share the same object
+      p2.x = 99                  p1.x is also 99
 
-  ─────────────────────────────────────────────────────────────
+
   Inheritance (extends / super)
-  ─────────────────────────────────────────────────────────────
+  ──────────────────────
     class ChildClass extends ParentClass {
         init(...) = { super.init(...); ... }
         method() = ...         // Override parent method
     }
 
-    • Single inheritance only. Child inherits all methods.
-    • `super` dispatches to the parent class's methods securely.
+    • Single inheritance only. Child inherits all parent methods.
+    • `super.method()` dispatches to the parent class's implementation.
 
-  ─────────────────────────────────────────────────────────────
   Operator Overloading (Dunder Methods)
-  ─────────────────────────────────────────────────────────────
-    Classes can inject logic into global operator behavior using double 
-    underscores. Dunder methods are symmetrically inherited.
+  ──────────────────────
+    Classes can inject logic into operators via double-underscore methods.
+    Dunder methods are inherited through the class hierarchy.
 
     Arithmetic:
       __add__ (+)  __sub__ (-)  __mul__ (*)  __div__ (/)  __mod__ (%)  __pow__ (^)
 
-    Reverse arithmetic (when left operand is not an instance):
+    Reverse arithmetic (when left operand is NOT an instance):
       __radd__  __rsub__  __rmul__  __rdiv__  __rmod__  __rpow__
+      Example: 2 * vec  calls  vec.__rmul__(2)
 
-    Comparison & Logical:
+    Unary:
+      __neg__()        Unary minus: -obj
+
+    Comparison:
       __eq__ (==)  __neq__ (!=)  __lt__ (<)  __le__ (<=)  __gt__ (>)  __ge__ (>=)
-      __contains__(x)   Membership (x in a)
 
-    Indexing & Hooks:
-      __getitem__(i) / __getitem__(i, j)   Read via index
-      __setitem__(i, v) / __setitem__(i,j, v) Write via index
-      __str__()    str(a), print(a), format("{}", a)
-      __len__()    len(a)
-      __abs__()    abs(a)
-      __bool__()   bool(a)
+    Membership:
+      __contains__(x)   Called by:  x in obj
 
-  ─────────────────────────────────────────────────────────────
+    Indexing:
+      __getitem__(i)               Called by:  obj[i]
+      __setitem__(i, v)            Called by:  obj[i] = v
+
+    Conversion hooks (called by built-in functions):
+      __str__()    → str(obj), print(obj), f"{obj}", format("{}", obj)
+      __len__()    → len(obj)
+      __abs__()    → abs(obj)
+      __bool__()   → bool(obj)
+
+
+  Chained Method Calls
+  ──────────────────────
+    Methods that return `self` enable fluent-style chaining:
+      class Builder {
+          init() = { self.parts = list() }
+          add(x) = { self.parts = push(self.parts, x); return self }
+          build() = join(self.parts, "-")
+      }
+      Builder().add("a").add("b").add("c").build()   → "a-b-c"
+
   Destructuring with Methods
-  ─────────────────────────────────────────────────────────────
-    Methods can organically return arrays/lists facilitating destructured bounds:
+  ──────────────────────
+    Methods can return arrays/lists for destructured assignment:
       class Point { coords() = [self.x, self.y] }
       [px, py] = Point(3, 4).coords()
 
-  ─────────────────────────────────────────────────────────────
   Introspection
-  ─────────────────────────────────────────────────────────────
+  ──────────────────────
     type(p)                  Class name → "Point"
-    isinstance(p, Point)     1 if p is (or inherits from) Point structure
-    hasField(p, "x")         Returns truthiness mapping
-    getFields(p)             Isolates all allocated field names 
-    getClass(p)              Retrieves the core class definition blueprint
-    getParent(Dog)           Outputs parent class mapping or `none`
-)HELP"},
+    isinstance(p)            1 if p is any class instance
+    isinstance(p, Point)     1 if p is (or inherits from) Point
+    hasField(p, "x")         1 if field exists
+    getFields(p)             All field names as StringMatrix
+    getClass(p)              The class definition object
+    getParent(Dog)           Parent class or none
+
+  Type Predicates (see: help typecheck)
+  ──────────────────────
+    isclass(Point)           1 if argument is a class definition
+    isinstance(p)            1 if argument is any instance
+    isfunction(sin)          1 if argument is a function/closure
+)HELP" },
 
         {"error", R"HELP(
 ═══ Error Handling ═══
@@ -1485,6 +1716,130 @@ namespace jc {
     deleteFile(path)            Permanently deletes the specified file.
     listDir(path)               Returns a List of filenames in the specified directory.
 )HELP"},
+
+        { "typecheck", R"HELP(
+═══ Type Predicates & Value Tests ═══
+
+  All type-check functions accept exactly 1 argument and return
+  1 (true) or 0 (false). They never throw errors.
+
+  Numeric Type Checks
+  ──────────────────────
+    isint(x)            Integer? (BigInt, integer-valued double, 
+                        or Fraction with denominator = 1)
+    isfloat(x)          double type specifically?
+    isnumeric(x)        Any numeric type? (double, BigInt, Fraction, 
+                        Complex, BaseNum)
+    iscomplex(x)        Complex type specifically?
+    isreal(x)           Real number? (double, BigInt, Fraction, BaseNum,
+                        or Complex with imaginary part ≈ 0)
+    isfrac(x)           Fraction type specifically?
+    isbigint(x)         BigInt type specifically?
+    isbase(x)           BaseNum type specifically?
+
+    Examples:
+      isint(42)           → 1     (BigInt literal)
+      isint(3.0)          → 1     (integer-valued double)
+      isint(3.5)          → 0
+      isint(frac(6,3))    → 1     (reduces to 2)
+      isreal(3+0i)        → 1     (imaginary part is zero)
+      isreal(3+4i)        → 0
+      isnumeric("hello")  → 0
+
+  Container Type Checks
+  ──────────────────────
+    ismatrix(x)         Any matrix? (Real, Complex, or String)
+    isrealmat(x)        RealMatrix specifically?
+    iscomplexmat(x)     ComplexMatrix specifically?
+    isstringmat(x)      StringMatrix specifically?
+    isvector(x)         Row vector (1×N) or column vector (N×1)?
+    issquare(x)         Square matrix (N×N)?
+    islist(x)           List type?
+    isdict(x)           Dict type?
+
+    Examples:
+      ismatrix([1,2;3,4])       → 1
+      isvector([1,2,3])         → 1   (1×3 row vector)
+      isvector([1;2;3])         → 1   (3×1 column vector)
+      isvector([1,2;3,4])       → 0   (2×2, not a vector)
+      issquare([1,2;3,4])       → 1
+      islist(list(1,2))         → 1
+      isdict({a: 1})            → 1
+
+  String Predicates
+  ──────────────────────
+    isstring(x)         Is x a String type?
+    isalpha(s)          All characters alphabetic? ("abc" → 1)
+    isdigit(s)          All characters digits? ("123" → 1)
+    isalnum(s)          All characters alphanumeric? ("abc123" → 1)
+    isspace(s)          All characters whitespace? ("  \\t" → 1)
+    isupper(s)          All alphabetic chars uppercase? ("ABC" → 1)
+    islower(s)          All alphabetic chars lowercase? ("abc" → 1)
+    isempty(x)          Empty string, empty List, empty Dict,
+                        or zero-dimension matrix?
+
+    Notes:
+    • Non-string arguments return 0 for all string predicates
+      (except isempty, which also works on Lists, Dicts, matrices).
+    • Empty strings return 0 for isalpha/isdigit/isalnum/isspace
+      (nothing to test), but 1 for isempty.
+
+  Special Type Checks
+  ──────────────────────
+    isnone(x)           Is x the none value?
+    isfunction(x)       Is x a function or closure?
+    isclass(x)          Is x a class definition?
+    isinstance(x)       Is x an instance of any class? (1 arg)
+    isinstance(x, C)    Is x an instance of class C or its subclass? (2 args)
+
+    Examples:
+      isfunction(sin)         → 1
+      isfunction((x) => x)    → 1
+      isclass(Point)          → 1   (after class Point {...})
+      isinstance(Point(1,2))  → 1
+      isinstance(42)          → 0
+
+  Floating-Point Checks
+  ──────────────────────
+    isnan(x)            Is x NaN? (only for double type)
+    isinf(x)            Is x ±Infinity? (only for double type)
+    isfinite(x)         Is x a finite number? (BigInt/Fraction → always 1)
+
+    Examples:
+      isnan(0.0 / 0.0)       → 1
+      isinf(1.0 / 0.0)       → 1
+      isfinite(42)            → 1
+      isfinite(1.0 / 0.0)    → 0
+
+  Numeric Value Predicates
+  ──────────────────────
+    iszero(x)           Is x equal to zero? (works on double, BigInt,
+                        Complex, Fraction — uses tolerance for double)
+    ispositive(x)       Is x > 0? (double, BigInt, Fraction)
+    isnegative(x)       Is x < 0? (double, BigInt, Fraction)
+    iseven(n)           Is n an even integer?
+    isodd(n)            Is n an odd integer?
+    isprime(n)          Is n a prime number? (Miller-Rabin test)
+
+    Examples:
+      iszero(0)               → 1
+      iszero(0.0)             → 1
+      iszero(0+0i)            → 1
+      ispositive(-3)          → 0
+      iseven(4)               → 1
+      isodd(7)                → 1
+      isprime(97)             → 1
+      isprime(100)            → 0
+
+  Type Constructors (see also: help basic)
+  ──────────────────────
+    int(x)              Truncate to BigInt (toward zero)
+    double(x)           Convert to double
+    complex(x)          Convert to Complex (imag=0)
+    complex(a, b)       Construct Complex from real and imaginary parts
+    matrix(r, c, ...)   Construct matrix (auto-detects Real/Complex/String)
+    pi()  e()  i()      Constant factory functions (always available)
+)HELP" },
 
         { "json", R"HELP(
 ═══ JSON Module — Native Module ═══

@@ -1,6 +1,7 @@
 // VM.cpp
 #include "VM.h"
 #include "Module.h"
+#include "BuiltinRegistry.h"
 #include <iostream>
 #include <cmath>
 #include <stdexcept>
@@ -161,17 +162,21 @@ namespace jc {
             if (args.size() != 1 || !std::holds_alternative<std::string>(args[0].data))
                 throw std::runtime_error("VM Error: __vm_delete__ expects a string variable name.");
             const std::string& name = std::get<std::string>(args[0].data);
+
+            // ★ 允许删除所有变量（包括 const 和系统常量）
+            // 用户可通过 resetConst() 或 pi() 等函数恢复
             auto it = globals.find(name);
             if (it == globals.end())
                 throw std::runtime_error("Runtime Error: Undefined variable '" + name + "'.");
             globals.erase(it);
-            constGlobals.erase(name);
+            constGlobals.erase(name);  // 同步清除 const 标记
             return Value::none();
-            });
+            }, { 1 });
     }
 
-    void VM::registerBuiltin(const std::string& name, NativeCallable fn) {
+    void VM::registerBuiltin(const std::string& name, NativeCallable fn, std::set<int> arity) {
         nativeBuiltins[name] = std::move(fn);
+        builtinArity[name] = std::move(arity);
     }
 
     void VM::setGlobal(const std::string& name, const Value& val) {
@@ -506,6 +511,34 @@ namespace jc {
                     std::string name = std::get<std::string>(currentChunk().constants[idx].data);
                     if (constGlobals.count(name))
                         throw std::runtime_error("Runtime Error: Cannot modify const variable '" + name + "'.");
+
+                    // ★ 检查是否与内建函数 arity 冲突
+                    Value& val = peek(0);
+                    if (std::holds_alternative<std::shared_ptr<FunctionClosure>>(val.data)) {
+                        auto nit = nativeBuiltins.find(name);
+                        if (nit != nativeBuiltins.end()) {
+                            auto ait = builtinArity.find(name);
+                            auto closure = std::get<std::shared_ptr<FunctionClosure>>(val.data);
+
+                            if (ait == builtinArity.end() || ait->second.empty()) {
+                                // 原生函数接受任意参数数量 → 完全禁止同名函数
+                                throw std::runtime_error(
+                                    "Runtime Error: Cannot redefine '" + name +
+                                    "' — it is a variadic built-in function.");
+                            }
+
+                            // 检查用户函数的每个可接受参数数量是否与原生冲突
+                            for (int a = closure->minArgs(); a <= closure->maxArgs(); ++a) {
+                                if (ait->second.count(a)) {
+                                    throw std::runtime_error(
+                                        "Runtime Error: Cannot redefine '" + name + "' with " +
+                                        std::to_string(a) + " parameter(s) — conflicts with built-in function. "
+                                        "Use a different parameter count to create an overload.");
+                                }
+                            }
+                        }
+                    }
+
                     globals[name] = peek(0);
                     break;
                 }
@@ -624,6 +657,71 @@ namespace jc {
                     uint8_t argc = readByte();
                     Value callee = stack[stack.size() - 1 - argc];
                     pendingRefWritebacks.clear();
+                    // ======== [1] 字符串动态调用 (晚绑定) ========
+                    if (std::holds_alternative<std::string>(callee.data)) {
+                        const std::string& tag = std::get<std::string>(callee.data);
+                        if (tag.size() >= 5 && tag.substr(0, 5) == "__fn:") {
+                            int fnIdx = std::stoi(tag.substr(5));
+                            auto& fn = compiledFunctions[fnIdx];
+                            if (static_cast<int>(argc) < fn->arity || static_cast<int>(argc) > fn->maxArity)
+                                throw std::runtime_error("VM Error: '" + fn->name + "' expects args mismatch.");
+                            int padCount = fn->maxArity - static_cast<int>(argc);
+                            for (int j = 0; j < padCount; ++j) push(Value::none());
+                            int reserveCount = fn->localCount - fn->maxArity;
+                            for (int j = 0; j < reserveCount; ++j) push(Value::none());
+                            CallFrame newFrame; newFrame.function = fn.get(); newFrame.ip = 0;
+                            newFrame.stackBase = static_cast<int>(stack.size()) - fn->localCount;
+                            stack.erase(stack.begin() + newFrame.stackBase - 1); newFrame.stackBase--;
+                            frames.push_back(newFrame); break;
+                        }
+                        if (tag.size() >= 10 && tag.substr(0, 10) == "__builtin:") {
+                            std::string fnName = tag.substr(10); std::vector<Value> args(argc);
+                            for (int j = argc - 1; j >= 0; --j) args[j] = pop();
+                            pop(); push(nativeBuiltins.find(fnName)->second(args)); break;
+                        }
+                        // ★ 核心判断：内建函数判定（最高优先级）
+                        auto nIt = nativeBuiltins.find(tag);
+                        if (nIt != nativeBuiltins.end()) {
+                            auto arityIt = builtinArity.find(tag);
+                            bool arityMatched = false;
+                            if (arityIt != builtinArity.end() && !arityIt->second.empty()) {
+                                if (arityIt->second.count(argc)) arityMatched = true;
+                            }
+                            else {
+                                arityMatched = true; // 支持无元数限制
+                            }
+
+                            // 参数一致，直接引爆执行原生算法！
+                            if (arityMatched) {
+                                std::vector<Value> args(argc);
+                                for (int j = argc - 1; j >= 0; --j) args[j] = pop();
+                                pop(); // 弹出 tag字符串名
+                                push(nIt->second(args));
+                                break;
+                            }
+                        }
+
+                        // ★ 退回判定：用户全局变量判定
+                        auto it = globals.find(tag);
+                        if (it != globals.end()) {
+                            callee = it->second;
+                            stack[stack.size() - 1 - argc] = callee;
+                            // ↓ 继续往下流进下一层的 Instance / FunctionClosure 统一执行块中执行 ↓
+                        }
+                        else {
+                            if (nIt != nativeBuiltins.end()) {
+                                auto arityIt = builtinArity.find(tag);
+                                std::string expected;
+                                for (auto aIt = arityIt->second.begin(); aIt != arityIt->second.end(); ++aIt) {
+                                    if (aIt != arityIt->second.begin()) expected += " or ";
+                                    expected += std::to_string(*aIt);
+                                }
+                                throw std::runtime_error("Runtime Error: " + tag + "() expects " +
+                                    expected + " arguments, got " + std::to_string(argc) + ".");
+                            }
+                            throw std::runtime_error("Runtime Error: Unknown function or not callable '" + tag + "()'.");
+                        }
+                    }
 
                     if (std::holds_alternative<std::shared_ptr<ClassDefinition>>(callee.data)) {
                         auto cls = std::get<std::shared_ptr<ClassDefinition>>(callee.data);
@@ -2409,16 +2507,29 @@ namespace jc {
 
                     auto& modules = getNativeModules();
                     auto it = modules.find(name);
-                    if (it == modules.end())
-                        throw std::runtime_error("VM Error: Module '" + name +
-                            "' not found. Only native modules (json, image, prob) "
-                            "are supported in VM mode.");
+                    if (it != modules.end()) {
+                        it->second.loader(globals, nativeBuiltins, builtinArity);
+                        importedModules.insert(name);
+                        std::cout << "[System] Native module '" << name << "' loaded." << std::endl;
+                        push(Value::none());
+                        break;
+                    }
 
-                    it->second.loader(globals, nativeBuiltins, builtinArity);
+                    // ★ 非原生模块，委托给 main.cpp 进行强健逐行加载
+                    std::string resolved = helpers::safeResolvePath(name);
+                    if (!std::filesystem::exists(resolved)) {
+                        resolved = helpers::safeResolvePath(name + ".jc2");
+                    }
+
+                    if (!std::filesystem::exists(resolved)) {
+                        throw std::runtime_error("VM Error: Cannot find module '" + name + "'.");
+                    }
+
                     importedModules.insert(name);
 
-                    std::cout << "[System] Native module '" << name
-                        << "' loaded." << std::endl;
+                    if (helpers::runFileCallback) {
+                        helpers::runFileCallback(resolved);
+                    }
 
                     push(Value::none());
                     break;

@@ -19,7 +19,6 @@ set(JC2_HEADERS
     "Expr.h"
     "Parser.h"
     "Value.h"
-    "Evaluator.h"
     "Complex.h"
     "Matrix.h"
     "BigInt.h"
@@ -34,6 +33,7 @@ set(JC2_HEADERS
     "Compiler.h"
     "VM.h"
     "Module.h"
+    "BuiltinRegistry.h"
     "modules/json_module.h"
     "modules/image_module.h"
     "modules/prob_module.h"
@@ -42,9 +42,9 @@ set(JC2_HEADERS
 set(JC2_SOURCES
     "Lexer.cpp"
     "Parser.cpp"
-    "Evaluator.cpp"
     "Compiler.cpp"
     "VM.cpp"
+    "BuiltinRegistry.cpp"
     "main.cpp"
 )
 

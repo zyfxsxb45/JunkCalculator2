@@ -74,7 +74,7 @@ namespace jc {
     public:
         VM();
 
-        void registerBuiltin(const std::string& name, NativeCallable fn);
+        void registerBuiltin(const std::string& name, NativeCallable fn, std::set<int> arity);
         void setGlobal(const std::string& name, const Value& val);
         inline static VM* activeVM = nullptr;
         // ★ 接受编译后的函数列表
@@ -85,6 +85,16 @@ namespace jc {
             std::shared_ptr<std::vector<Value>> upvalues = nullptr);
 
         Value execute(const Chunk& mainChunk);
+
+        const std::map<std::string, Value>& getGlobals() const { return globals; }
+        void clearGlobals() {
+            globals.clear();
+            constGlobals.clear();
+        }
+        void removeGlobal(const std::string& name) {
+            globals.erase(name);
+            constGlobals.erase(name);
+        }
     };
 
 } // namespace jc

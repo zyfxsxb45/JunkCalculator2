@@ -319,10 +319,12 @@ namespace jc {
 
         int slot = resolveLocal(name);
 
-        // ★ Auto-local
+        // ★ Auto-local Write — 但不能覆盖已存在的 upvalue
         if (stateStack.size() > 1 && slot == -1 && current().globalNames.count(name) == 0) {
-            addLocal(name);
-            slot = resolveLocal(name);
+            if (resolveUpvalue(name) == -1) {   // ★ 仅当不是 upvalue 时才 auto-local
+                addLocal(name);
+                slot = resolveLocal(name);
+            }
         }
 
         if (slot != -1) {
@@ -422,8 +424,9 @@ namespace jc {
                 emit16(static_cast<uint16_t>(upvalue), expr->callee.position);
             }
             else {
+                // ★ 关键重构：将全局级别调用的目标变成字符串文字，把解析交接给 VM 的 OP_CALL 晚绑定操作
                 uint16_t idx = identifierConstant(name);
-                emit(OpCode::OP_GET_GLOBAL, expr->callee.position);
+                emit(OpCode::OP_CONSTANT, expr->callee.position);
                 emit16(idx, expr->callee.position);
             }
         }
@@ -793,8 +796,10 @@ namespace jc {
 
             // ★ Auto-local Write
             if (stateStack.size() > 1 && slot == -1 && current().globalNames.count(name) == 0) {
-                addLocal(name);
-                slot = resolveLocal(name);
+                if (resolveUpvalue(name) == -1) {   // ★ 仅当不是 upvalue 时才 auto-local
+                    addLocal(name);
+                    slot = resolveLocal(name);
+                }
             }
 
             if (slot != -1) {
