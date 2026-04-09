@@ -1,8 +1,8 @@
 {
     "name": "jc2-language",
     "displayName": "JC2 Language Support",
-    "description": "Syntax highlighting and script runner for Junk Calculator 2.0 (.jc2)",
-    "version": "1.1.0",
+    "description": "Syntax highlighting and script runner for Junk Calculator 2.2 [VM Edition]",
+    "version": "2.2.0",
     "publisher": "yuliangyang",
     "engines": {
         "vscode": "^1.80.0"
@@ -42,6 +42,11 @@
                 "icon": "$(play)"
             },
             {
+                "command": "jc2.runProfile",
+                "title": "JC2: Run with Profiler",
+                "icon": "$(dashboard)"
+            },
+            {
                 "command": "jc2.runSelection",
                 "title": "JC2: Run Selection"
             },
@@ -56,12 +61,6 @@
                 "key": "ctrl+shift+r",
                 "mac": "cmd+shift+r",
                 "when": "editorLangId == jc2"
-            },
-            {
-                "command": "jc2.runSelection",
-                "key": "ctrl+shift+e",
-                "mac": "cmd+shift+e",
-                "when": "editorLangId == jc2 && editorHasSelection"
             }
         ],
         "menus": {
@@ -79,9 +78,14 @@
                     "group": "jc2@1"
                 },
                 {
+                    "command": "jc2.runProfile",
+                    "when": "editorLangId == jc2",
+                    "group": "jc2@2"
+                },
+                {
                     "command": "jc2.runSelection",
                     "when": "editorLangId == jc2 && editorHasSelection",
-                    "group": "jc2@2"
+                    "group": "jc2@3"
                 }
             ]
         },
@@ -100,7 +104,7 @@
         "test": "echo \"Error: no test specified\" && exit 1"
     },
     "keywords": [],
-    "author": "",
-    "license": "ISC",
+    "author": "Yu Liangyang",
+    "license": "MIT",
     "type": "commonjs"
 }

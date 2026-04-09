@@ -60,11 +60,26 @@ target_include_directories(JunkCalculator2 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 # ==============================================================================
 # 编译器极限优化与安全级别
 # ==============================================================================
+# ==============================================================================
+# 编译器极限优化与静态链接绑定 (防止缺失 VCRUNTIME.dll)
+# ==============================================================================
 if(MSVC)
     # /utf-8: 强制国际化字符编码，防止中文乱码
     # /W4 /WX: 严苛警告并视为错误 /bigobj: 防止模板嵌套导致的文件过大
-    target_compile_options(JunkCalculator2 PRIVATE /W4 /WX /utf-8 /bigobj)
+    # /EHsc: 显式开启 C++ 异常处理模型（解决 eh vector 报错的核心！）
+    target_compile_options(JunkCalculator2 PRIVATE /W4 /WX /utf-8 /bigobj /EHsc)
     
+    # 强制覆盖 CMake 默认的 /MD 为 /MT，彻底实现单文件纯绿色版！
+    # 这一段直接硬核替换编译器的全局标志，最暴力也最稳定。
+    foreach(flag_var
+            CMAKE_C_FLAGS CMAKE_C_FLAGS_DEBUG CMAKE_C_FLAGS_RELEASE
+            CMAKE_C_FLAGS_MINSIZEREL CMAKE_C_FLAGS_RELWITHDEBINFO
+            CMAKE_CXX_FLAGS CMAKE_CXX_FLAGS_DEBUG CMAKE_CXX_FLAGS_RELEASE
+            CMAKE_CXX_FLAGS_MINSIZEREL CMAKE_CXX_FLAGS_RELWITHDEBINFO)
+        if(${flag_var} MATCHES "/MD")
+            string(REGEX REPLACE "/MD" "/MT" ${flag_var} "${${flag_var}}")
+        endif()
+    endforeach()
     # 开启 Release 模式下最高级别的全程序优化 (Link Time Code Generation)
     set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /O2 /Oi /GL")
     set(CMAKE_EXE_LINKER_FLAGS_RELEASE "${CMAKE_EXE_LINKER_FLAGS_RELEASE} /LTCG")

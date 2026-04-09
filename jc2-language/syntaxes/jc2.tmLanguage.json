@@ -35,10 +35,7 @@
                     "beginCaptures": { "0": { "name": "punctuation.definition.string.begin.jc2" } },
                     "endCaptures": { "0": { "name": "punctuation.definition.string.end.jc2" } },
                     "patterns": [
-                        {
-                            "name": "constant.character.escape.jc2",
-                            "match": "\\\\[nrt\\\\\"0]"
-                        }
+                        { "name": "constant.character.escape.jc2", "match": "\\\\[nrt\\\\\"0]" }
                     ]
                 }
             ]
@@ -52,20 +49,13 @@
                     "beginCaptures": { "0": { "name": "punctuation.definition.string.begin.jc2" } },
                     "endCaptures": { "0": { "name": "punctuation.definition.string.end.jc2" } },
                     "patterns": [
-                        {
-                            "name": "constant.character.escape.jc2",
-                            "match": "\\\\[nrt\\\\\"0]"
-                        },
+                        { "name": "constant.character.escape.jc2", "match": "\\\\[nrt\\\\\"0]" },
                         {
                             "name": "meta.interpolation.jc2",
                             "begin": "\\{",
                             "end": "\\}",
-                            "beginCaptures": { "0": { "name": "punctuation.section.interpolation.begin.jc2" } },
-                            "endCaptures": { "0": { "name": "punctuation.section.interpolation.end.jc2" } },
                             "contentName": "source.jc2.embedded",
-                            "patterns": [
-                                { "include": "source.jc2" }
-                            ]
+                            "patterns": [ { "include": "source.jc2" } ]
                         }
                     ]
                 }
@@ -74,7 +64,16 @@
         "rstrings": {
             "patterns": [
                 {
-                    "name": "string.raw.jc2",
+                    "comment": "Custom Delimiter Raw String: r\"TAG(content)TAG\"",
+                    "name": "string.raw.delimited.jc2",
+                    "begin": "r\"([a-zA-Z0-9_]*)\\(",
+                    "beginCaptures": { "0": { "name": "punctuation.definition.string.begin.jc2" } },
+                    "end": "\\)\\1\"",
+                    "endCaptures": { "0": { "name": "punctuation.definition.string.end.jc2" } }
+                },
+                {
+                    "comment": "Simple Raw String: r\"content\"",
+                    "name": "string.raw.simple.jc2",
                     "begin": "r\"",
                     "end": "\"",
                     "beginCaptures": { "0": { "name": "punctuation.definition.string.begin.jc2" } },
@@ -84,42 +83,16 @@
         },
         "numbers": {
             "patterns": [
-                {
-                    "name": "constant.numeric.imaginary.jc2",
-                    "match": "\\b\\d+(\\.\\d+)?([eE][+-]?\\d+)?i\\b"
-                },
-                {
-                    "name": "constant.numeric.float.jc2",
-                    "match": "\\b\\d+\\.\\d+([eE][+-]?\\d+)?\\b"
-                },
-                {
-                    "name": "constant.numeric.scientific.jc2",
-                    "match": "\\b\\d+[eE][+-]?\\d+\\b"
-                },
-                {
-                    "name": "constant.numeric.integer.jc2",
-                    "match": "\\b\\d[\\d_]*\\b"
-                }
+                { "name": "constant.numeric.imaginary.jc2", "match": "\\b\\d+(\\.\\d+)?([eE][+-]?\\d+)?[iI]\\b" },
+                { "name": "constant.numeric.float.jc2", "match": "\\b\\d+\\.\\d+([eE][+-]?\\d+)?\\b" },
+                { "name": "constant.numeric.scientific.jc2", "match": "\\b\\d+[eE][+-]?\\d+\\b" },
+                { "name": "constant.numeric.integer.jc2", "match": "\\b\\d+[\\d_]*\\b" }
             ]
         },
         "keywords": {
             "patterns": [
-                {
-                    "name": "keyword.control.jc2",
-                    "match": "\\b(if|else|while|for|in|break|continue|return|switch|case|default|throw|try|catch)\\b"
-                },
-                {
-                    "name": "keyword.declaration.jc2",
-                    "match": "\\b(class|extends|const|global|delete|ref|import)\\b"
-                },
-                {
-                    "name": "keyword.operator.logical.jc2",
-                    "match": "\\b(and|or|not)\\b"
-                },
-                {
-                    "name": "variable.language.jc2",
-                    "match": "\\b(self|super)\\b"
-                }
+                { "name": "keyword.control.jc2", "match": "\\b(if|else|while|for|in|break|continue|return|switch|case|default|throw|try|catch)\\b" },
+                { "name": "keyword.declaration.jc2", "match": "\\b(class|extends|const|global|delete|ref|import)\\b" }
             ]
         },
         "class-def": {
@@ -137,108 +110,42 @@
         },
         "function-def": {
             "patterns": [
-                {
-                    "comment": "Dunder method definition: __add__(other) =",
-                    "match": "\\b(__[A-Za-z_][A-Za-z0-9_]*__)\\s*(?=\\()",
-                    "captures": {
-                        "1": { "name": "support.function.magic.jc2" }
-                    }
-                },
-                {
-                    "comment": "Function/method definition: fname(params) =",
-                    "match": "\\b([A-Za-z_][A-Za-z0-9_]*)\\s*(?=\\([^)]*\\)\\s*=)",
-                    "captures": {
-                        "1": { "name": "entity.name.function.definition.jc2" }
-                    }
-                }
+                { "match": "\\b(__[A-Za-z_][A-Za-z0-9_]*__)\\s*(?=\\()", "captures": { "1": { "name": "support.function.magic.jc2" } } },
+                { "match": "\\b([A-Za-z_][A-Za-z0-9_]*)\\s*(?=\\([^)]*\\)\\s*=)", "captures": { "1": { "name": "entity.name.function.definition.jc2" } } }
             ]
         },
         "function-call": {
-            "patterns": [
-                {
-                    "comment": "Any identifier followed by ( is a function call",
-                    "match": "\\b([A-Za-z_][A-Za-z0-9_]*)\\s*(?=\\()",
-                    "captures": {
-                        "1": { "name": "entity.name.function.call.jc2" }
-                    }
-                }
-            ]
+            "patterns": [ { "match": "\\b([A-Za-z_][A-Za-z0-9_]*)\\s*(?=\\()", "captures": { "1": { "name": "entity.name.function.call.jc2" } } } ]
         },
         "constants": {
             "patterns": [
-                {
-                    "name": "constant.language.jc2",
-                    "match": "\\b(true|false|none|PI|E|ANS)\\b"
-                },
-                {
-                    "name": "constant.language.imaginary.jc2",
-                    "match": "\\b[iI]\\b"
-                }
+                { "name": "constant.language.jc2", "match": "\\b(true|false|none|PI|E|ANS)\\b" },
+                { "name": "variable.language.jc2", "match": "\\b(self|super|_)\\b" }
             ]
         },
         "operators": {
             "patterns": [
-                {
-                    "name": "keyword.operator.pipe.jc2",
-                    "match": "\\|>"
-                },
-                {
-                    "name": "keyword.operator.arrow.jc2",
-                    "match": "=>"
-                },
-                {
-                    "name": "keyword.operator.comparison.jc2",
-                    "match": "==|!=|<=|>=|<|>"
-                },
-                {
-                    "name": "keyword.operator.logical.jc2",
-                    "match": "&&|\\|\\||!"
-                },
-                {
-                    "name": "keyword.operator.assignment.jc2",
-                    "match": "\\+=|-=|\\*=|/=|%=|\\^=|="
-                },
-                {
-                    "name": "keyword.operator.arithmetic.jc2",
-                    "match": "\\+|-|\\*|/|%|\\^|\\\\|~"
-                },
-                {
-                    "name": "keyword.operator.ternary.jc2",
-                    "match": "\\?|:"
-                }
+                { "name": "keyword.operator.pipe.jc2", "match": "\\|>" },
+                { "name": "keyword.operator.arrow.jc2", "match": "=>" },
+                { "name": "keyword.operator.spread.jc2", "match": "\\.\\.\\." },
+                { "name": "keyword.operator.comparison.jc2", "match": "==|!=|<=|>=|<|>" },
+                { "name": "keyword.operator.logical.jc2", "match": "&&|\\|\\||!" },
+                { "name": "keyword.operator.assignment.jc2", "match": "\\+=|-=|\\*=|/=|%=|\\^=|=" },
+                { "name": "keyword.operator.arithmetic.jc2", "match": "\\+|-|\\*|/|%|\\^|\\\\|~" },
+                { "name": "keyword.operator.ternary.jc2", "match": "\\?|:" }
             ]
         },
         "punctuation": {
             "patterns": [
-                {
-                    "name": "punctuation.bracket.round.jc2",
-                    "match": "[()]"
-                },
-                {
-                    "name": "punctuation.bracket.square.jc2",
-                    "match": "[\\[\\]]"
-                },
-                {
-                    "name": "punctuation.bracket.curly.jc2",
-                    "match": "[{}]"
-                },
-                {
-                    "name": "punctuation.separator.jc2",
-                    "match": "[,;]"
-                },
-                {
-                    "name": "punctuation.accessor.jc2",
-                    "match": "\\."
-                }
+                { "name": "punctuation.bracket.round.jc2", "match": "[()]" },
+                { "name": "punctuation.bracket.square.jc2", "match": "[\\[\\]]" },
+                { "name": "punctuation.bracket.curly.jc2", "match": "[{}]" },
+                { "name": "punctuation.separator.jc2", "match": "[,;]" },
+                { "name": "punctuation.accessor.jc2", "match": "\\." }
             ]
         },
         "identifiers": {
-            "patterns": [
-                {
-                    "name": "variable.other.jc2",
-                    "match": "\\b[a-zA-Z_][a-zA-Z0-9_]*\\b"
-                }
-            ]
+            "patterns": [ { "name": "variable.other.jc2", "match": "\\b[a-zA-Z_][a-zA-Z0-9_]*\\b" } ]
         }
     }
 }

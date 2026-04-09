@@ -300,7 +300,7 @@ namespace jc {
             std::streampos numberStartPos = 0;  // ★ 新增：正向记录每个数字的起始文件偏移
 
             while (file.read(buffer.data(), BUFFER_SIZE) || file.gcount() > 0) {
-                size_t bytesRead = file.gcount();
+                size_t bytesRead = static_cast<size_t>(file.gcount());
                 for (size_t i = 0; i < bytesRead; ++i) {
                     char c = buffer[i];
                     if (c >= '0' && c <= '9') {
@@ -781,7 +781,7 @@ namespace jc {
                 bool done = false;
 
                 while (!done && (file.read(buffer.data(), BUFFER_SIZE) || file.gcount() > 0)) {
-                    size_t bytesRead = file.gcount();
+                    size_t bytesRead = static_cast<size_t>(file.gcount());
                     for (size_t i = 0; i < bytesRead; ++i) {
                         char c = buffer[i];
                         if (c >= '0' && c <= '9') {
@@ -851,7 +851,7 @@ namespace jc {
                     bool done = false;
 
                     while (!done && (file.read(buffer.data(), BUFFER_SIZE) || file.gcount() > 0)) {
-                        size_t bytesRead = file.gcount();
+                        size_t bytesRead = static_cast<size_t>(file.gcount());
                         for (size_t i = 0; i < bytesRead; ++i) {
                             char c = buffer[i];
                             if (c >= '0' && c <= '9') {
@@ -910,7 +910,7 @@ namespace jc {
                 bool done = false;
 
                 while (!done && (file.read(buffer.data(), BUFFER_SIZE) || file.gcount() > 0)) {
-                    size_t bytesRead = file.gcount();
+                    size_t bytesRead = static_cast<size_t>(file.gcount());
                     for (size_t i = 0; i < bytesRead; ++i) {
                         char c = buffer[i];
                         if (c >= '0' && c <= '9') {
