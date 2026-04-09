@@ -1,9 +1,15 @@
 ﻿# ==============================================================================
-# Junk Calculator 2.1.0 - Ultimate CMake Build Script
+# Junk Calculator 2.2.0 [VM Edition] - Ultimate CMake Build Script
 # Developed by Yu Liangyang, Tsinghua University
 # ==============================================================================
 cmake_minimum_required(VERSION 3.15)
-project(JunkCalculator2 VERSION 2.1.0 LANGUAGES CXX)
+
+# ★ 开启 CMake 3.15+ 的 MSVC 纯净运行库控制策略
+cmake_policy(SET CMP0091 NEW)
+# ★ 优雅地强制所有模式静态链接，Debug用 /MTd，Release用 /MT，从此告别 D9025 警告！
+set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+
+project(JunkCalculator2 VERSION 2.2.0 LANGUAGES CXX)
 
 # 要求 C++20 标准
 set(CMAKE_CXX_STANDARD 20)
@@ -52,16 +58,15 @@ add_executable(JunkCalculator2 ${JC2_HEADERS} ${JC2_SOURCES})
 target_include_directories(JunkCalculator2 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
 # ==============================================================================
-# 编译器极限优化与静态链接绑定 (防止缺失 VCRUNTIME.dll)
+# 编译器极限优化与安全级别
 # ==============================================================================
 if(MSVC)
     # /utf-8: 强制国际化字符编码，防止中文乱码
-    # /W4 /WX: 严苛警告并视为错误
+    # /W4 /WX: 严苛警告并视为错误 /bigobj: 防止模板嵌套导致的文件过大
     target_compile_options(JunkCalculator2 PRIVATE /W4 /WX /utf-8 /bigobj)
     
     # 开启 Release 模式下最高级别的全程序优化 (Link Time Code Generation)
-    # /MT: 强制把 C++ 运行库静态打进 exe 肚子里，实现单文件纯绿色版！
-    set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /O2 /Oi /GL /MT")
+    set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /O2 /Oi /GL")
     set(CMAKE_EXE_LINKER_FLAGS_RELEASE "${CMAKE_EXE_LINKER_FLAGS_RELEASE} /LTCG")
 else()
     target_compile_options(JunkCalculator2 PRIVATE -Wall -Wextra -Werror -O3)
@@ -96,11 +101,10 @@ endif()
 install(TARGETS JunkCalculator2 DESTINATION bin)
 
 # 2. 强制创建并拷贝资源文件夹
-# 如果源码目录下没有这两个文件夹，CMake 也会在打包时在 bin 里建出来
 install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/data" DESTINATION bin)
 install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/lib" DESTINATION bin)
 
-# 3. 拷贝文档与许可协议 (消除打包软件的无协议警告，兼容带后缀的情况)
+# 3. 拷贝文档与许可协议
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/README.md")
     install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/README.md" DESTINATION .)
 endif()
@@ -116,7 +120,7 @@ endif()
 # 启用 CPack 生成 ZIP 包
 set(CPACK_GENERATOR "ZIP") # 最通用的便携格式
 set(CPACK_PACKAGE_NAME "JunkCalculator2")
-set(CPACK_PACKAGE_VERSION "2.1.0")
+set(CPACK_PACKAGE_VERSION "2.2.0")
 set(CPACK_PACKAGE_VENDOR "Yu Liangyang")
 set(CPACK_PACKAGE_FILE_NAME "${CPACK_PACKAGE_NAME}-${CPACK_PACKAGE_VERSION}-Windows-x64")
 include(CPack)
