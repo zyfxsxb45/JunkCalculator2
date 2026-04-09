@@ -134,6 +134,84 @@ namespace jc {
         OP_REF_WRITEBACK,
     };
 
+    // =================================================================
+// ★ 统一的 OpCode 字符串映射 (供反汇编器与 Profiler 共享)
+// =================================================================
+    inline std::string opCodeToString(OpCode op) {
+        switch (op) {
+        case OpCode::OP_CONSTANT: return "OP_CONSTANT";
+        case OpCode::OP_CONSTANT_LONG: return "OP_CONSTANT_LONG";
+        case OpCode::OP_NONE: return "OP_NONE";
+        case OpCode::OP_TRUE: return "OP_TRUE";
+        case OpCode::OP_FALSE: return "OP_FALSE";
+        case OpCode::OP_POP: return "OP_POP";
+        case OpCode::OP_ADD: return "OP_ADD";
+        case OpCode::OP_SUBTRACT: return "OP_SUBTRACT";
+        case OpCode::OP_MULTIPLY: return "OP_MULTIPLY";
+        case OpCode::OP_DIVIDE: return "OP_DIVIDE";
+        case OpCode::OP_MODULO: return "OP_MODULO";
+        case OpCode::OP_POWER: return "OP_POWER";
+        case OpCode::OP_NEGATE: return "OP_NEGATE";
+        case OpCode::OP_NOT: return "OP_NOT";
+        case OpCode::OP_EQUAL: return "OP_EQUAL";
+        case OpCode::OP_NOT_EQUAL: return "OP_NOT_EQUAL";
+        case OpCode::OP_LESS: return "OP_LESS";
+        case OpCode::OP_LESS_EQUAL: return "OP_LESS_EQUAL";
+        case OpCode::OP_GREATER: return "OP_GREATER";
+        case OpCode::OP_GREATER_EQUAL: return "OP_GREATER_EQUAL";
+        case OpCode::OP_GET_GLOBAL: return "OP_GET_GLOBAL";
+        case OpCode::OP_SET_GLOBAL: return "OP_SET_GLOBAL";
+        case OpCode::OP_DEFINE_GLOBAL: return "OP_DEFINE_GLOBAL";
+        case OpCode::OP_GET_LOCAL: return "OP_GET_LOCAL";
+        case OpCode::OP_SET_LOCAL: return "OP_SET_LOCAL";
+        case OpCode::OP_JUMP: return "OP_JUMP";
+        case OpCode::OP_JUMP_IF_FALSE: return "OP_JUMP_IF_FALSE";
+        case OpCode::OP_LOOP: return "OP_LOOP";
+        case OpCode::OP_CALL: return "OP_CALL";
+        case OpCode::OP_RETURN: return "OP_RETURN";
+        case OpCode::OP_CALL_BUILTIN: return "OP_CALL_BUILTIN";
+        case OpCode::OP_PRINT: return "OP_PRINT";
+        case OpCode::OP_INDEX_GET: return "OP_INDEX_GET";
+        case OpCode::OP_INDEX_SET: return "OP_INDEX_SET";
+        case OpCode::OP_BUILD_LIST: return "OP_BUILD_LIST";
+        case OpCode::OP_BUILD_MATRIX: return "OP_BUILD_MATRIX";
+        case OpCode::OP_CLOSURE: return "OP_CLOSURE";
+        case OpCode::OP_CALL_USER: return "OP_CALL_USER";
+        case OpCode::OP_DUP: return "OP_DUP";
+        case OpCode::OP_BREAK: return "OP_BREAK";
+        case OpCode::OP_CONTINUE: return "OP_CONTINUE";
+        case OpCode::OP_ITER_INIT: return "OP_ITER_INIT";
+        case OpCode::OP_ITER_NEXT: return "OP_ITER_NEXT";
+        case OpCode::OP_ITER_VAR: return "OP_ITER_VAR";
+        case OpCode::OP_IN: return "OP_IN";
+        case OpCode::OP_STRINGIFY: return "OP_STRINGIFY";
+        case OpCode::OP_CONCAT_STRINGS: return "OP_CONCAT_STRINGS";
+        case OpCode::OP_DESTRUCT: return "OP_DESTRUCT";
+        case OpCode::OP_TRY_BEGIN: return "OP_TRY_BEGIN";
+        case OpCode::OP_TRY_END: return "OP_TRY_END";
+        case OpCode::OP_THROW: return "OP_THROW";
+        case OpCode::OP_BUILD_DICT: return "OP_BUILD_DICT";
+        case OpCode::OP_FORMAT_STRING: return "OP_FORMAT_STRING";
+        case OpCode::OP_LIST_INIT: return "OP_LIST_INIT";
+        case OpCode::OP_LIST_APPEND: return "OP_LIST_APPEND";
+        case OpCode::OP_GET_UPVALUE: return "OP_GET_UPVALUE";
+        case OpCode::OP_SET_UPVALUE: return "OP_SET_UPVALUE";
+        case OpCode::OP_CLASS: return "OP_CLASS";
+        case OpCode::OP_METHOD: return "OP_METHOD";
+        case OpCode::OP_INHERIT: return "OP_INHERIT";
+        case OpCode::OP_GET_PROPERTY: return "OP_GET_PROPERTY";
+        case OpCode::OP_SET_PROPERTY: return "OP_SET_PROPERTY";
+        case OpCode::OP_INVOKE: return "OP_INVOKE";
+        case OpCode::OP_GET_SUPER: return "OP_GET_SUPER";
+        case OpCode::OP_SUPER_INVOKE: return "OP_SUPER_INVOKE";
+        case OpCode::OP_IMPORT: return "OP_IMPORT";
+        case OpCode::OP_SLICE_GET: return "OP_SLICE_GET";
+        case OpCode::OP_SLICE_SET: return "OP_SLICE_SET";
+        case OpCode::OP_REF_WRITEBACK: return "OP_REF_WRITEBACK";
+        default: return "UNKNOWN_OP";
+        }
+    }
+
     // ═══════════════════════════════════════════
     // 字节码块 (Chunk)
     // 存储一段编译后的字节码 + 常量池 + 行号信息
@@ -219,259 +297,184 @@ namespace jc {
         }
 
         int disassembleInstruction(int offset) const {
-            std::cout << std::setw(4) << std::setfill('0') << offset << "  ";
+            std::cout << std::right << std::setw(4) << std::setfill('0') << offset << "  " << std::setfill(' ');
 
             if (offset > 0 && lines[offset] == lines[offset - 1])
                 std::cout << "   | ";
             else
-                std::cout << std::setw(4) << lines[offset] << " ";
+                std::cout << std::right << std::setw(4) << lines[offset] << " ";
 
             auto op = static_cast<OpCode>(code[offset]);
-            switch (op) {
-            case OpCode::OP_CONSTANT: {
-                uint16_t idx = read16(offset + 1);
-                std::cout << "OP_CONSTANT       " << idx << " (";
-                std::cout << constants[idx] << ")" << std::endl;
-                return offset + 3;
-            }
-            case OpCode::OP_NONE:           std::cout << "OP_NONE" << std::endl; return offset + 1;
-            case OpCode::OP_TRUE:           std::cout << "OP_TRUE" << std::endl; return offset + 1;
-            case OpCode::OP_FALSE:          std::cout << "OP_FALSE" << std::endl; return offset + 1;
-            case OpCode::OP_POP:            std::cout << "OP_POP" << std::endl; return offset + 1;
-            case OpCode::OP_ADD:            std::cout << "OP_ADD" << std::endl; return offset + 1;
-            case OpCode::OP_SUBTRACT:       std::cout << "OP_SUBTRACT" << std::endl; return offset + 1;
-            case OpCode::OP_MULTIPLY:       std::cout << "OP_MULTIPLY" << std::endl; return offset + 1;
-            case OpCode::OP_DIVIDE:         std::cout << "OP_DIVIDE" << std::endl; return offset + 1;
-            case OpCode::OP_MODULO:         std::cout << "OP_MODULO" << std::endl; return offset + 1;
-            case OpCode::OP_POWER:          std::cout << "OP_POWER" << std::endl; return offset + 1;
-            case OpCode::OP_NEGATE:         std::cout << "OP_NEGATE" << std::endl; return offset + 1;
-            case OpCode::OP_NOT:            std::cout << "OP_NOT" << std::endl; return offset + 1;
-            case OpCode::OP_EQUAL:          std::cout << "OP_EQUAL" << std::endl; return offset + 1;
-            case OpCode::OP_NOT_EQUAL:      std::cout << "OP_NOT_EQUAL" << std::endl; return offset + 1;
-            case OpCode::OP_LESS:           std::cout << "OP_LESS" << std::endl; return offset + 1;
-            case OpCode::OP_LESS_EQUAL:     std::cout << "OP_LESS_EQUAL" << std::endl; return offset + 1;
-            case OpCode::OP_GREATER:        std::cout << "OP_GREATER" << std::endl; return offset + 1;
-            case OpCode::OP_GREATER_EQUAL:  std::cout << "OP_GREATER_EQUAL" << std::endl; return offset + 1;
-            case OpCode::OP_PRINT:          std::cout << "OP_PRINT" << std::endl; return offset + 1;
-            case OpCode::OP_RETURN:         std::cout << "OP_RETURN" << std::endl; return offset + 1;
 
+            // ★ 一键提取并左对齐 18 个字符宽，告别过去那种拼凑空格的痛苦
+            std::string opName = opCodeToString(op);
+            std::cout << std::left << std::setw(18) << opName;
+
+            switch (op) {
+                // ============================================
+                // 格式 0: 无操作数 (1 字节)
+                // ============================================
+            case OpCode::OP_NONE: case OpCode::OP_TRUE: case OpCode::OP_FALSE:
+            case OpCode::OP_POP: case OpCode::OP_ADD: case OpCode::OP_SUBTRACT:
+            case OpCode::OP_MULTIPLY: case OpCode::OP_DIVIDE: case OpCode::OP_MODULO:
+            case OpCode::OP_POWER: case OpCode::OP_NEGATE: case OpCode::OP_NOT:
+            case OpCode::OP_EQUAL: case OpCode::OP_NOT_EQUAL: case OpCode::OP_LESS:
+            case OpCode::OP_LESS_EQUAL: case OpCode::OP_GREATER: case OpCode::OP_GREATER_EQUAL:
+            case OpCode::OP_PRINT: case OpCode::OP_RETURN: case OpCode::OP_DUP:
+            case OpCode::OP_BREAK: case OpCode::OP_CONTINUE: case OpCode::OP_ITER_VAR:
+            case OpCode::OP_IN: case OpCode::OP_STRINGIFY: case OpCode::OP_TRY_END:
+            case OpCode::OP_THROW: case OpCode::OP_LIST_INIT: case OpCode::OP_INHERIT:
+            case OpCode::OP_IMPORT:
+                std::cout << std::endl;
+                return offset + 1;
+
+            // ============================================
+            // 格式 1: 1 个 uint8_t 操作数 (2 字节)
+            // ============================================
+            case OpCode::OP_CALL:
+            case OpCode::OP_CALL_USER: {
+                uint8_t argc = code[offset + 1];
+                std::cout << static_cast<int>(argc) << " args" << std::endl;
+                return offset + 2;
+            }
+            case OpCode::OP_INDEX_GET:
+            case OpCode::OP_INDEX_SET:
+            case OpCode::OP_SLICE_GET:
+            case OpCode::OP_SLICE_SET: {
+                uint8_t dims = code[offset + 1];
+                std::cout << static_cast<int>(dims) << " dims" << std::endl;
+                return offset + 2;
+            }
+            case OpCode::OP_DESTRUCT: {
+                uint8_t count = code[offset + 1];
+                std::cout << static_cast<int>(count) << " vars" << std::endl;
+                return offset + 2;
+            }
+            case OpCode::OP_ITER_INIT: {
+                uint8_t flag = code[offset + 1];
+                std::cout << (flag ? "destruct" : "normal") << std::endl;
+                return offset + 2;
+            }
+
+            // ============================================
+            // 格式 2: 1 个 uint16_t 常量池引用 (3 字节)
+            // ============================================
+            case OpCode::OP_CONSTANT:
             case OpCode::OP_GET_GLOBAL:
             case OpCode::OP_SET_GLOBAL:
-            case OpCode::OP_DEFINE_GLOBAL: {
+            case OpCode::OP_DEFINE_GLOBAL:
+            case OpCode::OP_CLASS:
+            case OpCode::OP_METHOD:
+            case OpCode::OP_GET_PROPERTY:
+            case OpCode::OP_SET_PROPERTY:
+            case OpCode::OP_GET_SUPER: {
                 uint16_t idx = read16(offset + 1);
-                std::string opName = (op == OpCode::OP_GET_GLOBAL) ? "OP_GET_GLOBAL" :
-                    (op == OpCode::OP_SET_GLOBAL) ? "OP_SET_GLOBAL" :
-                    "OP_DEFINE_GLOBAL";
-                std::cout << std::left << std::setw(18) << opName << idx << " (";
-                if (std::holds_alternative<std::string>(constants[idx].data))
-                    std::cout << std::get<std::string>(constants[idx].data);
-                else std::cout << constants[idx];
+                std::cout << idx << " (";
+                if (idx < constants.size()) {
+                    if (std::holds_alternative<std::string>(constants[idx].data))
+                        std::cout << std::get<std::string>(constants[idx].data);
+                    else
+                        std::cout << constants[idx];
+                }
                 std::cout << ")" << std::endl;
                 return offset + 3;
             }
 
+            // ============================================
+            // 格式 3: 1 个 uint16_t 槽位/数量/偏移等 (3 字节)
+            // ============================================
             case OpCode::OP_GET_LOCAL:
-            case OpCode::OP_SET_LOCAL: {
+            case OpCode::OP_SET_LOCAL:
+            case OpCode::OP_GET_UPVALUE:
+            case OpCode::OP_SET_UPVALUE: {
                 uint16_t slot = read16(offset + 1);
-                std::string opName = (op == OpCode::OP_GET_LOCAL) ? "OP_GET_LOCAL" : "OP_SET_LOCAL";
-                std::cout << std::left << std::setw(18) << opName << "slot " << slot << std::endl;
+                std::cout << "slot " << slot << std::endl;
                 return offset + 3;
             }
-
-            case OpCode::OP_JUMP: {
+            case OpCode::OP_JUMP:
+            case OpCode::OP_JUMP_IF_FALSE:
+            case OpCode::OP_ITER_NEXT: {
                 uint16_t jump = read16(offset + 1);
-                std::cout << "OP_JUMP           -> " << (offset + 3 + jump) << std::endl;
-                return offset + 3;
-            }
-            case OpCode::OP_JUMP_IF_FALSE: {
-                uint16_t jump = read16(offset + 1);
-                std::cout << "OP_JUMP_IF_FALSE  -> " << (offset + 3 + jump) << std::endl;
+                std::cout << "-> " << (offset + 3 + jump) << std::endl;
                 return offset + 3;
             }
             case OpCode::OP_LOOP: {
                 uint16_t jump = read16(offset + 1);
-                std::cout << "OP_LOOP           -> " << (offset + 3 - jump) << std::endl;
+                std::cout << "-> " << (offset + 3 - jump) << std::endl;
+                return offset + 3;
+            }
+            case OpCode::OP_BUILD_LIST:
+            case OpCode::OP_CONCAT_STRINGS:
+            case OpCode::OP_BUILD_DICT: {
+                uint16_t count = read16(offset + 1);
+                std::cout << count << " items" << std::endl;
+                return offset + 3;
+            }
+            case OpCode::OP_CLOSURE:
+            case OpCode::OP_FORMAT_STRING:
+            case OpCode::OP_LIST_APPEND: {
+                uint16_t idx = read16(offset + 1);
+                std::cout << idx << std::endl;
                 return offset + 3;
             }
 
-            case OpCode::OP_CALL: {
-                uint8_t argc = code[offset + 1];
-                std::cout << "OP_CALL           " << static_cast<int>(argc) << " args" << std::endl;
-                return offset + 2;
-            }
-
-            case OpCode::OP_CALL_BUILTIN: {
+            // ============================================
+            // 格式 4: uint16_t 名称索引 + uint8_t 参数个数 (4 字节)
+            // ============================================
+            case OpCode::OP_CALL_BUILTIN:
+            case OpCode::OP_INVOKE:
+            case OpCode::OP_SUPER_INVOKE: {
                 uint16_t idx = read16(offset + 1);
                 uint8_t argc = code[offset + 3];
-                std::cout << "OP_CALL_BUILTIN   " << std::get<std::string>(constants[idx].data)
-                    << " (" << static_cast<int>(argc) << " args)" << std::endl;
+                std::cout << idx << " (";
+                if (idx < constants.size() && std::holds_alternative<std::string>(constants[idx].data))
+                    std::cout << std::get<std::string>(constants[idx].data);
+                std::cout << ") " << static_cast<int>(argc) << " args" << std::endl;
                 return offset + 4;
             }
-            case OpCode::OP_CLOSURE: {
-                uint16_t idx = read16(offset + 1);
-                std::cout << "OP_CLOSURE        " << idx << std::endl;
-                return offset + 3;
-            }
-            case OpCode::OP_CALL_USER: {
-                uint8_t argc = code[offset + 1];
-                std::cout << "OP_CALL_USER      " << static_cast<int>(argc) << " args" << std::endl;
-                return offset + 2;
-            }
-            case OpCode::OP_DUP:          std::cout << "OP_DUP" << std::endl; return offset + 1;
-            case OpCode::OP_ITER_INIT: {
-                uint8_t flag = code[offset + 1];
-                std::cout << "OP_ITER_INIT      " << (flag ? "destruct" : "normal") << std::endl;
-                return offset + 2;
-            }
-            case OpCode::OP_ITER_NEXT: {
-                uint16_t jump = read16(offset + 1);
-                std::cout << "OP_ITER_NEXT      -> " << (offset + 3 + jump) << std::endl;
-                return offset + 3;
-            }
-            case OpCode::OP_ITER_VAR:     std::cout << "OP_ITER_VAR" << std::endl; return offset + 1;
-            case OpCode::OP_IN:             std::cout << "OP_IN" << std::endl; return offset + 1;
-            case OpCode::OP_BUILD_LIST: {
-                uint16_t count = read16(offset + 1);
-                std::cout << "OP_BUILD_LIST     " << count << " elements" << std::endl;
-                return offset + 3;
-            }
+
+            // ============================================
+            // 格式 5: 定长双短参数 (5 字节)
+            // ============================================
             case OpCode::OP_BUILD_MATRIX: {
                 uint16_t r = read16(offset + 1);
                 uint16_t c = read16(offset + 3);
-                std::cout << "OP_BUILD_MATRIX   " << r << "x" << c << std::endl;
+                std::cout << r << "x" << c << std::endl;
                 return offset + 5;
-            }
-            case OpCode::OP_INDEX_GET: {
-                uint8_t dims = code[offset + 1];
-                std::cout << "OP_INDEX_GET      " << static_cast<int>(dims) << " dims" << std::endl;
-                return offset + 2;
-            }
-            case OpCode::OP_INDEX_SET: {
-                uint8_t dims = code[offset + 1];
-                std::cout << "OP_INDEX_SET      " << static_cast<int>(dims) << " dims" << std::endl;
-                return offset + 2;
-            }
-            case OpCode::OP_STRINGIFY:      std::cout << "OP_STRINGIFY" << std::endl; return offset + 1;
-            case OpCode::OP_CONCAT_STRINGS: {
-                uint16_t count = read16(offset + 1);
-                std::cout << "OP_CONCAT_STRINGS " << count << " parts" << std::endl;
-                return offset + 3;
-            }
-            case OpCode::OP_DESTRUCT: {
-                uint8_t count = code[offset + 1];
-                std::cout << "OP_DESTRUCT       " << static_cast<int>(count) << " vars" << std::endl;
-                return offset + 2;
             }
             case OpCode::OP_TRY_BEGIN: {
                 uint16_t jump = read16(offset + 1);
                 uint16_t nameIdx = read16(offset + 3);
-                std::cout << "OP_TRY_BEGIN      catch -> " << (offset + 5 + jump);
-                if (nameIdx < constants.size() &&
-                    std::holds_alternative<std::string>(constants[nameIdx].data))
+                std::cout << "catch -> " << (offset + 5 + jump);
+                if (nameIdx < constants.size() && std::holds_alternative<std::string>(constants[nameIdx].data))
                     std::cout << " (var: " << std::get<std::string>(constants[nameIdx].data) << ")";
                 std::cout << std::endl;
-                return offset + 5;  // ★ 1 opcode + 2 offset + 2 nameIdx
+                return offset + 5;
             }
-            case OpCode::OP_TRY_END:       std::cout << "OP_TRY_END" << std::endl; return offset + 1;
-            case OpCode::OP_THROW:          std::cout << "OP_THROW" << std::endl; return offset + 1;
-            case OpCode::OP_BUILD_DICT: {
-                uint16_t count = read16(offset + 1);
-                std::cout << "OP_BUILD_DICT     " << count << " pairs" << std::endl;
-                return offset + 3;
-            }
-            case OpCode::OP_FORMAT_STRING: {
-                uint16_t idx = read16(offset + 1);
-                std::cout << "OP_FORMAT_STRING  spec=" << idx << std::endl;
-                return offset + 3;
-            }
-            case OpCode::OP_LIST_INIT:     std::cout << "OP_LIST_INIT" << std::endl; return offset + 1;
-            case OpCode::OP_LIST_APPEND: {
-                uint16_t depth = read16(offset + 1);
-                std::cout << "OP_LIST_APPEND    depth=" << depth << std::endl;
-                return offset + 3;
-            }
-            case OpCode::OP_GET_UPVALUE: {
-                uint16_t idx = read16(offset + 1);
-                std::cout << "OP_GET_UPVALUE    " << idx << std::endl;
-                return offset + 3;
-            }
-            case OpCode::OP_SET_UPVALUE: {
-                uint16_t idx = read16(offset + 1);
-                std::cout << "OP_SET_UPVALUE    " << idx << std::endl;
-                return offset + 3;
-            }
-            case OpCode::OP_CLASS: {
-                uint16_t idx = read16(offset + 1);
-                std::cout << "OP_CLASS          " << std::get<std::string>(constants[idx].data) << std::endl;
-                return offset + 3;
-            }
-            case OpCode::OP_METHOD: {
-                uint16_t idx = read16(offset + 1);
-                std::cout << "OP_METHOD         " << std::get<std::string>(constants[idx].data) << std::endl;
-                return offset + 3;
-            }
-            case OpCode::OP_INHERIT:       std::cout << "OP_INHERIT" << std::endl; return offset + 1;
-            case OpCode::OP_GET_PROPERTY: {
-                uint16_t idx = read16(offset + 1);
-                std::cout << "OP_GET_PROPERTY   " << std::get<std::string>(constants[idx].data) << std::endl;
-                return offset + 3;
-            }
-            case OpCode::OP_SET_PROPERTY: {
-                uint16_t idx = read16(offset + 1);
-                std::cout << "OP_SET_PROPERTY   " << std::get<std::string>(constants[idx].data) << std::endl;
-                return offset + 3;
-            }
-            case OpCode::OP_INVOKE: {
-                uint16_t idx = read16(offset + 1);
-                uint8_t argc = code[offset + 3];
-                std::cout << "OP_INVOKE         " << std::get<std::string>(constants[idx].data)
-                    << " (" << static_cast<int>(argc) << " args)" << std::endl;
-                return offset + 4;
-            }
-            case OpCode::OP_IMPORT: {
-                // ★ 编译器不发射操作数，路径通过栈传递
-                std::cout << "OP_IMPORT" << std::endl;
-                return offset + 1;
-            }
-            case OpCode::OP_SLICE_GET: {
-                uint8_t dims = code[offset + 1];
-                std::cout << "OP_SLICE_GET      " << static_cast<int>(dims) << " dims" << std::endl;
-                return offset + 2;
-            }
-            case OpCode::OP_SLICE_SET: {
-                uint8_t dims = code[offset + 1];
-                std::cout << "OP_SLICE_SET      " << static_cast<int>(dims) << " dims" << std::endl;
-                return offset + 2;
-            }
-            case OpCode::OP_GET_SUPER: {
-                uint16_t idx = read16(offset + 1);
-                std::cout << "OP_GET_SUPER      " << std::get<std::string>(constants[idx].data) << std::endl;
-                return offset + 3;
-            }
-            case OpCode::OP_SUPER_INVOKE: {
-                uint16_t idx = read16(offset + 1);
-                uint8_t argc = code[offset + 3];
-                std::cout << "OP_SUPER_INVOKE   " << std::get<std::string>(constants[idx].data)
-                    << " (" << static_cast<int>(argc) << " args)" << std::endl;
-                return offset + 4;
-            }
+
+            // ============================================
+            // 格式 6: 变长复合参数
+            // ============================================
             case OpCode::OP_REF_WRITEBACK: {
                 uint8_t count = code[offset + 1];
-                std::cout << "OP_REF_WRITEBACK  " << static_cast<int>(count) << " args" << std::endl;
+                std::cout << static_cast<int>(count) << " source(s)" << std::endl;
                 int pos = offset + 2;
                 for (int k = 0; k < count; ++k) {
                     uint8_t argIdx = code[pos];
                     uint8_t srcType = code[pos + 1];
                     uint16_t srcRef = static_cast<uint16_t>((code[pos + 2] << 8) | code[pos + 3]);
-                    std::string typeName = (srcType == 1) ? "global" : (srcType == 2) ? "local" : "upvalue";
-                    std::cout << "                    arg " << static_cast<int>(argIdx)
-                        << " → " << typeName << " " << srcRef << std::endl;
+                    std::string typeName = (srcType == 1) ? "global" : ((srcType == 2) ? "local" : "upvalue");
+
+                    // 绘制下划线树形结构，方便透视查看
+                    std::cout << "         |                 arg " << static_cast<int>(argIdx)
+                        << " -> " << typeName << " " << srcRef << std::endl;
                     pos += 4;
                 }
                 return pos;
             }
+
             default:
-                std::cout << "UNKNOWN_OP " << static_cast<int>(code[offset]) << std::endl;
+                std::cout << "UNKNOWN FORMAT" << std::endl;
                 return offset + 1;
             }
         }
@@ -482,6 +485,7 @@ namespace jc {
         int arity = 0;
         int maxArity = 0;
         int localCount = 0;
+        bool hasRestParam = false;
         Chunk chunk;
 
         // ★ 上值捕获信息

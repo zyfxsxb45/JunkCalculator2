@@ -3,11 +3,12 @@
 
 #include "Bytecode.h"
 #include "Value.h"
-#include <vector>
-#include <map>
-#include <string>
+#include <chrono>
 #include <functional>
+#include <map>
 #include <set>
+#include <string>
+#include <vector>
 
 namespace jc {
 
@@ -71,6 +72,30 @@ namespace jc {
         std::map<std::string, std::set<int>> builtinArity;  // ★ 新增
         std::set<std::string> importedModules;               // ★ 防重复导入
 
+        int currentLine();
+
+        // ★ 调试器专属状态
+        bool debugMode = false;
+        bool stepNextLine = false;
+        int lastDebugLine = -1;
+        std::set<int> breakpoints;
+        void debugPrompt(); // 交互式调试终端
+
+        //★ 性能探针 Profiler 专属状态
+        bool profileMode = false;
+
+        // 统计每种 OpCode 的执行总次数
+        std::map<OpCode, uint64_t> opCounts;
+
+        // 统计每个函数的调用次数和总耗时
+        struct FuncProfile {
+            uint64_t callCount = 0;
+            double totalTimeMs = 0.0;
+        };
+        std::map<std::string, FuncProfile> funcProfiles;
+        // 当一次完整的脚本执行完，打印报告
+       
+
     public:
         VM();
 
@@ -95,6 +120,15 @@ namespace jc {
             globals.erase(name);
             constGlobals.erase(name);
         }
+
+        void triggerDebugger() {
+            debugMode = true;
+            stepNextLine = true; // 立刻在下一行停下
+            lastDebugLine = -1;  // 强制打破防抖
+        }
+
+        void printProfileReport();
+        void enableProfiler(bool enable) { profileMode = enable; }
     };
 
 } // namespace jc

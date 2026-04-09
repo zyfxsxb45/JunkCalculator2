@@ -134,12 +134,15 @@ namespace jc {
                 }
             }
 
-            // ★ 解构赋值: [a, b, c] = expr
+            // ★ 完美解构赋值: [a, b; c, d] = expr
             if (auto* matNode = dynamic_cast<MatrixNode*>(expr.get())) {
-                if (matNode->elements.size() == 1) {
-                    std::vector<Token> names;
-                    bool validDestruct = true;
-                    for (auto& elem : matNode->elements[0]) {
+                std::vector<Token> names;
+                bool validDestruct = true;
+
+                // ★ 改为：遍历矩阵结构里的所有行和所有列，把里面的变量统统抓出来变成一维解析顺位
+                // 因为在右边的 VM 层面，多维矩阵的底层 rawData 也是一个铺平的 1D 数组！
+                for (auto& row : matNode->elements) {
+                    for (auto& elem : row) {
                         if (auto* v = dynamic_cast<Variable*>(elem.get())) {
                             names.push_back(v->name);
                         }
@@ -148,10 +151,36 @@ namespace jc {
                             break;
                         }
                     }
-                    if (validDestruct && !names.empty()) {
-                        return std::make_unique<DestructAssign>(
-                            std::move(names), std::move(value));
+                    if (!validDestruct) break;
+                }
+
+                if (validDestruct && !names.empty()) {
+                    return std::make_unique<DestructAssign>(
+                        std::move(names), std::move(value));
+                }
+            }
+
+            // ★ 字典解构赋值: { name, age: a } = expr
+            if (auto* dictNode = dynamic_cast<DictLiteral*>(expr.get())) {
+                std::vector<std::pair<std::string, Token>> targets;
+                bool validDestruct = true;
+                for (auto& entry : dictNode->entries) {
+                    auto* litKey = dynamic_cast<Literal*>(entry.first.get());
+                    auto* varVal = dynamic_cast<Variable*>(entry.second.get());
+                    // 确保映射的键是字符串常数，值是单纯的变量标识符
+                    if (litKey && litKey->isString && varVal) {
+                        targets.push_back({ litKey->value, varVal->name });
                     }
+                    else {
+                        validDestruct = false; break;
+                    }
+                }
+                if (validDestruct && !targets.empty()) {
+                    return std::make_unique<DictDestructAssign>(
+                        std::move(targets), std::move(value));
+                }
+                else {
+                    throw std::runtime_error("Parser Error: Invalid dictionary destructuring target.");
                 }
             }
 
@@ -163,27 +192,84 @@ namespace jc {
             if (auto* callExpr = dynamic_cast<Call*>(expr.get())) {
                 std::vector<Token> params;
                 std::vector<bool> paramIsRef;
-                std::vector<std::shared_ptr<Expr>> defaultExprs;  // ★
+                std::vector<std::shared_ptr<Expr>> defaultExprs;
+
+                // ★ 新增：变长参数标志
+                bool hasRestParam = false;
+
+                // ★ 解构拦截器
+                std::vector<std::unique_ptr<Expr>> destructStmts;
+                int destructCounter = 0;
 
                 for (auto& argExpr : callExpr->arguments) {
+                    if (hasRestParam) {
+                        throw std::runtime_error("Parser Error: Rest parameter '...' must be the last parameter in function definition.");
+                    }
+
+                    // 1. 拦截 ref 引用参数
                     if (auto* refParam = dynamic_cast<RefParam*>(argExpr.get())) {
                         params.push_back(refParam->name);
                         paramIsRef.push_back(true);
                         defaultExprs.push_back(nullptr);
                     }
-                    // ★ param = defaultValue → Assign 节点
+                    // 2. 拦截默认值参数 a = 1
                     else if (auto* assignExpr = dynamic_cast<Assign*>(argExpr.get())) {
                         params.push_back(assignExpr->name);
                         paramIsRef.push_back(false);
                         defaultExprs.push_back(std::shared_ptr<Expr>(assignExpr->value.release()));
                     }
+                    // 3. 拦截普通变量 a
                     else if (auto* varExpr = dynamic_cast<Variable*>(argExpr.get())) {
                         params.push_back(varExpr->name);
                         paramIsRef.push_back(false);
                         defaultExprs.push_back(nullptr);
                     }
+                    // 4. ★ 新增：拦截变长参数 ...args
+                    else if (auto* unaryExpr = dynamic_cast<Unary*>(argExpr.get())) {
+                        if (unaryExpr->op.type == TokenType::ELLIPSIS) {
+                            if (auto* varTarget = dynamic_cast<Variable*>(unaryExpr->right.get())) {
+                                params.push_back(varTarget->name);
+                                paramIsRef.push_back(false);
+                                defaultExprs.push_back(nullptr);
+                                hasRestParam = true; // 标记已出现变长参数
+                                continue;
+                            }
+                        }
+                        throw std::runtime_error("Parser Error: Invalid rest parameter syntax. Expected '...name'.");
+                    }
+                    // 5. 拦截字典解构参数 {x, y}
+                    else if (auto* dictNode = dynamic_cast<DictLiteral*>(argExpr.get())) {
+                        std::string phName = "__param_dict_" + std::to_string(destructCounter++);
+                        Token phTok(TokenType::IDENTIFIER, phName, callExpr->callee.line);
+
+                        params.push_back(phTok);
+                        paramIsRef.push_back(false);
+                        defaultExprs.push_back(nullptr);
+
+                        std::vector<std::pair<std::string, Token>> targets;
+                        bool validDestruct = true;
+
+                        for (auto& entry : dictNode->entries) {
+                            auto* litKey = dynamic_cast<Literal*>(entry.first.get());
+                            auto* varVal = dynamic_cast<Variable*>(entry.second.get());
+                            if (litKey && litKey->isString && varVal) {
+                                targets.push_back({ litKey->value, varVal->name });
+                            }
+                            else {
+                                validDestruct = false; break;
+                            }
+                        }
+
+                        if (!validDestruct || targets.empty()) {
+                            throw std::runtime_error("Parser Error: Invalid dictionary parameter in function signature.");
+                        }
+
+                        auto rhs = std::make_unique<Variable>(phTok);
+                        auto dda = std::make_unique<DictDestructAssign>(std::move(targets), std::move(rhs));
+                        destructStmts.push_back(std::move(dda));
+                    }
                     else {
-                        throw std::runtime_error("Parser Error: Function parameters must be simple variable names (optionally prefixed with 'ref'), or name = default.");
+                        throw std::runtime_error("Parser Error: Function parameters must be simple variable names, default assignments, rest parameter '...', or destructured dictionaries '{ }'.");
                     }
                 }
 
@@ -194,13 +280,23 @@ namespace jc {
                     if (i < valueEndTokenIndex - 1) rawBodyStr += " ";
                 }
 
+                std::shared_ptr<Expr> finalBody;
+                if (!destructStmts.empty()) {
+                    destructStmts.push_back(std::move(value));
+                    finalBody = std::make_shared<Block>(std::move(destructStmts));
+                }
+                else {
+                    finalBody = std::shared_ptr<Expr>(value.release());
+                }
+
                 return std::make_unique<FunctionDef>(
                     callExpr->callee,
                     params,
                     paramIsRef,
-                    defaultExprs,     // ★
+                    defaultExprs,
+                    hasRestParam,     // ★ 将标志传给 AST 节点
                     rawBodyStr,
-                    std::shared_ptr<Expr>(value.release())
+                    std::move(finalBody)
                 );
             }
             throw std::runtime_error("Parser Error: Invalid assignment target at '" + equals.lexeme + "'.");
@@ -242,7 +338,7 @@ namespace jc {
     }
 
     std::unique_ptr<Expr> Parser::unary() {
-        if (match({ TokenType::PLUS, TokenType::MINUS, TokenType::BANG })) {  // ★ 加 BANG
+        if (match({ TokenType::PLUS, TokenType::MINUS, TokenType::BANG , TokenType::ELLIPSIS })) {  // ★ 加 BANG
             Token op = previous();
             auto right = unary();
             return std::make_unique<Unary>(op, std::move(right));
@@ -275,12 +371,42 @@ namespace jc {
                 }
                 while (match({ TokenType::NEWLINE })) {}  // ★
                 consume(TokenType::RPAREN, "Parser Error: Expect ')' after arguments.");
-
+                // =========================================================
+                // ★ 魔法糖 1：自动柯里化探测 (Partial Application)
+                // =========================================================
+                bool isPartial = false;
+                std::vector<Token> phParams;
+                std::vector<std::shared_ptr<Expr>> phDefaults;
+                int phCount = 0;
+                for (auto& arg : args) {
+                    if (auto* var = dynamic_cast<Variable*>(arg.get())) {
+                        if (var->name.lexeme == "_") {
+                            isPartial = true;
+                            // 制造一个隐形的变量名：__ph_0, __ph_1...
+                            Token phTok(TokenType::IDENTIFIER, "__ph_" + std::to_string(phCount++), var->name.line);
+                            phParams.push_back(phTok);
+                            phDefaults.push_back(nullptr);
+                            // 将暗号 `_` 替换为真实的内部变量传递
+                            arg = std::make_unique<Variable>(phTok);
+                        }
+                    }
+                }
+                std::unique_ptr<Expr> callNode;
                 if (auto* varExpr = dynamic_cast<Variable*>(expr.get())) {
-                    expr = std::make_unique<Call>(varExpr->name, std::move(args));
+                    callNode = std::make_unique<Call>(varExpr->name, std::move(args));
                 }
                 else {
-                    expr = std::make_unique<InvokeExpr>(std::move(expr), std::move(args));
+                    callNode = std::make_unique<InvokeExpr>(std::move(expr), std::move(args));
+                }
+                // 如果有占位符，直接把这个调用包进一个 Lambda 里！
+                if (isPartial) {
+                    expr = std::make_unique<LambdaExpr>(
+                        std::move(phParams), std::move(phDefaults), false,
+                        "<partial_apply>", std::shared_ptr<Expr>(callNode.release())
+                    );
+                }
+                else {
+                    expr = std::move(callNode);
                 }
             }
             else if (match({ TokenType::LBRACKET })) {
@@ -356,7 +482,36 @@ namespace jc {
                     }
                     while (match({ TokenType::NEWLINE })) {}  // ★
                     consume(TokenType::RPAREN, "Parser Error: Expect ')' after method arguments.");
-                    expr = std::make_unique<MethodCallExpr>(std::move(expr), field, std::move(args));
+
+                    // =========================================================
+                    // ★ 魔法糖 2：对象方法的自动柯里化
+                    // =========================================================
+                    bool isPartial = false;
+                    std::vector<Token> phParams;
+                    std::vector<std::shared_ptr<Expr>> phDefaults;
+                    int phCount = 0;
+                    for (auto& arg : args) {
+                        if (auto* var = dynamic_cast<Variable*>(arg.get())) {
+                            if (var->name.lexeme == "_") {
+                                isPartial = true;
+                                Token phTok(TokenType::IDENTIFIER, "__ph_" + std::to_string(phCount++), var->name.line);
+                                phParams.push_back(phTok);
+                                phDefaults.push_back(nullptr);
+                                arg = std::make_unique<Variable>(phTok);
+                            }
+                        }
+                    }
+                    std::unique_ptr<Expr> methodNode = std::make_unique<MethodCallExpr>(std::move(expr), field, std::move(args));
+
+                    if (isPartial) {
+                        expr = std::make_unique<LambdaExpr>(
+                            std::move(phParams), std::move(phDefaults), false,
+                            "<partial_method>", std::shared_ptr<Expr>(methodNode.release())
+                        );
+                    }
+                    else {
+                        expr = std::move(methodNode);
+                    }
                 }
                 else {
                     expr = std::make_unique<DotAccess>(std::move(expr), field);
@@ -605,10 +760,20 @@ namespace jc {
             if (peekPos + 1 < static_cast<int>(tokens.size())) {
                 TokenType first = tokens[peekPos].type;
                 TokenType second = tokens[peekPos + 1].type;
+
+                bool isDict = false;
+
                 if (second == TokenType::COLON &&
                     (first == TokenType::IDENTIFIER || first == TokenType::STRING ||
                         first == TokenType::NUMBER || first == TokenType::FSTRING ||
                         first == TokenType::RSTRING || first == TokenType::IMAGINARY)) {
+                    isDict = true;
+                }
+                else if (first == TokenType::IDENTIFIER && second == TokenType::COMMA) {
+                    isDict = true;
+                }
+
+                if (isDict) {
                     return parseDictLiteral();
                 }
             }
@@ -680,20 +845,34 @@ namespace jc {
             }
 
             if (isLambda) {
-                // ★ 回溯并用完整解析器重新解析参数（带默认值）
+                // ★ 回溯并用完整解析器重新解析参数
                 current = savedPos;
                 lambdaParams.clear();
                 std::vector<std::shared_ptr<Expr>> lambdaDefaults;
+                bool hasRestParam = false; // ★ 新增变长标志
 
                 if (!check(TokenType::RPAREN)) {
                     do {
+                        if (hasRestParam) {
+                            throw std::runtime_error("Parser Error: Rest parameter '...' must be the last parameter in lambda.");
+                        }
+
+                        // ★ 拦截 ...args
+                        if (match({ TokenType::ELLIPSIS })) {
+                            Token param = consume(TokenType::IDENTIFIER, "Parser Error: Expect parameter name after '...'.");
+                            lambdaParams.push_back(param);
+                            lambdaDefaults.push_back(nullptr);
+                            hasRestParam = true;
+                            continue;
+                        }
+
                         Token param = consume(TokenType::IDENTIFIER,
                             "Parser Error: Expect parameter name in lambda.");
                         lambdaParams.push_back(param);
+
                         if (match({ TokenType::ASSIGN })) {
                             auto defExpr = ternary();
-                            lambdaDefaults.push_back(
-                                std::shared_ptr<Expr>(defExpr.release()));
+                            lambdaDefaults.push_back(std::shared_ptr<Expr>(defExpr.release()));
                         }
                         else {
                             lambdaDefaults.push_back(nullptr);
@@ -710,16 +889,15 @@ namespace jc {
 
                 std::string rawBody;
                 for (int ii = bodyStart; ii < bodyEnd; ++ii) {
-                    if (tokens[ii].type == TokenType::STRING)
-                        rawBody += "\"" + tokens[ii].lexeme + "\"";
-                    else
-                        rawBody += tokens[ii].lexeme;
+                    if (tokens[ii].type == TokenType::STRING) rawBody += "\"" + tokens[ii].lexeme + "\"";
+                    else rawBody += tokens[ii].lexeme;
                     if (ii < bodyEnd - 1) rawBody += " ";
                 }
 
                 return std::make_unique<LambdaExpr>(
                     std::move(lambdaParams),
-                    std::move(lambdaDefaults),  // ★
+                    std::move(lambdaDefaults),
+                    hasRestParam,  // ★ 传入构造函数
                     rawBody,
                     std::shared_ptr<Expr>(body.release()));
             }
@@ -857,10 +1035,28 @@ namespace jc {
             std::vector<Token> params;
             std::vector<bool> paramIsRef;
             std::vector<std::shared_ptr<Expr>> defaultExprs;
+            bool hasRestParam = false; // ★ 新增变长标志
+
             if (!check(TokenType::RPAREN)) {
                 do {
+                    if (hasRestParam) {
+                        throw std::runtime_error("Parser Error: Rest parameter '...' must be the last parameter in class method.");
+                    }
+
                     bool isRef = false;
                     if (match({ TokenType::REF })) isRef = true;
+
+                    // ★ 拦截 ...args
+                    if (match({ TokenType::ELLIPSIS })) {
+                        if (isRef) throw std::runtime_error("Parser Error: Rest parameter cannot be passed by reference.");
+                        Token param = consume(TokenType::IDENTIFIER, "Parser Error: Expect parameter name after '...'.");
+                        params.push_back(param);
+                        paramIsRef.push_back(false);
+                        defaultExprs.push_back(nullptr);
+                        hasRestParam = true;
+                        continue;
+                    }
+
                     Token param = consume(TokenType::IDENTIFIER,
                         "Parser Error: Expect parameter name.");
                     params.push_back(param);
@@ -885,7 +1081,7 @@ namespace jc {
 
             std::string rawBody;
             for (int i = bodyStart; i < bodyEnd; ++i) {
-                if (tokens[i].type == TokenType::NEWLINE) continue;  // ★ 跳过 NEWLINE
+                if (tokens[i].type == TokenType::NEWLINE) continue;
                 if (tokens[i].type == TokenType::STRING)
                     rawBody += "\"" + tokens[i].lexeme + "\"";
                 else
@@ -898,6 +1094,7 @@ namespace jc {
                 std::move(params),
                 std::move(paramIsRef),
                 std::move(defaultExprs),
+                hasRestParam,  // ★ 传递给结构体
                 std::move(rawBody),
                 std::shared_ptr<Expr>(body.release())
                 });
@@ -1055,30 +1252,51 @@ namespace jc {
             while (match({ TokenType::NEWLINE })) {}  // ★ 跳过前导换行
             if (check(TokenType::RBRACE)) break;
 
-            std::unique_ptr<Expr> key;
-            if (check(TokenType::IDENTIFIER) &&
-                current + 1 < static_cast<int>(tokens.size()) &&
-                tokens[current + 1].type == TokenType::COLON) {
-                Token idTok = advance();
-                key = std::make_unique<Literal>(idTok.lexeme, true);
+            std::unique_ptr<Expr> key, value;
+
+            // 1. 尝试将第一个元素当成可能的标识符或常数提取出来
+            bool isSimpleId = check(TokenType::IDENTIFIER);
+            Token maybeIdTok = peek(); // 暂存这个可能的名字
+
+            if (isSimpleId) {
+                advance(); // 吞掉这个标识符
             }
             else {
-                key = ternary();
+                key = ternary(); // 它不是简单的标识符，按常规表达式读取
             }
 
-            consume(TokenType::COLON, "Parser Error: Expect ':' after dict key.");
+            // 2. 核心分发：看看接下来是不是冒号
+            while (match({ TokenType::NEWLINE })) {} // 跳过中间可能的换行
 
-            auto value = ternary();
+            if (match({ TokenType::COLON })) {
+                // ★ 它是标准的 "key: value" 模式
+                if (isSimpleId) {
+                    // 把刚才吞掉的标识符转为字符串常数作为 key
+                    key = std::make_unique<Literal>(maybeIdTok.lexeme, true);
+                }
+                value = ternary();
+            }
+            else if (isSimpleId) {
+                // ★ 它是简写的 "{ name }" 模式（没遇到冒号！）
+                // 1. 把它名字作为字符串当 Key
+                // 2. 把它作为一个对同名局域变量的读取当 Value
+                key = std::make_unique<Literal>(maybeIdTok.lexeme, true);
+                value = std::make_unique<Variable>(maybeIdTok);
+            }
+            else {
+                throw std::runtime_error("Parser Error: Expect ':' after dict key.");
+            }
 
+            // 保存这一对 entry
             entries.push_back({ std::move(key), std::move(value) });
 
-            // ★ 接受逗号或换行作为分隔
+            // 3. 处理分隔符（逗号或换行）
             if (!match({ TokenType::COMMA })) {
-                while (match({ TokenType::NEWLINE })) {}  // ★
-                break;
+                while (match({ TokenType::NEWLINE })) {}
+                break; // 如果既不是逗号也不是换行（比如碰到了 }），准备退出
             }
-            while (match({ TokenType::NEWLINE })) {}  // ★ 逗号后的换行
-            if (check(TokenType::RBRACE)) break;
+            while (match({ TokenType::NEWLINE })) {}
+            if (check(TokenType::RBRACE)) break; // 允许尾随逗号 {a, b,}
         }
 
         while (match({ TokenType::NEWLINE })) {}  // ★ 最终 } 前的换行

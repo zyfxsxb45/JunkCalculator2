@@ -18,6 +18,7 @@
 #include <iomanip>
 #include <numeric> 
 #include <map>
+#include <unordered_map>
 #include "Complex.h"
 #include "Matrix.h"
 #include "BigInt.h"
@@ -32,112 +33,112 @@ namespace jc {
 
     struct FunctionClosure;
 
+    // =======================================================
+    // 高级引用语义 Dict (底层交由智能指针接管防深拷贝)
+    // =======================================================
     class Dict {
     private:
-        std::vector<std::pair<std::string, std::any>> entries;
+        std::shared_ptr<std::unordered_map<std::string, std::any>> ptr;
     public:
-        Dict() = default;
+        Dict() : ptr(std::make_shared<std::unordered_map<std::string, std::any>>()) {}
 
         void set(const std::string& key, const std::any& val) {
-            for (auto& [k, v] : entries) {
-                if (k == key) { v = val; return; }
-            }
-            entries.push_back({ key, val });
+            (*ptr)[key] = val;
         }
 
         std::any* get(const std::string& key) {
-            for (auto& [k, v] : entries) {
-                if (k == key) return &v;
-            }
+            auto it = ptr->find(key);
+            if (it != ptr->end()) return &it->second;
             return nullptr;
         }
 
         const std::any* get(const std::string& key) const {
-            for (const auto& [k, v] : entries) {
-                if (k == key) return &v;
-            }
+            auto it = ptr->find(key);
+            if (it != ptr->end()) return &it->second;
             return nullptr;
         }
 
         bool has(const std::string& key) const {
-            for (const auto& [k, v] : entries)
-                if (k == key) return true;
-            return false;
+            return ptr->find(key) != ptr->end();
         }
 
         bool remove(const std::string& key) {
-            for (auto it = entries.begin(); it != entries.end(); ++it) {
-                if (it->first == key) { entries.erase(it); return true; }
-            }
-            return false;
+            return ptr->erase(key) > 0;
         }
 
-        size_t size() const { return entries.size(); }
-        bool empty() const { return entries.empty(); }
+        size_t size() const { return ptr->size(); }
+        bool empty() const { return ptr->empty(); }
 
         std::vector<std::string> getKeys() const {
             std::vector<std::string> keys;
-            for (const auto& [k, v] : entries) keys.push_back(k);
+            keys.reserve(ptr->size());
+            for (const auto& kv : *ptr) keys.push_back(kv.first);
             return keys;
         }
 
-        const std::vector<std::pair<std::string, std::any>>& getEntries() const {
-            return entries;
+        std::vector<std::pair<std::string, std::any>> getEntries() const {
+            std::vector<std::pair<std::string, std::any>> res;
+            res.reserve(ptr->size());
+            for (const auto& kv : *ptr) res.push_back(kv);
+            return res;
         }
     };
 
+    // =======================================================
+    // 高级引用语义 List (底层交由智能指针接管防深拷贝)
+    // =======================================================
     class List {
     private:
-        std::vector<std::any> elements;
+        std::shared_ptr<std::vector<std::any>> ptr;
     public:
-        List() = default;
+        List() : ptr(std::make_shared<std::vector<std::any>>()) {}
 
-        void push_back(const std::any& val) { elements.push_back(val); }
+        void push_back(const std::any& val) { ptr->push_back(val); }
 
         std::any& at(int idx) {
-            int n = static_cast<int>(elements.size());
-            if (idx < 0) idx = n + idx;
-            if (idx < 0 || idx >= n)
-                throw std::out_of_range("List Error: Index " + std::to_string(idx) + " out of bounds [0, " + std::to_string(n - 1) + "].");
-            return elements[idx];
-        }
-
-        const std::any& at(int idx) const {
-            int n = static_cast<int>(elements.size());
-            if (idx < 0) idx = n + idx;
-            if (idx < 0 || idx >= n)
-                throw std::out_of_range("List Error: Index " + std::to_string(idx) + " out of bounds [0, " + std::to_string(n - 1) + "].");
-            return elements[idx];
-        }
-
-        void set(int idx, const std::any& val) {
-            int n = static_cast<int>(elements.size());
+            int n = static_cast<int>(ptr->size());
             if (idx < 0) idx = n + idx;
             if (idx < 0 || idx >= n)
                 throw std::out_of_range("List Error: Index out of bounds.");
-            elements[idx] = val;
+            return (*ptr)[idx];
+        }
+
+        const std::any& at(int idx) const {
+            int n = static_cast<int>(ptr->size());
+            if (idx < 0) idx = n + idx;
+            if (idx < 0 || idx >= n)
+                throw std::out_of_range("List Error: Index out of bounds.");
+            return (*ptr)[idx];
+        }
+
+        void set(int idx, const std::any& val) {
+            int n = static_cast<int>(ptr->size());
+            if (idx < 0) idx = n + idx;
+            if (idx < 0 || idx >= n)
+                throw std::out_of_range("List Error: Index out of bounds.");
+            (*ptr)[idx] = val;
         }
 
         void insert(int idx, const std::any& val) {
-            int n = static_cast<int>(elements.size());
+            int n = static_cast<int>(ptr->size());
             if (idx < 0) idx = n + idx;
             if (idx < 0 || idx > n)
                 throw std::out_of_range("List Error: Insert index out of bounds.");
-            elements.insert(elements.begin() + idx, val);
+            ptr->insert(ptr->begin() + idx, val);
         }
 
         void removeAt(int idx) {
-            int n = static_cast<int>(elements.size());
+            int n = static_cast<int>(ptr->size());
             if (idx < 0) idx = n + idx;
             if (idx < 0 || idx >= n)
                 throw std::out_of_range("List Error: Remove index out of bounds.");
-            elements.erase(elements.begin() + idx);
+            ptr->erase(ptr->begin() + idx);
         }
 
-        size_t size() const { return elements.size(); }
-        bool empty() const { return elements.empty(); }
-        const std::vector<std::any>& raw() const { return elements; }
-        std::vector<std::any>& raw() { return elements; }
+        size_t size() const { return ptr->size(); }
+        bool empty() const { return ptr->empty(); }
+        const std::vector<std::any>& raw() const { return *ptr; }
+        std::vector<std::any>& raw() { return *ptr; }
     };
 
     struct ClassDefinition {
@@ -862,11 +863,9 @@ namespace jc {
         std::shared_ptr<Expr> body;
         std::any capturedEnv;
         std::any nativeFn;
-
-        // ★ 核心改动：增加字节码内置标识，默认 -1 (表示非VM包裹的纯原生函数)
         int compiledFnIndex = -1;
-
         std::vector<Value> defaultValues;
+        bool hasRestParam = false;
 
         int minArgs() const {
             int count = static_cast<int>(paramNames.size());
@@ -893,17 +892,16 @@ namespace jc {
         bool isBytecode() const { return compiledFnIndex >= 0; }
 
         FunctionClosure(std::vector<std::string> paramNames, std::vector<bool> isRef,
-            std::string rawBody, std::shared_ptr<Expr> body)
+            std::string rawBody, std::shared_ptr<Expr> body, bool hasRestParam = false)  // ★
             : paramNames(std::move(paramNames)), isRef(std::move(isRef)),
-            rawBody(std::move(rawBody)), body(std::move(body)) {
+            rawBody(std::move(rawBody)), body(std::move(body)), hasRestParam(hasRestParam) {
         }
-
         FunctionClosure(std::vector<std::string> paramNames, std::vector<bool> isRef,
             std::string rawBody, std::shared_ptr<Expr> body,
-            std::any capturedEnv)
+            std::any capturedEnv, bool hasRestParam = false)  // ★
             : paramNames(std::move(paramNames)), isRef(std::move(isRef)),
             rawBody(std::move(rawBody)), body(std::move(body)),
-            capturedEnv(std::move(capturedEnv)) {
+            capturedEnv(std::move(capturedEnv)), hasRestParam(hasRestParam) {
         }
 
         std::string toString() const {

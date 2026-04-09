@@ -84,6 +84,7 @@ namespace jc {
     A = matrix(2, 2, 1, 2, 3, 4)   same, via constructor
     A[0, 1] = 99                   in-place modify
     [a, b] = [1, 2]                destructuring assignment
+    {x, y: yy} = obj               dict/instance destructuring
     [x, y] = [y, x]                swap variables
     v = [1; 2; 3]                  column vector (math)
     arr = [1, 2, 3]                row vector (data/array)
@@ -92,7 +93,10 @@ namespace jc {
     d = {a: 1, b: 2}               dictionary literal
     d.a = 99                       dictionary dot operator
     f(x, y = 0) = x + y            function with default parameter
+    f(a, ...rest) = sum(rest)      variadic (rest) parameters
+    apply(f, [1, 2, 3])            unpack arguments (spread)
     (x) => x^2                     lambda expression
+    math_func(_, 10)               partial application (auto-currying)
     class Dog extends Animal {...} inheritance
     p = Point(3, 4)                instance creation
     p.dist()                       method call
@@ -116,6 +120,7 @@ namespace jc {
     isint(x)  isstring(x)          type predicates (see: help typecheck)
     delete x                       remove any variable (including const)
     data |> sort |> unique         pipe operator (left-to-right)
+    breakpoint()                   trigger interactive step-debugger
 
 ======================================================================
 )HELP"},
@@ -142,26 +147,33 @@ namespace jc {
     x /= expr           x %= expr           x ^= expr
     Also works on indexed elements: A[i, j] += 1
 
-  Destructuring Assignment
+   Destructuring Assignment (Arrays & Dicts)
   ──────────────────────
-    [a, b, c] = [10, 20, 30]
-    a              →  10
-
+    [a, b, c] = [10, 20, 30]          // Array destructuring
+    { name, age: a } = { name: "Bob", age: 20 }  // Dict destructuring
     Works with any iterable on the right side:
       [a, b] = [1; 2]                    Column vector
       [a, b] = list("hello", 42)          List
-      [name, score] = ["Alice", 95]       StringMatrix row
-
-    Variable Swap:
-      x = 1; y = 2
+      { x, y } = Point(10, 20)           Force-extract from instances!
+    Variable Swap & Discard:
       [x, y] = [y, x]
+      [_, second, _] = [10, 20, 30]      Discard with underscore
 
-    Discard with underscore:
-      [_, second, _] = [10, 20, 30]
+  Partial Application & Variadic Arguments
+  ──────────────────────
+    Placeholder `_`: Generates a closure automatically (Auto-Currying)
+      f(x, y) = x^2 + y
+      p = f(_, 10)                 →  (__ph_0) => f(__ph_0, 10)
+      p(5)                         →  35
+      [1, 2, 3] |> map(f(_, 10), _) // Powerful with pipes!
 
-    Multi-return functions:
-      minmax(v) = [min(v), max(v)]
-      [lo, hi] = minmax([3, 1, 4, 1, 5])
+    Rest Parameters `...`: Packs extra arguments into a List
+      sum_all(prefix, ...nums) = prefix + str(sum(nums))
+      sum_all("Total", 1, 2, 3)    → "Total3"
+
+    Apply: Unpacks a List/Matrix into separate arguments
+      args = [1, 2, 3]
+      apply(sum_three, args)       ≡ sum_three(1, 2, 3)
 
   Lambda (Anonymous Functions)
   ──────────────────────
@@ -938,17 +950,28 @@ namespace jc {
         { "sys", R"HELP(
 ═══ System, Generators & Runtime ═══
 
-  Command-Line Usage
+    Command-Line Usage & VM Switches
   ──────────────────────
     JunkCalculator2                    Interactive REPL
     JunkCalculator2 script.jc2         Run a script file
-    JunkCalculator2 --run script.jc2   Run a script (explicit flag)
-    JunkCalculator2 script.jc2 -d      Run with bytecode disassembly output
-    JunkCalculator2 -d                 REPL with bytecode disassembly
+    JunkCalculator2 script.jc2 -d      Run with bytecode disassembly
+    JunkCalculator2 script.jc2 --debug Run with interactive step-debugger
+    JunkCalculator2 script.jc2 --profile Run and print performance report
 
-    The -d flag prints the compiled bytecode (opcode listing) for every
-    statement before executing it. Invaluable for debugging and learning
-    how the VM works internally.
+    REPL Dynamic Switches (can be toggled anytime):
+      -d on / off         Enable/disable real-time bytecode disassembly
+      --debug on / off    Enable/disable global step-debugger
+      --profile on / off  Enable/disable execution profiler
+
+  Interactive Debugger & Profiler
+  ──────────────────────
+    breakpoint()          Suspends VM execution and opens the debug console.
+                          Type `help` inside `(jc2-dbg)` to see commands 
+                          like `step`, `continue`, `stack`, and `p <var>`.
+                          
+    Profiler Mode         When `--profile on`, JC2 benchmarks every opcode 
+                          and function call, outputting a highly detailed 
+                          flame/time report upon execution completion.
 
   Random Number Generation (Mersenne Twister)
   ──────────────────────
@@ -1491,22 +1514,14 @@ namespace jc {
   Creation
   ──────────────────────
     d = dict()                          Empty dictionary
-    d = dict("name", "Alice", "age", 30) Function form (key-value alternating)
-
-    d = {name: "Alice", age: 30}        ★ Literal syntax (recommended)
+    d = {name: "Alice", age: 30}        Literal syntax (recommended)
     d = {"name": "Alice", "age": 30}    Quoted string keys also work
-    d = {1: "one", 2: "two"}            Numeric keys (auto-converted to strings)
-
-    Bare identifiers as keys are treated as string literals (JavaScript style):
-      {name: "Alice"}      → key is "name" (NOT the value of variable 'name')
-      {"name": "Alice"}    → identical result
-
-    Trailing commas are allowed:
-      d = {a: 1, b: 2,}
-
+    
+    Shorthand Properties (Variables directly to Dict):
+      name = "Bob"; age = 25
+      d = { name, age }                 → {"name": "Bob", "age": 25}
     For computed keys, use the function form:
-      key = "dynamic"
-      dict(key, 42)                     → {"dynamic": 42}
+      dict(dynamic_key, 42)             → {"dynamic": 42}
 
   Access & Modification
   ──────────────────────

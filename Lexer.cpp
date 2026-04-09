@@ -72,7 +72,7 @@ namespace jc {
             start = current;
             scanToken();
         }
-        tokens.emplace_back(TokenType::END_OF_FILE, "", current);
+        tokens.emplace_back(TokenType::END_OF_FILE, "", current, line);
         return tokens;
     }
 
@@ -89,7 +89,14 @@ namespace jc {
         case ';': addToken(TokenType::SEMICOLON); break;
         case '?': addToken(TokenType::QUESTION); break;    // ★
         case ':': addToken(TokenType::COLON); break;       // ★
-        case '.': addToken(TokenType::DOT); break;
+        case '.':
+            if (match('.') && match('.')) {
+                addToken(TokenType::ELLIPSIS);
+            }
+            else {
+                addToken(TokenType::DOT);
+            }
+            break;
         case '+':
             addToken(match('=') ? TokenType::PLUS_ASSIGN : TokenType::PLUS);
             break;
@@ -146,6 +153,7 @@ namespace jc {
         case ' ': case '\r': case '\t': 
             break;
         case '\n':
+            line++;
             // ★ 智能换行符：当不在 () 或 [] 内部、且上一个 token 不是续行符时发射
             if (parenBracketDepth == 0 && !tokens.empty()) {
                 TokenType lastType = tokens.back().type;
@@ -236,11 +244,12 @@ namespace jc {
     char Lexer::peekNext() const { if (current + 1 >= (int)source.length()) return '\0'; return source[current + 1]; }
     char Lexer::peekNextNext() const { if (current + 2 >= (int)source.length()) return '\0'; return source[current + 2]; }
     bool Lexer::match(char expected) { if (isAtEnd() || source[current] != expected) return false; current++; return true; }
-    void Lexer::addToken(TokenType type) { tokens.emplace_back(type, source.substr(start, current - start), start); }
+    void Lexer::addToken(TokenType type) { tokens.emplace_back(type, source.substr(start, current - start), start, line); }
 
     void Lexer::stringLiteral() {
         std::string value;
         while (peek() != '"' && !isAtEnd()) {
+            if (peek() == '\n') line++;
             char c = advance();
             if (c == '\\' && !isAtEnd()) {
                 // ★ 转义序列处理
@@ -342,6 +351,7 @@ namespace jc {
                 }
             }
             else {
+                if (c == '\n') line++;
                 value += advance();
             }
         }
@@ -393,6 +403,7 @@ namespace jc {
 
             std::string value;
             while (current < static_cast<int>(source.size())) {
+                if (source[current] == '\n') line++;
                 // 检查当前位置是否匹配终止模式
                 if (source[current] == ')' &&
                     current + static_cast<int>(endLen) <= static_cast<int>(source.size())) {
@@ -419,6 +430,7 @@ namespace jc {
             // ═══ 简单模式: r"content" ═══
             std::string value;
             while (!isAtEnd() && peek() != '"') {
+                if (peek() == '\n') line++;
                 value += advance();
             }
             if (isAtEnd())

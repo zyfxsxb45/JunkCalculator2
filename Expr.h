@@ -50,6 +50,7 @@ namespace jc {
     struct ListCompExpr;       // ★
     struct DictLiteral;        // ★
     struct SliceExpr;        // ★ 新增
+    struct DictDestructAssign;
 
     class ExprVisitor {
     public:
@@ -93,6 +94,7 @@ namespace jc {
         virtual std::any visitListCompExpr(ListCompExpr* expr) = 0;  // ★
         virtual std::any visitDictLiteral(DictLiteral* expr) = 0;  // ★
         virtual std::any visitSliceExpr(SliceExpr* expr) = 0;  // ★ 新增
+        virtual std::any visitDictDestructAssign(DictDestructAssign* expr) = 0;
     };
 
     struct Expr {
@@ -167,15 +169,18 @@ namespace jc {
         Token name;
         std::vector<Token> params;
         std::vector<bool> paramIsRef;
-        std::vector<std::shared_ptr<Expr>> defaultExprs;  // ★ nullptr = 必填
+        std::vector<std::shared_ptr<Expr>> defaultExprs;
+        bool hasRestParam;  // ★ 新增：标记是否带有变长参数
         std::string rawBody;
         std::shared_ptr<Expr> body;
+
         FunctionDef(Token name, std::vector<Token> params, std::vector<bool> paramIsRef,
-            std::vector<std::shared_ptr<Expr>> defaultExprs,
+            std::vector<std::shared_ptr<Expr>> defaultExprs, bool hasRestParam,
             std::string rawBody, std::shared_ptr<Expr> body)
             : name(std::move(name)), params(std::move(params)),
             paramIsRef(std::move(paramIsRef)),
             defaultExprs(std::move(defaultExprs)),
+            hasRestParam(hasRestParam),
             rawBody(std::move(rawBody)), body(std::move(body)) {
         }
         std::any accept(ExprVisitor& visitor) override { return visitor.visitFunctionDef(this); }
@@ -319,13 +324,16 @@ namespace jc {
 
     struct LambdaExpr : public Expr {
         std::vector<Token> params;
-        std::vector<std::shared_ptr<Expr>> defaultExprs;  // ★ nullptr = 必填
+        std::vector<std::shared_ptr<Expr>> defaultExprs;
+        bool hasRestParam;  // ★ 新增：标记是否带有变长参数
         std::string rawBody;
         std::shared_ptr<Expr> body;
+
         LambdaExpr(std::vector<Token> params,
-            std::vector<std::shared_ptr<Expr>> defaultExprs,
+            std::vector<std::shared_ptr<Expr>> defaultExprs, bool hasRestParam,
             std::string rawBody, std::shared_ptr<Expr> body)
             : params(std::move(params)), defaultExprs(std::move(defaultExprs)),
+            hasRestParam(hasRestParam),
             rawBody(std::move(rawBody)), body(std::move(body)) {
         }
         std::any accept(ExprVisitor& visitor) override { return visitor.visitLambdaExpr(this); }
@@ -415,16 +423,18 @@ namespace jc {
 
     struct ClassDefExpr : public Expr {
         Token name;
-        std::string superClassName;   // ★ empty = no parent
+        std::string superClassName;
         struct MethodDef {
             Token name;
             std::vector<Token> params;
             std::vector<bool> paramIsRef;
             std::vector<std::shared_ptr<Expr>> defaultExprs;
+            bool hasRestParam;  // ★ 新增：标记是否带有变长参数
             std::string rawBody;
             std::shared_ptr<Expr> body;
         };
         std::vector<MethodDef> methods;
+
         ClassDefExpr(Token name, std::string superClassName, std::vector<MethodDef> methods)
             : name(std::move(name)), superClassName(std::move(superClassName)),
             methods(std::move(methods)) {
@@ -542,6 +552,16 @@ namespace jc {
             : start(std::move(start)), end(std::move(end)), step(std::move(step)) {
         }
         std::any accept(ExprVisitor& visitor) override { return visitor.visitSliceExpr(this); }
+    };
+
+    struct DictDestructAssign : public Expr {
+        // 保存解析出的对子：<提取的属性名 (比如 "name"), 变量占位符 (比如 n)>
+        std::vector<std::pair<std::string, Token>> targets;
+        std::unique_ptr<Expr> value;
+        DictDestructAssign(std::vector<std::pair<std::string, Token>> targets, std::unique_ptr<Expr> value)
+            : targets(std::move(targets)), value(std::move(value)) {
+        }
+        std::any accept(ExprVisitor& visitor) override { return visitor.visitDictDestructAssign(this); }
     };
 
 } // namespace jc

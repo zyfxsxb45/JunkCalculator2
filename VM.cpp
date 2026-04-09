@@ -2,11 +2,25 @@
 #include "VM.h"
 #include "Module.h"
 #include "BuiltinRegistry.h"
+#include "Highlight.h"
 #include <iostream>
 #include <cmath>
 #include <stdexcept>
 
 namespace jc {
+
+    int VM::currentLine() {
+        if (frames.empty()) return 0;
+
+        int errorIp = frame().ip - 1;
+        if (errorIp < 0) errorIp = 0;
+
+        const auto& lines = currentChunk().lines;
+        for (int i = std::min(errorIp, static_cast<int>(lines.size()) - 1); i >= 0; --i) {
+            if (lines[i] > 0) return lines[i];
+        }
+        return 0;
+    }
 
     static bool vmValuesEqual(const Value& lhs, const Value& rhs) {
         if (lhs.data.index() == rhs.data.index()) {
@@ -151,6 +165,8 @@ namespace jc {
     }
 
     VM::VM() {
+        activeVM = this;
+
         globals["PI"] = Value(3.14159265358979323846);
         globals["E"] = Value(2.71828182845904523536);
         globals["i"] = Value(Complex(0.0, 1.0));
@@ -251,7 +267,12 @@ namespace jc {
             frame().ip = handler.ip;
         }
         else {
-            throw std::runtime_error(msg);
+            int errLine = currentLine();
+            std::string fullMsg = msg;
+            if (errLine > 0 && msg.find("[Line") == std::string::npos) {
+                fullMsg = "[Line " + std::to_string(errLine) + "] " + msg;
+            }
+            throw std::runtime_error(fullMsg);
         }
     }
 
@@ -273,13 +294,46 @@ namespace jc {
         for (const auto& arg : args)
             push(arg);
 
-        // 填充未传入的默认参数 (补齐到 maxArity)
-        int padCount = fn->maxArity - static_cast<int>(args.size());
-        for (int j = 0; j < padCount; ++j)
-            push(Value::none());
+        // =============================================================
+        // ★ 核心变长参数打包引擎 (C++ 入口端)
+        // =============================================================
+        uint8_t argc = static_cast<uint8_t>(args.size());
+        if (fn->hasRestParam) {
+            int fixedMax = fn->maxArity - 1;
+            if (static_cast<int>(argc) < fn->arity) {
+                throw std::runtime_error("VM Error: '" + fn->name + "' requires at least " + std::to_string(fn->arity) + " arguments.");
+            }
+
+            List restList;
+            if (static_cast<int>(argc) > fixedMax) {
+                int restCount = static_cast<int>(argc) - fixedMax;
+                std::vector<std::any> temp(restCount);
+                for (int j = 0; j < restCount; j++) temp[restCount - 1 - j] = std::make_any<Value>(pop());
+                for (int j = 0; j < restCount; j++) restList.push_back(temp[j]);
+                argc = static_cast<uint8_t>(fixedMax);
+            }
+
+            int padCount = fixedMax - static_cast<int>(argc);
+            for (int j = 0; j < padCount; ++j) push(Value::none());
+            push(Value(restList));
+
+            // ★ 必须新增这一行：欺骗后续的所有清栈、对象地址抹除和 local 槽位预留机制，
+            // 告诉它们我们现在已经把参数补齐成满配置 (maxArity) 状态了！
+            argc = static_cast<uint8_t>(fn->maxArity);
+        }
+        else {
+            if (static_cast<int>(argc) < fn->arity || static_cast<int>(argc) > fn->maxArity) {
+                throw std::runtime_error("VM Error: '" + fn->name + "' expects " + std::to_string(fn->arity) + " to " + std::to_string(fn->maxArity) + " arguments, got " + std::to_string(argc) + ".");
+            }
+            int padCount = fn->maxArity - static_cast<int>(argc);
+            for (int j = 0; j < padCount; ++j) push(Value::none());
+
+            // 普通函数在这里也统一将 argc 设为 max (因为默认参数占位都补齐了)
+            argc = static_cast<uint8_t>(fn->maxArity);
+        }
+
         int reserveCount = fn->localCount - fn->maxArity;
-        for (int j = 0; j < reserveCount; ++j)
-            push(Value::none());
+        for (int j = 0; j < reserveCount; ++j) push(Value::none());
 
         CallFrame newFrame;
         newFrame.function = fn.get();
@@ -291,6 +345,10 @@ namespace jc {
         int boundary = static_cast<int>(frames.size()) - 1;
 
         Value result;
+        std::chrono::time_point<std::chrono::high_resolution_clock> start_time;
+        if (profileMode) {
+            start_time = std::chrono::high_resolution_clock::now();
+        }
         try {
             result = run(boundary);
         }
@@ -303,6 +361,15 @@ namespace jc {
             stack.resize(originalStackSize);
 
             throw;
+        }
+        if (profileMode) {
+            auto end_time = std::chrono::high_resolution_clock::now();
+            double duration = std::chrono::duration<double, std::milli>(end_time - start_time).count();
+
+            // 累加到该函数的档案中
+            auto& prof = funcProfiles[fn->name];
+            prof.callCount++;
+            prof.totalTimeMs += duration;
         }
 
         // 恢复原有 writeback 等代码逻辑
@@ -321,6 +388,22 @@ namespace jc {
     Value VM::run(int targetFrameDepth) {
         currentTargetFrameDepth = targetFrameDepth;
         while (true) {
+            // =======================================================
+            // ★ 调试器拦截探针 (Debugger Interceptor)
+            // =======================================================
+            if (debugMode) {
+                int currentL = currentLine();
+                if (currentL > 0) {
+                    bool hitBreak = breakpoints.count(currentL) && currentL != lastDebugLine;
+                    bool hitStep = stepNextLine && currentL != lastDebugLine;
+                    if (hitBreak || hitStep) {
+                        lastDebugLine = currentL;
+                        stepNextLine = false;
+                        debugPrompt();  // 挂起虚拟机，进入时间停止的四次元空间！
+                    }
+                }
+            }
+            // =======================================================
             if (frame().ip >= static_cast<int>(currentChunk().code.size())) {
                 return stack.empty() ? Value::none() : pop();
             }
@@ -332,7 +415,12 @@ namespace jc {
             catch (...) {
                 return stack.empty() ? Value::none() : pop();
             }
-
+			// =======================================================
+			// ★ Profiler 探针: 记录微观指令 (Instruction Tick)
+			// =======================================================
+			if (profileMode) {
+				opCounts[op]++;
+			}
             try {
 
                 switch (op) {
@@ -654,15 +742,43 @@ namespace jc {
                     closure->paramNames.clear();
                     closure->isRef.clear();
                     closure->defaultValues.clear();
+                    // ========================================================
+                    // ★ 修复：在给闭包构建占位数据时，严格划清“必填”、“默认值”和“变长”的界限
+                    // ========================================================
+
+                    // 1. 先把基础坑位全部挖好
+                    for (int j = 0; j < fn->maxArity; ++j) {
+                        closure->paramNames.push_back("_" + std::to_string(j));
+                        closure->isRef.push_back(false);
+                    }
+                    closure->defaultValues.resize(fn->maxArity, Value::none());
+                    closure->paramNames.clear();
+                    closure->isRef.clear();
+                    closure->defaultValues.clear();
+
+                    // 2. 灌入必填参数
                     for (int j = 0; j < fn->arity; ++j) {
                         closure->paramNames.push_back("_" + std::to_string(j));
                         closure->isRef.push_back(false);
                     }
-                    for (int j = fn->arity; j < fn->maxArity; ++j) {
+
+                    // 3. 灌入真正的带默认值的参数（如果是变长，那最后一项就不是默认参数！）
+                    int defaultLimit = fn->hasRestParam ? (fn->maxArity - 1) : fn->maxArity;
+                    for (int j = fn->arity; j < defaultLimit; ++j) {
                         closure->paramNames.push_back("_" + std::to_string(j));
                         closure->isRef.push_back(false);
-                        closure->defaultValues.push_back(Value::none());
+                        closure->defaultValues.push_back(Value::none()); // 真正的默认值占位
                     }
+
+                    // 4. 灌入变长参数标识
+                    if (fn->hasRestParam) {
+                        closure->paramNames.push_back("...rest");
+                        closure->isRef.push_back(false);
+                        // 变长参数自身不需要压入 defaultValues 中！这保证了 C++ 反射获取的干净度。
+                    }
+
+                    // ★ 必须保留这个标志供 C++ 层 API 重用识别
+                    closure->hasRestParam = fn->hasRestParam;
 
                     push(Value(closure));
                     break;
@@ -818,13 +934,38 @@ namespace jc {
                             // ★ 核心扁平化调用，不触发 C++ nativeFn 回调
                             auto& fnDef = compiledFunctions[closure->compiledFnIndex];
 
-                            // 补齐默认参数
-                            int padCount = fnDef->maxArity - static_cast<int>(argc);
-                            for (int j = 0; j < padCount; ++j) push(Value::none());
+                            // =============================================================
+                            // ★ 核心变长参数打包引擎 (Closure 端)
+                            // =============================================================
+                            if (fnDef->hasRestParam) {
+                                int fixedMax = fnDef->maxArity - 1;
+                                if (static_cast<int>(argc) < fnDef->arity) {
+                                    throw std::runtime_error("VM Error: '" + fnDef->name + "' requires at least " + std::to_string(fnDef->arity) + " arguments.");
+                                }
 
-                            // ★ 预留局部变量栈槽
+                                List restList;
+                                if (static_cast<int>(argc) > fixedMax) {
+                                    int restCount = static_cast<int>(argc) - fixedMax;
+                                    std::vector<std::any> temp(restCount);
+                                    for (int j = 0; j < restCount; j++) temp[restCount - 1 - j] = std::make_any<Value>(pop());
+                                    for (int j = 0; j < restCount; j++) restList.push_back(temp[j]);
+                                    argc = static_cast<uint8_t>(fixedMax);
+                                }
+
+                                int padCount = fixedMax - static_cast<int>(argc);
+                                for (int j = 0; j < padCount; ++j) push(Value::none());
+                                push(Value(restList));
+                            }
+                            else {
+                                if (static_cast<int>(argc) < fnDef->arity || static_cast<int>(argc) > fnDef->maxArity)
+                                    throw std::runtime_error("VM Error: '" + fnDef->name + "' expects " + std::to_string(fnDef->arity) + " to " + std::to_string(fnDef->maxArity) + " arguments, got " + std::to_string(argc) + ".");
+                                int padCount = fnDef->maxArity - static_cast<int>(argc);
+                                for (int j = 0; j < padCount; ++j) push(Value::none());
+                            }
+
                             int reserveCount = fnDef->localCount - fnDef->maxArity;
                             for (int j = 0; j < reserveCount; ++j) push(Value::none());
+                            // =============================================================
 
                             CallFrame newFrame;
                             newFrame.function = fnDef.get();
@@ -859,36 +1000,45 @@ namespace jc {
 
                         if (tag.size() >= 5 && tag.substr(0, 5) == "__fn:") {
                             int fnIdx = std::stoi(tag.substr(5));
-                            if (fnIdx < 0 || fnIdx >= static_cast<int>(compiledFunctions.size()))
-                                throw std::runtime_error("VM Error: Function index " +
-                                    std::to_string(fnIdx) + " out of range.");
                             auto& fn = compiledFunctions[fnIdx];
 
-                            if (static_cast<int>(argc) < fn->arity || static_cast<int>(argc) > fn->maxArity)
-                                throw std::runtime_error("VM Error: '" + fn->name +
-                                    "' expects " + std::to_string(fn->arity) +
-                                    " to " + std::to_string(fn->maxArity) +
-                                    " arguments, got " + std::to_string(argc) + ".");
+                            // =============================================================
+                            // ★ 核心变长参数打包引擎 (String-Tag 晚绑定端)
+                            // =============================================================
+                            if (fn->hasRestParam) {
+                                int fixedMax = fn->maxArity - 1;
+                                if (static_cast<int>(argc) < fn->arity) {
+                                    throw std::runtime_error("VM Error: '" + fn->name + "' requires at least " + std::to_string(fn->arity) + " arguments.");
+                                }
 
-                            if (static_cast<int>(frames.size()) >= MAX_FRAMES)
-                                throw std::runtime_error("VM Error: Stack overflow (call depth exceeded).");
-                            // 补齐默认参数
-                            int padCount = fn->maxArity - static_cast<int>(argc);
-                            for (int j = 0; j < padCount; ++j) push(Value::none());
+                                List restList;
+                                if (static_cast<int>(argc) > fixedMax) {
+                                    int restCount = static_cast<int>(argc) - fixedMax;
+                                    std::vector<std::any> temp(restCount);
+                                    for (int j = 0; j < restCount; j++) temp[restCount - 1 - j] = std::make_any<Value>(pop());
+                                    for (int j = 0; j < restCount; j++) restList.push_back(temp[j]);
+                                    argc = static_cast<uint8_t>(fixedMax);
+                                }
 
-                            // ★ 预留局部变量栈槽
+                                int padCount = fixedMax - static_cast<int>(argc);
+                                for (int j = 0; j < padCount; ++j) push(Value::none());
+                                push(Value(restList));
+                            }
+                            else {
+                                if (static_cast<int>(argc) < fn->arity || static_cast<int>(argc) > fn->maxArity)
+                                    throw std::runtime_error("VM Error: '" + fn->name + "' expects " + std::to_string(fn->arity) + " to " + std::to_string(fn->maxArity) + " arguments, got " + std::to_string(argc) + ".");
+                                int padCount = fn->maxArity - static_cast<int>(argc);
+                                for (int j = 0; j < padCount; ++j) push(Value::none());
+                            }
+
                             int reserveCount = fn->localCount - fn->maxArity;
                             for (int j = 0; j < reserveCount; ++j) push(Value::none());
-                            CallFrame newFrame;
-                            newFrame.function = fn.get();
-                            newFrame.ip = 0;
-                            // ★ 栈基址对齐
+                            // =============================================================
+
+                            CallFrame newFrame; newFrame.function = fn.get(); newFrame.ip = 0;
                             newFrame.stackBase = static_cast<int>(stack.size()) - fn->localCount;
-                            // 抹除 callee
-                            stack.erase(stack.begin() + newFrame.stackBase - 1);
-                            newFrame.stackBase--;
-                            frames.push_back(newFrame);
-                            break;
+                            stack.erase(stack.begin() + newFrame.stackBase - 1); newFrame.stackBase--;
+                            frames.push_back(newFrame); break;
                         }
 
                         if (tag.size() >= 10 && tag.substr(0, 10) == "__builtin:") {
@@ -983,18 +1133,42 @@ namespace jc {
                         // ★ 展平
                         auto& fnDef = compiledFunctions[method->compiledFnIndex];
 
-                        // 补齐默认参数
-                        int padCount = fnDef->maxArity - static_cast<int>(argc);
-                        for (int j = 0; j < padCount; ++j) push(Value::none());
+                        // =============================================================
+                        // ★ 核心变长参数打包引擎 (Super Invoke 父类方法端)
+                        // =============================================================
+                        if (fnDef->hasRestParam) {
+                            int fixedMax = fnDef->maxArity - 1;
+                            if (static_cast<int>(argc) < fnDef->arity) {
+                                throw std::runtime_error("VM Error: '" + fnDef->name + "' requires at least " + std::to_string(fnDef->arity) + " arguments.");
+                            }
 
-                        // ★ 预留局部变量栈槽
+                            List restList;
+                            if (static_cast<int>(argc) > fixedMax) {
+                                int restCount = static_cast<int>(argc) - fixedMax;
+                                std::vector<std::any> temp(restCount);
+                                for (int j = 0; j < restCount; j++) temp[restCount - 1 - j] = std::make_any<Value>(pop());
+                                for (int j = 0; j < restCount; j++) restList.push_back(temp[j]);
+                                argc = static_cast<uint8_t>(fixedMax);
+                            }
+
+                            int padCount = fixedMax - static_cast<int>(argc);
+                            for (int j = 0; j < padCount; ++j) push(Value::none());
+                            push(Value(restList));
+                        }
+                        else {
+                            if (static_cast<int>(argc) < fnDef->arity || static_cast<int>(argc) > fnDef->maxArity)
+                                throw std::runtime_error("VM Error: '" + fnDef->name + "' expects " + std::to_string(fnDef->arity) + " to " + std::to_string(fnDef->maxArity) + " arguments, got " + std::to_string(argc) + ".");
+                            int padCount = fnDef->maxArity - static_cast<int>(argc);
+                            for (int j = 0; j < padCount; ++j) push(Value::none());
+                        }
+
                         int reserveCount = fnDef->localCount - fnDef->maxArity;
                         for (int j = 0; j < reserveCount; ++j) push(Value::none());
+                        // =============================================================
 
                         CallFrame newFrame;
                         newFrame.function = fnDef.get();
                         newFrame.ip = 0;
-                        // ★ 栈基址对齐
                         newFrame.stackBase = static_cast<int>(stack.size()) - fnDef->localCount;
 
                         if (method->hasCaptures()) {
@@ -1399,7 +1573,7 @@ namespace jc {
 
                 case OpCode::OP_DESTRUCT: {
                     uint8_t count = readByte();
-                    Value rhs = pop();
+                    Value& rhs = peek(0);   // ★ 提取它的引用！不要剥夺它的栈地位！
 
                     std::vector<Value> elements;
                     if (std::holds_alternative<RealMatrix>(rhs.data)) {
@@ -1414,6 +1588,14 @@ namespace jc {
                         for (const auto& e : std::get<List>(rhs.data).raw())
                             elements.push_back(std::any_cast<Value>(e));
                     }
+                    else if (std::holds_alternative<StringMatrix>(rhs.data)) {
+                        for (const auto& s : std::get<StringMatrix>(rhs.data).rawData())
+                            elements.push_back(Value(s));
+                    }
+                    else if (std::holds_alternative<std::string>(rhs.data)) {
+                        for (char c : std::get<std::string>(rhs.data))
+                            elements.push_back(Value(std::string(1, c)));
+                    }
                     else {
                         throw std::runtime_error("VM Error: Cannot destructure this type.");
                     }
@@ -1421,6 +1603,7 @@ namespace jc {
                     if (static_cast<int>(elements.size()) != count)
                         throw std::runtime_error("VM Error: Destructuring size mismatch.");
 
+                    // ★ 将拆解出的元素依次压在原主体的上面！
                     for (int j = 0; j < count; ++j) {
                         push(elements[j]);
                     }
@@ -1456,16 +1639,26 @@ namespace jc {
                         msg = oss.str();
                     }
 
-                    if (!exceptionHandlers.empty() &&
-                        exceptionHandlers.back().frameIndex >= currentTargetFrameDepth) {
+                    if (!exceptionHandlers.empty() && exceptionHandlers.back().frameIndex >= currentTargetFrameDepth) {
                         auto handler = exceptionHandlers.back();
                         exceptionHandlers.pop_back();
-                        while (static_cast<int>(frames.size()) > handler.frameIndex + 1)
-                            frames.pop_back();
+                        while (static_cast<int>(frames.size()) > handler.frameIndex + 1) frames.pop_back();
                         stack.resize(handler.stackSize);
+
+                        // ★ 原地捕获也顺手清洗，保证极致干净
+                        if (msg.find("[Line ") == 0) {
+                            size_t c = msg.find("] ");
+                            if (c != std::string::npos) msg = msg.substr(c + 2);
+                        }
                         push(Value(msg));
                         frame().ip = handler.ip;
-                        break;
+                        continue; // 跳转到 catch 块
+                    }
+
+                    // ★ 逃出当前 run() 循环：立刻烙印最深处案发第一现场的真实行号！
+                    int errLine = currentLine();
+                    if (errLine > 0 && msg.find("[Line") == std::string::npos) {
+                        msg = "[Line " + std::to_string(errLine) + "] " + msg;
                     }
                     throw std::runtime_error(msg);
                 }
@@ -2890,29 +3083,48 @@ namespace jc {
 
                     if (method->isBytecode()) {
                         auto& fnDef = compiledFunctions[method->compiledFnIndex];
+                        // =============================================================
+                        // ★ 核心变长参数打包引擎 (Invoke 对象方法端)
+                        // =============================================================
+                        if (fnDef->hasRestParam) {
+                            int fixedMax = fnDef->maxArity - 1;
+                            if (static_cast<int>(argc) < fnDef->arity) {
+                                throw std::runtime_error("VM Error: '" + fnDef->name + "' requires at least " + std::to_string(fnDef->arity) + " arguments.");
+                            }
 
-                        // 补齐默认参数
-                        int padCount = fnDef->maxArity - static_cast<int>(argc);
-                        for (int j = 0; j < padCount; ++j) push(Value::none());
+                            List restList;
+                            if (static_cast<int>(argc) > fixedMax) {
+                                int restCount = static_cast<int>(argc) - fixedMax;
+                                std::vector<std::any> temp(restCount);
+                                for (int j = 0; j < restCount; j++) temp[restCount - 1 - j] = std::make_any<Value>(pop());
+                                for (int j = 0; j < restCount; j++) restList.push_back(temp[j]);
+                                argc = static_cast<uint8_t>(fixedMax);
+                            }
 
-                        // ★ 预留局部变量栈槽
+                            int padCount = fixedMax - static_cast<int>(argc);
+                            for (int j = 0; j < padCount; ++j) push(Value::none());
+                            push(Value(restList));
+                        }
+                        else {
+                            if (static_cast<int>(argc) < fnDef->arity || static_cast<int>(argc) > fnDef->maxArity)
+                                throw std::runtime_error("VM Error: '" + fnDef->name + "' expects " + std::to_string(fnDef->arity) + " to " + std::to_string(fnDef->maxArity) + " arguments, got " + std::to_string(argc) + ".");
+                            int padCount = fnDef->maxArity - static_cast<int>(argc);
+                            for (int j = 0; j < padCount; ++j) push(Value::none());
+                        }
+
                         int reserveCount = fnDef->localCount - fnDef->maxArity;
                         for (int j = 0; j < reserveCount; ++j) push(Value::none());
-
+                        // =============================================================
                         CallFrame newFrame;
                         newFrame.function = fnDef.get();
                         newFrame.ip = 0;
-                        // ★ 栈基址对齐
                         newFrame.stackBase = static_cast<int>(stack.size()) - fnDef->localCount;
-
                         if (method->hasCaptures()) {
                             newFrame.upvalues = std::any_cast<std::shared_ptr<std::vector<Value>>>(method->capturedEnv);
                         }
-
                         // 抹除原本在参数下方的 obj 引用
                         stack.erase(stack.begin() + newFrame.stackBase - 1);
                         newFrame.stackBase--;
-
                         frames.push_back(newFrame);
                         break;
                     }
@@ -2941,49 +3153,196 @@ namespace jc {
                 }
 
             }
+            // =======================================================
+            // ★ 异常捕获与行号处理区 (VM 内外边界防火墙)
+            // =======================================================
             catch (const ErrorSignal& sig) {
-                if (!exceptionHandlers.empty() &&
-                    exceptionHandlers.back().frameIndex >= currentTargetFrameDepth) {
+                std::string msg = sig.message;
+                if (!exceptionHandlers.empty() && exceptionHandlers.back().frameIndex >= currentTargetFrameDepth) {
                     auto handler = exceptionHandlers.back();
                     exceptionHandlers.pop_back();
-                    while (static_cast<int>(frames.size()) > handler.frameIndex + 1)
-                        frames.pop_back();
+                    while (static_cast<int>(frames.size()) > handler.frameIndex + 1) frames.pop_back();
                     stack.resize(handler.stackSize);
-                    push(Value(sig.message));
+
+                    // ★ 内部拦截器净化：剥离下层 run() 逃逸时可能附带的行号
+                    if (msg.find("[Line ") == 0) {
+                        size_t c = msg.find("] ");
+                        if (c != std::string::npos) msg = msg.substr(c + 2);
+                    }
+                    push(Value(msg));
                     frame().ip = handler.ip;
                     continue;
                 }
-                throw std::runtime_error(sig.message);
+                int errLine = currentLine();
+                if (errLine > 0 && msg.find("[Line") == std::string::npos) msg = "[Line " + std::to_string(errLine) + "] " + msg;
+                throw std::runtime_error(msg); // 彻底逃逸，带上行号
             }
             catch (const std::exception& ex) {
-                if (!exceptionHandlers.empty() &&
-                    exceptionHandlers.back().frameIndex >= currentTargetFrameDepth) {
+                std::string msg = ex.what();
+                if (!exceptionHandlers.empty() && exceptionHandlers.back().frameIndex >= currentTargetFrameDepth) {
                     auto handler = exceptionHandlers.back();
                     exceptionHandlers.pop_back();
-                    while (static_cast<int>(frames.size()) > handler.frameIndex + 1)
-                        frames.pop_back();
+                    while (static_cast<int>(frames.size()) > handler.frameIndex + 1) frames.pop_back();
                     stack.resize(handler.stackSize);
-                    push(Value(std::string(ex.what())));
+
+                    // ★ 内部拦截器净化：剥离下层 run() 逃逸时可能附带的行号
+                    if (msg.find("[Line ") == 0) {
+                        size_t c = msg.find("] ");
+                        if (c != std::string::npos) msg = msg.substr(c + 2);
+                    }
+                    push(Value(msg));
                     frame().ip = handler.ip;
                     continue;
                 }
-                throw;
+                int errLine = currentLine();
+                if (errLine > 0 && msg.find("[Line") == std::string::npos) msg = "[Line " + std::to_string(errLine) + "] " + msg;
+                throw std::runtime_error(msg); // 彻底逃逸，带上行号
             }
             catch (...) {
-                if (!exceptionHandlers.empty() &&
-                    exceptionHandlers.back().frameIndex >= currentTargetFrameDepth) {
+                std::string msg = "Unknown error";
+                if (!exceptionHandlers.empty() && exceptionHandlers.back().frameIndex >= currentTargetFrameDepth) {
                     auto handler = exceptionHandlers.back();
                     exceptionHandlers.pop_back();
-                    while (static_cast<int>(frames.size()) > handler.frameIndex + 1)
-                        frames.pop_back();
+                    while (static_cast<int>(frames.size()) > handler.frameIndex + 1) frames.pop_back();
                     stack.resize(handler.stackSize);
-                    push(Value(std::string("Unknown error")));
+                    push(Value(msg));
                     frame().ip = handler.ip;
                     continue;
                 }
-                throw std::runtime_error("Unknown error");
+                int errLine = currentLine();
+                if (errLine > 0) msg = "[Line " + std::to_string(errLine) + "] " + msg;
+                throw std::runtime_error(msg); // 彻底逃逸，带上行号
             }
         }
+    }
+
+    void VM::debugPrompt() {
+        std::cout << "\n" << col(Ansi::BRIGHT_YELLOW)
+            << ">>> [Debugger] Paused at Line " << currentLine()
+            << " in " << frame().function->name
+            << col(Ansi::RESET) << "\n";
+
+        while (true) {
+            std::cout << col(Ansi::BRIGHT_MAGENTA) << "(jc2-dbg) " << col(Ansi::RESET);
+            std::string cmd;
+            if (!std::getline(std::cin, cmd)) break;
+
+            // 去除头尾空格
+            size_t s = cmd.find_first_not_of(" \t");
+            if (s != std::string::npos) cmd = cmd.substr(s);
+            else continue;
+
+            if (cmd == "c" || cmd == "continue") {
+                break; // 恢复执行
+            }
+            else if (cmd == "s" || cmd == "step") {
+                stepNextLine = true;
+                break; // 走一步（即步入下一个不同的行号）
+            }
+            else if (cmd == "stack") {
+                std::cout << "--- VM Stack (" << stack.size() << " elements) ---\n";
+                // 打印栈内容（即局部变量与中间计算状态）
+                for (size_t i = 0; i < stack.size(); i++) {
+                    std::cout << " [" << i << "]  " << stack[i];
+                    if (static_cast<int>(i) == frame().stackBase) std::cout << "  <-- Frame Base";
+                    std::cout << "\n";
+                }
+                std::cout << "-----------------------------------\n";
+            }
+            else if (cmd.substr(0, 2) == "p ") {
+                std::string varName = cmd.substr(2);
+                size_t vs = varName.find_first_not_of(" \t");
+                if (vs != std::string::npos) varName = varName.substr(vs);
+                // 探查全局变量
+                auto it = globals.find(varName);
+                if (it != globals.end()) {
+                    std::cout << varName << " = " << it->second << "\n";
+                }
+                else {
+                    std::cout << "Variable '" << varName << "' not found in global scope.\n";
+                }
+            }
+            else if (cmd.substr(0, 2) == "b ") {
+                int l = std::stoi(cmd.substr(2));
+                breakpoints.insert(l);
+                std::cout << "Breakpoint set at Line " << l << "\n";
+            }
+            else if (cmd.substr(0, 3) == "rb ") {
+                int l = std::stoi(cmd.substr(3));
+                breakpoints.erase(l);
+                std::cout << "Breakpoint removed at Line " << l << "\n";
+            }
+            else if (cmd == "q" || cmd == "quit") {
+                throw std::runtime_error("Execution aborted by debugger.");
+            }
+            else {
+                std::cout << "Available Commands:\n"
+                    << "  c / continue  : Resume execution until next breakpoint\n"
+                    << "  s / step      : Step to the next line of code\n"
+                    << "  b <line>      : Set breakpoint at line\n"
+                    << "  rb <line>     : Remove breakpoint at line\n"
+                    << "  p <global>    : Print a global variable's value\n"
+                    << "  stack         : View raw VM memory stack (inspect auto-locals)\n"
+                    << "  q / quit      : Abort program\n";
+            }
+        }
+    }
+
+    void VM::printProfileReport() {
+        std::cout << "\n" << col(Ansi::BRIGHT_CYAN)
+            << "==================================================\n"
+            << "               JC2 PROFILER REPORT                \n"
+            << "=================================================="
+            << col(Ansi::RESET) << "\n";
+
+        // --- 1. 函数耗时排行榜 ---
+        std::cout << col(Ansi::BRIGHT_YELLOW) << "\n[Top Functions by Time]\n" << col(Ansi::RESET);
+
+        std::vector<std::pair<std::string, FuncProfile>> funcList(funcProfiles.begin(), funcProfiles.end());
+        std::sort(funcList.begin(), funcList.end(), [](const auto& a, const auto& b) {
+            return a.second.totalTimeMs > b.second.totalTimeMs;
+            });
+
+        int count = 1;
+        for (const auto& f : funcList) {
+            if (count > 10) break;
+            std::cout << "  " << count << ". " << std::left << std::setw(20) << f.first
+                << " | " << std::setw(10) << std::fixed << std::setprecision(4) << f.second.totalTimeMs << " ms"
+                << " | " << f.second.callCount << " calls\n";
+            count++;
+        }
+
+        // --- 2. 虚拟机操作码热点榜 ---
+        std::cout << col(Ansi::BRIGHT_YELLOW) << "\n[Top 15 VM OpCodes Frequency]\n" << col(Ansi::RESET);
+
+        uint64_t totalOps = 0;
+        std::vector<std::pair<OpCode, uint64_t>> opList(opCounts.begin(), opCounts.end());
+        for (const auto& op : opList) totalOps += op.second;
+
+        std::sort(opList.begin(), opList.end(), [](const auto& a, const auto& b) {
+            return a.second > b.second;
+            });
+
+        if (totalOps == 0) totalOps = 1;
+        count = 1;
+        for (const auto& op : opList) {
+            if (count > 15) break;  // ★ 设为 15，因为有全量字典了，可以多看几个大头
+
+            // ★ 调用公共字典！去掉前三个字符 "OP_" 让显示更好看
+            std::string opName = opCodeToString(op.first).substr(3);
+
+            double perm = (static_cast<double>(op.second) / totalOps) * 100.0;
+            std::cout << "  " << std::right << std::setw(2) << count << ". "
+                << std::left << std::setw(16) << opName
+                << " | " << std::setw(8) << op.second << " times ("
+                << std::fixed << std::setprecision(2) << perm << "%)\n";
+            count++;
+        }
+        std::cout << "\n  Total Instructions Executed: " << totalOps << "\n";
+        std::cout << col(Ansi::BRIGHT_CYAN) << "==================================================" << col(Ansi::RESET) << "\n\n";
+
+        funcProfiles.clear();
+        opCounts.clear();
     }
 
 } // namespace jc

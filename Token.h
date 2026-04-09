@@ -30,7 +30,7 @@ namespace jc {
         COMMA, SEMICOLON,
         QUESTION,            // ★ ?
         COLON,               // ★ :
-        DOT,
+        DOT, ELLIPSIS,
 
         // --- 控制流关键字 ---     // ★ 新增
         IF, ELSE, WHILE, FOR, IN,
@@ -63,8 +63,9 @@ namespace jc {
         TokenType type;
         std::string lexeme;
         int position;
-        Token(TokenType type, std::string lexeme, int position = 0)
-            : type(type), lexeme(std::move(lexeme)), position(position) {
+        int line;
+        Token(TokenType type, std::string lexeme, int position = 0, int line = 0)
+            : type(type), lexeme(std::move(lexeme)), position(position), line(line) {
         }
     };
 
@@ -112,6 +113,7 @@ namespace jc {
         case TokenType::QUESTION:      return "QUESTION(?)";
         case TokenType::COLON:         return "COLON(:)";
         case TokenType::DOT:           return "DOT(.)";
+        case TokenType::ELLIPSIS:      return "ELLIPSIS(...)";
         case TokenType::CLASS:         return "CLASS";
         case TokenType::SUPER:         return "SUPER";
         case TokenType::IF:            return "IF";               // ★

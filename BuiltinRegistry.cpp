@@ -1,6 +1,7 @@
 #include "BuiltinRegistry.h"
 #include "Highlight.h"          // ★ highlightCode(), colorsEnabled
 #include "Module.h"
+#include "VM.h"
 #include <algorithm>
 #include <cctype>
 #include <chrono>               // ★ clock() — high_resolution_clock
@@ -1161,13 +1162,62 @@ void BuiltinRegistry::registerFormatType() {
 }
 
 // =================================================================
-// [HOF] 高阶函数（使用通用 callClosure，VM/Evaluator 均可用）
-// Evaluator 会用自己的版本覆盖这些（支持 AST 闭包 + dunder）
+// [HOF] 高阶函数（使用通用 callClosure）
 // =================================================================
-// =================================================================
-// [HOF] 高阶函数（使用 safeCallFunction 自动在 Evaluator 走 AST，VM 走 Native）
-// =================================================================
+
 void BuiltinRegistry::registerHigherOrder() {
+
+    reg("apply", { 2 }, [](const std::vector<Value>& args) -> Value {
+        auto cl = args[0].asFunction();
+
+        std::vector<Value> unpackedArgs;
+
+        const Value& argList = args[1];
+
+        if (std::holds_alternative<List>(argList.data)) {
+            const auto& L = std::get<List>(argList.data);
+            for (const auto& e : L.raw()) unpackedArgs.push_back(std::any_cast<Value>(e));
+        }
+        else if (std::holds_alternative<RealMatrix>(argList.data)) {
+            const auto& m = std::get<RealMatrix>(argList.data);
+            if (m.getRows() == 1 || m.getCols() == 1) {
+                for (double d : m.rawData()) unpackedArgs.push_back(Value(d));
+            }
+            else {
+                throw std::runtime_error("Type Error: apply() requires a 1D vector or list.");
+            }
+        }
+        else if (std::holds_alternative<ComplexMatrix>(argList.data)) {
+            const auto& m = std::get<ComplexMatrix>(argList.data);
+            if (m.getRows() == 1 || m.getCols() == 1) {
+                for (const auto& c : m.rawData()) unpackedArgs.push_back(Value(c));
+            }
+            else {
+                throw std::runtime_error("Type Error: apply() requires a 1D vector or list.");
+            }
+        }
+        // ★ 补齐：StringMatrix 的解包支持
+        else if (std::holds_alternative<StringMatrix>(argList.data)) {
+            const auto& m = std::get<StringMatrix>(argList.data);
+            if (m.getRows() == 1 || m.getCols() == 1) {
+                for (const auto& s : m.rawData()) unpackedArgs.push_back(Value(s));
+            }
+            else {
+                throw std::runtime_error("Type Error: apply() requires a 1D string vector or list.");
+            }
+        }
+        // ★ 附赠：支持把普通字符串打散当参数（如 "abc" -> 'a', 'b', 'c'）
+        else if (std::holds_alternative<std::string>(argList.data)) {
+            const auto& str = std::get<std::string>(argList.data);
+            for (char c : str) unpackedArgs.push_back(Value(std::string(1, c)));
+        }
+        else {
+            throw std::runtime_error("Type Error: apply() expects a function and an iterable argument list/vector.");
+        }
+
+        // 把展开的参数序列精准投喂给目标函数
+        return safeCallFunction(cl, unpackedArgs);
+        });
 
     reg("map", { 2 }, [](const std::vector<Value>& args) -> Value {
         auto cl = args[0].asFunction();
@@ -1634,17 +1684,28 @@ void BuiltinRegistry::registerErrorHandling() {
         auto cl = args[0].asFunction();
         if (!cl->acceptsArgCount(0))
             throw std::runtime_error("Runtime Error: pcall() expects a zero-parameter function.");
+
+        // ★ 核心净化器：如果异常是从虚拟机深处逃逸出来的，剥离自动贴上的调试行号
+        auto stripLineInfo = [](const std::string& m) {
+            std::string msg = m;
+            if (msg.find("[Line ") == 0) {
+                size_t c = msg.find("] ");
+                if (c != std::string::npos) msg = msg.substr(c + 2);
+            }
+            return msg;
+            };
+
         try {
             Value result = safeCallFunction(cl, {});
             List L; L.push_back(valToAny(Value(1.0))); L.push_back(valToAny(result));
             return Value(L);
         }
         catch (ErrorSignal& sig) {
-            List L; L.push_back(valToAny(Value(0.0))); L.push_back(valToAny(Value(sig.message)));
+            List L; L.push_back(valToAny(Value(0.0))); L.push_back(valToAny(Value(stripLineInfo(sig.message))));
             return Value(L);
         }
         catch (const std::exception& ex) {
-            List L; L.push_back(valToAny(Value(0.0))); L.push_back(valToAny(Value(std::string(ex.what()))));
+            List L; L.push_back(valToAny(Value(0.0))); L.push_back(valToAny(Value(stripLineInfo(std::string(ex.what())))));
             return Value(L);
         }
         });
@@ -1792,6 +1853,16 @@ void BuiltinRegistry::registerSystemShell() {
         }
         return args[0];
         });
+
+    reg("breakpoint", { 0 }, [](const std::vector<Value>&) -> Value {
+        if (VM::activeVM) {
+            VM::activeVM->triggerDebugger();
+        }
+        return Value::none();
+        });
+    // 做个兼容别名
+    builtins["debugger"] = builtins["breakpoint"];
+    builtinArity["debugger"] = builtinArity["breakpoint"];
 }
 
 // =================================================================

@@ -67,6 +67,8 @@ void printHelpTopic(const std::string& topic) {
 jc::VM vm;
 std::vector<std::shared_ptr<jc::CompiledFunction>> allFunctions;
 bool g_showDisasm = false;  // ★ 新增：字节码反汇编开关
+bool g_autoDebug = false;
+bool g_profile = false;
 
 // ★ 执行一段任意多行/单行代码的统一接口
 jc::Value evalCode(const std::string& code, bool isFile = false) {
@@ -101,6 +103,11 @@ jc::Value evalCode(const std::string& code, bool isFile = false) {
     evalFn->chunk = chunk;
 
     int evalIdx = static_cast<int>(allFunctions.size());
+    if (g_autoDebug) {
+        if (jc::VM::activeVM) {
+            jc::VM::activeVM->triggerDebugger(); // ★ 一进虚拟机立刻触发下一行暂停！
+        }
+    }
     allFunctions.push_back(evalFn);
     vm.setCompiledFunctions(allFunctions);
 
@@ -135,8 +142,11 @@ void runScript(const std::string& filepath) {
     }
     catch (const std::exception& ex) {
         std::cerr << jc::col(jc::Ansi::BRIGHT_RED)
-            << "   [VM] Script Error in '" << resolvedPath << "':\n    "
+            << "   Error in '" << resolvedPath << "': "    // ★ 修改：附带文件名
             << ex.what() << jc::col(jc::Ansi::RESET) << std::endl;
+    }
+    if (g_profile && jc::VM::activeVM) {
+        jc::VM::activeVM->printProfileReport();
     }
 
     jc::helpers::g_scriptDirStack.pop_back();
@@ -227,12 +237,19 @@ int main(int argc, char* argv[]) {
         if (arg == "-d") {
             g_showDisasm = true;
         }
+        else if (arg == "--debug") {    // ★ 拦截 --debug 启动项
+            g_autoDebug = true;
+        }
         else if (arg == "--run") {
-            continue; // 跳过 --run 标记，下一个参数就是文件
+            continue; // 跳过 --run 标记
         }
         else if (arg == "--help" || arg == "-h") {
             printHelp();
             return 0;
+        }
+        else if (arg == "--profile") {
+            g_profile = true;
+            vm.enableProfiler(true);
         }
         else {
             if (scriptPath.empty()) {
@@ -288,6 +305,42 @@ int main(int argc, char* argv[]) {
 
         if (input == "color on") { jc::colorsEnabled = true; continue; }
         if (input == "color off") { jc::colorsEnabled = false; continue; }
+
+        // ★ 随时开关 Disassembly 打印
+        if (input == "-d on") {
+            g_showDisasm = true;
+            std::cout << "Bytecode disassembly enabled.\n";
+            continue;
+        }
+        if (input == "-d off") {
+            g_showDisasm = false;
+            std::cout << "Bytecode disassembly disabled.\n";
+            continue;
+        }
+
+        // ★ 随时开关全局单步 Debugger
+        if (input == "--debug on") {
+            g_autoDebug = true;
+            std::cout << "Interactive Step-Debugger enabled. (Will break on next evaluated line)\n";
+            continue;
+        }
+        if (input == "--debug off") {
+            g_autoDebug = false;
+            std::cout << "Interactive Step-Debugger disabled.\n";
+            continue;
+        }
+        if (input == "--profile on") {
+            g_profile = true;
+            if (jc::VM::activeVM) jc::VM::activeVM->enableProfiler(true);
+            std::cout << "Profiler enabled. Will print report after execution.\n";
+            continue;
+        }
+        if (input == "--profile off") {
+            g_profile = false;
+            if (jc::VM::activeVM) jc::VM::activeVM->enableProfiler(false);
+            std::cout << "Profiler disabled.\n";
+            continue;
+        }
         if (input == "exit" || input == "quit") break;
         if (input == "help") { printHelp(); continue; }
         if (input.substr(0, 5) == "help ") { printHelpTopic(input.substr(5)); continue; }
@@ -324,6 +377,9 @@ int main(int argc, char* argv[]) {
                         typeColor = jc::col(jc::Ansi::BRIGHT_CYAN);
                     }, result.data);
                 std::cout << typeColor << result << jc::col(jc::Ansi::RESET) << std::endl;
+            }
+            if (g_profile && jc::VM::activeVM) {
+                jc::VM::activeVM->printProfileReport();
             }
         }
         catch (const std::exception& e) {

@@ -41,6 +41,7 @@ namespace jc {
         std::vector<CompilerState> stateStack;
         std::vector<std::shared_ptr<CompiledFunction>> compiledFunctions;
         int functionIndexOffset = 0;
+        int lastLine = 0;
 
         CompilerState& current() { return stateStack.back(); }
         Chunk* chunk() { return &current().function->chunk; }
@@ -111,6 +112,7 @@ namespace jc {
         std::any visitListCompExpr(ListCompExpr*) override;
         std::any visitDictLiteral(DictLiteral*) override;
         std::any visitSliceExpr(SliceExpr*) override;
+        std::any visitDictDestructAssign(DictDestructAssign*) override;
     };
 
 }
