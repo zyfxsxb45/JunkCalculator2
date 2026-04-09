@@ -9,18 +9,20 @@ Developed by Yu Liangyang, Tsinghua University.
 ## Technical Overview
 
 ### Architecture
-- **Lexer**: Hand-written tokenizer supporting 55+ token types, including string interpolation (`f""`), raw strings with custom delimiters (`r"TAG()TAG"`), and imaginary suffixes (`3i`).
-- **Parser**: Recursive descent parser producing an AST (Abstract Syntax Tree) with 30+ node types. Supports operator precedence, block statements, and destructuring.
+- **Lexer**: Hand-written tokenizer supporting 55+ token types, including string interpolation (`f""`), raw strings with custom delimiters (`r"TAG()TAG"`), imaginary suffixes (`3i`), and variadic ellipsis (`...`).
+- **Parser**: Recursive descent parser producing an AST (Abstract Syntax Tree) with 30+ node types. Supports operator precedence, block statements, and cascading destructuring.
 - **Compiler**: AST-to-bytecode compiler (Visitor pattern). Handles lexical scoping, auto-local variable declaration, loop patching, and closure capture (upvalues).
-- **Virtual Machine**: Stack-based bytecode interpreter. Implements late-binding for function calls (`OP_CALL`), exception handling (`OP_TRY_BEGIN`), iterator protocols, and dynamic operator dispatching.
+- **Virtual Machine**: Stack-based bytecode interpreter. Implements late-binding for function calls, exception handling with precise line-number unwinding, an interactive step-debugger, execution profiling, and dynamic operator dispatching.
 
 ### Language Semantics
-- **Type System**: `std::variant`-backed dynamic typing supporting 16 internal types (double, BigInt, Fraction, Complex, BaseNum, String, RealMatrix, ComplexMatrix, StringMatrix, Dict, List, Function, Class, Instance).
+- **Type System**: `std::variant`-backed dynamic typing supporting 16 internal types (double, BigInt, Fraction, Complex, BaseNum, String, RealMatrix, ComplexMatrix, StringMatrix, Dict, List, Function, Class, Instance, none). Utilizes a PIMPL architecture with `std::shared_ptr` for `Dict` and `List` to provide O(1) reference semantics and deterministic memory management without a tracing garbage collector.
 - **Object-Oriented Programming**: Single inheritance (`extends`), `super` proxy dispatcher, and runtime overriding via 20+ dunder methods (e.g., `__add__`, `__getitem__`).
 - **Control Flow**: `if/else`, `while`, C-style `for`, `for-in` (with array/dict destructuring), `switch/case`, `break/continue/return`.
-- **Error Handling**: `try/catch/throw` block constructs with call-stack unwinding.
-- **Functions**: First-class closures, lambdas `(x) => expr`, default parameters, and `ref` parameter binding for pass-by-reference semantics.
-- **Paradigms**: List comprehensions `[x^2 for x in arr if x > 0]`, pipe operator `|>` for left-to-right evaluation chains, and functional primitives (`map`, `filter`, `reduce`).
+- **Error Handling**: `try/catch/throw` block constructs and functional `pcall` with safe VM-boundary exception containment.
+- **Functions**: First-class closures, lambdas `(x) => expr`, default parameters, variadic arguments (`...args`), and `ref` parameter binding for pass-by-reference semantics.
+- **Paradigms**: 
+  - *Data Manipulation*: List comprehensions, array/dictionary destructuring (`{x, y} = obj`), and object shorthand properties.
+  - *Functional*: Partial application via `_` placeholder, argument unpacking (`apply()`), pipe operator `|>` for left-to-right evaluation chains, and functional primitives (`map`, `filter`, `reduce`).
 
 ### Math & Number Theory Engine
 - **Arbitrary-Precision**: Base-10^9 compressed `BigInt` layout. Implements high-base long division, GCD/LCM, and modular exponentiation.
@@ -57,7 +59,8 @@ Requires a C++20 compliant compiler and CMake 3.15+.
     JunkCalculator2 script.jc2         # Execute a script
     JunkCalculator2 --run script.jc2   # Execute a script (explicit flag)
     JunkCalculator2 script.jc2 -d      # Execute and print bytecode disassembly
-    JunkCalculator2 -d                 # REPL session with real-time disassembly
+    JunkCalculator2 script.jc2 --debug # Execute with interactive step-debugger
+    JunkCalculator2 script.jc2 --profile # Execute and print performance breakdown report
 
 *Script Path Context: The `run` and `import` instructions automatically push the executing script's directory onto a virtual paths stack, ensuring relative I/O (`readFile`, `import`) resolves relative to the current file, not the terminal's working directory.*
 
