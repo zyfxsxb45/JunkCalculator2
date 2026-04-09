@@ -127,6 +127,11 @@ namespace jc {
             lastDebugLine = -1;  // 强制打破防抖
         }
 
+        void disableDebugger() {
+            debugMode = false;
+            stepNextLine = false;
+        }
+
         void printProfileReport();
         void enableProfiler(bool enable) { profileMode = enable; }
     };

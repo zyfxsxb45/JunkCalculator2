@@ -326,6 +326,7 @@ int main(int argc, char* argv[]) {
         }
         if (input == "--debug off") {
             g_autoDebug = false;
+            if (jc::VM::activeVM) jc::VM::activeVM->disableDebugger(); // ★ 强制拉闸
             std::cout << "Interactive Step-Debugger disabled.\n";
             continue;
         }
