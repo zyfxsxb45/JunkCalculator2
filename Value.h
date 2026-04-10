@@ -33,6 +33,18 @@ namespace jc {
 
     struct FunctionClosure;
 
+    struct PrintGuard {
+        std::vector<const void*>& vis;
+        bool isCycle;
+        PrintGuard(std::vector<const void*>& v, const void* p) : vis(v) {
+            isCycle = (std::find(vis.begin(), vis.end(), p) != vis.end());
+            if (!isCycle) vis.push_back(p);
+        }
+        ~PrintGuard() {
+            if (!isCycle) vis.pop_back(); // 打印退出时自动抹除足迹
+        }
+    };
+
     // =======================================================
     // 高级引用语义 Dict (底层交由智能指针接管防深拷贝)
     // =======================================================
@@ -82,6 +94,8 @@ namespace jc {
             for (const auto& kv : *ptr) res.push_back(kv);
             return res;
         }
+
+        const void* id() const { return ptr.get(); }
     };
 
     // =======================================================
@@ -139,6 +153,7 @@ namespace jc {
         bool empty() const { return ptr->empty(); }
         const std::vector<std::any>& raw() const { return *ptr; }
         std::vector<std::any>& raw() { return *ptr; }
+        const void* id() const { return ptr.get(); }
     };
 
     struct ClassDefinition {
@@ -668,6 +683,7 @@ namespace jc {
         }
 
         friend std::ostream& operator<<(std::ostream& os, const Value& val) {
+            static thread_local std::vector<const void*> visited;
             std::visit([&os](auto&& arg) {
                 using T = std::decay_t<decltype(arg)>;
                 if constexpr (std::is_same_v<T, std::monostate>) {}
@@ -690,6 +706,8 @@ namespace jc {
                 else if constexpr (std::is_same_v<T, BaseNum>) os << arg;
                 else if constexpr (std::is_same_v<T, jc::StringMatrix>) os << arg;
                 else if constexpr (std::is_same_v<T, jc::Dict>) {
+                    PrintGuard guard(visited, arg.id());
+                    if (guard.isCycle) { os << "{...}"; return; } // 防爆护盾！
                     os << "{";
                     const auto& entries = arg.getEntries();
                     for (size_t ii = 0; ii < entries.size(); ++ii) {
@@ -704,6 +722,8 @@ namespace jc {
                     os << "}";
                 }
                 else if constexpr (std::is_same_v<T, jc::List>) {
+                    PrintGuard guard(visited, arg.id());
+                    if (guard.isCycle) { os << "[...]"; return; } // 防爆护盾！
                     os << "[";
                     for (size_t ii = 0; ii < arg.size(); ++ii) {
                         try {

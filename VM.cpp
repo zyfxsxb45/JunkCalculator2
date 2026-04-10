@@ -23,6 +23,7 @@ namespace jc {
     }
 
     static bool vmValuesEqual(const Value& lhs, const Value& rhs) {
+        static thread_local std::vector<std::pair<const void*, const void*>> comparingPairs;
         if (lhs.data.index() == rhs.data.index()) {
             if (std::holds_alternative<std::monostate>(lhs.data))
                 return true;
@@ -60,32 +61,49 @@ namespace jc {
             if (std::holds_alternative<List>(lhs.data)) {
                 const auto& a = std::get<List>(lhs.data);
                 const auto& b = std::get<List>(rhs.data);
+
+                if (a.id() == b.id()) return true;
                 if (a.size() != b.size()) return false;
+                auto pair = a.id() < b.id() ? std::make_pair(a.id(), b.id()) : std::make_pair(b.id(), a.id());
+                if (std::find(comparingPairs.begin(), comparingPairs.end(), pair) != comparingPairs.end()) {
+                    return true; 
+                }
+                comparingPairs.push_back(pair);
+                bool eq = true;
                 for (size_t i = 0; i < a.size(); ++i) {
                     try {
                         Value va = std::any_cast<Value>(a.raw()[i]);
                         Value vb = std::any_cast<Value>(b.raw()[i]);
-                        if (!vmValuesEqual(va, vb)) return false;
+                        if (!vmValuesEqual(va, vb)) { eq = false; break; }
                     }
-                    catch (...) { return false; }
+                    catch (...) { eq = false; break; }
                 }
-                return true;
+                comparingPairs.pop_back(); 
+                return eq;
             }
             if (std::holds_alternative<Dict>(lhs.data)) {
                 const auto& a = std::get<Dict>(lhs.data);
                 const auto& b = std::get<Dict>(rhs.data);
+                if (a.id() == b.id()) return true;
                 if (a.size() != b.size()) return false;
+                auto pair = a.id() < b.id() ? std::make_pair(a.id(), b.id()) : std::make_pair(b.id(), a.id());
+                if (std::find(comparingPairs.begin(), comparingPairs.end(), pair) != comparingPairs.end()) {
+                    return true; 
+                }
+                comparingPairs.push_back(pair);
+                bool eq = true;
                 for (const auto& [key, val] : a.getEntries()) {
                     const auto* bval = b.get(key);
-                    if (!bval) return false;
+                    if (!bval) { eq = false; break; }
                     try {
                         Value va = std::any_cast<Value>(val);
                         Value vb = std::any_cast<Value>(*bval);
-                        if (!vmValuesEqual(va, vb)) return false;
+                        if (!vmValuesEqual(va, vb)) { eq = false; break; }
                     }
-                    catch (...) { return false; }
+                    catch (...) { eq = false; break; }
                 }
-                return true;
+                comparingPairs.pop_back();
+                return eq;
             }
             if (std::holds_alternative<StringMatrix>(lhs.data)) {
                 const auto& a = std::get<StringMatrix>(lhs.data);
