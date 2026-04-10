@@ -15,8 +15,11 @@ Developed by Yu Liangyang, Tsinghua University.
 - **Virtual Machine**: Stack-based bytecode interpreter. Implements late-binding for function calls, exception handling with precise line-number unwinding, an interactive step-debugger, execution profiling, and dynamic operator dispatching.
 
 ### Language Semantics
-- **Type System**: `std::variant`-backed dynamic typing supporting 16 internal types (double, BigInt, Fraction, Complex, BaseNum, String, RealMatrix, ComplexMatrix, StringMatrix, Dict, List, Function, Class, Instance, none). Utilizes a PIMPL architecture with `std::shared_ptr` for `Dict` and `List` to provide O(1) reference semantics and deterministic memory management without a tracing garbage collector.
-- **Object-Oriented Programming**: Single inheritance (`extends`), `super` proxy dispatcher, and runtime overriding via 20+ dunder methods (e.g., `__add__`, `__getitem__`).
+- **Type System & Memory Management**: `std::variant`-backed dynamic typing supporting 16 internal types. 
+  - *Value Types*: Scalars (double, BigInt, Complex, etc.) and Matrices (Real, Complex, String) use strictly contiguous memory and **pass-by-value** semantics for maximum mathematical auto-vectorization performance.
+  - *Reference Types*: Containers (`List`, `Dict`) and OOP `Instance`s use **pass-by-reference** semantics (backed by PIMPL architecture and `std::shared_ptr`). Mutating a passed list inside a function mutates the original object.
+- **Garbage Collection (GC)**: Features a custom, zero-pause **Mark-and-Sweep Garbage Collector** (`GcHeap`) running transparently on top of the VM stack. It traces GC roots (Globals, Stack, Upvalues) to detect and shatter cyclic memory leaks (e.g., a `List` containing itself) that standard C++ smart pointers cannot handle.
+- **Object-Oriented Programming**: Single inheritance (`extends`), `super` proxy dispatcher, and runtime overriding via 20+ dunder methods (e.g., `__add__`, `__getitem__`). Instances can be directly destructured via `{field1, field2} = obj`.
 - **Control Flow**: `if/else`, `while`, C-style `for`, `for-in` (with array/dict destructuring), `switch/case`, `break/continue/return`.
 - **Error Handling**: `try/catch/throw` block constructs and functional `pcall` with safe VM-boundary exception containment.
 - **Functions**: First-class closures, lambdas `(x) => expr`, default parameters, variadic arguments (`...args`), and `ref` parameter binding for pass-by-reference semantics.

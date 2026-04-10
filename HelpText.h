@@ -17,6 +17,8 @@ namespace jc {
     clear                 Wipe all user-defined variables
     exit / quit           Leave the calculator
     color on / color off  Enable/disable REPL syntax highlighting
+    gcinfo()              Show current Garbage Collector tracking status
+    gc()                  Force a Mark-and-Sweep garbage collection cycle
 
   Workspace & Scripts
   ────────────────────────────────────────────────────────────────────
@@ -950,7 +952,7 @@ namespace jc {
         { "sys", R"HELP(
 ═══ System, Generators & Runtime ═══
 
-    Command-Line Usage & VM Switches
+  Command-Line Usage & VM Switches
   ──────────────────────
     JunkCalculator2                    Interactive REPL
     JunkCalculator2 script.jc2         Run a script file
@@ -1004,6 +1006,16 @@ namespace jc {
     sysinfo()                    Current prime database status
     mountPrimes("path")          Redirect the engine to a custom prime file
     buildIndex()                 Build an O(1) anchor tree in RAM
+
+  Garbage Collector (Mark-and-Sweep)
+  ──────────────────────
+    JC2 runs an automatic background Garbage Collector to track reference 
+    types (Lists, Dicts, Instances, Closures) and prevent cyclic memory leaks.
+    
+    gcinfo()              Print current heap status (tracked objects, thresholds)
+    gc()                  Force a standard GC sweep, returning freed object count
+    gc(true)              Aggressive sweep (clears the 'ANS' variable first to 
+                          prevent it from shielding dead objects from collection)
 
   Workspace & Path Management
   ──────────────────────
@@ -1314,8 +1326,10 @@ namespace jc {
         {"array", R"HELP(
 ═══ Array / Data Functions ═══
   Arrays are structurally defined as row vectors (1×N matrices): `[1, 2, 3]`
-  All array functions natively return row vectors.
-  For mathematical column vectors, refer to: `help vector`
+  
+  CRITICAL: Unlike Lists, Arrays/Matrices use VALUE SEMANTICS. 
+  Assigning `A = B` creates a completely independent deep copy. Modifying `A` 
+  will never affect `B`. This guarantees high performance and math safety.
 
   Element Access
   ──────────────────────
@@ -1503,6 +1517,26 @@ namespace jc {
                              it creates a 2D List: [ [..], [..] ].
     list()  list(1, "a")     Explicit creation for any heterogeneous data.
 
+  Reference Semantics & Memory
+  ──────────────────────
+    Unlike Arrays/Matrices (which are passed by value and deep-copied),
+    Lists use strictly REFERENCE SEMANTICS.
+    
+      L1 = list(1, 2, 3)
+      L2 = L1                   // L2 and L1 point to the exact same list in memory
+      L2[0] = 99                // L1[0] is now also 99!
+      
+    To pass a List to a function and modify it inside, you DO NOT need `ref`.
+    
+  Garbage Collection (Cycles)
+  ──────────────────────
+    Because Lists and Dicts can contain each other, they can form cycles
+    (e.g., pushing a list into itself). JC2 features a background Mark-and-Sweep
+    Garbage Collector to clean up disconnected cyclic islands.
+    You can observe or force this via:
+      gcinfo()                  View tracked objects and GC thresholds
+      gc()                      Force immediate memory sweep
+
 )HELP" },
 
         {"dict", R"HELP(
@@ -1555,6 +1589,17 @@ namespace jc {
       for ([k, v] in d) {
           print(k, "=", v)
       }
+
+  Reference Semantics & GC
+  ──────────────────────
+    Identical to Lists, Dicts are passed by reference.
+      d1 = {a: 1}
+      d2 = d1
+      d2.a = 99                 // d1.a is now also 99
+      
+    Dicts are fully tracked by the VM's Garbage Collector. Therefore, creating a
+    graph where Dict A points to Dict B, and Dict B points back to Dict A will 
+    never cause a memory leak when they go out of scope.
 )HELP"},
 
         { "class", R"HELP(
@@ -1576,10 +1621,12 @@ namespace jc {
     p = Point(3, 4)              Calls init(3, 4)
     p.x                          Read field
     p.x = 10                     Write field (creates if absent)
-
-    Instances use reference semantics (C++ shared_ptr backing):
-      p2 = p1                    p2 and p1 share the same object
-      p2.x = 99                  p1.x is also 99
+    Instances use strict REFERENCE SEMANTICS (tracked by the Garbage Collector):
+      p2 = p1                    p2 and p1 share the exact same object
+      p2.x = 99                  p1.x is automatically 99
+      
+    You can also force destructure instances just like Dicts:
+      {x, y} = p                 Extracts p.x into 'x' and p.y into 'y'
 
 
   Inheritance (extends / super)
