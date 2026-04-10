@@ -47,6 +47,7 @@ void printHelp() {
     if (it != jc::BuiltinHelp.end()) std::cout << "\n" << it->second << std::endl;
 }
 
+// 在 main.cpp 中找到 printHelpTopic 并修改为：
 void printHelpTopic(const std::string& topic) {
     std::string key = topic;
     size_t s = key.find_first_not_of(" \t");
@@ -54,7 +55,14 @@ void printHelpTopic(const std::string& topic) {
     if (s != std::string::npos) key = key.substr(s, e - s + 1);
     else key.clear();
 
-    // ★ 用 Lambda 来做显式的 char 转换
+    // ★ 1. 优先搜索脚本动态注册的库
+    auto itDyn = jc::DynamicHelp.find(key);
+    if (itDyn != jc::DynamicHelp.end()) {
+        std::cout << "\n" << itDyn->second << std::endl;
+        return;
+    }
+
+    // ★ 2. 搜索 C++ 静态库（且转为小写）
     std::transform(key.begin(), key.end(), key.begin(),
         [](unsigned char c) -> char { return static_cast<char>(std::tolower(c)); });
 

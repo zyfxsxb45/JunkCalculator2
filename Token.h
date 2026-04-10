@@ -23,6 +23,8 @@ namespace jc {
         SLASH_ASSIGN,        // ★ /=
         PERCENT_ASSIGN,      // ★ %=
         CARET_ASSIGN,        // ★ ^=
+        BIT_AND_ASSIGN,      // ★ &=
+        BIT_OR_ASSIGN,       // ★ |=
 
         // --- 括号与标点符号 ---
         LPAREN, RPAREN, LBRACKET, RBRACKET,
@@ -53,6 +55,8 @@ namespace jc {
         AND_AND,        // &&
         OR_OR,          // ||
         BANG,           // !  (单独的，不是 !=)
+        BIT_AND,        // &  (★ 新增)
+        BIT_OR,         // |  (★ 新增)
 
 
         // --- 特殊标记 ---
@@ -95,9 +99,13 @@ namespace jc {
         case TokenType::SLASH_ASSIGN:   return "SLASH_ASSIGN(/=)";
         case TokenType::PERCENT_ASSIGN: return "PERCENT_ASSIGN(%=)";
         case TokenType::CARET_ASSIGN:   return "CARET_ASSIGN(^=)";
+        case TokenType::BIT_AND_ASSIGN: return "BIT_AND_ASSIGN(&=)";   // ★
+        case TokenType::BIT_OR_ASSIGN:  return "BIT_OR_ASSIGN(|=)";    // ★
         case TokenType::AND_AND:       return "AND_AND(&&)";    // ★
         case TokenType::OR_OR:         return "OR_OR(||)";      // ★
         case TokenType::BANG:          return "BANG(!)";         // ★
+        case TokenType::BIT_AND:       return "BIT_AND(&)";
+        case TokenType::BIT_OR:        return "BIT_OR(|)";
         case TokenType::GREATER:       return "GREATER(>)";
         case TokenType::GREATER_EQUAL: return "GREATER_EQUAL(>=)";
         case TokenType::LESS:          return "LESS(<)";

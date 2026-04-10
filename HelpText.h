@@ -5,6 +5,7 @@
 #include <string>
 
 namespace jc {
+    inline std::map<std::string, std::string> DynamicHelp;
 
     const std::map<std::string, std::string> BuiltinHelp = {
         {"main", R"HELP(
@@ -77,6 +78,11 @@ namespace jc {
 
     Type `modules()` in the REPL to see all available native modules.
 
+  Standard Libraries (require `import` before use, use help("<library>") for details)
+  ────────────────────────────────────────────────────────────────────
+    regex       Regular Expression standard library (import "regex")
+    discrete    Discrete math utilities standard library (import "discrete")
+
   Quick-Start Cheatsheet
   ────────────────────────────────────────────────────────────────────
     x = 3.14                       assign a real
@@ -106,6 +112,9 @@ namespace jc {
     super.init(name)               call parent constructor
     __add__(o) = ...               operator overloading
     10 / 3                         exact fraction → 10/3
+    2 ^ 10                         power (strictly power, NOT bitwise XOR)
+    A | B                          set union / base-2 bitwise OR
+    A & B                          set intersection / base-2 bitwise AND
     int(3.7)                       truncate to integer → 3
     double(frac(1,3))              convert to float → 0.333...
     3 > 2 && !false                comparison + logic
@@ -136,19 +145,28 @@ namespace jc {
     // text              Everything after // is ignored until end of line.
                          Works in expressions, blocks, functions, and scripts.
 
-  Arithmetic Operators
+   Arithmetic Operators
   ──────────────────────
     +  -  *  /          Standard four operations
     \                   Left division: a\b ≡ inv(a) * b
-    ^                   Power             2^10 → 1024
+    ^                   Power             2^10 → 1024 (NOT bitwise XOR!)
     %                   Truncated modulo  (-7) % 3 → -1
     =                   Assignment        x = 42
+  Set & Bitwise Operators
+  ──────────────────────
+    |                   Set Union / Base-2 Bitwise OR
+    &                   Set Intersection / Base-2 Bitwise AND
+    
+    * Note: To prevent syntax ambiguity and precedence issues with polynomials, 
+      the caret (^) is STRICTLY reserved for exponentiation. 
+      For bitwise XOR, use the function `bitxor(a, b)`.
 
   Compound Assignment
   ──────────────────────
     x += expr           x -= expr           x *= expr
     x /= expr           x %= expr           x ^= expr
-    Also works on indexed elements: A[i, j] += 1
+    x &= expr           x |= expr
+    Also works on indexed elements: A[i, j] += 1, d.flag |= Set("X")
 
    Destructuring Assignment (Arrays & Dicts)
   ──────────────────────
@@ -941,13 +959,16 @@ namespace jc {
 
   Bitwise Operations (Base-2 Exclusive)
   ──────────────────────
+    BaseNums automatically support native bitwise operators when radix = 2.
     (Wrap your inputs using `base(x, 2)` before passing them here).
-
-    bitand(a, b)         AND
-    bitor(a, b)          OR
-    bitxor(a, b)         XOR
+    a & b                AND (Native operator)
+    a | b                OR  (Native operator)
+    a &= b               Compound AND assignment
+    a |= b               Compound OR assignment
+    bitxor(a, b)         XOR (Function only, since `^` is used for math power)
     bitnot(a, w)         NOT (auto-aligns to bytes, or explicitly w-bits)
     bitshift(a, n)       Logical Shift: Left (n > 0) / Right (n < 0)
+
 )HELP"},
 
         { "sys", R"HELP(
@@ -1440,7 +1461,12 @@ namespace jc {
 
   Adding & Removing
   ──────────────────────
-    push(L, val)            Append value to the end (returns new list)
+    add(L, val)             Append value to the end (same as push)
+    remove(L, idx)          Remove the element at specific index
+    clear(L)                Erase all elements
+
+    You can also use legacy functions:
+    push(L, val)            Append value to the end
     prepend(L, val)         Insert value at the beginning
     insert(L, idx, val)     Insert value at a specific index
     removeAt(L, idx)        Remove the element at specific index
@@ -1572,16 +1598,20 @@ namespace jc {
       d.age = 31                 → modifies    (same as d["age"] = 31)
       d.score = 95               → adds new key
 
-  Inspection & Manipulation
+   Inspection & Manipulation
   ──────────────────────
-    len(d) / dictSize(d)Number of key-value entries
-    type(d)             Returns "Dict"
-    hasKey(d, "key")    Returns 1 if the key exists
-    keys(d)             Returns all keys as a StringMatrix row
-    values(d)           Returns all values
-    dictPairs(d)        Returns an N×2 StringMatrix of [key, value] rows
-    removeKey(d, "key") Returns a new Dict with the specified key removed
-    dictMerge(d1, d2)   Merges d2 into d1
+    add(d, "key", val)                  Inserts or updates a key-value pair
+    remove(d, "key")                    Removes the key (throws error if absent)
+    discard(d, "key")                   Removes the key (silent if absent)
+    clear(d)                            Erases all entries
+
+    len(d) / dictSize(d)                Number of key-value entries
+    type(d)                             Returns "Dict"
+    hasKey(d, "key")                    Returns 1 if the key exists
+    keys(d)                             Returns all keys as a StringMatrix row
+    values(d)                           Returns all values
+    dictPairs(d)                        Returns an N×2 StringMatrix of [key, value] rows
+    dictMerge(d1, d2)                   Merges d2 into d1
 
   Iteration & Membership
   ──────────────────────
@@ -1625,13 +1655,16 @@ namespace jc {
     for (x in s) { print(x) }      Iterates in insertion order
     len(s)                          Number of unique elements
 
-  Element Operations (mutates via reference semantics)
+    Element Operations (Unified Container API - mutates via reference)
   ──────────────────────
-    setAdd(s, val)                  Add element (no-op if already present)
-    setRemove(s, val)               Remove element (error if absent)
-    setDiscard(s, val)              Remove element (silent if absent)
+    add(s, val)                     Add element (no-op if already present)
+    remove(s, val)                  Remove element (error if absent)
+    discard(s, val)                 Remove element (silent if absent)
+    clear(s)                        Remove all elements
     setPop(s)                       Remove & return an arbitrary element
-    setClear(s)                     Remove all elements
+    
+    (Note: legacy functions setAdd, setRemove, setDiscard, setClear 
+     are still supported).
 
   Set Algebra (returns NEW Set)
   ──────────────────────
@@ -1639,11 +1672,18 @@ namespace jc {
     setIntersect(a, b)              a ∩ b  — elements in both sets
     setDiff(a, b)                   a \ b  — elements in a but not in b
     setSymDiff(a, b)                a △ b  — elements in exactly one set
+    
+    setProduct(a, b)                a × b  — Cartesian product (returns Set of Lists)
+    setPow(s)                       P(s)   — Powerset (Set of all subsets, max 20 elems)
 
-  Operator Shortcuts
+    Operator Shortcuts (and Compound Assignments)
   ──────────────────────
-    a + b                           Union   (same as setUnion)
+    a | b                           Union (same as setUnion)
+    a & b                           Intersection (same as setIntersect)
     a - b                           Difference (same as setDiff)
+    a * b                           Cartesian product (same as setProduct)
+    a |= b                          In-place union (a = a | b)
+    a &= b                          In-place intersection (a = a & b)
 
   Relation Predicates (return 1 or 0)
   ──────────────────────
@@ -1668,25 +1708,35 @@ namespace jc {
     Sets share the same underlying memory when assigned:
       s1 = Set(1, 2, 3)
       s2 = s1                      s2 and s1 are the SAME set
-      setAdd(s2, 99)               s1 now also contains 99
-
+      add(s2, 99)                  s1 now also contains 99
     Sets are tracked by the Garbage Collector (see: help sys).
 
   Examples
   ──────────────────────
-    a = Set(1, 2, 3, 4, 5)
-    b = Set(3, 4, 5, 6, 7)
+    a = Set(1, 2, 3)
+    b = Set(2, 3, 4)
+    a | b                           → Set{1, 2, 3, 4}
+    a & b                           → Set{2, 3}
+    a - b                           → Set{1}
+    a * Set("x", "y")               → Set{[1, "x"], [1, "y"], ... [3, "y"]}
+    setPow(Set(1, 2))               → Set{Set{}, Set{1}, Set{2}, Set{1, 2}}
+    chars = toSet("abracadabra")    → Set{"a", "b", "r", "c", "d"}
 
-    setUnion(a, b)                  → Set{1, 2, 3, 4, 5, 6, 7}
-    setIntersect(a, b)              → Set{3, 4, 5}
-    setDiff(a, b)                   → Set{1, 2}
-    a + b                           → Set{1, 2, 3, 4, 5, 6, 7}
-    a - b                           → Set{1, 2}
+  Examples
+  ──────────────────────
+    a = Set(1, 2, 3)
+    b = Set(2, 3, 4)
+
+    setUnion(a, b)                  → Set{1, 2, 3, 4}
+    setIntersect(a, b)              → Set{2, 3}
+    setSymDiff(a, b)                → Set{1, 4}
+    a * Set("x", "y")               → Set{[1, "x"], [1, "y"], ... [3, "y"]}
+    setPow(Set(1, 2))               → Set{Set{}, Set{1}, Set{2}, Set{1, 2}}
 
     chars = toSet("abracadabra")    → Set{"a", "b", "r", "c", "d"}
     3 in a                          → 1
     9 in a                          → 0
-    isSubset(set(1, 2), a)          → 1
+    isSubset(Set(1, 2), a)          → 1
 )HELP" },
 
         { "class", R"HELP(

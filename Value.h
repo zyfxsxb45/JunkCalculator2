@@ -31,8 +31,9 @@
 #include "GcHeap.h"
 
 namespace jc {
-
+    class Value;
     struct FunctionClosure;
+    inline std::string setValueKey(const Value& v);
 
     struct PrintGuard {
         std::vector<const void*>& vis;
@@ -448,12 +449,6 @@ namespace jc {
                             flat[i * a.getCols() + j] = a(i, j) + b(i, j);
                     return Value(StringMatrix(a.getRows(), a.getCols(), flat));
                 }
-                else if constexpr (std::is_same_v<T1, Set> && std::is_same_v<T2, Set>) {
-                    Set result;
-                    for (const auto& [key, val] : a.raw()) result.insert(key, val);
-                    for (const auto& [key, val] : b.raw()) result.insert(key, val);
-                    return Value(result);
-                }
                 else {
                     throw std::runtime_error("Type Error: Cannot add these types.");
                 }
@@ -572,6 +567,20 @@ namespace jc {
                     std::string result;
                     result.reserve(b.size() * n);
                     for (int i = 0; i < n; ++i) result += b;
+                    return Value(result);
+                }
+                else if constexpr (std::is_same_v<T1, Set> && std::is_same_v<T2, Set>) {
+                    Set result;
+                    // 笛卡尔积：返回由两两组合的 List(二元组) 构成的 Set
+                    for (const auto& [k1, v1Any] : a.raw()) {
+                        for (const auto& [k2, v2Any] : b.raw()) {
+                            List pair;
+                            pair.push_back(std::make_any<Value>(std::any_cast<Value>(v1Any)));
+                            pair.push_back(std::make_any<Value>(std::any_cast<Value>(v2Any)));
+                            Value pairVal(pair);
+                            result.insert(setValueKey(pairVal), std::make_any<Value>(pairVal));
+                        }
+                    }
                     return Value(result);
                 }
                 else if constexpr (std::is_same_v<T1, BaseNum>) { return Value(a.getValue()) * rhs; }
@@ -913,6 +922,47 @@ namespace jc {
             return os;
         }
 
+        friend Value operator&(const Value& lhs, const Value& rhs) {
+            return std::visit([&](auto&& a, auto&& b) -> Value {
+                using T1 = std::decay_t<decltype(a)>;
+                using T2 = std::decay_t<decltype(b)>;
+
+                if constexpr (std::is_same_v<T1, Set> && std::is_same_v<T2, Set>) {
+                    Set result;
+                    for (const auto& [key, val] : a.raw()) {
+                        if (b.contains(key)) result.insert(key, val);
+                    }
+                    return Value(result);
+                }
+                else if constexpr (std::is_same_v<T1, BaseNum> && std::is_same_v<T2, BaseNum>) {
+                    return Value(a.bitAnd(b)); // 底层的 bitAnd 已经具备校验进制合法性的能力
+                }
+                else {
+                    throw std::runtime_error("Type Error: Bitwise/Set AND '&' not supported for these types.");
+                }
+                }, lhs.data, rhs.data);
+        }
+
+        friend Value operator|(const Value& lhs, const Value& rhs) {
+            return std::visit([&](auto&& a, auto&& b) -> Value {
+                using T1 = std::decay_t<decltype(a)>;
+                using T2 = std::decay_t<decltype(b)>;
+
+                if constexpr (std::is_same_v<T1, Set> && std::is_same_v<T2, Set>) {
+                    Set result;
+                    for (const auto& [key, val] : a.raw()) result.insert(key, val);
+                    for (const auto& [key, val] : b.raw()) result.insert(key, val);
+                    return Value(result);
+                }
+                else if constexpr (std::is_same_v<T1, BaseNum> && std::is_same_v<T2, BaseNum>) {
+                    return Value(a.bitOr(b));
+                }
+                else {
+                    throw std::runtime_error("Type Error: Bitwise/Set OR '|' not supported for these types.");
+                }
+                }, lhs.data, rhs.data);
+        }
+
         std::string toJC2Expression() const {
             return std::visit([](auto&& arg) -> std::string {
                 using T = std::decay_t<decltype(arg)>;
@@ -1017,8 +1067,7 @@ namespace jc {
                 else { return "none()"; }
                 }, data);
         }
-
-    };
+    }; // class Value
 
     inline Value ldivide(const Value& lhs, const Value& rhs) {
         return std::visit([&](auto&& a, [[maybe_unused]] auto&& b) -> Value {
@@ -1032,12 +1081,36 @@ namespace jc {
             }, lhs.data, rhs.data);
     }
 
-    // ═══ Set 元素键生成器（类型前缀 + 字符串表示，保证跨类型唯一性）═══
+    // ═══ 容器元素键生成器（保证内容相同的 Set/Dict 无论插入顺序如何，都能生成相同的键用于去重）═══
     inline std::string setValueKey(const Value& v) {
         std::ostringstream oss;
         oss << v.data.index() << ":";
-        if (std::holds_alternative<std::monostate>(v.data)) oss << "none";
-        else oss << v;
+
+        if (std::holds_alternative<std::monostate>(v.data)) {
+            oss << "none";
+        }
+        // Set：提取元素的键排序后拼接，保证顺序无关
+        else if (std::holds_alternative<Set>(v.data)) {
+            auto& s = std::get<Set>(v.data);
+            std::vector<std::string> keys;
+            for (const auto& [k, val] : s.raw()) keys.push_back(k);
+            std::sort(keys.begin(), keys.end());
+            oss << "{";
+            for (const auto& k : keys) oss << k << ",";
+            oss << "}";
+        }
+        // Dict：提取键排后拼接
+        else if (std::holds_alternative<Dict>(v.data)) {
+            auto& d = std::get<Dict>(v.data);
+            std::vector<std::string> keys = d.getKeys();
+            std::sort(keys.begin(), keys.end());
+            oss << "{";
+            for (const auto& k : keys) oss << k << ",";
+            oss << "}";
+        }
+        else {
+            oss << v;
+        }
         return oss.str();
     }
 

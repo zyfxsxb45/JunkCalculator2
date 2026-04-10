@@ -1,0 +1,250 @@
+// ═══════════════════════════════════════════════════════════════
+// discrete.jc2 — Discrete Mathematics Standard Library
+// Pure JC2 2.2.0 Implementation
+//
+// Modernized features used:
+//   - Resilient Type System (Matrix Value vs List Reference Semantics)
+//   - Graph DFS via Upvalue Closure Environment
+// ═══════════════════════════════════════════════════════════════
+
+// ┌────────────────────────────────────────────────────────┐
+// │ 1. Combinatorics (排列组合生成器)                      │
+// └────────────────────────────────────────────────────────┘
+
+permutations(arr) = {
+    n = len(arr)
+    if (n <= 1) { return list(arr) }
+    res = list()
+    for (i in range(n)) {
+        curr = arr[i]
+        rest = list()
+        for (j in range(n)) {
+            if (i != j) { add(rest, arr[j]) }
+        }
+        for (p in permutations(rest)) {
+            new_p = list(curr)
+            for (x in p) { add(new_p, x) }
+            add(res, new_p)
+        }
+    }
+    return res
+}
+
+combinations(arr, k) = {
+    if (k == 0) { return list(list()) }
+    if (len(arr) < k) { return list() }
+    if (len(arr) == k) { return list(arr) }
+    
+    res = list()
+    first = arr[0]
+    rest = slice(arr, 1, len(arr))
+    
+    for (c in combinations(rest, k - 1)) {
+        new_c = list(first)
+        for (x in c) { add(new_c, x) }
+        add(res, new_c)
+    }
+    for (c in combinations(rest, k)) { add(res, c) }
+    return res
+}
+
+// ┌────────────────────────────────────────────────────────┐
+// │ 2. Binary Relations (二元关系)                         │
+// └────────────────────────────────────────────────────────┘
+
+// ★ Semantic Safety Patch: Respect user's chosen tuple type 
+// (Matrix Array vs List Reference)
+_pair(sample, a, b) = type(sample) == "List" ? list(a, b) : [a, b]
+
+isReflexive(R, S) = {
+    // Extract a sample to smell the user's data type
+    sample = len(R) > 0 ? toList(R)[0] : [0, 0] 
+    for (x in S) {
+        if (!(_pair(sample, x, x) in R)) { return false }
+    }
+    return true
+}
+
+isSymmetric(R) = {
+    for (pair in R) {
+        [a, b] = pair
+        if (!(_pair(pair, b, a) in R)) { return false }
+    }
+    return true
+}
+
+isTransitive(R) = {
+    for (p1 in R) {
+        for (p2 in R) {
+            [a, b] = p1
+            [c, d] = p2
+            if (b == c && !(_pair(p1, a, d) in R)) { return false }
+        }
+    }
+    return true
+}
+
+isEquivalence(R, S) = isReflexive(R, S) && isSymmetric(R) && isTransitive(R)
+
+isIrreflexive(R, S) = {
+    sample = len(R) > 0 ? toList(R)[0] : [0, 0]
+    for (x in S) {
+        if (_pair(sample, x, x) in R) { return false }
+    }
+    return true
+}
+
+isAntiSymmetric(R) = {
+    for (pair in R) {
+        [a, b] = pair
+        if (a != b && (_pair(pair, b, a) in R)) { return false }
+    }
+    return true
+}
+
+isPartialOrder(R, S) = isReflexive(R, S) && isAntiSymmetric(R) && isTransitive(R)
+
+
+// ┌────────────────────────────────────────────────────────┐
+// │ 3. Graph Theory (图论：邻接表)                         │
+// └────────────────────────────────────────────────────────┘
+
+bfs(graph, start) = {
+    visited = Set(start)
+    q = list(start)
+    res = list()
+    while (len(q) > 0) {
+        curr = q[0]; removeAt(q, 0)
+        add(res, curr)
+        if (hasKey(graph, curr)) {
+            for (nbr in graph[curr]) {
+                if (!(nbr in visited)) { add(visited, nbr); add(q, nbr) }
+            }
+        }
+    }
+    return res
+}
+
+dfs(graph, start) = {
+    visited = Set()
+    res = list()
+    
+    // Upvalue recursion
+    _dfs_util(node) = {
+        if (node in visited) { return none() }
+        add(visited, node); add(res, node)
+        if (hasKey(graph, node)) {
+            for (nbr in graph[node]) { _dfs_util(nbr) }
+        }
+    }
+    _dfs_util(start)
+    return res
+}
+
+findPath(graph, start, end) = {
+    visited = Set(start)
+    q = list(list(start))
+    
+    while (len(q) > 0) {
+        path = q[0]; removeAt(q, 0)
+        curr = last(path)
+        
+        if (curr == end) { return path }
+        
+        if (hasKey(graph, curr)) {
+            for (nbr in graph[curr]) {
+                if (!(nbr in visited)) {
+                    add(visited, nbr)
+                    
+                    // ★ Semantic Safety Patch: 
+                    // path is a List (Reference Semantics). We MUST manually 
+                    // construct a new list to branch the state, avoiding mutation pollution.
+                    new_path = list()
+                    for (p in path) { add(new_path, p) }
+                    add(new_path, nbr)
+                    add(q, new_path)
+                }
+            }
+        }
+    }
+    return list()
+}
+
+// ┌────────────────────────────────────────────────────────┐
+// │ 4. Boolean Logic (真值表)                              │
+// └────────────────────────────────────────────────────────┘
+
+// ★ Optimized: Employs `zeros()` to generate RealMatrix (Value Semantics), 
+// drastically boosting speed compared to instantiating Lists sequentially.
+truthTable(n, fn) = {
+    total = 2 ^ n
+    res_list = list()
+    for (i in range(total)) {
+        vars = zeros(1, n)
+        for (j in range(n)) {
+            vars[j] = int(i / (2^(n - 1 - j))) % 2
+        }
+        res = apply(fn, vars)
+        add(res_list, {inputs: vars, output: res ? 1 : 0})
+    }
+    return res_list
+}
+
+printTruthTable(n, fn) = {
+    total = 2 ^ n
+    print(f"\nTruth Table ({n} variables):")
+    print("-" * (n * 7 + 10))
+    header = ""
+    for (i in range(n)) { header += f"V{i}     " }
+    header += "|   Out"
+    print(header)
+    print("-" * (n * 7 + 10))
+    
+    for (i in range(total)) {
+        vars = zeros(1, n)
+        for (j in range(n)) { vars[j] = int(i / (2^(n - 1 - j))) % 2 }
+        rowStr = ""
+        for (v in vars) { rowStr += f" {v}     " }
+        res = apply(fn, vars)
+        rowStr += f"|    {res ? 1 : 0}"
+        print(rowStr)
+    }
+    print("-" * (n * 7 + 10))
+}
+
+// ┌────────────────────────────────────────────────────────┐
+// │ Dynamic Help Registry                                  │
+// └────────────────────────────────────────────────────────┘
+
+__register_help("discrete", r"DOC(
+═══ Discrete Mathematics (Standard Library) ═══
+
+  Requires: import "discrete"
+
+  A pure JC2 implementation covering Combinatorics, Graph Theory, 
+  Binary Relations, and Boolean Logic generation.
+
+  Combinatorics
+  ──────────────────────
+    permutations(arr)          Returns all alignments of array elements
+    combinations(arr, k)       Returns all subsets of size k
+
+  Binary Relations 
+  ──────────────────────
+    isReflexive(R, S)          isTransitive(R)      isPartialOrder(R, S)
+    isSymmetric(R)             isAntiSymmetric(R)   isEquivalence(R, S)
+    isIrreflexive(R, S)        
+
+  Graph Theory (Adjacency Dict)
+  ──────────────────────
+    bfs(graph, start)          Breadth-First Search traversal
+    dfs(graph, start)          Depth-First Search traversal
+    findPath(graph, a, b)      Find shortest unweighted path from a to b
+
+  Boolean Logic
+  ──────────────────────
+    truthTable(n, fn)          Generates raw data model for n variables
+    printTruthTable(n, fn)     Prints styled truth table to terminal
+)DOC")
+
+print("[System] discrete.jc2 loaded successfully.")

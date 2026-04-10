@@ -28,8 +28,30 @@ namespace jc {
     }
 
     std::unique_ptr<Expr> Parser::logicalAnd() {
-        auto expr = comparison();
+        auto expr = bitwiseOr();  // ★ 从 comparison 改为 bitwiseOr
         while (match({ TokenType::AND_AND })) {
+            Token op = previous();
+            auto right = bitwiseOr(); // ★
+            expr = std::make_unique<Binary>(std::move(expr), op, std::move(right));
+        }
+        return expr;
+    }
+
+    // ★ 新增层级 1：位或 (并集)
+    std::unique_ptr<Expr> Parser::bitwiseOr() {
+        auto expr = bitwiseAnd();
+        while (match({ TokenType::BIT_OR })) {
+            Token op = previous();
+            auto right = bitwiseAnd();
+            expr = std::make_unique<Binary>(std::move(expr), op, std::move(right));
+        }
+        return expr;
+    }
+
+    // ★ 新增层级 2：位与 (交集)
+    std::unique_ptr<Expr> Parser::bitwiseAnd() {
+        auto expr = comparison(); // ★ 衔接原来的 comparison
+        while (match({ TokenType::BIT_AND })) {
             Token op = previous();
             auto right = comparison();
             expr = std::make_unique<Binary>(std::move(expr), op, std::move(right));
@@ -76,9 +98,11 @@ namespace jc {
     std::unique_ptr<Expr> Parser::assignment() {
         auto expr = ternary();
 
+        // ★ 将原本的 match 列表中加入 BIT_AND_ASSIGN 和 BIT_OR_ASSIGN
         if (match({ TokenType::PLUS_ASSIGN, TokenType::MINUS_ASSIGN,
                     TokenType::STAR_ASSIGN, TokenType::SLASH_ASSIGN,
-                    TokenType::PERCENT_ASSIGN, TokenType::CARET_ASSIGN })) {
+                    TokenType::PERCENT_ASSIGN, TokenType::CARET_ASSIGN,
+                    TokenType::BIT_AND_ASSIGN, TokenType::BIT_OR_ASSIGN })) { // ★
             Token compOp = previous();
             // 映射到基础运算符
             TokenType baseOp;
@@ -89,6 +113,8 @@ namespace jc {
             case TokenType::SLASH_ASSIGN:   baseOp = TokenType::SLASH; break;
             case TokenType::PERCENT_ASSIGN: baseOp = TokenType::PERCENT; break;
             case TokenType::CARET_ASSIGN:   baseOp = TokenType::CARET; break;
+            case TokenType::BIT_AND_ASSIGN: baseOp = TokenType::BIT_AND; break; // ★
+            case TokenType::BIT_OR_ASSIGN:  baseOp = TokenType::BIT_OR; break;  // ★
             default: baseOp = TokenType::PLUS; break;
             }
             auto value = assignment();

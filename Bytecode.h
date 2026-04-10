@@ -31,6 +31,8 @@ namespace jc {
         OP_POWER,
         OP_NEGATE,          // 一元取负
         OP_NOT,             // 逻辑取反
+        OP_BIT_AND,         // ★ & 
+        OP_BIT_OR,          // ★ |
 
         // 比较
         OP_EQUAL,
@@ -208,6 +210,8 @@ namespace jc {
         case OpCode::OP_SLICE_GET: return "OP_SLICE_GET";
         case OpCode::OP_SLICE_SET: return "OP_SLICE_SET";
         case OpCode::OP_REF_WRITEBACK: return "OP_REF_WRITEBACK";
+        case OpCode::OP_BIT_AND: return "OP_BIT_AND";
+        case OpCode::OP_BIT_OR: return "OP_BIT_OR";
         default: return "UNKNOWN_OP";
         }
     }
@@ -324,7 +328,7 @@ namespace jc {
             case OpCode::OP_BREAK: case OpCode::OP_CONTINUE: case OpCode::OP_ITER_VAR:
             case OpCode::OP_IN: case OpCode::OP_STRINGIFY: case OpCode::OP_TRY_END:
             case OpCode::OP_THROW: case OpCode::OP_LIST_INIT: case OpCode::OP_INHERIT:
-            case OpCode::OP_IMPORT:
+            case OpCode::OP_IMPORT: case OpCode::OP_BIT_AND: case OpCode::OP_BIT_OR:
                 std::cout << std::endl;
                 return offset + 1;
 

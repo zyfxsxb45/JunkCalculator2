@@ -42,12 +42,14 @@ namespace jc {
         case TokenType::PLUS_ASSIGN: case TokenType::MINUS_ASSIGN:
         case TokenType::STAR_ASSIGN: case TokenType::SLASH_ASSIGN:
         case TokenType::PERCENT_ASSIGN: case TokenType::CARET_ASSIGN:
+        case TokenType::BIT_AND_ASSIGN: case TokenType::BIT_OR_ASSIGN: // ★
             // 比较
         case TokenType::EQUAL: case TokenType::BANG_EQUAL:
         case TokenType::LESS: case TokenType::LESS_EQUAL:
         case TokenType::GREATER: case TokenType::GREATER_EQUAL:
             // 逻辑
         case TokenType::AND_AND: case TokenType::OR_OR:
+        case TokenType::BIT_AND: case TokenType::BIT_OR:
             // 管道与箭头
         case TokenType::PIPE: case TokenType::ARROW:
             // 标点
@@ -135,14 +137,16 @@ namespace jc {
             if (match('=')) addToken(TokenType::BANG_EQUAL);
             else addToken(TokenType::BANG);           // ★ 不再报错，作为逻辑 NOT
             break;
-        case '&':                                      // ★ 新增
-            if (match('&')) addToken(TokenType::AND_AND);
-            else throw std::runtime_error("Lexer Error: Expected '&&' at pos " + std::to_string(current));
+        case '&':
+            if (match('=')) addToken(TokenType::BIT_AND_ASSIGN);       // ★
+            else if (match('&')) addToken(TokenType::AND_AND);
+            else addToken(TokenType::BIT_AND);
             break;
         case '|':
-            if (match('|')) addToken(TokenType::OR_OR);
-            else if (match('>')) addToken(TokenType::PIPE);  // ★
-            else throw std::runtime_error("Lexer Error: Expected '||' or '|>' at pos " + std::to_string(current));
+            if (match('=')) addToken(TokenType::BIT_OR_ASSIGN);        // ★
+            else if (match('|')) addToken(TokenType::OR_OR);
+            else if (match('>')) addToken(TokenType::PIPE);
+            else addToken(TokenType::BIT_OR);
             break;
         case '<':
             addToken(match('=') ? TokenType::LESS_EQUAL : TokenType::LESS);

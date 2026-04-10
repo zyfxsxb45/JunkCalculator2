@@ -26,6 +26,8 @@ namespace jc {
         std::unique_ptr<Expr> primary();
         std::unique_ptr<Expr> logicalOr();       // ★ 新增
         std::unique_ptr<Expr> logicalAnd();      // ★ 新增
+        std::unique_ptr<Expr> bitwiseOr();       // ★ 新增
+        std::unique_ptr<Expr> bitwiseAnd();      // ★ 新增
         std::unique_ptr<Expr> ternary();
 
         // ★ 新增：控制流解析

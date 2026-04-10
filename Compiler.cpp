@@ -422,6 +422,8 @@ namespace jc {
         case TokenType::GREATER:       emit(OpCode::OP_GREATER, line); break;
         case TokenType::GREATER_EQUAL: emit(OpCode::OP_GREATER_EQUAL, line); break;
         case TokenType::IN:            emit(OpCode::OP_IN, line); break;
+        case TokenType::BIT_AND:       emit(OpCode::OP_BIT_AND, line); break;  // ★
+        case TokenType::BIT_OR:        emit(OpCode::OP_BIT_OR, line); break;   // ★
         default:
             throw std::runtime_error("Compiler Error: Unsupported binary operator '" +
                 expr->op.lexeme + "'.");
@@ -813,6 +815,8 @@ namespace jc {
             case TokenType::SLASH:   emit(OpCode::OP_DIVIDE, lastLine); break;
             case TokenType::PERCENT: emit(OpCode::OP_MODULO, lastLine); break;
             case TokenType::CARET:   emit(OpCode::OP_POWER, lastLine); break;
+            case TokenType::BIT_AND: emit(OpCode::OP_BIT_AND, lastLine); break; // ★
+            case TokenType::BIT_OR:  emit(OpCode::OP_BIT_OR, lastLine); break;  // ★
             default: throw std::runtime_error("Compiler Error: Unknown compound operator.");
             }
             };

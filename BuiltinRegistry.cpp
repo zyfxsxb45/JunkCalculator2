@@ -3,6 +3,7 @@
 #include "Module.h"
 #include "VM.h"
 #include "GcHeap.h"
+#include "HelpText.h"           // ★ BuiltinHelp, DynamicHelp
 #include <algorithm>
 #include <cctype>
 #include <chrono>               // ★ clock() — high_resolution_clock
@@ -788,6 +789,51 @@ void BuiltinRegistry::registerSystemUtils() {
             << "-----------------" << std::endl;
         return Value::none();
         });
+
+    reg("__register_help", { 2 }, [](const std::vector<Value>& args) -> Value {
+        if (!std::holds_alternative<std::string>(args[0].data) ||
+            !std::holds_alternative<std::string>(args[1].data)) {
+            throw std::runtime_error("System Error: __register_help expects two strings.");
+        }
+        std::string topic = std::get<std::string>(args[0].data);
+        std::string text = std::get<std::string>(args[1].data);
+        jc::DynamicHelp[topic] = text; // 存入 C++ 内存池
+        return Value::none();
+        });
+    // ★ 暴露给用户的原生 help() 内置函数
+    reg("help", { 0, 1 }, [](const std::vector<Value>& args) -> Value {
+        if (args.empty()) {
+            auto it = jc::BuiltinHelp.find("main");
+            if (it != jc::BuiltinHelp.end()) std::cout << "\n" << it->second << std::endl;
+            return Value::none();
+        }
+
+        if (!std::holds_alternative<std::string>(args[0].data))
+            throw std::runtime_error("Type Error: help() expects a string topic.");
+
+        std::string topic = std::get<std::string>(args[0].data);
+
+        // 1. 优先查找脚本注册进来的动态函数库
+        auto itDyn = jc::DynamicHelp.find(topic);
+        if (itDyn != jc::DynamicHelp.end()) {
+            std::cout << "\n" << itDyn->second << std::endl;
+            return Value::none();
+        }
+
+        // 2. 其次查找 C++ 内置的文档 (支持忽略大小写)
+        std::string key = topic;
+        std::transform(key.begin(), key.end(), key.begin(),
+            [](unsigned char c) -> char { return static_cast<char>(std::tolower(c)); });
+
+        auto itBuiltin = jc::BuiltinHelp.find(key);
+        if (itBuiltin != jc::BuiltinHelp.end()) {
+            std::cout << "\n" << itBuiltin->second << std::endl;
+            return Value::none();
+        }
+
+        std::cout << "\n  [System] No help found for topic: '" << topic << "'\n";
+        return Value::none();
+        });
 }
 
 // =================================================================
@@ -866,6 +912,94 @@ void BuiltinRegistry::registerControlFlow() {
         else throw std::runtime_error("Runtime Error: color() expects \"on\" or \"off\".");
         return Value::none();
     });
+
+    // =================================================================
+    // [大一统泛型 API] add / remove / discard / clear
+    // =================================================================
+
+    reg("add", { 2, 3 }, [](const std::vector<Value>& args) -> Value {
+        if (std::holds_alternative<Set>(args[0].data)) {
+            if (args.size() != 2) throw std::runtime_error("Runtime Error: add() on Set takes 2 args (set, val).");
+            Set s = std::get<Set>(args[0].data); // ★ 拷贝剥离 const
+            s.insert(setValueKey(args[1]), valToAny(args[1]));
+            return Value(s);
+        }
+        else if (std::holds_alternative<List>(args[0].data)) {
+            if (args.size() != 2) throw std::runtime_error("Runtime Error: add() on List takes 2 args (list, val).");
+            List l = std::get<List>(args[0].data); // ★ 拷贝剥离 const
+            l.push_back(valToAny(args[1]));
+            return Value(l);
+        }
+        else if (std::holds_alternative<Dict>(args[0].data)) {
+            if (args.size() != 3) throw std::runtime_error("Runtime Error: add() on Dict takes 3 args (dict, key, val).");
+            Dict d = std::get<Dict>(args[0].data); // ★ 拷贝剥离 const
+            std::string key;
+            if (std::holds_alternative<std::string>(args[1].data)) key = std::get<std::string>(args[1].data);
+            else { std::ostringstream oss; oss << args[1]; key = oss.str(); }
+            d.set(key, valToAny(args[2]));
+            return Value(d);
+        }
+        throw std::runtime_error("Type Error: add() expects a Set, List, or Dict as 1st argument.");
+        });
+
+    reg("remove", { 2 }, [](const std::vector<Value>& args) -> Value {
+        if (std::holds_alternative<Set>(args[0].data)) {
+            Set s = std::get<Set>(args[0].data); // ★ 拷贝剥离 const
+            if (!s.erase(setValueKey(args[1]))) throw std::runtime_error("Runtime Error: Element not found in Set.");
+            return Value(s);
+        }
+        else if (std::holds_alternative<List>(args[0].data)) {
+            List l = std::get<List>(args[0].data); // ★ 拷贝剥离 const
+            int idx = static_cast<int>(std::round(args[1].asDouble()));
+            l.removeAt(idx);
+            return Value(l);
+        }
+        else if (std::holds_alternative<Dict>(args[0].data)) {
+            Dict d = std::get<Dict>(args[0].data); // ★ 拷贝剥离 const
+            std::string key;
+            if (std::holds_alternative<std::string>(args[1].data)) key = std::get<std::string>(args[1].data);
+            else { std::ostringstream oss; oss << args[1]; key = oss.str(); }
+            if (!d.remove(key)) throw std::runtime_error("Runtime Error: Key '" + key + "' not found in Dict.");
+            return Value(d);
+        }
+        throw std::runtime_error("Type Error: remove() expects a Set, List, or Dict.");
+        });
+
+    reg("discard", { 2 }, [](const std::vector<Value>& args) -> Value {
+        if (std::holds_alternative<Set>(args[0].data)) {
+            Set s = std::get<Set>(args[0].data); // ★ 拷贝剥离 const
+            s.erase(setValueKey(args[1])); // 静默处理
+            return Value(s);
+        }
+        else if (std::holds_alternative<Dict>(args[0].data)) {
+            Dict d = std::get<Dict>(args[0].data); // ★ 拷贝剥离 const
+            std::string key;
+            if (std::holds_alternative<std::string>(args[1].data)) key = std::get<std::string>(args[1].data);
+            else { std::ostringstream oss; oss << args[1]; key = oss.str(); }
+            d.remove(key); // 静默处理
+            return Value(d);
+        }
+        throw std::runtime_error("Type Error: discard() expects a Set or Dict.");
+        });
+
+    reg("clear", { 1 }, [](const std::vector<Value>& args) -> Value {
+        if (std::holds_alternative<Set>(args[0].data)) {
+            Set s = std::get<Set>(args[0].data); // ★ 拷贝剥离 const
+            s.clear();
+            return Value(s);
+        }
+        else if (std::holds_alternative<List>(args[0].data)) {
+            List l = std::get<List>(args[0].data); // ★ 拷贝剥离 const
+            l.clear();
+            return Value(l);
+        }
+        else if (std::holds_alternative<Dict>(args[0].data)) {
+            Dict d = std::get<Dict>(args[0].data); // ★ 拷贝剥离 const
+            d.clear();
+            return Value(d);
+        }
+        throw std::runtime_error("Type Error: clear() expects a Set, List, or Dict.");
+        });
 }
 
 // =================================================================
@@ -2353,6 +2487,41 @@ void BuiltinRegistry::registerSetFunctions() {
             if (b.contains(key)) return Value(0.0);
         }
         return Value(1.0);
+        });
+
+    // ═══ 笛卡尔积 ═══
+    reg("setProduct", { 2 }, [](const std::vector<Value>& args) -> Value {
+        if (!std::holds_alternative<Set>(args[0].data) || !std::holds_alternative<Set>(args[1].data))
+            throw std::runtime_error("Type Error: setProduct() expects two Sets.");
+        // 直接触发刚写好的重载 *
+        return args[0] * args[1];
+        });
+
+    // ═══ 集合幂集 ═══
+    reg("setPow", { 1 }, [](const std::vector<Value>& args) -> Value {
+        if (!std::holds_alternative<Set>(args[0].data))
+            throw std::runtime_error("Type Error: setPow() expects a Set.");
+
+        const auto& s = std::get<Set>(args[0].data);
+        int n = static_cast<int>(s.size());
+        if (n > 20)
+            throw std::runtime_error("Math Error: Set size too large for powerset (max 20 elements).");
+
+        Set result;
+        int limit = 1 << n;  // 2^n
+        const auto& raw = s.raw();
+
+        for (int mask = 0; mask < limit; ++mask) {
+            Set sub;
+            for (int i = 0; i < n; ++i) {
+                if (mask & (1 << i)) {
+                    sub.insert(raw[i].first, raw[i].second);
+                }
+            }
+            Value subVal(sub);
+            result.insert(setValueKey(subVal), std::make_any<Value>(subVal));
+        }
+        return Value(result);
         });
 }
 

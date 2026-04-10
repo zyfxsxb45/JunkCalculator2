@@ -536,6 +536,21 @@ namespace jc {
                 }
                 case OpCode::OP_NOT: { push(Value(isTruthy(pop()) ? 0.0 : 1.0)); break; }
 
+                case OpCode::OP_BIT_AND: {
+                    Value b = pop(), a = pop();
+                    auto d = findDunder(a, "__bitand__");
+                    if (d) { push(callDunder(a, "__bitand__", { b })); break; }
+                    push(a & b);
+                    break;
+                }
+                case OpCode::OP_BIT_OR: {
+                    Value b = pop(), a = pop();
+                    auto d = findDunder(a, "__bitor__");
+                    if (d) { push(callDunder(a, "__bitor__", { b })); break; }
+                    push(a | b);
+                    break;
+                }
+
                 case OpCode::OP_EQUAL: {
                     Value b = pop(), a = pop();
                     auto d = findDunder(a, "__eq__");
@@ -3469,12 +3484,11 @@ namespace jc {
             const void* id = p->get();
             if (!id || marked.count(id)) return;
             marked.insert(id);
-            // 追踪实例的所有字段
+            marked.insert((*p)->fields.id());
             for (const auto& [key, anyVal] : (*p)->fields.getEntries()) {
                 try { markValue(std::any_cast<const Value&>(anyVal), marked); }
                 catch (...) {}
             }
-            // 追踪实例的类定义 (方法中可能捕获了闭包环境)
             markClassDef((*p)->classDef, marked);
             return;
         }
@@ -3488,6 +3502,14 @@ namespace jc {
         // ── ClassDefinition ──
         if (auto* p = std::get_if<std::shared_ptr<ClassDefinition>>(&val.data)) {
             markClassDef(*p, marked);
+            return;
+        }
+        // ── SuperProxy ── (★ 增加这一块)
+        if (auto* p = std::get_if<SuperProxyPtr>(&val.data)) {
+            if (*p) {
+                markValue(Value((*p)->instance), marked);
+                markClassDef((*p)->parentClass, marked);
+            }
             return;
         }
 
