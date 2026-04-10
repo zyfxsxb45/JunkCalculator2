@@ -84,8 +84,12 @@ class _RePS {
                     self.nx()
                     min_val = len(min_str) > 0 ? _to_int(min_str) : 0
                     max_val = -1
-                    if (has_comma) { if (len(max_str) > 0) max_val = _to_int(max_str) } 
-                    else { max_val = len(min_str) > 0 ? min_val : 0 }
+                    // ★ 修复：加回严格的大括号
+                    if (has_comma) { 
+                        if (len(max_str) > 0) { max_val = _to_int(max_str) } 
+                    } else { 
+                        max_val = len(min_str) > 0 ? min_val : 0 
+                    }
                     return {type: "bound", inner: node, min: min_val, max: max_val}
                 } else { self.p = saved_p }
             }
