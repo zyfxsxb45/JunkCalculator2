@@ -370,7 +370,7 @@ int main(int argc, char* argv[]) {
                         typeColor = jc::col(jc::Ansi::BRIGHT_CYAN);
                     else if constexpr (std::is_same_v<T, std::shared_ptr<jc::FunctionClosure>>)
                         typeColor = jc::col(jc::Ansi::BRIGHT_BLUE);
-                    else if constexpr (std::is_same_v<T, jc::Dict> || std::is_same_v<T, jc::List>)
+                    else if constexpr (std::is_same_v<T, jc::Dict> || std::is_same_v<T, jc::List> || std::is_same_v<T, jc::Set>)
                         typeColor = jc::col(jc::Ansi::CYAN);
                     else if constexpr (std::is_same_v<T, std::shared_ptr<jc::ClassDefinition>>)
                         typeColor = jc::col(jc::Ansi::BRIGHT_BLUE);

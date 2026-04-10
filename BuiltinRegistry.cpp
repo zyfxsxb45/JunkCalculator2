@@ -56,6 +56,7 @@ void BuiltinRegistry::registerAll() {
     registerErrorHandling();   // ★ Phase 2
     registerSystemShell();
     registerTypeChecks();
+    registerSetFunctions();
 }
 
 // =================================================================
@@ -894,6 +895,7 @@ void BuiltinRegistry::registerStringFunctions() {
         if (std::holds_alternative<StringMatrix>(args[0].data)) return Value(static_cast<double>(std::get<StringMatrix>(args[0].data).getRows() * std::get<StringMatrix>(args[0].data).getCols()));
         if (std::holds_alternative<Dict>(args[0].data)) return Value(static_cast<double>(std::get<Dict>(args[0].data).size()));
         if (std::holds_alternative<List>(args[0].data)) return Value(static_cast<double>(std::get<List>(args[0].data).size()));
+        if (std::holds_alternative<Set>(args[0].data)) return Value(static_cast<double>(std::get<Set>(args[0].data).size()));
         throw std::runtime_error("Type Error: len() expects a string, vector, matrix, dict, or list.");
         });
     reg("eval", { 1 }, [](const std::vector<Value>& args) -> Value {
@@ -1085,6 +1087,12 @@ void BuiltinRegistry::registerListConversion() {
         if (std::holds_alternative<ComplexMatrix>(args[0].data)) { const auto& m=std::get<ComplexMatrix>(args[0].data); if (m.getRows()==1||m.getCols()==1) { List L; for (const auto& c:m.rawData()) L.push_back(valToAny(Value(c))); return Value(L); } List rows; for (int i=0;i<m.getRows();++i) { List row; for (int j=0;j<m.getCols();++j) row.push_back(valToAny(Value(m(i,j)))); rows.push_back(valToAny(Value(row))); } return Value(rows); }
         if (std::holds_alternative<StringMatrix>(args[0].data)) { const auto& m=std::get<StringMatrix>(args[0].data); if (m.getRows()==1||m.getCols()==1) { List L; for (const auto& s:m.rawData()) L.push_back(valToAny(Value(s))); return Value(L); } List rows; for (int i=0;i<m.getRows();++i) { List row; for (int j=0;j<m.getCols();++j) row.push_back(valToAny(Value(m(i,j)))); rows.push_back(valToAny(Value(row))); } return Value(rows); }
         if (std::holds_alternative<std::string>(args[0].data)) { const auto& s=std::get<std::string>(args[0].data); List L; for (char c:s) L.push_back(valToAny(Value(std::string(1,c)))); return Value(L); }
+        if (std::holds_alternative<Set>(args[0].data)) {
+            const auto& S = std::get<Set>(args[0].data);
+            List L;
+            for (const auto& [key, val] : S.raw()) L.push_back(val);
+            return Value(L);
+        }
         List L; L.push_back(valToAny(args[0])); return Value(L);
     });
 
@@ -1178,6 +1186,7 @@ void BuiltinRegistry::registerFormatType() {
             else if constexpr (std::is_same_v<T, StringMatrix>) return Value(std::string("StringMatrix"));
             else if constexpr (std::is_same_v<T, Dict>) return Value(std::string("Dict"));
             else if constexpr (std::is_same_v<T, List>) return Value(std::string("List"));
+            else if constexpr (std::is_same_v<T, Set>) return Value(std::string("Set"));
             else if constexpr (std::is_same_v<T, std::shared_ptr<FunctionClosure>>) return Value(std::string("Function"));
             else if constexpr (std::is_same_v<T, std::shared_ptr<ClassDefinition>>) return Value(std::string("Class"));
             else if constexpr (std::is_same_v<T, std::shared_ptr<Instance>>) return Value(a->classDef->name);
@@ -2063,6 +2072,8 @@ void BuiltinRegistry::registerTypeChecks() {
             const auto& m = std::get<RealMatrix>(args[0].data);
             return Value((m.getRows() == 0 || m.getCols() == 0) ? 1.0 : 0.0);
         }
+        if (std::holds_alternative<Set>(args[0].data))
+            return Value(std::get<Set>(args[0].data).empty() ? 1.0 : 0.0);
         return Value(0.0);
         });
 
@@ -2159,6 +2170,189 @@ void BuiltinRegistry::registerTypeChecks() {
         if (std::holds_alternative<Fraction>(args[0].data))
             return Value(std::get<Fraction>(args[0].data).getNum().isZero() ? 1.0 : 0.0);
         return Value(0.0);
+        });
+
+    reg("isset", { 1 }, [](const std::vector<Value>& args) -> Value {
+        return Value(std::holds_alternative<Set>(args[0].data) ? 1.0 : 0.0);
+        });
+}
+
+// =================================================================
+// [Set] 无序去重集合
+// =================================================================
+void BuiltinRegistry::registerSetFunctions() {
+
+    // ═══ 构造 ═══
+    reg("Set", {}, [](const std::vector<Value>& args) -> Value {
+        Set s;
+        for (const auto& a : args) {
+            s.insert(setValueKey(a), valToAny(a));
+        }
+        return Value(s);
+        });
+
+    reg("toSet", { 1 }, [](const std::vector<Value>& args) -> Value {
+        Set s;
+        if (std::holds_alternative<Set>(args[0].data)) return args[0];
+        if (std::holds_alternative<List>(args[0].data)) {
+            for (const auto& e : std::get<List>(args[0].data).raw()) {
+                Value v = anyToVal(e);
+                s.insert(setValueKey(v), valToAny(v));
+            }
+        }
+        else if (std::holds_alternative<RealMatrix>(args[0].data)) {
+            for (double d : std::get<RealMatrix>(args[0].data).rawData()) {
+                Value v(d);
+                s.insert(setValueKey(v), valToAny(v));
+            }
+        }
+        else if (std::holds_alternative<ComplexMatrix>(args[0].data)) {
+            for (const auto& c : std::get<ComplexMatrix>(args[0].data).rawData()) {
+                Value v(c);
+                s.insert(setValueKey(v), valToAny(v));
+            }
+        }
+        else if (std::holds_alternative<std::string>(args[0].data)) {
+            for (char c : std::get<std::string>(args[0].data)) {
+                Value v(std::string(1, c));
+                s.insert(setValueKey(v), valToAny(v));
+            }
+        }
+        else {
+            throw std::runtime_error("Type Error: toSet() expects a list, array, string, or set.");
+        }
+        return Value(s);
+        });
+
+    // ═══ 元素操作（引用语义，原地修改）═══
+    reg("setAdd", { 2 }, [](const std::vector<Value>& args) -> Value {
+        if (!std::holds_alternative<Set>(args[0].data))
+            throw std::runtime_error("Type Error: setAdd() expects a Set.");
+        Set s = std::get<Set>(args[0].data);  // shared_ptr copy → same underlying data
+        s.insert(setValueKey(args[1]), valToAny(args[1]));
+        return Value(s);
+        });
+
+    reg("setRemove", { 2 }, [](const std::vector<Value>& args) -> Value {
+        if (!std::holds_alternative<Set>(args[0].data))
+            throw std::runtime_error("Type Error: setRemove() expects a Set.");
+        Set s = std::get<Set>(args[0].data);
+        std::string key = setValueKey(args[1]);
+        if (!s.erase(key))
+            throw std::runtime_error("Runtime Error: Element not found in Set.");
+        return Value(s);
+        });
+
+    reg("setDiscard", { 2 }, [](const std::vector<Value>& args) -> Value {
+        if (!std::holds_alternative<Set>(args[0].data))
+            throw std::runtime_error("Type Error: setDiscard() expects a Set.");
+        Set s = std::get<Set>(args[0].data);
+        s.erase(setValueKey(args[1]));  // 静默忽略不存在的元素
+        return Value(s);
+        });
+
+    reg("setClear", { 1 }, [](const std::vector<Value>& args) -> Value {
+        if (!std::holds_alternative<Set>(args[0].data))
+            throw std::runtime_error("Type Error: setClear() expects a Set.");
+        Set s = std::get<Set>(args[0].data);  // shared_ptr 浅拷贝，指向同一块数据
+        s.clear();
+        return Value(s);
+        });
+
+    reg("setPop", { 1 }, [](const std::vector<Value>& args) -> Value {
+        if (!std::holds_alternative<Set>(args[0].data))
+            throw std::runtime_error("Type Error: setPop() expects a Set.");
+        Set s = std::get<Set>(args[0].data);
+        if (s.empty()) throw std::runtime_error("Runtime Error: setPop() on empty Set.");
+        const auto& back = s.raw().back();
+        Value result = anyToVal(back.second);
+        s.erase(back.first);
+        return result;
+        });
+
+    // ═══ 集合运算（返回新 Set）═══
+    reg("setUnion", { 2 }, [](const std::vector<Value>& args) -> Value {
+        if (!std::holds_alternative<Set>(args[0].data) || !std::holds_alternative<Set>(args[1].data))
+            throw std::runtime_error("Type Error: setUnion() expects two Sets.");
+        const auto& a = std::get<Set>(args[0].data);
+        const auto& b = std::get<Set>(args[1].data);
+        Set result;
+        for (const auto& [key, val] : a.raw()) result.insert(key, val);
+        for (const auto& [key, val] : b.raw()) result.insert(key, val);
+        return Value(result);
+        });
+
+    reg("setIntersect", { 2 }, [](const std::vector<Value>& args) -> Value {
+        if (!std::holds_alternative<Set>(args[0].data) || !std::holds_alternative<Set>(args[1].data))
+            throw std::runtime_error("Type Error: setIntersect() expects two Sets.");
+        const auto& a = std::get<Set>(args[0].data);
+        const auto& b = std::get<Set>(args[1].data);
+        Set result;
+        for (const auto& [key, val] : a.raw()) {
+            if (b.contains(key)) result.insert(key, val);
+        }
+        return Value(result);
+        });
+
+    reg("setDiff", { 2 }, [](const std::vector<Value>& args) -> Value {
+        if (!std::holds_alternative<Set>(args[0].data) || !std::holds_alternative<Set>(args[1].data))
+            throw std::runtime_error("Type Error: setDiff() expects two Sets.");
+        const auto& a = std::get<Set>(args[0].data);
+        const auto& b = std::get<Set>(args[1].data);
+        Set result;
+        for (const auto& [key, val] : a.raw()) {
+            if (!b.contains(key)) result.insert(key, val);
+        }
+        return Value(result);
+        });
+
+    reg("setSymDiff", { 2 }, [](const std::vector<Value>& args) -> Value {
+        if (!std::holds_alternative<Set>(args[0].data) || !std::holds_alternative<Set>(args[1].data))
+            throw std::runtime_error("Type Error: setSymDiff() expects two Sets.");
+        const auto& a = std::get<Set>(args[0].data);
+        const auto& b = std::get<Set>(args[1].data);
+        Set result;
+        for (const auto& [key, val] : a.raw()) {
+            if (!b.contains(key)) result.insert(key, val);
+        }
+        for (const auto& [key, val] : b.raw()) {
+            if (!a.contains(key)) result.insert(key, val);
+        }
+        return Value(result);
+        });
+
+    // ═══ 集合关系谓词 ═══
+    reg("isSubset", { 2 }, [](const std::vector<Value>& args) -> Value {
+        if (!std::holds_alternative<Set>(args[0].data) || !std::holds_alternative<Set>(args[1].data))
+            throw std::runtime_error("Type Error: isSubset() expects two Sets.");
+        const auto& a = std::get<Set>(args[0].data);
+        const auto& b = std::get<Set>(args[1].data);
+        for (const auto& [key, val] : a.raw()) {
+            if (!b.contains(key)) return Value(0.0);
+        }
+        return Value(1.0);
+        });
+
+    reg("isSuperset", { 2 }, [](const std::vector<Value>& args) -> Value {
+        if (!std::holds_alternative<Set>(args[0].data) || !std::holds_alternative<Set>(args[1].data))
+            throw std::runtime_error("Type Error: isSuperset() expects two Sets.");
+        const auto& a = std::get<Set>(args[0].data);
+        const auto& b = std::get<Set>(args[1].data);
+        for (const auto& [key, val] : b.raw()) {
+            if (!a.contains(key)) return Value(0.0);
+        }
+        return Value(1.0);
+        });
+
+    reg("isDisjoint", { 2 }, [](const std::vector<Value>& args) -> Value {
+        if (!std::holds_alternative<Set>(args[0].data) || !std::holds_alternative<Set>(args[1].data))
+            throw std::runtime_error("Type Error: isDisjoint() expects two Sets.");
+        const auto& a = std::get<Set>(args[0].data);
+        const auto& b = std::get<Set>(args[1].data);
+        for (const auto& [key, val] : a.raw()) {
+            if (b.contains(key)) return Value(0.0);
+        }
+        return Value(1.0);
         });
 }
 

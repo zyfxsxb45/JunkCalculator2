@@ -41,6 +41,8 @@ namespace helpers {
             return !std::get<Dict>(v.data).empty();
         if (std::holds_alternative<List>(v.data))
             return !std::get<List>(v.data).empty();
+        if (std::holds_alternative<Set>(v.data))
+            return !std::get<Set>(v.data).empty();
         return true;
     }
 
@@ -194,7 +196,16 @@ namespace helpers {
                 return std::get<std::string>(lhs.data) == std::get<std::string>(rhs.data);
             if (std::holds_alternative<BaseNum>(lhs.data))
                 return std::get<BaseNum>(lhs.data).getValue() == std::get<BaseNum>(rhs.data).getValue();
-            // 不支持矩阵等深度结构直接比较
+            if (std::holds_alternative<Set>(lhs.data) && std::holds_alternative<Set>(rhs.data)) {
+                const auto& a = std::get<Set>(lhs.data);
+                const auto& b = std::get<Set>(rhs.data);
+                if (a.id() == b.id()) return true;
+                if (a.size() != b.size()) return false;
+                for (const auto& [key, val] : a.raw()) {
+                    if (!b.contains(key)) return false;
+                }
+                return true;
+            }
             return false;
         }
 
@@ -284,6 +295,7 @@ private:
     void registerErrorHandling();   // ★ Phase 2
     void registerSystemShell();
     void registerTypeChecks();
+    void registerSetFunctions();
 };
 
 } // namespace jc

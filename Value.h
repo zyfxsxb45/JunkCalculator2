@@ -177,6 +177,55 @@ namespace jc {
         void clear() { ptr->clear(); }
     };
 
+    // =======================================================
+    // 高级引用语义 Set (无序去重集合，O(1) 查找)
+    // =======================================================
+    class Set {
+    private:
+        struct SetData {
+            std::vector<std::pair<std::string, std::any>> elements; // (key, value) 保留插入顺序
+            std::unordered_set<std::string> keys;                   // O(1) 查重索引
+        };
+        std::shared_ptr<SetData> ptr;
+    public:
+        Set() : ptr(std::make_shared<SetData>()) {
+            GcHeap::get().track(
+                ptr.get(),
+                [w = std::weak_ptr<SetData>(ptr)]() { return !w.expired(); },
+                [w = std::weak_ptr<SetData>(ptr)]() {
+                    auto sp = w.lock();
+                    if (sp) { sp->elements.clear(); sp->keys.clear(); }
+                }
+            );
+        }
+
+        // key 由外部 setValueKey() 生成
+        bool insert(const std::string& key, const std::any& val) {
+            if (ptr->keys.count(key)) return false;
+            ptr->keys.insert(key);
+            ptr->elements.push_back({ key, val });
+            return true;
+        }
+
+        bool contains(const std::string& key) const {
+            return ptr->keys.count(key) > 0;
+        }
+
+        bool erase(const std::string& key) {
+            if (!ptr->keys.erase(key)) return false;
+            for (auto it = ptr->elements.begin(); it != ptr->elements.end(); ++it) {
+                if (it->first == key) { ptr->elements.erase(it); return true; }
+            }
+            return true;
+        }
+
+        size_t size() const { return ptr->elements.size(); }
+        bool empty() const { return ptr->elements.empty(); }
+        const std::vector<std::pair<std::string, std::any>>& raw() const { return ptr->elements; }
+        const void* id() const { return ptr.get(); }
+        void clear() { ptr->elements.clear(); ptr->keys.clear(); }
+    };
+
     struct ClassDefinition {
         std::string name;
         std::shared_ptr<ClassDefinition> parent;
@@ -198,7 +247,7 @@ namespace jc {
 
     using ValueVariant = std::variant<
         std::monostate, double, BigInt, BaseNum, Fraction, std::string,
-        Complex, RealMatrix, ComplexMatrix, StringMatrix, Dict, List,
+        Complex, RealMatrix, ComplexMatrix, StringMatrix, Dict, List, Set,
         std::shared_ptr<FunctionClosure>,
         std::shared_ptr<ClassDefinition>,
         std::shared_ptr<Instance>,
@@ -227,6 +276,7 @@ namespace jc {
         Value(StringMatrix val) : data(std::move(val)) {}
         Value(Dict val) : data(std::move(val)) {}
         Value(List val) : data(std::move(val)) {}
+        Value(Set val) : data(std::move(val)) {}
         Value(std::shared_ptr<ClassDefinition> val) : data(std::move(val)) {}
         Value(std::shared_ptr<Instance> val) : data(std::move(val)) {}
 
@@ -398,6 +448,12 @@ namespace jc {
                             flat[i * a.getCols() + j] = a(i, j) + b(i, j);
                     return Value(StringMatrix(a.getRows(), a.getCols(), flat));
                 }
+                else if constexpr (std::is_same_v<T1, Set> && std::is_same_v<T2, Set>) {
+                    Set result;
+                    for (const auto& [key, val] : a.raw()) result.insert(key, val);
+                    for (const auto& [key, val] : b.raw()) result.insert(key, val);
+                    return Value(result);
+                }
                 else {
                     throw std::runtime_error("Type Error: Cannot add these types.");
                 }
@@ -435,6 +491,13 @@ namespace jc {
                 }
                 else if constexpr (std::is_same_v<T2, BaseNum> && (std::is_same_v<T1, double> || std::is_same_v<T1, BigInt>)) {
                     return Value(BaseNum(lhs.asBigInt(), 10) - b);
+                }
+                else if constexpr (std::is_same_v<T1, Set> && std::is_same_v<T2, Set>) {
+                    Set result;
+                    for (const auto& [key, val] : a.raw()) {
+                        if (!b.contains(key)) result.insert(key, val);
+                    }
+                    return Value(result);
                 }
                 else if constexpr (std::is_same_v<T1, BaseNum>) { return Value(a.getValue()) - rhs; }
                 else if constexpr (std::is_same_v<T2, BaseNum>) { return lhs - Value(b.getValue()); }
@@ -477,6 +540,39 @@ namespace jc {
                 }
                 else if constexpr (std::is_same_v<T2, BaseNum> && (std::is_same_v<T1, double> || std::is_same_v<T1, BigInt>)) {
                     return Value(BaseNum(lhs.asBigInt(), 10) * b);
+                }
+                // 在 operator* 的 std::visit lambda 中，最终 throw 之前添加：
+                else if constexpr (std::is_same_v<T1, std::string> && std::is_same_v<T2, double>) {
+                    int n = static_cast<int>(std::round(b));
+                    if (n < 0) throw std::runtime_error("Type Error: String repeat count must be non-negative.");
+                    std::string result;
+                    result.reserve(a.size() * n);
+                    for (int i = 0; i < n; ++i) result += a;
+                    return Value(result);
+                }
+                else if constexpr (std::is_same_v<T1, double> && std::is_same_v<T2, std::string>) {
+                    int n = static_cast<int>(std::round(a));
+                    if (n < 0) throw std::runtime_error("Type Error: String repeat count must be non-negative.");
+                    std::string result;
+                    result.reserve(b.size() * n);
+                    for (int i = 0; i < n; ++i) result += b;
+                    return Value(result);
+                }
+                else if constexpr (std::is_same_v<T1, std::string> && std::is_same_v<T2, BigInt>) {
+                    int n = static_cast<int>(b.toDouble());
+                    if (n < 0) throw std::runtime_error("Type Error: String repeat count must be non-negative.");
+                    std::string result;
+                    result.reserve(a.size() * n);
+                    for (int i = 0; i < n; ++i) result += a;
+                    return Value(result);
+                }
+                else if constexpr (std::is_same_v<T1, BigInt> && std::is_same_v<T2, std::string>) {
+                    int n = static_cast<int>(a.toDouble());
+                    if (n < 0) throw std::runtime_error("Type Error: String repeat count must be non-negative.");
+                    std::string result;
+                    result.reserve(b.size() * n);
+                    for (int i = 0; i < n; ++i) result += b;
+                    return Value(result);
                 }
                 else if constexpr (std::is_same_v<T1, BaseNum>) { return Value(a.getValue()) * rhs; }
                 else if constexpr (std::is_same_v<T2, BaseNum>) { return lhs * Value(b.getValue()); }
@@ -794,6 +890,21 @@ namespace jc {
                         os << "}>";
                     }
                 }
+                else if constexpr (std::is_same_v<T, jc::Set>) {
+                    PrintGuard guard(visited, arg.id());
+                    if (guard.isCycle) { os << "Set{...}"; return; }
+                    os << "Set{";
+                    const auto& elems = arg.raw();
+                    for (size_t ii = 0; ii < elems.size(); ++ii) {
+                        try {
+                            const auto& v = std::any_cast<const jc::Value&>(elems[ii].second);
+                            printNested(v);
+                        }
+                        catch (...) { os << "?"; }
+                        if (ii < elems.size() - 1) os << ", ";
+                    }
+                    os << "}";
+                }
                 else if constexpr (std::is_same_v<T, SuperProxyPtr>) {
                     os << "<super>";
                 }
@@ -880,6 +991,20 @@ namespace jc {
                     res += ")";
                     return res;
                 }
+                else if constexpr (std::is_same_v<T, Set>) {
+                    std::string res = "Set(";
+                    const auto& elems = arg.raw();
+                    for (size_t ii = 0; ii < elems.size(); ++ii) {
+                        try {
+                            const auto& v = std::any_cast<const jc::Value&>(elems[ii].second);
+                            res += v.toJC2Expression();
+                        }
+                        catch (...) { res += "0"; }
+                        if (ii < elems.size() - 1) res += ", ";
+                    }
+                    res += ")";
+                    return res;
+                }
                 else if constexpr (std::is_same_v<T, std::shared_ptr<ClassDefinition>>) {
                     return "\"<class " + arg->name + ">\"";
                 }
@@ -905,6 +1030,15 @@ namespace jc {
                 return rhs / lhs;
             }
             }, lhs.data, rhs.data);
+    }
+
+    // ═══ Set 元素键生成器（类型前缀 + 字符串表示，保证跨类型唯一性）═══
+    inline std::string setValueKey(const Value& v) {
+        std::ostringstream oss;
+        oss << v.data.index() << ":";
+        if (std::holds_alternative<std::monostate>(v.data)) oss << "none";
+        else oss << v;
+        return oss.str();
     }
 
     struct FunctionClosure {

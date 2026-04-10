@@ -258,7 +258,7 @@ namespace jc {
             return col(Ansi::BRIGHT_CYAN);
         if (typeName == "Function")
             return col(Ansi::BRIGHT_BLUE);
-        if (typeName == "Dict" || typeName == "List")
+        if (typeName == "Dict" || typeName == "List"|| typeName == "Set")
             return col(Ansi::CYAN);
         return "";
     }

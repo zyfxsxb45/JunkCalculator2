@@ -106,6 +106,16 @@ namespace jc {
                 comparingPairs.pop_back();
                 return eq;
             }
+            if (std::holds_alternative<Set>(lhs.data)) {
+                const auto& a = std::get<Set>(lhs.data);
+                const auto& b = std::get<Set>(rhs.data);
+                if (a.id() == b.id()) return true;
+                if (a.size() != b.size()) return false;
+                for (const auto& [key, val] : a.raw()) {
+                    if (!b.contains(key)) return false;
+                }
+                return true;
+            }
             if (std::holds_alternative<StringMatrix>(lhs.data)) {
                 const auto& a = std::get<StringMatrix>(lhs.data);
                 const auto& b = std::get<StringMatrix>(rhs.data);
@@ -1790,6 +1800,12 @@ namespace jc {
                             }
                         }
                     }
+                    else if (std::holds_alternative<Set>(iterable.data)) {
+                        const auto& s = std::get<Set>(iterable.data);
+                        for (const auto& [key, val] : s.raw()) {
+                            elements.push_back(val);  // 只暴露值，不暴露内部 key
+                        }
+                    }
                     else {
                         throw std::runtime_error("VM Error: Cannot iterate over this type.");
                     }
@@ -2075,6 +2091,11 @@ namespace jc {
                             key = oss.str();
                         }
                         push(Value(std::get<Dict>(haystack.data).has(key) ? 1.0 : 0.0));
+                        break;
+                    }
+
+                    if (std::holds_alternative<Set>(haystack.data)) {
+                        push(Value(std::get<Set>(haystack.data).contains(setValueKey(needle)) ? 1.0 : 0.0));
                         break;
                     }
 
@@ -3426,6 +3447,18 @@ namespace jc {
             marked.insert(id);
             for (const auto& [key, anyVal] : p->getEntries()) {
                 try { markValue(std::any_cast<const Value&>(anyVal), marked); }
+                catch (...) {}
+            }
+            return;
+        }
+
+        // ── Set ──
+        if (auto* p = std::get_if<Set>(&val.data)) {
+            const void* id = p->id();
+            if (!id || marked.count(id)) return;
+            marked.insert(id);
+            for (const auto& [key, elem] : p->raw()) {
+                try { markValue(std::any_cast<const Value&>(elem), marked); }
                 catch (...) {}
             }
             return;

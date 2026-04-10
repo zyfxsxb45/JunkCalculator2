@@ -63,6 +63,7 @@ namespace jc {
     array       Array (row vector) manipulation, functional programming
     list        Heterogeneous list (any type, nestable)
     dict        Dictionary (key-value store)
+    set         Unordered deduplicated Set (reference semantics)
     class       Classes, instances, inheritance, operator overloading
     error       Error handling (try/catch/throw/pcall)
     fileio      File I/O (read, write, CSV, directory)
@@ -1262,6 +1263,8 @@ namespace jc {
   Concatenation & Splitting
   ──────────────────────
     "a" + "b"                   String concatenation
+    "abc" * 3                   String repetition → "abcabcabc"
+    3 * "ha"                    Same, commutative → "hahaha"
     concat(a, b, c, ...)        Arbitrary type concatenation → string
     split(s, delim)             Split into a List
 
@@ -1601,6 +1604,90 @@ namespace jc {
     graph where Dict A points to Dict B, and Dict B points back to Dict A will 
     never cause a memory leak when they go out of scope.
 )HELP"},
+
+{ "set", R"HELP(
+═══ Set (Unordered Deduplicated Collection) ═══
+
+  Sets store unique elements only. Duplicate insertions are silently ignored.
+  Elements can be of any type. Sets use REFERENCE SEMANTICS (like Lists/Dicts).
+
+  Construction
+  ──────────────────────
+    s = Set()                       Empty set
+    s = Set(1, 2, 3)               From values (duplicates auto-removed)
+    s = Set(1, 1, 2, 2, 3)         → Set{1, 2, 3}
+    s = toSet([3, 1, 4, 1, 5])     From array/list/string (deduplicates)
+    s = toSet("hello")             → Set{"h", "e", "l", "o"}
+
+  Membership & Iteration
+  ──────────────────────
+    3 in s                          1 if present, 0 otherwise (O(1) lookup)
+    for (x in s) { print(x) }      Iterates in insertion order
+    len(s)                          Number of unique elements
+
+  Element Operations (mutates via reference semantics)
+  ──────────────────────
+    setAdd(s, val)                  Add element (no-op if already present)
+    setRemove(s, val)               Remove element (error if absent)
+    setDiscard(s, val)              Remove element (silent if absent)
+    setPop(s)                       Remove & return an arbitrary element
+    setClear(s)                     Remove all elements
+
+  Set Algebra (returns NEW Set)
+  ──────────────────────
+    setUnion(a, b)                  a ∪ b  — all elements in either set
+    setIntersect(a, b)              a ∩ b  — elements in both sets
+    setDiff(a, b)                   a \ b  — elements in a but not in b
+    setSymDiff(a, b)                a △ b  — elements in exactly one set
+
+  Operator Shortcuts
+  ──────────────────────
+    a + b                           Union   (same as setUnion)
+    a - b                           Difference (same as setDiff)
+
+  Relation Predicates (return 1 or 0)
+  ──────────────────────
+    isSubset(a, b)                  Is every element of a also in b?
+    isSuperset(a, b)                Is every element of b also in a?
+    isDisjoint(a, b)                Do a and b share no elements?
+    a == b                          Set equality (same elements, any order)
+
+  Type Checks
+  ──────────────────────
+    isset(x)                        1 if x is a Set
+    type(s)                         → "Set"
+    isempty(s)                      1 if set has no elements
+
+  Conversion
+  ──────────────────────
+    toList(s)                       Set → List (preserves insertion order)
+    toSet(list)                     List/Array/String → Set (deduplicates)
+
+  Reference Semantics
+  ──────────────────────
+    Sets share the same underlying memory when assigned:
+      s1 = Set(1, 2, 3)
+      s2 = s1                      s2 and s1 are the SAME set
+      setAdd(s2, 99)               s1 now also contains 99
+
+    Sets are tracked by the Garbage Collector (see: help sys).
+
+  Examples
+  ──────────────────────
+    a = Set(1, 2, 3, 4, 5)
+    b = Set(3, 4, 5, 6, 7)
+
+    setUnion(a, b)                  → Set{1, 2, 3, 4, 5, 6, 7}
+    setIntersect(a, b)              → Set{3, 4, 5}
+    setDiff(a, b)                   → Set{1, 2}
+    a + b                           → Set{1, 2, 3, 4, 5, 6, 7}
+    a - b                           → Set{1, 2}
+
+    chars = toSet("abracadabra")    → Set{"a", "b", "r", "c", "d"}
+    3 in a                          → 1
+    9 in a                          → 0
+    isSubset(set(1, 2), a)          → 1
+)HELP" },
 
         { "class", R"HELP(
 ═══ Classes, Instances, Inheritance & Operator Overloading ═══
