@@ -505,12 +505,16 @@ namespace jc {
     // ═══════════════════════════════════════════
     // 调用帧 (Call Frame)
     // ═══════════════════════════════════════════
-    struct CallFrame {
-        const CompiledFunction* function = nullptr;
-        int ip = 0;
-        int stackBase = 0;
-        std::shared_ptr<std::vector<Value>> upvalues;  // ★ 闭包捕获值
-    };
+	struct CallFrame {
+		const CompiledFunction* function = nullptr;
+		int ip = 0;
+		int stackBase = 0;
+		std::shared_ptr<std::vector<Value>> upvalues;
+		// ★ 嵌套调用保护：保存调用前的 self/__class__，防止覆盖
+		Value savedSelf;
+		Value savedClass;
+		bool hasSavedContext = false;
+	};
 
 
 } // namespace jc

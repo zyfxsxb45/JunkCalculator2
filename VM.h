@@ -102,6 +102,30 @@ namespace jc {
             std::unordered_set<const void*>& marked);
         int gcInstructionCounter_ = 0;
 
+        void saveSelfContext(CallFrame& targetFrame) {
+            auto selfIt = globals.find("self");
+            auto classIt = globals.find("__class__");
+            targetFrame.savedSelf = (selfIt != globals.end()) ? selfIt->second : Value::none();
+            targetFrame.savedClass = (classIt != globals.end()) ? classIt->second : Value::none();
+            targetFrame.hasSavedContext = true;
+        }
+        void restoreSelfContext(const CallFrame& from) {
+            if (!from.hasSavedContext) return;
+            globals["self"] = from.savedSelf;
+            globals["__class__"] = from.savedClass;
+        }
+
+        void execCall(uint8_t argc);
+        void execIndexGet(uint8_t dims);
+        void execIndexSet(uint8_t dims);
+        void execSliceGet(uint8_t dims);
+        void execSliceSet(uint8_t dims);
+        void execBuildMatrix(uint16_t rows, uint16_t cols);
+        void execIn();
+        Value execReturn(bool& shouldExit);
+        void execInvoke(uint16_t nameIdx, uint8_t argc);
+        void execSuperInvoke(uint16_t nameIdx, uint8_t argc);
+
     public:
         VM();
 

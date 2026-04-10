@@ -220,6 +220,10 @@ int main(int argc, char* argv[]) {
 
     // 绑定虚拟机外包服务给系统级运行时回调！
     jc::helpers::setGlobalCallback = [](const std::string& name, const jc::Value& val) { vm.setGlobal(name, val); };
+    jc::helpers::getGlobalCallback = [](const std::string& name) -> jc::Value {
+        auto it = vm.getGlobals().find(name);
+        return (it != vm.getGlobals().end()) ? it->second : jc::Value::none();
+        };
     jc::helpers::evalCallback = [](const std::string& code) -> jc::Value { return evalCode(code, false); };
     jc::helpers::runFileCallback = [](const std::string& path) { runScript(path); }; // ★ 提供标准库文件挂载服务
     jc::helpers::callFunctionCallback = nullptr;

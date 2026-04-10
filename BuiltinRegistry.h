@@ -140,6 +140,7 @@ namespace helpers {
     // ═══ Dunder 调用机制（VM/Evaluator 通过回调注入 self 绑定）═══
     // 静态回调：由 VM 或 Evaluator 在初始化时设置，用于绑定 self
     inline std::function<void(const std::string&, const Value&)> setGlobalCallback = nullptr;
+    inline std::function<Value(const std::string&)> getGlobalCallback = nullptr;
     // 检查 Instance 是否有指定 dunder 方法（沿继承链查找）
     inline bool hasDunder(const Value& val, const std::string& name) {
         if (!std::holds_alternative<std::shared_ptr<Instance>>(val.data)) return false;
@@ -150,8 +151,7 @@ namespace helpers {
         }
         return false;
     }
-    // 尝试调用 Instance 的 dunder 方法
-    // 返回 {true, result} 如果找到并成功调用，{false, none} 如果方法不存在
+    // ===== 修复后的代码 =====
     inline std::pair<bool, Value> tryCallDunder(
         const std::shared_ptr<Instance>& inst,
         const std::string& methodName,
@@ -161,12 +161,35 @@ namespace helpers {
         while (c) {
             auto it = c->methods.find(methodName);
             if (it != c->methods.end()) {
-                // 通过回调绑定 self（VM 设置 globals，Evaluator 设置 environment）
+                // ★ FIX: 保存当前的 self 和 __class__
+                Value prevSelf = getGlobalCallback ? getGlobalCallback("self") : Value::none();
+                Value prevClass = getGlobalCallback ? getGlobalCallback("__class__") : Value::none();
+
                 if (setGlobalCallback) {
                     setGlobalCallback("self", Value(inst));
                     setGlobalCallback("__class__", Value(c));
                 }
-                return { true, safeCallFunction(it->second, args) };
+
+                Value result;
+                try {
+                    result = safeCallFunction(it->second, args);
+                }
+                catch (...) {
+                    // ★ FIX: 异常时也必须恢复
+                    if (setGlobalCallback) {
+                        setGlobalCallback("self", prevSelf);
+                        setGlobalCallback("__class__", prevClass);
+                    }
+                    throw;
+                }
+
+                // ★ FIX: 正常返回时恢复
+                if (setGlobalCallback) {
+                    setGlobalCallback("self", prevSelf);
+                    setGlobalCallback("__class__", prevClass);
+                }
+
+                return { true, result };
             }
             c = c->parent;
         }

@@ -179,18 +179,37 @@ namespace jc {
         auto method = findDunder(obj, name);
         if (!method) throw std::runtime_error("VM Error: No callable dunder '" + name + "'.");
 
+        // ★ FIX: 保存上下文
+        Value prevSelf = globals.count("self") ? globals["self"] : Value::none();
+        Value prevClass = globals.count("__class__") ? globals["__class__"] : Value::none();
+
         globals["self"] = Value(inst);
 
-        if (method->isNative() && !method->isBytecode()) {
-            auto& fn = std::any_cast<NativeCallable&>(method->nativeFn);
-            return fn(args);
+        Value result;
+        try {
+            if (method->isNative() && !method->isBytecode()) {
+                auto& fn = std::any_cast<NativeCallable&>(method->nativeFn);
+                result = fn(args);
+            }
+            else if (method->isBytecode()) {
+                std::shared_ptr<std::vector<Value>> captures = nullptr;
+                if (method->hasCaptures())
+                    captures = std::any_cast<std::shared_ptr<std::vector<Value>>>(method->capturedEnv);
+                result = callVMFunction(method->compiledFnIndex, args, captures);
+            }
+            else {
+                throw std::runtime_error("VM Error: No callable dunder '" + name + "'.");
+            }
         }
-        else if (method->isBytecode()) {
-            std::shared_ptr<std::vector<Value>> captures = nullptr;
-            if (method->hasCaptures()) captures = std::any_cast<std::shared_ptr<std::vector<Value>>>(method->capturedEnv);
-            return callVMFunction(method->compiledFnIndex, args, captures);
+        catch (...) {
+            globals["self"] = prevSelf;       // ★ FIX
+            globals["__class__"] = prevClass;
+            throw;
         }
-        throw std::runtime_error("VM Error: No callable dunder '" + name + "'.");
+
+        globals["self"] = prevSelf;           // ★ FIX
+        globals["__class__"] = prevClass;
+        return result;
     }
 
     VM::VM() {
@@ -315,17 +334,16 @@ namespace jc {
         auto savedRefWritebacks = pendingRefWritebacks;
         pendingRefWritebacks.clear();
 
-        // ★ 核心修复：记录调用前的真实物理栈和帧大小，以便在崩溃逃逸时完美回滚！
+        // ★ 核心修复：保存 self 上下文，防止内部构造函数/方法调用污染外层
+        Value prevSelf = globals.count("self") ? globals["self"] : Value::none();
+        Value prevClass = globals.count("__class__") ? globals["__class__"] : Value::none();
+
         int originalStackSize = static_cast<int>(stack.size());
         int originalFramesSize = static_cast<int>(frames.size());
 
-        // 压入实际传入的参数
         for (const auto& arg : args)
             push(arg);
 
-        // =============================================================
-        // ★ 核心变长参数打包引擎 (C++ 入口端)
-        // =============================================================
         uint8_t argc = static_cast<uint8_t>(args.size());
         if (fn->hasRestParam) {
             int fixedMax = fn->maxArity - 1;
@@ -345,9 +363,6 @@ namespace jc {
             int padCount = fixedMax - static_cast<int>(argc);
             for (int j = 0; j < padCount; ++j) push(Value::none());
             push(Value(restList));
-
-            // ★ 必须新增这一行：欺骗后续的所有清栈、对象地址抹除和 local 槽位预留机制，
-            // 告诉它们我们现在已经把参数补齐成满配置 (maxArity) 状态了！
             argc = static_cast<uint8_t>(fn->maxArity);
         }
         else {
@@ -356,8 +371,6 @@ namespace jc {
             }
             int padCount = fn->maxArity - static_cast<int>(argc);
             for (int j = 0; j < padCount; ++j) push(Value::none());
-
-            // 普通函数在这里也统一将 argc 设为 max (因为默认参数占位都补齐了)
             argc = static_cast<uint8_t>(fn->maxArity);
         }
 
@@ -384,32 +397,34 @@ namespace jc {
         catch (...) {
             currentTargetFrameDepth = savedTargetFrameDepth;
             pendingRefWritebacks = savedRefWritebacks;
-
-            // ★ 完美回滚清理：将留在物理内存中、属于这个已崩溃函数的局部变量遗体全数弹栈销毁！
             frames.resize(originalFramesSize);
             stack.resize(originalStackSize);
+
+            // ★ 异常时也恢复 self 上下文
+            globals["self"] = prevSelf;
+            globals["__class__"] = prevClass;
 
             throw;
         }
         if (profileMode) {
             auto end_time = std::chrono::high_resolution_clock::now();
             double duration = std::chrono::duration<double, std::milli>(end_time - start_time).count();
-
-            // 累加到该函数的档案中
             auto& prof = funcProfiles[fn->name];
             prof.callCount++;
             prof.totalTimeMs += duration;
         }
 
-        // 恢复原有 writeback 等代码逻辑
         auto myRefWritebacks = pendingRefWritebacks;
-
         currentTargetFrameDepth = savedTargetFrameDepth;
         pendingRefWritebacks = savedRefWritebacks;
 
         if (!myRefWritebacks.empty()) {
             pendingRefWritebacks = myRefWritebacks;
         }
+
+        // ★ 正常返回时也恢复 self 上下文
+        globals["self"] = prevSelf;
+        globals["__class__"] = prevClass;
 
         return result;
     }
@@ -839,287 +854,8 @@ namespace jc {
 
                 case OpCode::OP_CALL: {
                     uint8_t argc = readByte();
-                    Value callee = stack[stack.size() - 1 - argc];
-                    pendingRefWritebacks.clear();
-                    // ======== [1] 字符串动态调用 (晚绑定) ========
-                    if (std::holds_alternative<std::string>(callee.data)) {
-                        const std::string& tag = std::get<std::string>(callee.data);
-                        if (tag.size() >= 5 && tag.substr(0, 5) == "__fn:") {
-                            int fnIdx = std::stoi(tag.substr(5));
-                            auto& fn = compiledFunctions[fnIdx];
-                            if (static_cast<int>(argc) < fn->arity || static_cast<int>(argc) > fn->maxArity)
-                                throw std::runtime_error("VM Error: '" + fn->name + "' expects args mismatch.");
-                            int padCount = fn->maxArity - static_cast<int>(argc);
-                            for (int j = 0; j < padCount; ++j) push(Value::none());
-                            int reserveCount = fn->localCount - fn->maxArity;
-                            for (int j = 0; j < reserveCount; ++j) push(Value::none());
-                            CallFrame newFrame; newFrame.function = fn.get(); newFrame.ip = 0;
-                            newFrame.stackBase = static_cast<int>(stack.size()) - fn->localCount;
-                            stack.erase(stack.begin() + newFrame.stackBase - 1); newFrame.stackBase--;
-                            frames.push_back(newFrame); break;
-                        }
-                        if (tag.size() >= 10 && tag.substr(0, 10) == "__builtin:") {
-                            std::string fnName = tag.substr(10); std::vector<Value> args(argc);
-                            for (int j = argc - 1; j >= 0; --j) args[j] = pop();
-                            pop(); push(nativeBuiltins.find(fnName)->second(args)); break;
-                        }
-                        // ★ 核心判断：内建函数判定（最高优先级）
-                        auto nIt = nativeBuiltins.find(tag);
-                        if (nIt != nativeBuiltins.end()) {
-                            auto arityIt = builtinArity.find(tag);
-                            bool arityMatched = false;
-                            if (arityIt != builtinArity.end() && !arityIt->second.empty()) {
-                                if (arityIt->second.count(argc)) arityMatched = true;
-                            }
-                            else {
-                                arityMatched = true; // 支持无元数限制
-                            }
-
-                            // 参数一致，直接引爆执行原生算法！
-                            if (arityMatched) {
-                                std::vector<Value> args(argc);
-                                for (int j = argc - 1; j >= 0; --j) args[j] = pop();
-                                pop(); // 弹出 tag字符串名
-                                push(nIt->second(args));
-                                break;
-                            }
-                        }
-
-                        // ★ 退回判定：用户全局变量判定
-                        auto it = globals.find(tag);
-                        if (it != globals.end()) {
-                            callee = it->second;
-                            stack[stack.size() - 1 - argc] = callee;
-                            // ↓ 继续往下流进下一层的 Instance / FunctionClosure 统一执行块中执行 ↓
-                        }
-                        else {
-                            if (nIt != nativeBuiltins.end()) {
-                                auto arityIt = builtinArity.find(tag);
-                                std::string expected;
-                                for (auto aIt = arityIt->second.begin(); aIt != arityIt->second.end(); ++aIt) {
-                                    if (aIt != arityIt->second.begin()) expected += " or ";
-                                    expected += std::to_string(*aIt);
-                                }
-                                throw std::runtime_error("Runtime Error: " + tag + "() expects " +
-                                    expected + " arguments, got " + std::to_string(argc) + ".");
-                            }
-                            throw std::runtime_error("Runtime Error: Unknown function or not callable '" + tag + "()'.");
-                        }
-                    }
-
-                    if (std::holds_alternative<std::shared_ptr<ClassDefinition>>(callee.data)) {
-                        auto cls = std::get<std::shared_ptr<ClassDefinition>>(callee.data);
-                        auto instance = std::make_shared<Instance>();
-                        instance->classDef = cls;
-
-                        std::shared_ptr<FunctionClosure> initMethod;
-                        std::shared_ptr<ClassDefinition> initOwner;
-                        auto c = cls;
-                        while (c) {
-                            auto it = c->methods.find("init");
-                            if (it != c->methods.end()) {
-                                initMethod = it->second;
-                                initOwner = c;
-                                break;
-                            }
-                            c = c->parent;
-                        }
-
-                        if (initMethod) {
-                            if (initMethod->isBytecode()) {
-                                // ★ 构造调用展平
-                                globals["self"] = Value(instance);
-                                globals["__class__"] = Value(initOwner);
-
-                                auto& fnDef = compiledFunctions[initMethod->compiledFnIndex];
-
-                                // 补齐默认参数
-                                int padCount = fnDef->maxArity - static_cast<int>(argc);
-                                for (int j = 0; j < padCount; ++j) push(Value::none());
-
-                                // ★ 预留局部变量栈槽
-                                int reserveCount = fnDef->localCount - fnDef->maxArity;
-                                for (int j = 0; j < reserveCount; ++j) push(Value::none());
-
-                                CallFrame newFrame;
-                                newFrame.function = fnDef.get();
-                                newFrame.ip = 0;
-                                // ★ 栈基址对齐
-                                newFrame.stackBase = static_cast<int>(stack.size()) - fnDef->localCount;
-
-                                if (initMethod->hasCaptures()) {
-                                    newFrame.upvalues = std::any_cast<std::shared_ptr<std::vector<Value>>>(initMethod->capturedEnv);
-                                }
-
-                                // 抹除原本在参数下方的 class 对象
-                                stack.erase(stack.begin() + newFrame.stackBase - 1);
-                                newFrame.stackBase--;
-
-                                frames.push_back(newFrame);
-                                break;
-                            }
-                            else if (initMethod->isNative()) {
-                                globals["self"] = Value(instance);
-                                globals["__class__"] = Value(initOwner);
-                                std::vector<Value> args(argc);
-                                for (int j = argc - 1; j >= 0; --j) args[j] = pop();
-                                pop();
-                                auto& fn = std::any_cast<NativeCallable&>(initMethod->nativeFn);
-                                fn(args);
-                                push(Value(instance));
-                            }
-                        }
-                        else if (!initMethod) {
-                            for (int j = 0; j < argc; ++j) pop();
-                            pop();
-                            push(Value(instance));
-                        }
-                        else {
-                            throw std::runtime_error("VM Error: init has no callable implementation.");
-                        }
-                        break;
-                    }
-
-                    if (std::holds_alternative<std::shared_ptr<FunctionClosure>>(callee.data)) {
-                        auto closure = std::get<std::shared_ptr<FunctionClosure>>(callee.data);
-
-                        if (closure->isBytecode()) {
-                            // ★ 核心扁平化调用，不触发 C++ nativeFn 回调
-                            auto& fnDef = compiledFunctions[closure->compiledFnIndex];
-
-                            // =============================================================
-                            // ★ 核心变长参数打包引擎 (Closure 端)
-                            // =============================================================
-                            if (fnDef->hasRestParam) {
-                                int fixedMax = fnDef->maxArity - 1;
-                                if (static_cast<int>(argc) < fnDef->arity) {
-                                    throw std::runtime_error("VM Error: '" + fnDef->name + "' requires at least " + std::to_string(fnDef->arity) + " arguments.");
-                                }
-
-                                List restList;
-                                if (static_cast<int>(argc) > fixedMax) {
-                                    int restCount = static_cast<int>(argc) - fixedMax;
-                                    std::vector<std::any> temp(restCount);
-                                    for (int j = 0; j < restCount; j++) temp[restCount - 1 - j] = std::make_any<Value>(pop());
-                                    for (int j = 0; j < restCount; j++) restList.push_back(temp[j]);
-                                    argc = static_cast<uint8_t>(fixedMax);
-                                }
-
-                                int padCount = fixedMax - static_cast<int>(argc);
-                                for (int j = 0; j < padCount; ++j) push(Value::none());
-                                push(Value(restList));
-                            }
-                            else {
-                                if (static_cast<int>(argc) < fnDef->arity || static_cast<int>(argc) > fnDef->maxArity)
-                                    throw std::runtime_error("VM Error: '" + fnDef->name + "' expects " + std::to_string(fnDef->arity) + " to " + std::to_string(fnDef->maxArity) + " arguments, got " + std::to_string(argc) + ".");
-                                int padCount = fnDef->maxArity - static_cast<int>(argc);
-                                for (int j = 0; j < padCount; ++j) push(Value::none());
-                            }
-
-                            int reserveCount = fnDef->localCount - fnDef->maxArity;
-                            for (int j = 0; j < reserveCount; ++j) push(Value::none());
-                            // =============================================================
-
-                            CallFrame newFrame;
-                            newFrame.function = fnDef.get();
-                            newFrame.ip = 0;
-                            // ★ 栈基址对齐
-                            newFrame.stackBase = static_cast<int>(stack.size()) - fnDef->localCount;
-
-                            if (closure->hasCaptures()) {
-                                newFrame.upvalues = std::any_cast<std::shared_ptr<std::vector<Value>>>(closure->capturedEnv);
-                            }
-
-                            // 抹除原本在参数下方的 closure 对象
-                            stack.erase(stack.begin() + newFrame.stackBase - 1);
-                            newFrame.stackBase--;
-
-                            frames.push_back(newFrame);
-                            break;
-                        }
-                        else if (closure->isNative()) {
-                            std::vector<Value> args(argc);
-                            for (int j = argc - 1; j >= 0; --j) args[j] = pop();
-                            pop();
-                            auto& fn = std::any_cast<NativeCallable&>(closure->nativeFn);
-                            push(fn(args));
-                            break;
-                        }
-                        throw std::runtime_error("VM Error: Invalid closure.");
-                    }
-
-                    if (std::holds_alternative<std::string>(callee.data)) {
-                        const std::string& tag = std::get<std::string>(callee.data);
-
-                        if (tag.size() >= 5 && tag.substr(0, 5) == "__fn:") {
-                            int fnIdx = std::stoi(tag.substr(5));
-                            auto& fn = compiledFunctions[fnIdx];
-
-                            // =============================================================
-                            // ★ 核心变长参数打包引擎 (String-Tag 晚绑定端)
-                            // =============================================================
-                            if (fn->hasRestParam) {
-                                int fixedMax = fn->maxArity - 1;
-                                if (static_cast<int>(argc) < fn->arity) {
-                                    throw std::runtime_error("VM Error: '" + fn->name + "' requires at least " + std::to_string(fn->arity) + " arguments.");
-                                }
-
-                                List restList;
-                                if (static_cast<int>(argc) > fixedMax) {
-                                    int restCount = static_cast<int>(argc) - fixedMax;
-                                    std::vector<std::any> temp(restCount);
-                                    for (int j = 0; j < restCount; j++) temp[restCount - 1 - j] = std::make_any<Value>(pop());
-                                    for (int j = 0; j < restCount; j++) restList.push_back(temp[j]);
-                                    argc = static_cast<uint8_t>(fixedMax);
-                                }
-
-                                int padCount = fixedMax - static_cast<int>(argc);
-                                for (int j = 0; j < padCount; ++j) push(Value::none());
-                                push(Value(restList));
-                            }
-                            else {
-                                if (static_cast<int>(argc) < fn->arity || static_cast<int>(argc) > fn->maxArity)
-                                    throw std::runtime_error("VM Error: '" + fn->name + "' expects " + std::to_string(fn->arity) + " to " + std::to_string(fn->maxArity) + " arguments, got " + std::to_string(argc) + ".");
-                                int padCount = fn->maxArity - static_cast<int>(argc);
-                                for (int j = 0; j < padCount; ++j) push(Value::none());
-                            }
-
-                            int reserveCount = fn->localCount - fn->maxArity;
-                            for (int j = 0; j < reserveCount; ++j) push(Value::none());
-                            // =============================================================
-
-                            CallFrame newFrame; newFrame.function = fn.get(); newFrame.ip = 0;
-                            newFrame.stackBase = static_cast<int>(stack.size()) - fn->localCount;
-                            stack.erase(stack.begin() + newFrame.stackBase - 1); newFrame.stackBase--;
-                            frames.push_back(newFrame); break;
-                        }
-
-                        if (tag.size() >= 10 && tag.substr(0, 10) == "__builtin:") {
-                            std::string fnName = tag.substr(10);
-                            std::vector<Value> args(argc);
-                            for (int j = argc - 1; j >= 0; --j) args[j] = pop();
-                            pop();
-                            auto nit = nativeBuiltins.find(fnName);
-                            if (nit == nativeBuiltins.end())
-                                throw std::runtime_error("VM Error: Unknown builtin '" + fnName + "'.");
-                            push(nit->second(args));
-                            break;
-                        }
-                    }
-
-                    {
-                        std::vector<Value> args(argc);
-                        for (int j = argc - 1; j >= 0; --j) args[j] = pop();
-                        Value calleeVal = pop();
-                        std::string desc;
-                        if (std::holds_alternative<std::string>(calleeVal.data))
-                            desc = std::get<std::string>(calleeVal.data);
-                        else {
-                            std::ostringstream oss; oss << calleeVal;
-                            desc = oss.str();
-                        }
-                        throw std::runtime_error("VM Error: '" + desc + "' is not callable.");
-                    }
+                    execCall(argc);
+                    break;
                 }
 
                 case OpCode::OP_GET_UPVALUE: {
@@ -1143,109 +879,8 @@ namespace jc {
                 case OpCode::OP_SUPER_INVOKE: {
                     uint16_t nameIdx = readShort();
                     uint8_t argc = readByte();
-                    std::string methodName = std::get<std::string>(currentChunk().constants[nameIdx].data);
-
-                    Value selfVal = stack[stack.size() - 1 - argc];
-
-                    if (!std::holds_alternative<std::shared_ptr<Instance>>(selfVal.data))
-                        throw std::runtime_error("VM Error: 'super' requires an instance context.");
-
-                    auto inst = std::get<std::shared_ptr<Instance>>(selfVal.data);
-
-                    auto classIt = globals.find("__class__");
-                    if (classIt == globals.end() ||
-                        !std::holds_alternative<std::shared_ptr<ClassDefinition>>(classIt->second.data))
-                        throw std::runtime_error("VM Error: 'super' requires class context (__class__).");
-
-                    auto currentClass = std::get<std::shared_ptr<ClassDefinition>>(classIt->second.data);
-                    auto parentClass = currentClass->parent;
-                    if (!parentClass)
-                        throw std::runtime_error("VM Error: Class '" + currentClass->name +
-                            "' has no parent class.");
-
-                    std::shared_ptr<FunctionClosure> method;
-                    std::shared_ptr<ClassDefinition> owningClass;
-                    auto c = parentClass;
-                    while (c) {
-                        auto it = c->methods.find(methodName);
-                        if (it != c->methods.end()) {
-                            method = it->second;
-                            owningClass = c;
-                            break;
-                        }
-                        c = c->parent;
-                    }
-                    if (!method)
-                        throw std::runtime_error("VM Error: Parent class has no method '" +
-                            methodName + "'.");
-
-                    globals["self"] = Value(inst);
-                    globals["__class__"] = Value(owningClass);
-
-                    if (method->isBytecode()) {
-                        // ★ 展平
-                        auto& fnDef = compiledFunctions[method->compiledFnIndex];
-
-                        // =============================================================
-                        // ★ 核心变长参数打包引擎 (Super Invoke 父类方法端)
-                        // =============================================================
-                        if (fnDef->hasRestParam) {
-                            int fixedMax = fnDef->maxArity - 1;
-                            if (static_cast<int>(argc) < fnDef->arity) {
-                                throw std::runtime_error("VM Error: '" + fnDef->name + "' requires at least " + std::to_string(fnDef->arity) + " arguments.");
-                            }
-
-                            List restList;
-                            if (static_cast<int>(argc) > fixedMax) {
-                                int restCount = static_cast<int>(argc) - fixedMax;
-                                std::vector<std::any> temp(restCount);
-                                for (int j = 0; j < restCount; j++) temp[restCount - 1 - j] = std::make_any<Value>(pop());
-                                for (int j = 0; j < restCount; j++) restList.push_back(temp[j]);
-                                argc = static_cast<uint8_t>(fixedMax);
-                            }
-
-                            int padCount = fixedMax - static_cast<int>(argc);
-                            for (int j = 0; j < padCount; ++j) push(Value::none());
-                            push(Value(restList));
-                        }
-                        else {
-                            if (static_cast<int>(argc) < fnDef->arity || static_cast<int>(argc) > fnDef->maxArity)
-                                throw std::runtime_error("VM Error: '" + fnDef->name + "' expects " + std::to_string(fnDef->arity) + " to " + std::to_string(fnDef->maxArity) + " arguments, got " + std::to_string(argc) + ".");
-                            int padCount = fnDef->maxArity - static_cast<int>(argc);
-                            for (int j = 0; j < padCount; ++j) push(Value::none());
-                        }
-
-                        int reserveCount = fnDef->localCount - fnDef->maxArity;
-                        for (int j = 0; j < reserveCount; ++j) push(Value::none());
-                        // =============================================================
-
-                        CallFrame newFrame;
-                        newFrame.function = fnDef.get();
-                        newFrame.ip = 0;
-                        newFrame.stackBase = static_cast<int>(stack.size()) - fnDef->localCount;
-
-                        if (method->hasCaptures()) {
-                            newFrame.upvalues = std::any_cast<std::shared_ptr<std::vector<Value>>>(method->capturedEnv);
-                        }
-
-                        // 抹除原本在参数下方的 obj / class 引用
-                        stack.erase(stack.begin() + newFrame.stackBase - 1);
-                        newFrame.stackBase--;
-
-                        frames.push_back(newFrame);
-                        break;
-                    }
-                    else if (method->isNative()) {
-                        std::vector<Value> args(argc);
-                        for (int j = argc - 1; j >= 0; --j) args[j] = pop();
-                        pop();
-                        auto& fn = std::any_cast<NativeCallable&>(method->nativeFn);
-                        push(fn(args));
-                        break;
-                    }
-
-                    throw std::runtime_error("VM Error: Parent method '" + methodName +
-                        "' has no callable implementation.");
+                    execSuperInvoke(nameIdx, argc);
+                    break;
                 }
 
                 case OpCode::OP_GET_SUPER: {
@@ -1343,50 +978,9 @@ namespace jc {
                 }
 
                 case OpCode::OP_RETURN: {
-                    Value result = pop();
-                    int base = frame().stackBase;
-                    std::string fnName = frame().function->name;
-                    pendingRefWritebacks.clear();
-                    const auto& refFlags = frame().function->paramIsRef;
-                    if (!refFlags.empty()) {
-                        for (int i = 0; i < static_cast<int>(refFlags.size()); ++i) {
-                            if (refFlags[i]) {
-                                int localIdx = base + i;
-                                if (localIdx < static_cast<int>(stack.size())) {
-                                    pendingRefWritebacks.push_back({ i, stack[localIdx] });
-                                }
-                            }
-                        }
-                    }
-
-                    while (!exceptionHandlers.empty() &&
-                        exceptionHandlers.back().frameIndex == static_cast<int>(frames.size()) - 1) {
-                        exceptionHandlers.pop_back();
-                    }
-
-                    frames.pop_back();
-
-                    if (static_cast<int>(frames.size()) <= currentTargetFrameDepth) {
-                        if (currentTargetFrameDepth == 0) {
-                            stack.clear();
-                        }
-                        else {
-                            stack.resize(base);
-                        }
-                        return result;
-                    }
-
-                    stack.resize(base);
-                    if (fnName == "init") {
-                        auto it = globals.find("self");
-                        if (it != globals.end())
-                            push(it->second);
-                        else
-                            push(result);
-                    }
-                    else {
-                        push(result);
-                    }
+                    bool shouldExit = false;
+                    Value result = execReturn(shouldExit);
+                    if (shouldExit) return result;
                     break;
                 }
 
@@ -1429,198 +1023,7 @@ namespace jc {
 
                 case OpCode::OP_SLICE_GET: {
                     uint8_t dims = readByte();
-
-                    auto readOptionalInt = [this]() -> std::pair<bool, int> {
-                        Value v = pop();
-                        if (v.isNone()) return { false, 0 };
-                        return { true, static_cast<int>(std::round(v.asDouble())) };
-                        };
-
-                    auto buildSliceIndices = [](int dimSize, std::pair<bool, int> start,
-                        std::pair<bool, int> end,
-                        std::pair<bool, int> step) -> std::vector<int> {
-                            int sp = step.first ? step.second : 1;
-
-                            // ★ 点索引标记：step 被显式设置为 0
-                            if (step.first && sp == 0) {
-                                int idx = start.first ? start.second : 0;
-                                if (idx < 0) idx = dimSize + idx;
-                                if (idx < 0 || idx >= dimSize)
-                                    throw std::out_of_range("VM Error: Index out of bounds.");
-                                return { idx };
-                            }
-
-                            int st, en;
-                            if (sp > 0) {
-                                st = start.first ? start.second : 0;
-                                en = end.first ? end.second : dimSize;
-                            }
-                            else {
-                                st = start.first ? start.second : dimSize - 1;
-                                en = end.first ? end.second : -1;
-                            }
-
-                            if (st < 0) st = dimSize + st;
-                            if (en < 0 && end.first) en = dimSize + en;
-
-                            if (sp > 0) {
-                                st = std::max(0, std::min(dimSize, st));
-                                en = std::max(0, std::min(dimSize, en));
-                            }
-                            else {
-                                st = std::max(-1, std::min(dimSize - 1, st));
-                                en = std::max(-1, std::min(dimSize - 1, en));
-                            }
-
-                            std::vector<int> ids;
-                            if (sp > 0) {
-                                for (int i = st; i < en; i += sp) ids.push_back(i);
-                            }
-                            else {
-                                for (int i = st; i > en; i += sp) ids.push_back(i);
-                            }
-                            return ids;
-                        };
-
-                    if (dims == 1) {
-                        auto step = readOptionalInt();
-                        auto end = readOptionalInt();
-                        auto start = readOptionalInt();
-                        Value obj = pop();
-
-                        if (std::holds_alternative<std::string>(obj.data)) {
-                            const auto& s = std::get<std::string>(obj.data);
-                            auto ids = buildSliceIndices(static_cast<int>(s.size()), start, end, step);
-                            std::string result;
-                            for (int id : ids) result += s[id];
-                            push(Value(result));
-                            break;
-                        }
-
-                        if (std::holds_alternative<RealMatrix>(obj.data)) {
-                            const auto& m = std::get<RealMatrix>(obj.data);
-                            int n = (m.getRows() == 1) ? m.getCols() : m.getRows();
-                            auto ids = buildSliceIndices(n, start, end, step);
-                            std::vector<double> result;
-                            if (m.getRows() == 1) {
-                                for (int id : ids) result.push_back(m(0, id));
-                                push(Value(RealMatrix(1, static_cast<int>(result.size()), result)));
-                            }
-                            else if (m.getCols() == 1) {
-                                for (int id : ids) result.push_back(m(id, 0));
-                                push(Value(RealMatrix(static_cast<int>(result.size()), 1, result)));
-                            }
-                            else {
-                                int rc = static_cast<int>(ids.size());
-                                std::vector<double> flat;
-                                for (int id : ids)
-                                    for (int j = 0; j < m.getCols(); ++j)
-                                        flat.push_back(m(id, j));
-                                push(Value(RealMatrix(rc, m.getCols(), flat)));
-                            }
-                            break;
-                        }
-
-                        if (std::holds_alternative<ComplexMatrix>(obj.data)) {
-                            const auto& m = std::get<ComplexMatrix>(obj.data);
-                            int n = (m.getRows() == 1) ? m.getCols() : m.getRows();
-                            auto ids = buildSliceIndices(n, start, end, step);
-                            if (m.getRows() == 1) {
-                                std::vector<Complex> result;
-                                for (int id : ids) result.push_back(m(0, id));
-                                push(Value(ComplexMatrix(1, static_cast<int>(result.size()), result)));
-                            }
-                            else if (m.getCols() == 1) {
-                                std::vector<Complex> result;
-                                for (int id : ids) result.push_back(m(id, 0));
-                                push(Value(ComplexMatrix(static_cast<int>(result.size()), 1, result)));
-                            }
-                            else {
-                                int rc = static_cast<int>(ids.size());
-                                std::vector<Complex> flat;
-                                for (int id : ids)
-                                    for (int j = 0; j < m.getCols(); ++j)
-                                        flat.push_back(m(id, j));
-                                push(Value(ComplexMatrix(rc, m.getCols(), flat)));
-                            }
-                            break;
-                        }
-
-                        if (std::holds_alternative<StringMatrix>(obj.data)) {
-                            const auto& m = std::get<StringMatrix>(obj.data);
-                            int n = (m.getRows() == 1) ? m.getCols() : m.getRows();
-                            auto ids = buildSliceIndices(n, start, end, step);
-                            if (m.getRows() == 1) {
-                                std::vector<std::string> result;
-                                for (int id : ids) result.push_back(m(0, id));
-                                push(Value(StringMatrix(1, static_cast<int>(result.size()), result)));
-                            }
-                            else if (m.getCols() == 1) {
-                                std::vector<std::string> result;
-                                for (int id : ids) result.push_back(m(id, 0));
-                                push(Value(StringMatrix(static_cast<int>(result.size()), 1, result)));
-                            }
-                            else {
-                                int rc = static_cast<int>(ids.size());
-                                std::vector<std::string> flat;
-                                for (int id : ids)
-                                    for (int j = 0; j < m.getCols(); ++j)
-                                        flat.push_back(m(id, j));
-                                push(Value(StringMatrix(rc, m.getCols(), flat)));
-                            }
-                            break;
-                        }
-
-                        if (std::holds_alternative<List>(obj.data)) {
-                            const auto& L = std::get<List>(obj.data);
-                            auto ids = buildSliceIndices(static_cast<int>(L.size()), start, end, step);
-                            List result;
-                            for (int id : ids) result.push_back(L.raw()[id]);
-                            push(Value(result));
-                            break;
-                        }
-
-                        throw std::runtime_error("VM Error: Cannot slice this type.");
-                    }
-                    else if (dims == 2) {
-                        auto cStep = readOptionalInt();
-                        auto cEnd = readOptionalInt();
-                        auto cStart = readOptionalInt();
-                        auto rStep = readOptionalInt();
-                        auto rEnd = readOptionalInt();
-                        auto rStart = readOptionalInt();
-                        Value obj = pop();
-
-                        auto processMatSlice = [&](const auto& m) {
-                            auto rIds = buildSliceIndices(m.getRows(), rStart, rEnd, rStep);
-                            auto cIds = buildSliceIndices(m.getCols(), cStart, cEnd, cStep);
-
-                            using MatType = std::decay_t<decltype(m)>;
-                            using ElemType = std::decay_t<decltype(m(0, 0))>;
-                            std::vector<ElemType> flat;
-                            for (int ri : rIds)
-                                for (int ci : cIds)
-                                    flat.push_back(m(ri, ci));
-                            push(Value(MatType(static_cast<int>(rIds.size()),
-                                static_cast<int>(cIds.size()), flat)));
-                            };
-
-                        if (std::holds_alternative<RealMatrix>(obj.data)) {
-                            processMatSlice(std::get<RealMatrix>(obj.data));
-                        }
-                        else if (std::holds_alternative<ComplexMatrix>(obj.data)) {
-                            processMatSlice(std::get<ComplexMatrix>(obj.data));
-                        }
-                        else if (std::holds_alternative<StringMatrix>(obj.data)) {
-                            processMatSlice(std::get<StringMatrix>(obj.data));
-                        }
-                        else {
-                            throw std::runtime_error("VM Error: 2D slicing requires a matrix.");
-                        }
-                    }
-                    else {
-                        throw std::runtime_error("VM Error: Unsupported slice dimensionality.");
-                    }
+                    execSliceGet(dims);
                     break;
                 }
 
@@ -1848,1046 +1251,30 @@ namespace jc {
                 case OpCode::OP_BUILD_MATRIX: {
                     uint16_t rows = readShort();
                     uint16_t cols = readShort();
-                    int total = rows * cols;
-
-                    bool hasComplex = false;
-                    bool hasString = false;
-                    bool hasOther = false;
-
-                    auto canBeMatrixElement = [](const Value& v) -> bool {
-                        return std::holds_alternative<double>(v.data) ||
-                            std::holds_alternative<BigInt>(v.data) ||
-                            std::holds_alternative<Fraction>(v.data) ||
-                            std::holds_alternative<BaseNum>(v.data) ||
-                            std::holds_alternative<Complex>(v.data) ||
-                            std::holds_alternative<std::string>(v.data) ||
-                            std::holds_alternative<RealMatrix>(v.data) ||
-                            std::holds_alternative<ComplexMatrix>(v.data) ||
-                            std::holds_alternative<StringMatrix>(v.data);
-                        };
-
-                    for (int ii = 0; ii < total; ++ii) {
-                        const Value& v = stack[stack.size() - total + ii];
-                        if (std::holds_alternative<Complex>(v.data) ||
-                            std::holds_alternative<ComplexMatrix>(v.data))
-                            hasComplex = true;
-                        if (std::holds_alternative<std::string>(v.data) ||
-                            std::holds_alternative<StringMatrix>(v.data))
-                            hasString = true;
-                        if (!canBeMatrixElement(v))
-                            hasOther = true;
-                    }
-
-                    Value result;
-
-                    if (hasOther) {
-                        if (rows == 1) {
-                            List L;
-                            for (int ii = 0; ii < total; ++ii)
-                                L.push_back(std::make_any<Value>(stack[stack.size() - total + ii]));
-                            result = Value(L);
-                        }
-                        else {
-                            List outer;
-                            for (int i = 0; i < rows; ++i) {
-                                List inner;
-                                for (int j = 0; j < cols; ++j)
-                                    inner.push_back(std::make_any<Value>(
-                                        stack[stack.size() - total + i * cols + j]));
-                                outer.push_back(std::make_any<Value>(Value(inner)));
-                            }
-                            result = Value(outer);
-                        }
-                    }
-                    else {
-                        bool hasSubMatrix = false;
-                        for (int ii = 0; ii < total; ++ii) {
-                            const Value& v = stack[stack.size() - total + ii];
-                            if (std::holds_alternative<RealMatrix>(v.data) ||
-                                std::holds_alternative<ComplexMatrix>(v.data) ||
-                                std::holds_alternative<StringMatrix>(v.data))
-                                hasSubMatrix = true;
-                        }
-
-                        if (hasSubMatrix) {
-                            auto extractCell = [&](Value& cell) {
-                                if (!std::holds_alternative<RealMatrix>(cell.data) &&
-                                    !std::holds_alternative<ComplexMatrix>(cell.data) &&
-                                    !std::holds_alternative<StringMatrix>(cell.data)) {
-                                    if (hasString) {
-                                        std::ostringstream oss; oss << cell;
-                                        cell = Value(StringMatrix(1, 1, { oss.str() }));
-                                    }
-                                    else if (hasComplex) {
-                                        cell = Value(ComplexMatrix(1, 1, { cell.asComplex() }));
-                                    }
-                                    else {
-                                        cell = Value(RealMatrix(1, 1, { cell.asDouble() }));
-                                    }
-                                }
-                                if (hasString) {
-                                    if (std::holds_alternative<RealMatrix>(cell.data)) {
-                                        const auto& m = std::get<RealMatrix>(cell.data);
-                                        std::vector<std::string> flat;
-                                        for (int i = 0; i < m.getRows(); ++i)
-                                            for (int j = 0; j < m.getCols(); ++j) {
-                                                std::ostringstream oss; oss << Value(m(i, j));
-                                                flat.push_back(oss.str());
-                                            }
-                                        cell = Value(StringMatrix(m.getRows(), m.getCols(), flat));
-                                    }
-                                    else if (std::holds_alternative<ComplexMatrix>(cell.data)) {
-                                        const auto& m = std::get<ComplexMatrix>(cell.data);
-                                        std::vector<std::string> flat;
-                                        for (int i = 0; i < m.getRows(); ++i)
-                                            for (int j = 0; j < m.getCols(); ++j) {
-                                                std::ostringstream oss; oss << Value(m(i, j));
-                                                flat.push_back(oss.str());
-                                            }
-                                        cell = Value(StringMatrix(m.getRows(), m.getCols(), flat));
-                                    }
-                                }
-                                else if (hasComplex && std::holds_alternative<RealMatrix>(cell.data)) {
-                                    cell = Value(cell.asComplexMatrix());
-                                }
-                                };
-
-                            try {
-                                int idx = 0;
-                                Value matResult = Value::none();
-                                for (int i = 0; i < rows; ++i) {
-                                    Value rowResult = Value::none();
-                                    for (int j = 0; j < cols; ++j) {
-                                        Value cell = stack[stack.size() - total + idx++];
-                                        extractCell(cell);
-                                        if (rowResult.isNone()) {
-                                            rowResult = cell;
-                                        }
-                                        else {
-                                            if (hasString)
-                                                rowResult = Value(std::get<StringMatrix>(rowResult.data)
-                                                    .integR(std::get<StringMatrix>(cell.data)));
-                                            else if (hasComplex)
-                                                rowResult = Value(std::get<ComplexMatrix>(rowResult.data)
-                                                    .integR(std::get<ComplexMatrix>(cell.data)));
-                                            else
-                                                rowResult = Value(std::get<RealMatrix>(rowResult.data)
-                                                    .integR(std::get<RealMatrix>(cell.data)));
-                                        }
-                                    }
-                                    if (matResult.isNone()) {
-                                        matResult = rowResult;
-                                    }
-                                    else {
-                                        if (hasString)
-                                            matResult = Value(std::get<StringMatrix>(matResult.data)
-                                                .integC(std::get<StringMatrix>(rowResult.data)));
-                                        else if (hasComplex)
-                                            matResult = Value(std::get<ComplexMatrix>(matResult.data)
-                                                .integC(std::get<ComplexMatrix>(rowResult.data)));
-                                        else
-                                            matResult = Value(std::get<RealMatrix>(matResult.data)
-                                                .integC(std::get<RealMatrix>(rowResult.data)));
-                                    }
-                                }
-                                result = matResult;
-                            }
-                            catch (...) {
-                                throw std::runtime_error(
-                                    "VM Error: Dimension mismatch during block matrix concatenation.");
-                            }
-                        }
-                        else if (hasString) {
-                            std::vector<std::string> flat(total);
-                            for (int ii = 0; ii < total; ++ii) {
-                                const Value& v = stack[stack.size() - total + ii];
-                                if (std::holds_alternative<std::string>(v.data))
-                                    flat[ii] = std::get<std::string>(v.data);
-                                else {
-                                    std::ostringstream oss; oss << v;
-                                    flat[ii] = oss.str();
-                                }
-                            }
-                            result = Value(StringMatrix(rows, cols, flat));
-                        }
-                        else if (hasComplex) {
-                            std::vector<Complex> flat(total);
-                            for (int ii = 0; ii < total; ++ii)
-                                flat[ii] = stack[stack.size() - total + ii].asComplex();
-                            result = Value(ComplexMatrix(rows, cols, flat));
-                        }
-                        else {
-                            std::vector<double> flat(total);
-                            for (int ii = 0; ii < total; ++ii)
-                                flat[ii] = stack[stack.size() - total + ii].asDouble();
-                            result = Value(RealMatrix(rows, cols, flat));
-                        }
-                    }
-
-                    for (int ii = 0; ii < total; ++ii) pop();
-                    push(result);
+                    execBuildMatrix(rows, cols);
                     break;
                 }
 
                 case OpCode::OP_IN: {
-                    Value haystack = pop(), needle = pop();
-
-                    if (std::holds_alternative<std::string>(needle.data) &&
-                        std::holds_alternative<std::string>(haystack.data)) {
-                        bool found = std::get<std::string>(haystack.data).find(
-                            std::get<std::string>(needle.data)) != std::string::npos;
-                        push(Value(found ? 1.0 : 0.0));
-                        break;
-                    }
-                    if (std::holds_alternative<std::string>(haystack.data)) {
-                        throw std::runtime_error(
-                            "VM Error: 'in' on string requires a string on the left side.");
-                    }
-
-                    if (std::holds_alternative<RealMatrix>(haystack.data)) {
-                        const auto& m = std::get<RealMatrix>(haystack.data);
-                        double target;
-                        try { target = needle.asDouble(); }
-                        catch (...) { push(Value(0.0)); goto in_done; }
-                        for (const auto& v : m.rawData()) {
-                            if (Tol::isEq(v, target, 1e4)) { push(Value(1.0)); goto in_done; }
-                        }
-                        push(Value(0.0));
-                        break;
-                    }
-
-                    if (std::holds_alternative<ComplexMatrix>(haystack.data)) {
-                        const auto& m = std::get<ComplexMatrix>(haystack.data);
-                        Complex target;
-                        try { target = needle.asComplex(); }
-                        catch (...) { push(Value(0.0)); goto in_done; }
-                        for (const auto& v : m.rawData()) {
-                            if (v == target) { push(Value(1.0)); goto in_done; }
-                        }
-                        push(Value(0.0));
-                        break;
-                    }
-
-                    if (std::holds_alternative<StringMatrix>(haystack.data)) {
-                        if (!std::holds_alternative<std::string>(needle.data))
-                            throw std::runtime_error(
-                                "VM Error: 'in' on StringMatrix requires a string needle.");
-                        const auto& m = std::get<StringMatrix>(haystack.data);
-                        const auto& target = std::get<std::string>(needle.data);
-                        for (const auto& v : m.rawData()) {
-                            if (v == target) { push(Value(1.0)); goto in_done; }
-                        }
-                        push(Value(0.0));
-                        break;
-                    }
-
-                    if (std::holds_alternative<List>(haystack.data)) {
-                        const auto& L = std::get<List>(haystack.data);
-                        for (const auto& e : L.raw()) {
-                            try {
-                                Value elem = std::any_cast<Value>(e);
-                                if (vmValuesEqual(needle, elem)) {
-                                    push(Value(1.0));
-                                    goto in_done;
-                                }
-                            }
-                            catch (...) {}
-                        }
-                        push(Value(0.0));
-                        break;
-                    }
-
-                    if (std::holds_alternative<Dict>(haystack.data)) {
-                        std::string key;
-                        if (std::holds_alternative<std::string>(needle.data))
-                            key = std::get<std::string>(needle.data);
-                        else {
-                            std::ostringstream oss; oss << needle;
-                            key = oss.str();
-                        }
-                        push(Value(std::get<Dict>(haystack.data).has(key) ? 1.0 : 0.0));
-                        break;
-                    }
-
-                    if (std::holds_alternative<Set>(haystack.data)) {
-                        push(Value(std::get<Set>(haystack.data).contains(setValueKey(needle)) ? 1.0 : 0.0));
-                        break;
-                    }
-
-                    if (std::holds_alternative<std::shared_ptr<Instance>>(haystack.data)) {
-                        auto method = findDunder(haystack, "__contains__");
-                        if (method) {
-                            push(Value(isTruthy(callDunder(haystack, "__contains__", { needle })) ? 1.0 : 0.0));
-                            break;
-                        }
-                    }
-
-                    throw std::runtime_error(
-                        "VM Error: 'in' requires an array, vector, matrix, string, list, dict, or instance.");
-
-                in_done:
+                    execIn();
                     break;
                 }
 
                 case OpCode::OP_SLICE_SET: {
                     uint8_t dims = readByte();
-
-                    auto readOptionalInt = [this]() -> std::pair<bool, int> {
-                        Value v = pop();
-                        if (v.isNone()) return { false, 0 };
-                        return { true, static_cast<int>(std::round(v.asDouble())) };
-                        };
-
-                    auto buildSliceIndices = [](int dimSize, std::pair<bool, int> start,
-                        std::pair<bool, int> end,
-                        std::pair<bool, int> step) -> std::vector<int> {
-                            int sp = step.first ? step.second : 1;
-
-                            // ★ 点索引标记：step 被显式设置为 0
-                            if (step.first && sp == 0) {
-                                int idx = start.first ? start.second : 0;
-                                if (idx < 0) idx = dimSize + idx;
-                                if (idx < 0 || idx >= dimSize)
-                                    throw std::out_of_range("VM Error: Index out of bounds.");
-                                return { idx };
-                            }
-
-                            int st, en;
-                            if (sp > 0) {
-                                st = start.first ? start.second : 0;
-                                en = end.first ? end.second : dimSize;
-                            }
-                            else {
-                                st = start.first ? start.second : dimSize - 1;
-                                en = end.first ? end.second : -1;
-                            }
-
-                            if (st < 0) st = dimSize + st;
-                            if (en < 0 && end.first) en = dimSize + en;
-
-                            if (sp > 0) {
-                                st = std::max(0, std::min(dimSize, st));
-                                en = std::max(0, std::min(dimSize, en));
-                            }
-                            else {
-                                st = std::max(-1, std::min(dimSize - 1, st));
-                                en = std::max(-1, std::min(dimSize - 1, en));
-                            }
-
-                            std::vector<int> ids;
-                            if (sp > 0) {
-                                for (int i = st; i < en; i += sp) ids.push_back(i);
-                            }
-                            else {
-                                for (int i = st; i > en; i += sp) ids.push_back(i);
-                            }
-                            return ids;
-                        };
-
-                    if (dims == 1) {
-                        Value val = pop();
-                        auto step = readOptionalInt();
-                        auto end = readOptionalInt();
-                        auto start = readOptionalInt();
-                        Value& obj = peek(0);
-
-                        if (std::holds_alternative<RealMatrix>(obj.data)) {
-                            auto& m = std::get<RealMatrix>(obj.data);
-                            int n = (m.getRows() == 1) ? m.getCols() : m.getRows();
-                            auto ids = buildSliceIndices(n, start, end, step);
-
-                            if (std::holds_alternative<double>(val.data) ||
-                                std::holds_alternative<BigInt>(val.data) ||
-                                std::holds_alternative<Fraction>(val.data)) {
-                                double v = val.asDouble();
-                                if (m.getRows() == 1) {
-                                    for (int id : ids) m(0, id) = v;
-                                }
-                                else if (m.getCols() == 1) {
-                                    for (int id : ids) m(id, 0) = v;
-                                }
-                                else {
-                                    // ★ 广播到这几行的所有列！
-                                    for (int id : ids)
-                                        for (int j = 0; j < m.getCols(); ++j) m(id, j) = v;
-                                }
-                            }
-                            else if (std::holds_alternative<RealMatrix>(val.data)) {
-                                const auto& src = std::get<RealMatrix>(val.data);
-                                auto srcFlat = src.rawData();
-
-                                if (m.getRows() == 1 || m.getCols() == 1) {
-                                    // 纯向量赋值
-                                    if (static_cast<int>(srcFlat.size()) != static_cast<int>(ids.size()))
-                                        throw std::runtime_error("VM Error: Slice assignment size mismatch.");
-                                    if (m.getRows() == 1) {
-                                        for (size_t k = 0; k < ids.size(); ++k) m(0, ids[k]) = srcFlat[k];
-                                    }
-                                    else {
-                                        for (size_t k = 0; k < ids.size(); ++k) m(ids[k], 0) = srcFlat[k];
-                                    }
-                                }
-                                else {
-                                    // 2D 矩阵的单维整行赋值（M[0:1] 意味着替换第0行的所有列）
-                                    if (static_cast<int>(srcFlat.size()) != static_cast<int>(ids.size()) * m.getCols())
-                                        throw std::runtime_error("VM Error: Slice assignment size mismatch for matrix row.");
-                                    for (size_t k = 0; k < ids.size(); ++k) {
-                                        for (int j = 0; j < m.getCols(); ++j) {
-                                            m(ids[k], j) = srcFlat[k * m.getCols() + j];
-                                        }
-                                    }
-                                }
-                            }
-                            else {
-                                throw std::runtime_error("VM Error: Cannot assign this type to slice.");
-                            }
-                        }
-                        else if (std::holds_alternative<List>(obj.data)) {
-                            auto& L = std::get<List>(obj.data);
-                            auto ids = buildSliceIndices(static_cast<int>(L.size()), start, end, step);
-                            if (std::holds_alternative<List>(val.data)) {
-                                const auto& srcL = std::get<List>(val.data);
-                                if (srcL.size() != ids.size())
-                                    throw std::runtime_error("VM Error: Slice assignment size mismatch.");
-                                for (size_t k = 0; k < ids.size(); ++k)
-                                    L.set(ids[k], srcL.raw()[k]);
-                            }
-                            else {
-                                for (int id : ids)
-                                    L.set(id, std::make_any<Value>(val));
-                            }
-                        }
-                        else if (std::holds_alternative<std::string>(obj.data)) {
-                            auto& s = std::get<std::string>(obj.data);
-                            auto ids = buildSliceIndices(static_cast<int>(s.size()), start, end, step);
-                            if (!std::holds_alternative<std::string>(val.data))
-                                throw std::runtime_error("VM Error: String slice assignment requires a string.");
-                            const auto& src = std::get<std::string>(val.data);
-                            if (static_cast<int>(src.size()) != static_cast<int>(ids.size()))
-                                throw std::runtime_error("VM Error: String slice assignment size mismatch.");
-                            for (size_t k = 0; k < ids.size(); ++k) s[ids[k]] = src[k];
-                        }
-                        else if (std::holds_alternative<ComplexMatrix>(obj.data)) {
-                            auto& m = std::get<ComplexMatrix>(obj.data);
-                            int n = (m.getRows() == 1) ? m.getCols() : m.getRows();
-                            auto ids = buildSliceIndices(n, start, end, step);
-                            if (std::holds_alternative<ComplexMatrix>(val.data)) {
-                                auto srcFlat = std::get<ComplexMatrix>(val.data).rawData();
-
-                                if (m.getRows() == 1 || m.getCols() == 1) {
-                                    if (static_cast<int>(srcFlat.size()) != static_cast<int>(ids.size()))
-                                        throw std::runtime_error("VM Error: Slice assignment size mismatch.");
-                                    if (m.getRows() == 1) {
-                                        for (size_t k = 0; k < ids.size(); ++k) m(0, ids[k]) = srcFlat[k];
-                                    }
-                                    else {
-                                        for (size_t k = 0; k < ids.size(); ++k) m(ids[k], 0) = srcFlat[k];
-                                    }
-                                }
-                                else {
-                                    if (static_cast<int>(srcFlat.size()) != static_cast<int>(ids.size()) * m.getCols())
-                                        throw std::runtime_error("VM Error: Slice assignment size mismatch for matrix row.");
-                                    for (size_t k = 0; k < ids.size(); ++k) {
-                                        for (int j = 0; j < m.getCols(); ++j) {
-                                            m(ids[k], j) = srcFlat[k * m.getCols() + j];
-                                        }
-                                    }
-                                }
-                            }
-                            else {
-                                Complex cv = val.asComplex();
-                                if (m.getRows() == 1) {
-                                    for (int id : ids) m(0, id) = cv;
-                                }
-                                else if (m.getCols() == 1) {
-                                    for (int id : ids) m(id, 0) = cv;
-                                }
-                                else {
-                                    for (int id : ids)
-                                        for (int j = 0; j < m.getCols(); ++j) m(id, j) = cv;
-                                }
-                            }
-                        }
-                        else if (std::holds_alternative<StringMatrix>(obj.data)) {
-                            auto& m = std::get<StringMatrix>(obj.data);
-                            int n = (m.getRows() == 1) ? m.getCols() : m.getRows();
-                            auto ids = buildSliceIndices(n, start, end, step);
-                            if (std::holds_alternative<StringMatrix>(val.data)) {
-                                auto srcFlat = std::get<StringMatrix>(val.data).rawData();
-
-                                if (m.getRows() == 1 || m.getCols() == 1) {
-                                    if (static_cast<int>(srcFlat.size()) != static_cast<int>(ids.size()))
-                                        throw std::runtime_error("VM Error: Slice assignment size mismatch.");
-                                    if (m.getRows() == 1) {
-                                        for (size_t k = 0; k < ids.size(); ++k) m(0, ids[k]) = srcFlat[k];
-                                    }
-                                    else {
-                                        for (size_t k = 0; k < ids.size(); ++k) m(ids[k], 0) = srcFlat[k];
-                                    }
-                                }
-                                else {
-                                    if (static_cast<int>(srcFlat.size()) != static_cast<int>(ids.size()) * m.getCols())
-                                        throw std::runtime_error("VM Error: Slice assignment size mismatch for matrix row.");
-                                    for (size_t k = 0; k < ids.size(); ++k) {
-                                        for (int j = 0; j < m.getCols(); ++j) {
-                                            m(ids[k], j) = srcFlat[k * m.getCols() + j];
-                                        }
-                                    }
-                                }
-                            }
-                            else {
-                                std::string sv;
-                                if (std::holds_alternative<std::string>(val.data)) sv = std::get<std::string>(val.data);
-                                else { std::ostringstream oss; oss << val; sv = oss.str(); }
-
-                                if (m.getRows() == 1) {
-                                    for (int id : ids) m(0, id) = sv;
-                                }
-                                else if (m.getCols() == 1) {
-                                    for (int id : ids) m(id, 0) = sv;
-                                }
-                                else {
-                                    for (int id : ids)
-                                        for (int j = 0; j < m.getCols(); ++j) m(id, j) = sv;
-                                }
-                            }
-                        }
-                        else {
-                            throw std::runtime_error("VM Error: Cannot slice-assign this type.");
-                        }
-                    }
-                    else if (dims == 2) {
-                        Value val = pop();
-                        auto cStep = readOptionalInt();
-                        auto cEnd = readOptionalInt();
-                        auto cStart = readOptionalInt();
-                        auto rStep = readOptionalInt();
-                        auto rEnd = readOptionalInt();
-                        auto rStart = readOptionalInt();
-                        Value& obj = peek(0);
-
-                        auto processMatSliceSet = [&](auto& m) {
-                            auto rIds = buildSliceIndices(m.getRows(), rStart, rEnd, rStep);
-                            auto cIds = buildSliceIndices(m.getCols(), cStart, cEnd, cStep);
-                            int dstR = static_cast<int>(rIds.size());
-                            int dstC = static_cast<int>(cIds.size());
-
-                            using ElemType = std::decay_t<decltype(m(0, 0))>;
-
-                            // 检测右值是否为一个矩阵
-                            bool isRhsMat = std::holds_alternative<RealMatrix>(val.data) ||
-                                std::holds_alternative<ComplexMatrix>(val.data) ||
-                                std::holds_alternative<StringMatrix>(val.data);
-
-                            if (isRhsMat) {
-                                int srcR = 0, srcC = 0;
-                                if (std::holds_alternative<RealMatrix>(val.data)) {
-                                    srcR = std::get<RealMatrix>(val.data).getRows();
-                                    srcC = std::get<RealMatrix>(val.data).getCols();
-                                }
-                                else if (std::holds_alternative<ComplexMatrix>(val.data)) {
-                                    srcR = std::get<ComplexMatrix>(val.data).getRows();
-                                    srcC = std::get<ComplexMatrix>(val.data).getCols();
-                                }
-                                else {
-                                    srcR = std::get<StringMatrix>(val.data).getRows();
-                                    srcC = std::get<StringMatrix>(val.data).getCols();
-                                }
-
-                                if (srcR != dstR || srcC != dstC)
-                                    throw std::runtime_error("VM Error: Slice assignment size mismatch.");
-
-                                for (int i = 0; i < dstR; ++i) {
-                                    for (int j = 0; j < dstC; ++j) {
-                                        if constexpr (std::is_same_v<ElemType, double>) {
-                                            if (std::holds_alternative<RealMatrix>(val.data))
-                                                m(rIds[i], cIds[j]) = std::get<RealMatrix>(val.data)(i, j);
-                                            else
-                                                throw std::runtime_error("VM Error: Cannot assign complex/string matrix to real matrix slice.");
-                                        }
-                                        else if constexpr (std::is_same_v<ElemType, Complex>) {
-                                            if (std::holds_alternative<ComplexMatrix>(val.data))
-                                                m(rIds[i], cIds[j]) = std::get<ComplexMatrix>(val.data)(i, j);
-                                            else if (std::holds_alternative<RealMatrix>(val.data))
-                                                m(rIds[i], cIds[j]) = Complex(std::get<RealMatrix>(val.data)(i, j));
-                                            else
-                                                throw std::runtime_error("VM Error: Cannot assign string matrix to complex matrix slice.");
-                                        }
-                                        else if constexpr (std::is_same_v<ElemType, std::string>) {
-                                            std::ostringstream oss;
-                                            if (std::holds_alternative<StringMatrix>(val.data))
-                                                oss << std::get<StringMatrix>(val.data)(i, j);
-                                            else if (std::holds_alternative<ComplexMatrix>(val.data))
-                                                oss << Value(std::get<ComplexMatrix>(val.data)(i, j));
-                                            else
-                                                oss << Value(std::get<RealMatrix>(val.data)(i, j));
-                                            m(rIds[i], cIds[j]) = oss.str();
-                                        }
-                                    }
-                                }
-                            }
-                            else {
-                                // 万能标量广播 (Scalar Broadcast)
-                                ElemType scalarVal{};
-                                if constexpr (std::is_same_v<ElemType, double>) {
-                                    scalarVal = val.asDouble(); // 可承接 int, double, fraction 等
-                                }
-                                else if constexpr (std::is_same_v<ElemType, Complex>) {
-                                    scalarVal = val.asComplex();
-                                }
-                                else if constexpr (std::is_same_v<ElemType, std::string>) {
-                                    if (std::holds_alternative<std::string>(val.data))
-                                        scalarVal = std::get<std::string>(val.data);
-                                    else {
-                                        std::ostringstream oss; oss << val; scalarVal = oss.str();
-                                    }
-                                }
-
-                                for (int ri : rIds)
-                                    for (int ci : cIds)
-                                        m(ri, ci) = scalarVal;
-                            }
-                            };
-
-                        if (std::holds_alternative<RealMatrix>(obj.data)) {
-                            processMatSliceSet(std::get<RealMatrix>(obj.data));
-                        }
-                        else if (std::holds_alternative<ComplexMatrix>(obj.data)) {
-                            processMatSliceSet(std::get<ComplexMatrix>(obj.data));
-                        }
-                        else if (std::holds_alternative<StringMatrix>(obj.data)) {
-                            processMatSliceSet(std::get<StringMatrix>(obj.data));
-                        }
-                        else {
-                            throw std::runtime_error("VM Error: 2D slice assignment requires a matrix.");
-                        }
-                    }
-                    else {
-                        throw std::runtime_error("VM Error: Unsupported slice assignment dimensionality.");
-                    }
+                    execSliceSet(dims);
                     break;
                 }
 
                 case OpCode::OP_INDEX_GET: {
                     uint8_t dims = readByte();
-                    if (dims == 1) {
-                        Value idx = pop();
-                        Value obj = pop();
-
-                        if (std::holds_alternative<Dict>(obj.data)) {
-                            std::string key;
-                            if (std::holds_alternative<std::string>(idx.data))
-                                key = std::get<std::string>(idx.data);
-                            else {
-                                std::ostringstream oss; oss << idx;
-                                key = oss.str();
-                            }
-                            const auto* entry = std::get<Dict>(obj.data).get(key);
-                            if (!entry) throw std::runtime_error("VM Error: Key '" + key + "' not found.");
-                            push(std::any_cast<Value>(*entry));
-                            break;
-                        }
-
-                        int i = static_cast<int>(std::round(idx.asDouble()));
-
-                        if (std::holds_alternative<RealMatrix>(obj.data)) {
-                            const auto& m = std::get<RealMatrix>(obj.data);
-                            if (m.getRows() == 1) {
-                                if (i < 0) i = m.getCols() + i;
-                                push(Value(m(0, i)));
-                            }
-                            else if (m.getCols() == 1) {
-                                if (i < 0) i = m.getRows() + i;
-                                push(Value(m(i, 0)));
-                            }
-                            else {
-                                if (i < 0) i = m.getRows() + i;
-                                push(Value(m.getRow(i)));
-                            }
-                        }
-                        else if (std::holds_alternative<ComplexMatrix>(obj.data)) {
-                            const auto& m = std::get<ComplexMatrix>(obj.data);
-                            if (m.getRows() == 1) {
-                                if (i < 0) i = m.getCols() + i;
-                                push(Value(m(0, i)));
-                            }
-                            else if (m.getCols() == 1) {
-                                if (i < 0) i = m.getRows() + i;
-                                push(Value(m(i, 0)));
-                            }
-                            else {
-                                if (i < 0) i = m.getRows() + i;
-                                push(Value(m.getRow(i)));
-                            }
-                        }
-                        else if (std::holds_alternative<StringMatrix>(obj.data)) {
-                            const auto& m = std::get<StringMatrix>(obj.data);
-                            if (m.getRows() == 1) {
-                                if (i < 0) i = m.getCols() + i;
-                                push(Value(m(0, i)));
-                            }
-                            else if (m.getCols() == 1) {
-                                if (i < 0) i = m.getRows() + i;
-                                push(Value(m(i, 0)));
-                            }
-                            else {
-                                if (i < 0) i = m.getRows() + i;
-                                push(Value(m.getRow(i)));
-                            }
-                        }
-                        else if (std::holds_alternative<List>(obj.data)) {
-                            push(std::any_cast<Value>(std::get<List>(obj.data).at(i)));
-                        }
-                        else if (std::holds_alternative<std::string>(obj.data)) {
-                            const auto& s = std::get<std::string>(obj.data);
-                            if (i < 0) i = static_cast<int>(s.size()) + i;
-                            if (i < 0 || i >= static_cast<int>(s.size()))
-                                throw std::runtime_error("VM Error: String index out of bounds.");
-                            push(Value(std::string(1, s[i])));
-                        }
-                        // ── Instance (__getitem__) ──
-                        else if (std::holds_alternative<std::shared_ptr<Instance>>(obj.data)) {
-                            auto inst = std::get<std::shared_ptr<Instance>>(obj.data);
-                            auto c = inst->classDef;
-                            std::shared_ptr<FunctionClosure> getitemMethod;
-                            while (c) {
-                                auto it = c->methods.find("__getitem__");
-                                if (it != c->methods.end()) {
-                                    getitemMethod = it->second;
-                                    break;
-                                }
-                                c = c->parent;
-                            }
-                            if (getitemMethod) {
-                                globals["self"] = Value(inst);
-                                if (getitemMethod->isBytecode()) {
-                                    auto& fnDef = compiledFunctions[getitemMethod->compiledFnIndex];
-
-                                    push(idx); // 将参数重新压回栈
-
-                                    // ★ 补齐缺省的默认参数
-                                    int padCount = fnDef->maxArity - 1;
-                                    for (int j = 0; j < padCount; ++j) push(Value::none());
-
-                                    // ★ 为该方法的 Auto-local 预留局部变量栈槽
-                                    int reserveCount = fnDef->localCount - fnDef->maxArity;
-                                    for (int j = 0; j < reserveCount; ++j) push(Value::none());
-
-                                    CallFrame newFrame;
-                                    newFrame.function = fnDef.get();
-                                    newFrame.ip = 0;
-                                    // 基址对齐至参数(idx)起始处
-                                    newFrame.stackBase = static_cast<int>(stack.size()) - fnDef->localCount;
-
-                                    if (getitemMethod->hasCaptures()) {
-                                        newFrame.upvalues = std::any_cast<std::shared_ptr<std::vector<Value>>>(getitemMethod->capturedEnv);
-                                    }
-                                    frames.push_back(newFrame);
-                                    break;
-                                }
-                                else if (getitemMethod->isNative()) {
-                                    auto& fn = std::any_cast<NativeCallable&>(getitemMethod->nativeFn);
-                                    push(fn({ idx }));
-                                }
-                                else {
-                                    throw std::runtime_error("VM Error: __getitem__ has no callable implementation.");
-                                }
-                            }
-                            else {
-                                throw std::runtime_error("VM Error: Cannot index this instance (no __getitem__).");
-                            }
-                        }
-                        else {
-                            throw std::runtime_error("VM Error: Cannot index this type.");
-                        }
-                    }
-                    else if (dims == 2) {
-                        Value col = pop();
-                        Value row = pop();
-                        Value obj = pop();
-                        int r = static_cast<int>(std::round(row.asDouble()));
-                        int c = static_cast<int>(std::round(col.asDouble()));
-
-                        if (std::holds_alternative<RealMatrix>(obj.data)) {
-                            const auto& m = std::get<RealMatrix>(obj.data);
-                            if (r < 0) r = m.getRows() + r;
-                            if (c < 0) c = m.getCols() + c;
-                            push(Value(m(r, c)));
-                        }
-                        else if (std::holds_alternative<ComplexMatrix>(obj.data)) {
-                            const auto& m = std::get<ComplexMatrix>(obj.data);
-                            if (r < 0) r = m.getRows() + r;
-                            if (c < 0) c = m.getCols() + c;
-                            push(Value(m(r, c)));
-                        }
-                        else if (std::holds_alternative<StringMatrix>(obj.data)) {
-                            const auto& m = std::get<StringMatrix>(obj.data);
-                            if (r < 0) r = m.getRows() + r;
-                            if (c < 0) c = m.getCols() + c;
-                            push(Value(m(r, c)));
-                        }
-                        else {
-                            throw std::runtime_error("VM Error: 2D indexing requires a matrix.");
-                        }
-                    }
-                    else {
-                        throw std::runtime_error("VM Error: Unsupported index dimensionality.");
-                    }
+                    execIndexGet(dims);
                     break;
                 }
 
                 case OpCode::OP_INDEX_SET: {
                     uint8_t dims = readByte();
-                    Value val = pop();
-
-                    if (dims == 1) {
-                        Value idx = pop();
-                        Value& obj = peek(0);
-
-                        if (std::holds_alternative<Dict>(obj.data)) {
-                            std::string key;
-                            if (std::holds_alternative<std::string>(idx.data))
-                                key = std::get<std::string>(idx.data);
-                            else {
-                                std::ostringstream oss; oss << idx;
-                                key = oss.str();
-                            }
-                            std::get<Dict>(obj.data).set(key, std::make_any<Value>(val));
-                            break;
-                        }
-
-                        int i = static_cast<int>(std::round(idx.asDouble()));
-
-                        if (std::holds_alternative<RealMatrix>(obj.data)) {
-                            auto& m = std::get<RealMatrix>(obj.data);
-                            if (std::holds_alternative<Complex>(val.data) || std::holds_alternative<ComplexMatrix>(val.data)) {
-                                ComplexMatrix cm = m.toComplexMatrix();
-                                if (cm.getRows() == 1) {
-                                    if (i < 0) i = cm.getCols() + i;
-                                    cm(0, i) = val.asComplex();
-                                }
-                                else if (cm.getCols() == 1) {
-                                    if (i < 0) i = cm.getRows() + i;
-                                    cm(i, 0) = val.asComplex();
-                                }
-                                else {
-                                    if (i < 0) i = cm.getRows() + i;
-                                    if (i < 0 || i >= cm.getRows()) throw std::out_of_range("VM Error: Row index out of bounds.");
-                                    if (std::holds_alternative<ComplexMatrix>(val.data)) {
-                                        auto srcFlat = std::get<ComplexMatrix>(val.data).rawData();
-                                        if (static_cast<int>(srcFlat.size()) != cm.getCols()) throw std::runtime_error("VM Error: Row assignment size mismatch.");
-                                        for (int j = 0; j < cm.getCols(); ++j) cm(i, j) = srcFlat[j];
-                                    }
-                                    else {
-                                        Complex cv = val.asComplex();
-                                        for (int j = 0; j < cm.getCols(); ++j) cm(i, j) = cv;
-                                    }
-                                }
-                                obj = Value(cm);
-                            }
-                            else {
-                                if (m.getRows() == 1) {
-                                    if (i < 0) i = m.getCols() + i;
-                                    m(0, i) = val.asDouble();
-                                }
-                                else if (m.getCols() == 1) {
-                                    if (i < 0) i = m.getRows() + i;
-                                    m(i, 0) = val.asDouble();
-                                }
-                                else {
-                                    // ★ 2D 矩阵整行赋值 / 广播
-                                    if (i < 0) i = m.getRows() + i;
-                                    if (i < 0 || i >= m.getRows()) throw std::out_of_range("VM Error: Row index out of bounds.");
-                                    if (std::holds_alternative<RealMatrix>(val.data)) {
-                                        const auto& src = std::get<RealMatrix>(val.data);
-                                        auto srcFlat = src.rawData();
-                                        if (static_cast<int>(srcFlat.size()) != m.getCols())
-                                            throw std::runtime_error("VM Error: Row assignment size mismatch.");
-                                        for (int j = 0; j < m.getCols(); ++j) m(i, j) = srcFlat[j];
-                                    }
-                                    else {
-                                        double dVal = val.asDouble();
-                                        for (int j = 0; j < m.getCols(); ++j) m(i, j) = dVal;
-                                    }
-                                }
-                            }
-                        }
-                        else if (std::holds_alternative<ComplexMatrix>(obj.data)) {
-                            auto& m = std::get<ComplexMatrix>(obj.data);
-                            if (m.getRows() == 1) {
-                                if (i < 0) i = m.getCols() + i;
-                                m(0, i) = val.asComplex();
-                            }
-                            else if (m.getCols() == 1) {
-                                if (i < 0) i = m.getRows() + i;
-                                m(i, 0) = val.asComplex();
-                            }
-                            else {
-                                // ★ 2D 复数矩阵整行赋值 / 广播
-                                if (i < 0) i = m.getRows() + i;
-                                if (i < 0 || i >= m.getRows()) throw std::out_of_range("VM Error: Row index out of bounds.");
-
-                                if (std::holds_alternative<ComplexMatrix>(val.data)) {
-                                    auto srcFlat = std::get<ComplexMatrix>(val.data).rawData();
-                                    if (static_cast<int>(srcFlat.size()) != m.getCols()) throw std::runtime_error("VM Error: Row assignment size mismatch.");
-                                    for (int j = 0; j < m.getCols(); ++j) m(i, j) = srcFlat[j];
-                                }
-                                // ★ 补足支持对复数矩阵写入实值行向量：
-                                else if (std::holds_alternative<RealMatrix>(val.data)) {
-                                    auto srcFlat = std::get<RealMatrix>(val.data).rawData();
-                                    if (static_cast<int>(srcFlat.size()) != m.getCols()) throw std::runtime_error("VM Error: Row assignment size mismatch.");
-                                    for (int j = 0; j < m.getCols(); ++j) m(i, j) = Complex(srcFlat[j], 0.0);
-                                }
-                                else {
-                                    // 标量广播
-                                    Complex cv = val.asComplex();
-                                    for (int j = 0; j < m.getCols(); ++j) m(i, j) = cv;
-                                }
-                            }
-                        }
-                        else if (std::holds_alternative<StringMatrix>(obj.data)) {
-                            auto& m = std::get<StringMatrix>(obj.data);
-
-                            if (m.getRows() == 1) {
-                                if (i < 0) i = m.getCols() + i;
-                                if (std::holds_alternative<std::string>(val.data)) m(0, i) = std::get<std::string>(val.data);
-                                else { std::ostringstream oss; oss << val; m(0, i) = oss.str(); }
-                            }
-                            else if (m.getCols() == 1) {
-                                if (i < 0) i = m.getRows() + i;
-                                if (std::holds_alternative<std::string>(val.data)) m(i, 0) = std::get<std::string>(val.data);
-                                else { std::ostringstream oss; oss << val; m(i, 0) = oss.str(); }
-                            }
-                            else {
-                                // ★ 2D 字符串矩阵整行赋值 / 广播
-                                if (i < 0) i = m.getRows() + i;
-                                if (i < 0 || i >= m.getRows()) throw std::out_of_range("VM Error: Row index out of bounds.");
-
-                                if (std::holds_alternative<StringMatrix>(val.data)) {
-                                    auto srcFlat = std::get<StringMatrix>(val.data).rawData();
-                                    if (static_cast<int>(srcFlat.size()) != m.getCols()) throw std::runtime_error("VM Error: Row assignment size mismatch.");
-                                    for (int j = 0; j < m.getCols(); ++j) m(i, j) = srcFlat[j];
-                                }
-                                // ★ 将任何实数矩阵映射到字符串行中
-                                else if (std::holds_alternative<RealMatrix>(val.data)) {
-                                    auto srcFlat = std::get<RealMatrix>(val.data).rawData();
-                                    if (static_cast<int>(srcFlat.size()) != m.getCols()) throw std::runtime_error("VM Error: Row assignment size mismatch.");
-                                    for (int j = 0; j < m.getCols(); ++j) { std::ostringstream oss; oss << Value(srcFlat[j]); m(i, j) = oss.str(); }
-                                }
-                                // ★ 将任何复数矩阵映射到字符串行中
-                                else if (std::holds_alternative<ComplexMatrix>(val.data)) {
-                                    auto srcFlat = std::get<ComplexMatrix>(val.data).rawData();
-                                    if (static_cast<int>(srcFlat.size()) != m.getCols()) throw std::runtime_error("VM Error: Row assignment size mismatch.");
-                                    for (int j = 0; j < m.getCols(); ++j) { std::ostringstream oss; oss << Value(srcFlat[j]); m(i, j) = oss.str(); }
-                                }
-                                else {
-                                    // 标量广播
-                                    std::string s;
-                                    if (std::holds_alternative<std::string>(val.data)) s = std::get<std::string>(val.data);
-                                    else { std::ostringstream oss; oss << val; s = oss.str(); }
-                                    for (int j = 0; j < m.getCols(); ++j) m(i, j) = s;
-                                }
-                            }
-                        }
-                        else if (std::holds_alternative<List>(obj.data)) {
-                            std::get<List>(obj.data).set(i, std::make_any<Value>(val));
-                        }
-                        else if (std::holds_alternative<std::string>(obj.data)) {
-                            auto& s = std::get<std::string>(obj.data);
-                            if (i < 0) i = static_cast<int>(s.size()) + i;
-                            if (i < 0 || i >= static_cast<int>(s.size()))
-                                throw std::runtime_error("VM Error: String index out of bounds.");
-                            if (!std::holds_alternative<std::string>(val.data) ||
-                                std::get<std::string>(val.data).size() != 1)
-                                throw std::runtime_error("VM Error: String element assignment requires a single character.");
-                            s[i] = std::get<std::string>(val.data)[0];
-                        }
-                        // ── Instance (__setitem__) ──
-                        else if (std::holds_alternative<std::shared_ptr<Instance>>(obj.data)) {
-                            auto inst = std::get<std::shared_ptr<Instance>>(obj.data);
-                            auto c = inst->classDef;
-                            std::shared_ptr<FunctionClosure> setitemMethod;
-                            while (c) {
-                                auto it = c->methods.find("__setitem__");
-                                if (it != c->methods.end()) {
-                                    setitemMethod = it->second;
-                                    break;
-                                }
-                                c = c->parent;
-                            }
-                            if (setitemMethod) {
-                                globals["self"] = Value(inst);
-
-                                // ★ 不管是 bytecode 还是 native，统一使用回调安全执行
-                                // 避免其内部的 OP_RETURN 破坏属于复合赋值等所需的栈顶 obj 指针
-                                if (setitemMethod->isBytecode()) {
-                                    std::shared_ptr<std::vector<Value>> captures = nullptr;
-                                    if (setitemMethod->hasCaptures())
-                                        captures = std::any_cast<std::shared_ptr<std::vector<Value>>>(setitemMethod->capturedEnv);
-                                    callVMFunction(setitemMethod->compiledFnIndex, { idx, val }, captures);
-                                }
-                                else if (setitemMethod->isNative()) {
-                                    auto& fn = std::any_cast<NativeCallable&>(setitemMethod->nativeFn);
-                                    fn({ idx, val });
-                                }
-                                else {
-                                    throw std::runtime_error("VM Error: __setitem__ has no callable implementation.");
-                                }
-                            }
-                            else {
-                                throw std::runtime_error("VM Error: Cannot assign index on this instance (no __setitem__).");
-                            }
-                        }
-                        else {
-                            throw std::runtime_error("VM Error: Cannot assign index on this type.");
-                        }
-                    }
-                    else if (dims == 2) {
-                        Value col = pop();
-                        Value row = pop();
-                        Value& obj = peek(0);
-                        int r = static_cast<int>(std::round(row.asDouble()));
-                        int c = static_cast<int>(std::round(col.asDouble()));
-
-                        if (std::holds_alternative<RealMatrix>(obj.data)) {
-                            if (std::holds_alternative<Complex>(val.data)) {
-                                ComplexMatrix cm = std::get<RealMatrix>(obj.data).toComplexMatrix();
-                                if (r < 0) r = cm.getRows() + r;
-                                if (c < 0) c = cm.getCols() + c;
-                                cm(r, c) = val.asComplex();
-                                obj = Value(cm);
-                            }
-                            else {
-                                auto& m = std::get<RealMatrix>(obj.data);
-                                if (r < 0) r = m.getRows() + r;
-                                if (c < 0) c = m.getCols() + c;
-                                m(r, c) = val.asDouble();
-                            }
-                        }
-                        else if (std::holds_alternative<ComplexMatrix>(obj.data)) {
-                            auto& m = std::get<ComplexMatrix>(obj.data);
-                            if (r < 0) r = m.getRows() + r;
-                            if (c < 0) c = m.getCols() + c;
-                            m(r, c) = val.asComplex();
-                        }
-                        else if (std::holds_alternative<StringMatrix>(obj.data)) {
-                            auto& m = std::get<StringMatrix>(obj.data);
-                            if (r < 0) r = m.getRows() + r;
-                            if (c < 0) c = m.getCols() + c;
-                            if (std::holds_alternative<std::string>(val.data))
-                                m(r, c) = std::get<std::string>(val.data);
-                            else {
-                                std::ostringstream oss; oss << val;
-                                m(r, c) = oss.str();
-                            }
-                        }
-                        else {
-                            throw std::runtime_error("VM Error: 2D index assignment requires a matrix.");
-                        }
-                    }
-                    else {
-                        throw std::runtime_error("VM Error: Unsupported index dimensionality for assignment.");
-                    }
+                    execIndexSet(dims);
                     break;
                 }
 
@@ -3064,22 +1451,94 @@ namespace jc {
                     if (std::holds_alternative<std::shared_ptr<Instance>>(obj.data)) {
                         auto inst = std::get<std::shared_ptr<Instance>>(obj.data);
 
+                        // 1. 字段查找 — 不变
                         auto* fval = inst->fields.get(field);
                         if (fval) {
                             push(std::any_cast<Value>(*fval));
                             break;
                         }
 
+                        // 2. 方法查找
+                        std::shared_ptr<FunctionClosure> rawMethod;
+                        std::shared_ptr<ClassDefinition> ownerClass;
                         auto c = inst->classDef;
                         while (c) {
                             auto it = c->methods.find(field);
                             if (it != c->methods.end()) {
-                                push(Value(it->second));
+                                rawMethod = it->second;
+                                ownerClass = c;
                                 break;
                             }
                             c = c->parent;
                         }
                         if (!c) throw std::runtime_error("VM Error: No field/method '" + field + "'.");
+
+                        // ★ FIX: 创建绑定方法闭包，携带 receiver 和所属类
+                        auto bound = std::make_shared<FunctionClosure>(
+                            std::vector<std::string>{}, std::vector<bool>{},
+                            field, nullptr
+                        );
+
+                        // 复制元数据（参数名、默认值、变长标志）供 execCall 进行参数校验
+                        bound->paramNames = rawMethod->paramNames;
+                        bound->isRef = rawMethod->isRef;
+                        bound->defaultValues = rawMethod->defaultValues;
+                        bound->hasRestParam = rawMethod->hasRestParam;
+
+                        VM* vm = this;
+                        auto capturedInst = inst;
+                        auto capturedOwner = ownerClass;
+                        auto capturedMethod = rawMethod;
+                        auto capturedField = field;
+
+                        bound->nativeFn = std::make_any<NativeCallable>(
+                            [vm, capturedInst, capturedOwner, capturedMethod, capturedField]
+                            (const std::vector<Value>& args) -> Value
+                            {
+                                // RAII 式保存/恢复 self 上下文
+                                Value prevSelf = vm->globals.count("self")
+                                    ? vm->globals["self"] : Value::none();
+                                Value prevClass = vm->globals.count("__class__")
+                                    ? vm->globals["__class__"] : Value::none();
+
+                                vm->globals["self"] = Value(capturedInst);
+                                vm->globals["__class__"] = Value(capturedOwner);
+
+                                Value result;
+                                try {
+                                    if (capturedMethod->isBytecode()) {
+                                        std::shared_ptr<std::vector<Value>> captures = nullptr;
+                                        if (capturedMethod->hasCaptures())
+                                            captures = std::any_cast<
+                                            std::shared_ptr<std::vector<Value>>
+                                            >(capturedMethod->capturedEnv);
+                                        result = vm->callVMFunction(
+                                            capturedMethod->compiledFnIndex, args, captures);
+                                    }
+                                    else if (capturedMethod->isNative()) {
+                                        auto& fn = std::any_cast<NativeCallable&>(
+                                            capturedMethod->nativeFn);
+                                        result = fn(args);
+                                    }
+                                    else {
+                                        throw std::runtime_error(
+                                            "VM Error: Method '" + capturedField +
+                                            "' has no callable implementation.");
+                                    }
+                                }
+                                catch (...) {
+                                    vm->globals["self"] = prevSelf;
+                                    vm->globals["__class__"] = prevClass;
+                                    throw;
+                                }
+
+                                vm->globals["self"] = prevSelf;
+                                vm->globals["__class__"] = prevClass;
+                                return result;
+                            }
+                        );
+
+                        push(Value(bound));
                     }
                     else if (std::holds_alternative<Dict>(obj.data)) {
                         const auto& d = std::get<Dict>(obj.data);
@@ -3117,92 +1576,8 @@ namespace jc {
                 case OpCode::OP_INVOKE: {
                     uint16_t nameIdx = readShort();
                     uint8_t argc = readByte();
-                    std::string methodName = std::get<std::string>(currentChunk().constants[nameIdx].data);
-
-                    Value obj = stack[stack.size() - 1 - argc];
-
-                    if (!std::holds_alternative<std::shared_ptr<Instance>>(obj.data))
-                        throw std::runtime_error("VM Error: Cannot invoke method on non-instance.");
-
-                    auto inst = std::get<std::shared_ptr<Instance>>(obj.data);
-
-                    std::shared_ptr<FunctionClosure> method;
-                    std::shared_ptr<ClassDefinition> owningClass;
-                    auto c = inst->classDef;
-                    while (c) {
-                        auto it = c->methods.find(methodName);
-                        if (it != c->methods.end()) {
-                            method = it->second;
-                            owningClass = c;
-                            break;
-                        }
-                        c = c->parent;
-                    }
-                    if (!method)
-                        throw std::runtime_error("VM Error: No method '" + methodName +
-                            "' on '" + inst->classDef->name + "'.");
-
-                    globals["self"] = Value(inst);
-                    globals["__class__"] = Value(owningClass);
-
-                    if (method->isBytecode()) {
-                        auto& fnDef = compiledFunctions[method->compiledFnIndex];
-                        // =============================================================
-                        // ★ 核心变长参数打包引擎 (Invoke 对象方法端)
-                        // =============================================================
-                        if (fnDef->hasRestParam) {
-                            int fixedMax = fnDef->maxArity - 1;
-                            if (static_cast<int>(argc) < fnDef->arity) {
-                                throw std::runtime_error("VM Error: '" + fnDef->name + "' requires at least " + std::to_string(fnDef->arity) + " arguments.");
-                            }
-
-                            List restList;
-                            if (static_cast<int>(argc) > fixedMax) {
-                                int restCount = static_cast<int>(argc) - fixedMax;
-                                std::vector<std::any> temp(restCount);
-                                for (int j = 0; j < restCount; j++) temp[restCount - 1 - j] = std::make_any<Value>(pop());
-                                for (int j = 0; j < restCount; j++) restList.push_back(temp[j]);
-                                argc = static_cast<uint8_t>(fixedMax);
-                            }
-
-                            int padCount = fixedMax - static_cast<int>(argc);
-                            for (int j = 0; j < padCount; ++j) push(Value::none());
-                            push(Value(restList));
-                        }
-                        else {
-                            if (static_cast<int>(argc) < fnDef->arity || static_cast<int>(argc) > fnDef->maxArity)
-                                throw std::runtime_error("VM Error: '" + fnDef->name + "' expects " + std::to_string(fnDef->arity) + " to " + std::to_string(fnDef->maxArity) + " arguments, got " + std::to_string(argc) + ".");
-                            int padCount = fnDef->maxArity - static_cast<int>(argc);
-                            for (int j = 0; j < padCount; ++j) push(Value::none());
-                        }
-
-                        int reserveCount = fnDef->localCount - fnDef->maxArity;
-                        for (int j = 0; j < reserveCount; ++j) push(Value::none());
-                        // =============================================================
-                        CallFrame newFrame;
-                        newFrame.function = fnDef.get();
-                        newFrame.ip = 0;
-                        newFrame.stackBase = static_cast<int>(stack.size()) - fnDef->localCount;
-                        if (method->hasCaptures()) {
-                            newFrame.upvalues = std::any_cast<std::shared_ptr<std::vector<Value>>>(method->capturedEnv);
-                        }
-                        // 抹除原本在参数下方的 obj 引用
-                        stack.erase(stack.begin() + newFrame.stackBase - 1);
-                        newFrame.stackBase--;
-                        frames.push_back(newFrame);
-                        break;
-                    }
-                    else if (method->isNative()) {
-                        std::vector<Value> args(argc);
-                        for (int j = argc - 1; j >= 0; --j) args[j] = pop();
-                        pop();
-                        auto& fn = std::any_cast<NativeCallable&>(method->nativeFn);
-                        push(fn(args));
-                        break;
-                    }
-
-                    throw std::runtime_error("VM Error: Method '" + methodName +
-                        "' has no callable implementation.");
+                    execInvoke(nameIdx, argc);
+                    break;
                 }
 
                 case OpCode::OP_PRINT: {
@@ -3558,6 +1933,1768 @@ namespace jc {
             for (const auto& c : fn->chunk.constants) markValue(c, marked);
 
         return GcHeap::get().sweep(marked);
+    }
+
+    void VM::execCall(uint8_t argc) {
+        Value callee = stack[stack.size() - 1 - argc];
+        pendingRefWritebacks.clear();
+        // ======== [1] 字符串动态调用 (晚绑定) ========
+        if (std::holds_alternative<std::string>(callee.data)) {
+            const std::string& tag = std::get<std::string>(callee.data);
+            if (tag.size() >= 5 && tag.substr(0, 5) == "__fn:") {
+                int fnIdx = std::stoi(tag.substr(5));
+                auto& fn = compiledFunctions[fnIdx];
+                if (static_cast<int>(argc) < fn->arity || static_cast<int>(argc) > fn->maxArity)
+                    throw std::runtime_error("VM Error: '" + fn->name + "' expects args mismatch.");
+                int padCount = fn->maxArity - static_cast<int>(argc);
+                for (int j = 0; j < padCount; ++j) push(Value::none());
+                int reserveCount = fn->localCount - fn->maxArity;
+                for (int j = 0; j < reserveCount; ++j) push(Value::none());
+                CallFrame newFrame; newFrame.function = fn.get(); newFrame.ip = 0;
+                newFrame.stackBase = static_cast<int>(stack.size()) - fn->localCount;
+                stack.erase(stack.begin() + newFrame.stackBase - 1); newFrame.stackBase--;
+                frames.push_back(newFrame); return;
+            }
+            if (tag.size() >= 10 && tag.substr(0, 10) == "__builtin:") {
+                std::string fnName = tag.substr(10); std::vector<Value> args(argc);
+                for (int j = argc - 1; j >= 0; --j) args[j] = pop();
+                pop(); push(nativeBuiltins.find(fnName)->second(args)); return;
+            }
+            // ★ 核心判断：内建函数判定（最高优先级）
+            auto nIt = nativeBuiltins.find(tag);
+            if (nIt != nativeBuiltins.end()) {
+                auto arityIt = builtinArity.find(tag);
+                bool arityMatched = false;
+                if (arityIt != builtinArity.end() && !arityIt->second.empty()) {
+                    if (arityIt->second.count(argc)) arityMatched = true;
+                }
+                else {
+                    arityMatched = true; // 支持无元数限制
+                }
+
+                // 参数一致，直接引爆执行原生算法！
+                if (arityMatched) {
+                    std::vector<Value> args(argc);
+                    for (int j = argc - 1; j >= 0; --j) args[j] = pop();
+                    pop(); // 弹出 tag字符串名
+                    push(nIt->second(args));
+                    return;
+                }
+            }
+
+            // ★ 退回判定：用户全局变量判定
+            auto it = globals.find(tag);
+            if (it != globals.end()) {
+                callee = it->second;
+                stack[stack.size() - 1 - argc] = callee;
+                // ↓ 继续往下流进下一层的 Instance / FunctionClosure 统一执行块中执行 ↓
+            }
+            else {
+                if (nIt != nativeBuiltins.end()) {
+                    auto arityIt = builtinArity.find(tag);
+                    std::string expected;
+                    for (auto aIt = arityIt->second.begin(); aIt != arityIt->second.end(); ++aIt) {
+                        if (aIt != arityIt->second.begin()) expected += " or ";
+                        expected += std::to_string(*aIt);
+                    }
+                    throw std::runtime_error("Runtime Error: " + tag + "() expects " +
+                        expected + " arguments, got " + std::to_string(argc) + ".");
+                }
+                throw std::runtime_error("Runtime Error: Unknown function or not callable '" + tag + "()'.");
+            }
+        }
+
+        if (std::holds_alternative<std::shared_ptr<ClassDefinition>>(callee.data)) {
+            auto cls = std::get<std::shared_ptr<ClassDefinition>>(callee.data);
+            auto instance = std::make_shared<Instance>();
+            instance->classDef = cls;
+
+            std::shared_ptr<FunctionClosure> initMethod;
+            std::shared_ptr<ClassDefinition> initOwner;
+            auto c = cls;
+            while (c) {
+                auto it = c->methods.find("init");
+                if (it != c->methods.end()) {
+                    initMethod = it->second;
+                    initOwner = c;
+                    break;
+                }
+                c = c->parent;
+            }
+
+            if (initMethod) {
+                if (initMethod->isBytecode()) {
+                    // ★ FIX: 保存当前 self 上下文到新帧
+                    CallFrame newFrame;
+                    saveSelfContext(newFrame);  // ★ FIX
+                    globals["self"] = Value(instance);
+                    globals["__class__"] = Value(initOwner);
+                    auto& fnDef = compiledFunctions[initMethod->compiledFnIndex];
+                    int padCount = fnDef->maxArity - static_cast<int>(argc);
+                    for (int j = 0; j < padCount; ++j) push(Value::none());
+                    int reserveCount = fnDef->localCount - fnDef->maxArity;
+                    for (int j = 0; j < reserveCount; ++j) push(Value::none());
+                    newFrame.function = fnDef.get();
+                    newFrame.ip = 0;
+                    newFrame.stackBase = static_cast<int>(stack.size()) - fnDef->localCount;
+                    if (initMethod->hasCaptures()) {
+                        newFrame.upvalues = std::any_cast<std::shared_ptr<std::vector<Value>>>(
+                            initMethod->capturedEnv);
+                    }
+                    stack.erase(stack.begin() + newFrame.stackBase - 1);
+                    newFrame.stackBase--;
+                    frames.push_back(newFrame);
+                    return;
+                }
+                else if (initMethod->isNative()) {
+                    // ★ FIX: 同步调用 — RAII 式保存/恢复
+                    Value prevSelf = globals.count("self") ? globals["self"] : Value::none();
+                    Value prevClass = globals.count("__class__") ? globals["__class__"] : Value::none();
+                    globals["self"] = Value(instance);
+                    globals["__class__"] = Value(initOwner);
+                    std::vector<Value> args(argc);
+                    for (int j = argc - 1; j >= 0; --j) args[j] = pop();
+                    pop();
+                    try {
+                        auto& fn = std::any_cast<NativeCallable&>(initMethod->nativeFn);
+                        fn(args);
+                    }
+                    catch (...) {
+                        globals["self"] = prevSelf;       // ★ FIX: 异常时也恢复
+                        globals["__class__"] = prevClass;
+                        throw;
+                    }
+                    globals["self"] = prevSelf;           // ★ FIX: 正常恢复
+                    globals["__class__"] = prevClass;
+                    push(Value(instance));
+                }
+            }
+            else if (!initMethod) {
+                for (int j = 0; j < argc; ++j) pop();
+                pop();
+                push(Value(instance));
+            }
+            else {
+                throw std::runtime_error("VM Error: init has no callable implementation.");
+            }
+            return;
+        }
+
+        if (std::holds_alternative<std::shared_ptr<FunctionClosure>>(callee.data)) {
+            auto closure = std::get<std::shared_ptr<FunctionClosure>>(callee.data);
+
+            if (closure->isBytecode()) {
+                // ★ 核心扁平化调用，不触发 C++ nativeFn 回调
+                auto& fnDef = compiledFunctions[closure->compiledFnIndex];
+
+                // =============================================================
+                // ★ 核心变长参数打包引擎 (Closure 端)
+                // =============================================================
+                if (fnDef->hasRestParam) {
+                    int fixedMax = fnDef->maxArity - 1;
+                    if (static_cast<int>(argc) < fnDef->arity) {
+                        throw std::runtime_error("VM Error: '" + fnDef->name + "' requires at least " + std::to_string(fnDef->arity) + " arguments.");
+                    }
+
+                    List restList;
+                    if (static_cast<int>(argc) > fixedMax) {
+                        int restCount = static_cast<int>(argc) - fixedMax;
+                        std::vector<std::any> temp(restCount);
+                        for (int j = 0; j < restCount; j++) temp[restCount - 1 - j] = std::make_any<Value>(pop());
+                        for (int j = 0; j < restCount; j++) restList.push_back(temp[j]);
+                        argc = static_cast<uint8_t>(fixedMax);
+                    }
+
+                    int padCount = fixedMax - static_cast<int>(argc);
+                    for (int j = 0; j < padCount; ++j) push(Value::none());
+                    push(Value(restList));
+                }
+                else {
+                    if (static_cast<int>(argc) < fnDef->arity || static_cast<int>(argc) > fnDef->maxArity)
+                        throw std::runtime_error("VM Error: '" + fnDef->name + "' expects " + std::to_string(fnDef->arity) + " to " + std::to_string(fnDef->maxArity) + " arguments, got " + std::to_string(argc) + ".");
+                    int padCount = fnDef->maxArity - static_cast<int>(argc);
+                    for (int j = 0; j < padCount; ++j) push(Value::none());
+                }
+
+                int reserveCount = fnDef->localCount - fnDef->maxArity;
+                for (int j = 0; j < reserveCount; ++j) push(Value::none());
+                // =============================================================
+
+                CallFrame newFrame;
+                newFrame.function = fnDef.get();
+                newFrame.ip = 0;
+                // ★ 栈基址对齐
+                newFrame.stackBase = static_cast<int>(stack.size()) - fnDef->localCount;
+
+                if (closure->hasCaptures()) {
+                    newFrame.upvalues = std::any_cast<std::shared_ptr<std::vector<Value>>>(closure->capturedEnv);
+                }
+
+                // 抹除原本在参数下方的 closure 对象
+                stack.erase(stack.begin() + newFrame.stackBase - 1);
+                newFrame.stackBase--;
+
+                frames.push_back(newFrame);
+                return;
+            }
+            else if (closure->isNative()) {
+                std::vector<Value> args(argc);
+                for (int j = argc - 1; j >= 0; --j) args[j] = pop();
+                pop();
+                auto& fn = std::any_cast<NativeCallable&>(closure->nativeFn);
+                push(fn(args));
+                return;
+            }
+            throw std::runtime_error("VM Error: Invalid closure.");
+        }
+
+        if (std::holds_alternative<std::string>(callee.data)) {
+            const std::string& tag = std::get<std::string>(callee.data);
+
+            if (tag.size() >= 5 && tag.substr(0, 5) == "__fn:") {
+                int fnIdx = std::stoi(tag.substr(5));
+                auto& fn = compiledFunctions[fnIdx];
+
+                // =============================================================
+                // ★ 核心变长参数打包引擎 (String-Tag 晚绑定端)
+                // =============================================================
+                if (fn->hasRestParam) {
+                    int fixedMax = fn->maxArity - 1;
+                    if (static_cast<int>(argc) < fn->arity) {
+                        throw std::runtime_error("VM Error: '" + fn->name + "' requires at least " + std::to_string(fn->arity) + " arguments.");
+                    }
+
+                    List restList;
+                    if (static_cast<int>(argc) > fixedMax) {
+                        int restCount = static_cast<int>(argc) - fixedMax;
+                        std::vector<std::any> temp(restCount);
+                        for (int j = 0; j < restCount; j++) temp[restCount - 1 - j] = std::make_any<Value>(pop());
+                        for (int j = 0; j < restCount; j++) restList.push_back(temp[j]);
+                        argc = static_cast<uint8_t>(fixedMax);
+                    }
+
+                    int padCount = fixedMax - static_cast<int>(argc);
+                    for (int j = 0; j < padCount; ++j) push(Value::none());
+                    push(Value(restList));
+                }
+                else {
+                    if (static_cast<int>(argc) < fn->arity || static_cast<int>(argc) > fn->maxArity)
+                        throw std::runtime_error("VM Error: '" + fn->name + "' expects " + std::to_string(fn->arity) + " to " + std::to_string(fn->maxArity) + " arguments, got " + std::to_string(argc) + ".");
+                    int padCount = fn->maxArity - static_cast<int>(argc);
+                    for (int j = 0; j < padCount; ++j) push(Value::none());
+                }
+
+                int reserveCount = fn->localCount - fn->maxArity;
+                for (int j = 0; j < reserveCount; ++j) push(Value::none());
+                // =============================================================
+
+                CallFrame newFrame; newFrame.function = fn.get(); newFrame.ip = 0;
+                newFrame.stackBase = static_cast<int>(stack.size()) - fn->localCount;
+                stack.erase(stack.begin() + newFrame.stackBase - 1); newFrame.stackBase--;
+                frames.push_back(newFrame); return;
+            }
+
+            if (tag.size() >= 10 && tag.substr(0, 10) == "__builtin:") {
+                std::string fnName = tag.substr(10);
+                std::vector<Value> args(argc);
+                for (int j = argc - 1; j >= 0; --j) args[j] = pop();
+                pop();
+                auto nit = nativeBuiltins.find(fnName);
+                if (nit == nativeBuiltins.end())
+                    throw std::runtime_error("VM Error: Unknown builtin '" + fnName + "'.");
+                push(nit->second(args));
+                return;
+            }
+        }
+
+        {
+            std::vector<Value> args(argc);
+            for (int j = argc - 1; j >= 0; --j) args[j] = pop();
+            Value calleeVal = pop();
+            std::string desc;
+            if (std::holds_alternative<std::string>(calleeVal.data))
+                desc = std::get<std::string>(calleeVal.data);
+            else {
+                std::ostringstream oss; oss << calleeVal;
+                desc = oss.str();
+            }
+            throw std::runtime_error("VM Error: '" + desc + "' is not callable.");
+        }
+    }
+
+    void VM::execIndexGet(uint8_t dims) {
+        if (dims == 1) {
+            Value idx = pop();
+            Value obj = pop();
+
+            if (std::holds_alternative<Dict>(obj.data)) {
+                std::string key;
+                if (std::holds_alternative<std::string>(idx.data))
+                    key = std::get<std::string>(idx.data);
+                else {
+                    std::ostringstream oss; oss << idx;
+                    key = oss.str();
+                }
+                const auto* entry = std::get<Dict>(obj.data).get(key);
+                if (!entry) throw std::runtime_error("VM Error: Key '" + key + "' not found.");
+                push(std::any_cast<Value>(*entry));
+                return;
+            }
+
+            int i = static_cast<int>(std::round(idx.asDouble()));
+
+            if (std::holds_alternative<RealMatrix>(obj.data)) {
+                const auto& m = std::get<RealMatrix>(obj.data);
+                if (m.getRows() == 1) {
+                    if (i < 0) i = m.getCols() + i;
+                    push(Value(m(0, i)));
+                }
+                else if (m.getCols() == 1) {
+                    if (i < 0) i = m.getRows() + i;
+                    push(Value(m(i, 0)));
+                }
+                else {
+                    if (i < 0) i = m.getRows() + i;
+                    push(Value(m.getRow(i)));
+                }
+            }
+            else if (std::holds_alternative<ComplexMatrix>(obj.data)) {
+                const auto& m = std::get<ComplexMatrix>(obj.data);
+                if (m.getRows() == 1) {
+                    if (i < 0) i = m.getCols() + i;
+                    push(Value(m(0, i)));
+                }
+                else if (m.getCols() == 1) {
+                    if (i < 0) i = m.getRows() + i;
+                    push(Value(m(i, 0)));
+                }
+                else {
+                    if (i < 0) i = m.getRows() + i;
+                    push(Value(m.getRow(i)));
+                }
+            }
+            else if (std::holds_alternative<StringMatrix>(obj.data)) {
+                const auto& m = std::get<StringMatrix>(obj.data);
+                if (m.getRows() == 1) {
+                    if (i < 0) i = m.getCols() + i;
+                    push(Value(m(0, i)));
+                }
+                else if (m.getCols() == 1) {
+                    if (i < 0) i = m.getRows() + i;
+                    push(Value(m(i, 0)));
+                }
+                else {
+                    if (i < 0) i = m.getRows() + i;
+                    push(Value(m.getRow(i)));
+                }
+            }
+            else if (std::holds_alternative<List>(obj.data)) {
+                push(std::any_cast<Value>(std::get<List>(obj.data).at(i)));
+            }
+            else if (std::holds_alternative<std::string>(obj.data)) {
+                const auto& s = std::get<std::string>(obj.data);
+                if (i < 0) i = static_cast<int>(s.size()) + i;
+                if (i < 0 || i >= static_cast<int>(s.size()))
+                    throw std::runtime_error("VM Error: String index out of bounds.");
+                push(Value(std::string(1, s[i])));
+            }
+            // ── Instance (__getitem__) ──
+            else if (std::holds_alternative<std::shared_ptr<Instance>>(obj.data)) {
+                auto inst = std::get<std::shared_ptr<Instance>>(obj.data);
+                auto c = inst->classDef;
+                std::shared_ptr<FunctionClosure> getitemMethod;
+                while (c) {
+                    auto it = c->methods.find("__getitem__");
+                    if (it != c->methods.end()) {
+                        getitemMethod = it->second;
+                        break;
+                    }
+                    c = c->parent;
+                }
+                if (getitemMethod) {
+                    globals["self"] = Value(inst);
+                    if (getitemMethod->isBytecode()) {
+                        auto& fnDef = compiledFunctions[getitemMethod->compiledFnIndex];
+
+                        push(idx); // 将参数重新压回栈
+
+                        // ★ 补齐缺省的默认参数
+                        int padCount = fnDef->maxArity - 1;
+                        for (int j = 0; j < padCount; ++j) push(Value::none());
+
+                        // ★ 为该方法的 Auto-local 预留局部变量栈槽
+                        int reserveCount = fnDef->localCount - fnDef->maxArity;
+                        for (int j = 0; j < reserveCount; ++j) push(Value::none());
+
+                        CallFrame newFrame;
+                        newFrame.function = fnDef.get();
+                        newFrame.ip = 0;
+                        // 基址对齐至参数(idx)起始处
+                        newFrame.stackBase = static_cast<int>(stack.size()) - fnDef->localCount;
+
+                        if (getitemMethod->hasCaptures()) {
+                            newFrame.upvalues = std::any_cast<std::shared_ptr<std::vector<Value>>>(getitemMethod->capturedEnv);
+                        }
+                        frames.push_back(newFrame);
+                        return;
+                    }
+                    else if (getitemMethod->isNative()) {
+                        auto& fn = std::any_cast<NativeCallable&>(getitemMethod->nativeFn);
+                        push(fn({ idx }));
+                    }
+                    else {
+                        throw std::runtime_error("VM Error: __getitem__ has no callable implementation.");
+                    }
+                }
+                else {
+                    throw std::runtime_error("VM Error: Cannot index this instance (no __getitem__).");
+                }
+            }
+            else {
+                throw std::runtime_error("VM Error: Cannot index this type.");
+            }
+        }
+        else if (dims == 2) {
+            Value col = pop();
+            Value row = pop();
+            Value obj = pop();
+            int r = static_cast<int>(std::round(row.asDouble()));
+            int c = static_cast<int>(std::round(col.asDouble()));
+
+            if (std::holds_alternative<RealMatrix>(obj.data)) {
+                const auto& m = std::get<RealMatrix>(obj.data);
+                if (r < 0) r = m.getRows() + r;
+                if (c < 0) c = m.getCols() + c;
+                push(Value(m(r, c)));
+            }
+            else if (std::holds_alternative<ComplexMatrix>(obj.data)) {
+                const auto& m = std::get<ComplexMatrix>(obj.data);
+                if (r < 0) r = m.getRows() + r;
+                if (c < 0) c = m.getCols() + c;
+                push(Value(m(r, c)));
+            }
+            else if (std::holds_alternative<StringMatrix>(obj.data)) {
+                const auto& m = std::get<StringMatrix>(obj.data);
+                if (r < 0) r = m.getRows() + r;
+                if (c < 0) c = m.getCols() + c;
+                push(Value(m(r, c)));
+            }
+            else {
+                throw std::runtime_error("VM Error: 2D indexing requires a matrix.");
+            }
+        }
+        else {
+            throw std::runtime_error("VM Error: Unsupported index dimensionality.");
+        }
+        return;
+    }
+
+    void VM::execIndexSet(uint8_t dims) {
+        Value val = pop();
+
+        if (dims == 1) {
+            Value idx = pop();
+            Value& obj = peek(0);
+
+            if (std::holds_alternative<Dict>(obj.data)) {
+                std::string key;
+                if (std::holds_alternative<std::string>(idx.data))
+                    key = std::get<std::string>(idx.data);
+                else {
+                    std::ostringstream oss; oss << idx;
+                    key = oss.str();
+                }
+                std::get<Dict>(obj.data).set(key, std::make_any<Value>(val));
+                return;
+            }
+
+            int i = static_cast<int>(std::round(idx.asDouble()));
+
+            if (std::holds_alternative<RealMatrix>(obj.data)) {
+                auto& m = std::get<RealMatrix>(obj.data);
+                if (std::holds_alternative<Complex>(val.data) || std::holds_alternative<ComplexMatrix>(val.data)) {
+                    ComplexMatrix cm = m.toComplexMatrix();
+                    if (cm.getRows() == 1) {
+                        if (i < 0) i = cm.getCols() + i;
+                        cm(0, i) = val.asComplex();
+                    }
+                    else if (cm.getCols() == 1) {
+                        if (i < 0) i = cm.getRows() + i;
+                        cm(i, 0) = val.asComplex();
+                    }
+                    else {
+                        if (i < 0) i = cm.getRows() + i;
+                        if (i < 0 || i >= cm.getRows()) throw std::out_of_range("VM Error: Row index out of bounds.");
+                        if (std::holds_alternative<ComplexMatrix>(val.data)) {
+                            auto srcFlat = std::get<ComplexMatrix>(val.data).rawData();
+                            if (static_cast<int>(srcFlat.size()) != cm.getCols()) throw std::runtime_error("VM Error: Row assignment size mismatch.");
+                            for (int j = 0; j < cm.getCols(); ++j) cm(i, j) = srcFlat[j];
+                        }
+                        else {
+                            Complex cv = val.asComplex();
+                            for (int j = 0; j < cm.getCols(); ++j) cm(i, j) = cv;
+                        }
+                    }
+                    obj = Value(cm);
+                }
+                else {
+                    if (m.getRows() == 1) {
+                        if (i < 0) i = m.getCols() + i;
+                        m(0, i) = val.asDouble();
+                    }
+                    else if (m.getCols() == 1) {
+                        if (i < 0) i = m.getRows() + i;
+                        m(i, 0) = val.asDouble();
+                    }
+                    else {
+                        // ★ 2D 矩阵整行赋值 / 广播
+                        if (i < 0) i = m.getRows() + i;
+                        if (i < 0 || i >= m.getRows()) throw std::out_of_range("VM Error: Row index out of bounds.");
+                        if (std::holds_alternative<RealMatrix>(val.data)) {
+                            const auto& src = std::get<RealMatrix>(val.data);
+                            auto srcFlat = src.rawData();
+                            if (static_cast<int>(srcFlat.size()) != m.getCols())
+                                throw std::runtime_error("VM Error: Row assignment size mismatch.");
+                            for (int j = 0; j < m.getCols(); ++j) m(i, j) = srcFlat[j];
+                        }
+                        else {
+                            double dVal = val.asDouble();
+                            for (int j = 0; j < m.getCols(); ++j) m(i, j) = dVal;
+                        }
+                    }
+                }
+            }
+            else if (std::holds_alternative<ComplexMatrix>(obj.data)) {
+                auto& m = std::get<ComplexMatrix>(obj.data);
+                if (m.getRows() == 1) {
+                    if (i < 0) i = m.getCols() + i;
+                    m(0, i) = val.asComplex();
+                }
+                else if (m.getCols() == 1) {
+                    if (i < 0) i = m.getRows() + i;
+                    m(i, 0) = val.asComplex();
+                }
+                else {
+                    // ★ 2D 复数矩阵整行赋值 / 广播
+                    if (i < 0) i = m.getRows() + i;
+                    if (i < 0 || i >= m.getRows()) throw std::out_of_range("VM Error: Row index out of bounds.");
+
+                    if (std::holds_alternative<ComplexMatrix>(val.data)) {
+                        auto srcFlat = std::get<ComplexMatrix>(val.data).rawData();
+                        if (static_cast<int>(srcFlat.size()) != m.getCols()) throw std::runtime_error("VM Error: Row assignment size mismatch.");
+                        for (int j = 0; j < m.getCols(); ++j) m(i, j) = srcFlat[j];
+                    }
+                    // ★ 补足支持对复数矩阵写入实值行向量：
+                    else if (std::holds_alternative<RealMatrix>(val.data)) {
+                        auto srcFlat = std::get<RealMatrix>(val.data).rawData();
+                        if (static_cast<int>(srcFlat.size()) != m.getCols()) throw std::runtime_error("VM Error: Row assignment size mismatch.");
+                        for (int j = 0; j < m.getCols(); ++j) m(i, j) = Complex(srcFlat[j], 0.0);
+                    }
+                    else {
+                        // 标量广播
+                        Complex cv = val.asComplex();
+                        for (int j = 0; j < m.getCols(); ++j) m(i, j) = cv;
+                    }
+                }
+            }
+            else if (std::holds_alternative<StringMatrix>(obj.data)) {
+                auto& m = std::get<StringMatrix>(obj.data);
+
+                if (m.getRows() == 1) {
+                    if (i < 0) i = m.getCols() + i;
+                    if (std::holds_alternative<std::string>(val.data)) m(0, i) = std::get<std::string>(val.data);
+                    else { std::ostringstream oss; oss << val; m(0, i) = oss.str(); }
+                }
+                else if (m.getCols() == 1) {
+                    if (i < 0) i = m.getRows() + i;
+                    if (std::holds_alternative<std::string>(val.data)) m(i, 0) = std::get<std::string>(val.data);
+                    else { std::ostringstream oss; oss << val; m(i, 0) = oss.str(); }
+                }
+                else {
+                    // ★ 2D 字符串矩阵整行赋值 / 广播
+                    if (i < 0) i = m.getRows() + i;
+                    if (i < 0 || i >= m.getRows()) throw std::out_of_range("VM Error: Row index out of bounds.");
+
+                    if (std::holds_alternative<StringMatrix>(val.data)) {
+                        auto srcFlat = std::get<StringMatrix>(val.data).rawData();
+                        if (static_cast<int>(srcFlat.size()) != m.getCols()) throw std::runtime_error("VM Error: Row assignment size mismatch.");
+                        for (int j = 0; j < m.getCols(); ++j) m(i, j) = srcFlat[j];
+                    }
+                    // ★ 将任何实数矩阵映射到字符串行中
+                    else if (std::holds_alternative<RealMatrix>(val.data)) {
+                        auto srcFlat = std::get<RealMatrix>(val.data).rawData();
+                        if (static_cast<int>(srcFlat.size()) != m.getCols()) throw std::runtime_error("VM Error: Row assignment size mismatch.");
+                        for (int j = 0; j < m.getCols(); ++j) { std::ostringstream oss; oss << Value(srcFlat[j]); m(i, j) = oss.str(); }
+                    }
+                    // ★ 将任何复数矩阵映射到字符串行中
+                    else if (std::holds_alternative<ComplexMatrix>(val.data)) {
+                        auto srcFlat = std::get<ComplexMatrix>(val.data).rawData();
+                        if (static_cast<int>(srcFlat.size()) != m.getCols()) throw std::runtime_error("VM Error: Row assignment size mismatch.");
+                        for (int j = 0; j < m.getCols(); ++j) { std::ostringstream oss; oss << Value(srcFlat[j]); m(i, j) = oss.str(); }
+                    }
+                    else {
+                        // 标量广播
+                        std::string s;
+                        if (std::holds_alternative<std::string>(val.data)) s = std::get<std::string>(val.data);
+                        else { std::ostringstream oss; oss << val; s = oss.str(); }
+                        for (int j = 0; j < m.getCols(); ++j) m(i, j) = s;
+                    }
+                }
+            }
+            else if (std::holds_alternative<List>(obj.data)) {
+                std::get<List>(obj.data).set(i, std::make_any<Value>(val));
+            }
+            else if (std::holds_alternative<std::string>(obj.data)) {
+                auto& s = std::get<std::string>(obj.data);
+                if (i < 0) i = static_cast<int>(s.size()) + i;
+                if (i < 0 || i >= static_cast<int>(s.size()))
+                    throw std::runtime_error("VM Error: String index out of bounds.");
+                if (!std::holds_alternative<std::string>(val.data) ||
+                    std::get<std::string>(val.data).size() != 1)
+                    throw std::runtime_error("VM Error: String element assignment requires a single character.");
+                s[i] = std::get<std::string>(val.data)[0];
+            }
+            // ── Instance (__setitem__) ──
+            else if (std::holds_alternative<std::shared_ptr<Instance>>(obj.data)) {
+                auto inst = std::get<std::shared_ptr<Instance>>(obj.data);
+                auto c = inst->classDef;
+                std::shared_ptr<FunctionClosure> setitemMethod;
+                while (c) {
+                    auto it = c->methods.find("__setitem__");
+                    if (it != c->methods.end()) {
+                        setitemMethod = it->second;
+                        break;
+                    }
+                    c = c->parent;
+                }
+                if (setitemMethod) {
+                    globals["self"] = Value(inst);
+
+                    // ★ 不管是 bytecode 还是 native，统一使用回调安全执行
+                    // 避免其内部的 OP_RETURN 破坏属于复合赋值等所需的栈顶 obj 指针
+                    if (setitemMethod->isBytecode()) {
+                        std::shared_ptr<std::vector<Value>> captures = nullptr;
+                        if (setitemMethod->hasCaptures())
+                            captures = std::any_cast<std::shared_ptr<std::vector<Value>>>(setitemMethod->capturedEnv);
+                        callVMFunction(setitemMethod->compiledFnIndex, { idx, val }, captures);
+                    }
+                    else if (setitemMethod->isNative()) {
+                        auto& fn = std::any_cast<NativeCallable&>(setitemMethod->nativeFn);
+                        fn({ idx, val });
+                    }
+                    else {
+                        throw std::runtime_error("VM Error: __setitem__ has no callable implementation.");
+                    }
+                }
+                else {
+                    throw std::runtime_error("VM Error: Cannot assign index on this instance (no __setitem__).");
+                }
+            }
+            else {
+                throw std::runtime_error("VM Error: Cannot assign index on this type.");
+            }
+        }
+        else if (dims == 2) {
+            Value col = pop();
+            Value row = pop();
+            Value& obj = peek(0);
+            int r = static_cast<int>(std::round(row.asDouble()));
+            int c = static_cast<int>(std::round(col.asDouble()));
+
+            if (std::holds_alternative<RealMatrix>(obj.data)) {
+                if (std::holds_alternative<Complex>(val.data)) {
+                    ComplexMatrix cm = std::get<RealMatrix>(obj.data).toComplexMatrix();
+                    if (r < 0) r = cm.getRows() + r;
+                    if (c < 0) c = cm.getCols() + c;
+                    cm(r, c) = val.asComplex();
+                    obj = Value(cm);
+                }
+                else {
+                    auto& m = std::get<RealMatrix>(obj.data);
+                    if (r < 0) r = m.getRows() + r;
+                    if (c < 0) c = m.getCols() + c;
+                    m(r, c) = val.asDouble();
+                }
+            }
+            else if (std::holds_alternative<ComplexMatrix>(obj.data)) {
+                auto& m = std::get<ComplexMatrix>(obj.data);
+                if (r < 0) r = m.getRows() + r;
+                if (c < 0) c = m.getCols() + c;
+                m(r, c) = val.asComplex();
+            }
+            else if (std::holds_alternative<StringMatrix>(obj.data)) {
+                auto& m = std::get<StringMatrix>(obj.data);
+                if (r < 0) r = m.getRows() + r;
+                if (c < 0) c = m.getCols() + c;
+                if (std::holds_alternative<std::string>(val.data))
+                    m(r, c) = std::get<std::string>(val.data);
+                else {
+                    std::ostringstream oss; oss << val;
+                    m(r, c) = oss.str();
+                }
+            }
+            else {
+                throw std::runtime_error("VM Error: 2D index assignment requires a matrix.");
+            }
+        }
+        else {
+            throw std::runtime_error("VM Error: Unsupported index dimensionality for assignment.");
+        }
+        return;
+    }
+
+    void VM::execSliceGet(uint8_t dims) {
+        auto readOptionalInt = [this]() -> std::pair<bool, int> {
+            Value v = pop();
+            if (v.isNone()) return { false, 0 };
+            return { true, static_cast<int>(std::round(v.asDouble())) };
+            };
+
+        auto buildSliceIndices = [](int dimSize, std::pair<bool, int> start,
+            std::pair<bool, int> end,
+            std::pair<bool, int> step) -> std::vector<int> {
+                int sp = step.first ? step.second : 1;
+
+                // ★ 点索引标记：step 被显式设置为 0
+                if (step.first && sp == 0) {
+                    int idx = start.first ? start.second : 0;
+                    if (idx < 0) idx = dimSize + idx;
+                    if (idx < 0 || idx >= dimSize)
+                        throw std::out_of_range("VM Error: Index out of bounds.");
+                    return { idx };
+                }
+
+                int st, en;
+                if (sp > 0) {
+                    st = start.first ? start.second : 0;
+                    en = end.first ? end.second : dimSize;
+                }
+                else {
+                    st = start.first ? start.second : dimSize - 1;
+                    en = end.first ? end.second : -1;
+                }
+
+                if (st < 0) st = dimSize + st;
+                if (en < 0 && end.first) en = dimSize + en;
+
+                if (sp > 0) {
+                    st = std::max(0, std::min(dimSize, st));
+                    en = std::max(0, std::min(dimSize, en));
+                }
+                else {
+                    st = std::max(-1, std::min(dimSize - 1, st));
+                    en = std::max(-1, std::min(dimSize - 1, en));
+                }
+
+                std::vector<int> ids;
+                if (sp > 0) {
+                    for (int i = st; i < en; i += sp) ids.push_back(i);
+                }
+                else {
+                    for (int i = st; i > en; i += sp) ids.push_back(i);
+                }
+                return ids;
+            };
+
+        if (dims == 1) {
+            auto step = readOptionalInt();
+            auto end = readOptionalInt();
+            auto start = readOptionalInt();
+            Value obj = pop();
+
+            if (std::holds_alternative<std::string>(obj.data)) {
+                const auto& s = std::get<std::string>(obj.data);
+                auto ids = buildSliceIndices(static_cast<int>(s.size()), start, end, step);
+                std::string result;
+                for (int id : ids) result += s[id];
+                push(Value(result));
+                return;
+            }
+
+            if (std::holds_alternative<RealMatrix>(obj.data)) {
+                const auto& m = std::get<RealMatrix>(obj.data);
+                int n = (m.getRows() == 1) ? m.getCols() : m.getRows();
+                auto ids = buildSliceIndices(n, start, end, step);
+                std::vector<double> result;
+                if (m.getRows() == 1) {
+                    for (int id : ids) result.push_back(m(0, id));
+                    push(Value(RealMatrix(1, static_cast<int>(result.size()), result)));
+                }
+                else if (m.getCols() == 1) {
+                    for (int id : ids) result.push_back(m(id, 0));
+                    push(Value(RealMatrix(static_cast<int>(result.size()), 1, result)));
+                }
+                else {
+                    int rc = static_cast<int>(ids.size());
+                    std::vector<double> flat;
+                    for (int id : ids)
+                        for (int j = 0; j < m.getCols(); ++j)
+                            flat.push_back(m(id, j));
+                    push(Value(RealMatrix(rc, m.getCols(), flat)));
+                }
+                return;
+            }
+
+            if (std::holds_alternative<ComplexMatrix>(obj.data)) {
+                const auto& m = std::get<ComplexMatrix>(obj.data);
+                int n = (m.getRows() == 1) ? m.getCols() : m.getRows();
+                auto ids = buildSliceIndices(n, start, end, step);
+                if (m.getRows() == 1) {
+                    std::vector<Complex> result;
+                    for (int id : ids) result.push_back(m(0, id));
+                    push(Value(ComplexMatrix(1, static_cast<int>(result.size()), result)));
+                }
+                else if (m.getCols() == 1) {
+                    std::vector<Complex> result;
+                    for (int id : ids) result.push_back(m(id, 0));
+                    push(Value(ComplexMatrix(static_cast<int>(result.size()), 1, result)));
+                }
+                else {
+                    int rc = static_cast<int>(ids.size());
+                    std::vector<Complex> flat;
+                    for (int id : ids)
+                        for (int j = 0; j < m.getCols(); ++j)
+                            flat.push_back(m(id, j));
+                    push(Value(ComplexMatrix(rc, m.getCols(), flat)));
+                }
+                return;
+            }
+
+            if (std::holds_alternative<StringMatrix>(obj.data)) {
+                const auto& m = std::get<StringMatrix>(obj.data);
+                int n = (m.getRows() == 1) ? m.getCols() : m.getRows();
+                auto ids = buildSliceIndices(n, start, end, step);
+                if (m.getRows() == 1) {
+                    std::vector<std::string> result;
+                    for (int id : ids) result.push_back(m(0, id));
+                    push(Value(StringMatrix(1, static_cast<int>(result.size()), result)));
+                }
+                else if (m.getCols() == 1) {
+                    std::vector<std::string> result;
+                    for (int id : ids) result.push_back(m(id, 0));
+                    push(Value(StringMatrix(static_cast<int>(result.size()), 1, result)));
+                }
+                else {
+                    int rc = static_cast<int>(ids.size());
+                    std::vector<std::string> flat;
+                    for (int id : ids)
+                        for (int j = 0; j < m.getCols(); ++j)
+                            flat.push_back(m(id, j));
+                    push(Value(StringMatrix(rc, m.getCols(), flat)));
+                }
+                return;
+            }
+
+            if (std::holds_alternative<List>(obj.data)) {
+                const auto& L = std::get<List>(obj.data);
+                auto ids = buildSliceIndices(static_cast<int>(L.size()), start, end, step);
+                List result;
+                for (int id : ids) result.push_back(L.raw()[id]);
+                push(Value(result));
+                return;
+            }
+
+            throw std::runtime_error("VM Error: Cannot slice this type.");
+        }
+        else if (dims == 2) {
+            auto cStep = readOptionalInt();
+            auto cEnd = readOptionalInt();
+            auto cStart = readOptionalInt();
+            auto rStep = readOptionalInt();
+            auto rEnd = readOptionalInt();
+            auto rStart = readOptionalInt();
+            Value obj = pop();
+
+            auto processMatSlice = [&](const auto& m) {
+                auto rIds = buildSliceIndices(m.getRows(), rStart, rEnd, rStep);
+                auto cIds = buildSliceIndices(m.getCols(), cStart, cEnd, cStep);
+
+                using MatType = std::decay_t<decltype(m)>;
+                using ElemType = std::decay_t<decltype(m(0, 0))>;
+                std::vector<ElemType> flat;
+                for (int ri : rIds)
+                    for (int ci : cIds)
+                        flat.push_back(m(ri, ci));
+                push(Value(MatType(static_cast<int>(rIds.size()),
+                    static_cast<int>(cIds.size()), flat)));
+                };
+
+            if (std::holds_alternative<RealMatrix>(obj.data)) {
+                processMatSlice(std::get<RealMatrix>(obj.data));
+            }
+            else if (std::holds_alternative<ComplexMatrix>(obj.data)) {
+                processMatSlice(std::get<ComplexMatrix>(obj.data));
+            }
+            else if (std::holds_alternative<StringMatrix>(obj.data)) {
+                processMatSlice(std::get<StringMatrix>(obj.data));
+            }
+            else {
+                throw std::runtime_error("VM Error: 2D slicing requires a matrix.");
+            }
+        }
+        else {
+            throw std::runtime_error("VM Error: Unsupported slice dimensionality.");
+        }
+        return;
+    }
+
+    void VM::execSliceSet(uint8_t dims) {
+
+        auto readOptionalInt = [this]() -> std::pair<bool, int> {
+            Value v = pop();
+            if (v.isNone()) return { false, 0 };
+            return { true, static_cast<int>(std::round(v.asDouble())) };
+            };
+
+        auto buildSliceIndices = [](int dimSize, std::pair<bool, int> start,
+            std::pair<bool, int> end,
+            std::pair<bool, int> step) -> std::vector<int> {
+                int sp = step.first ? step.second : 1;
+
+                // ★ 点索引标记：step 被显式设置为 0
+                if (step.first && sp == 0) {
+                    int idx = start.first ? start.second : 0;
+                    if (idx < 0) idx = dimSize + idx;
+                    if (idx < 0 || idx >= dimSize)
+                        throw std::out_of_range("VM Error: Index out of bounds.");
+                    return { idx };
+                }
+
+                int st, en;
+                if (sp > 0) {
+                    st = start.first ? start.second : 0;
+                    en = end.first ? end.second : dimSize;
+                }
+                else {
+                    st = start.first ? start.second : dimSize - 1;
+                    en = end.first ? end.second : -1;
+                }
+
+                if (st < 0) st = dimSize + st;
+                if (en < 0 && end.first) en = dimSize + en;
+
+                if (sp > 0) {
+                    st = std::max(0, std::min(dimSize, st));
+                    en = std::max(0, std::min(dimSize, en));
+                }
+                else {
+                    st = std::max(-1, std::min(dimSize - 1, st));
+                    en = std::max(-1, std::min(dimSize - 1, en));
+                }
+
+                std::vector<int> ids;
+                if (sp > 0) {
+                    for (int i = st; i < en; i += sp) ids.push_back(i);
+                }
+                else {
+                    for (int i = st; i > en; i += sp) ids.push_back(i);
+                }
+                return ids;
+            };
+
+        if (dims == 1) {
+            Value val = pop();
+            auto step = readOptionalInt();
+            auto end = readOptionalInt();
+            auto start = readOptionalInt();
+            Value& obj = peek(0);
+
+            if (std::holds_alternative<RealMatrix>(obj.data)) {
+                auto& m = std::get<RealMatrix>(obj.data);
+                int n = (m.getRows() == 1) ? m.getCols() : m.getRows();
+                auto ids = buildSliceIndices(n, start, end, step);
+
+                if (std::holds_alternative<double>(val.data) ||
+                    std::holds_alternative<BigInt>(val.data) ||
+                    std::holds_alternative<Fraction>(val.data)) {
+                    double v = val.asDouble();
+                    if (m.getRows() == 1) {
+                        for (int id : ids) m(0, id) = v;
+                    }
+                    else if (m.getCols() == 1) {
+                        for (int id : ids) m(id, 0) = v;
+                    }
+                    else {
+                        // ★ 广播到这几行的所有列！
+                        for (int id : ids)
+                            for (int j = 0; j < m.getCols(); ++j) m(id, j) = v;
+                    }
+                }
+                else if (std::holds_alternative<RealMatrix>(val.data)) {
+                    const auto& src = std::get<RealMatrix>(val.data);
+                    auto srcFlat = src.rawData();
+
+                    if (m.getRows() == 1 || m.getCols() == 1) {
+                        // 纯向量赋值
+                        if (static_cast<int>(srcFlat.size()) != static_cast<int>(ids.size()))
+                            throw std::runtime_error("VM Error: Slice assignment size mismatch.");
+                        if (m.getRows() == 1) {
+                            for (size_t k = 0; k < ids.size(); ++k) m(0, ids[k]) = srcFlat[k];
+                        }
+                        else {
+                            for (size_t k = 0; k < ids.size(); ++k) m(ids[k], 0) = srcFlat[k];
+                        }
+                    }
+                    else {
+                        // 2D 矩阵的单维整行赋值（M[0:1] 意味着替换第0行的所有列）
+                        if (static_cast<int>(srcFlat.size()) != static_cast<int>(ids.size()) * m.getCols())
+                            throw std::runtime_error("VM Error: Slice assignment size mismatch for matrix row.");
+                        for (size_t k = 0; k < ids.size(); ++k) {
+                            for (int j = 0; j < m.getCols(); ++j) {
+                                m(ids[k], j) = srcFlat[k * m.getCols() + j];
+                            }
+                        }
+                    }
+                }
+                else {
+                    throw std::runtime_error("VM Error: Cannot assign this type to slice.");
+                }
+            }
+            else if (std::holds_alternative<List>(obj.data)) {
+                auto& L = std::get<List>(obj.data);
+                auto ids = buildSliceIndices(static_cast<int>(L.size()), start, end, step);
+                if (std::holds_alternative<List>(val.data)) {
+                    const auto& srcL = std::get<List>(val.data);
+                    if (srcL.size() != ids.size())
+                        throw std::runtime_error("VM Error: Slice assignment size mismatch.");
+                    for (size_t k = 0; k < ids.size(); ++k)
+                        L.set(ids[k], srcL.raw()[k]);
+                }
+                else {
+                    for (int id : ids)
+                        L.set(id, std::make_any<Value>(val));
+                }
+            }
+            else if (std::holds_alternative<std::string>(obj.data)) {
+                auto& s = std::get<std::string>(obj.data);
+                auto ids = buildSliceIndices(static_cast<int>(s.size()), start, end, step);
+                if (!std::holds_alternative<std::string>(val.data))
+                    throw std::runtime_error("VM Error: String slice assignment requires a string.");
+                const auto& src = std::get<std::string>(val.data);
+                if (static_cast<int>(src.size()) != static_cast<int>(ids.size()))
+                    throw std::runtime_error("VM Error: String slice assignment size mismatch.");
+                for (size_t k = 0; k < ids.size(); ++k) s[ids[k]] = src[k];
+            }
+            else if (std::holds_alternative<ComplexMatrix>(obj.data)) {
+                auto& m = std::get<ComplexMatrix>(obj.data);
+                int n = (m.getRows() == 1) ? m.getCols() : m.getRows();
+                auto ids = buildSliceIndices(n, start, end, step);
+                if (std::holds_alternative<ComplexMatrix>(val.data)) {
+                    auto srcFlat = std::get<ComplexMatrix>(val.data).rawData();
+
+                    if (m.getRows() == 1 || m.getCols() == 1) {
+                        if (static_cast<int>(srcFlat.size()) != static_cast<int>(ids.size()))
+                            throw std::runtime_error("VM Error: Slice assignment size mismatch.");
+                        if (m.getRows() == 1) {
+                            for (size_t k = 0; k < ids.size(); ++k) m(0, ids[k]) = srcFlat[k];
+                        }
+                        else {
+                            for (size_t k = 0; k < ids.size(); ++k) m(ids[k], 0) = srcFlat[k];
+                        }
+                    }
+                    else {
+                        if (static_cast<int>(srcFlat.size()) != static_cast<int>(ids.size()) * m.getCols())
+                            throw std::runtime_error("VM Error: Slice assignment size mismatch for matrix row.");
+                        for (size_t k = 0; k < ids.size(); ++k) {
+                            for (int j = 0; j < m.getCols(); ++j) {
+                                m(ids[k], j) = srcFlat[k * m.getCols() + j];
+                            }
+                        }
+                    }
+                }
+                else {
+                    Complex cv = val.asComplex();
+                    if (m.getRows() == 1) {
+                        for (int id : ids) m(0, id) = cv;
+                    }
+                    else if (m.getCols() == 1) {
+                        for (int id : ids) m(id, 0) = cv;
+                    }
+                    else {
+                        for (int id : ids)
+                            for (int j = 0; j < m.getCols(); ++j) m(id, j) = cv;
+                    }
+                }
+            }
+            else if (std::holds_alternative<StringMatrix>(obj.data)) {
+                auto& m = std::get<StringMatrix>(obj.data);
+                int n = (m.getRows() == 1) ? m.getCols() : m.getRows();
+                auto ids = buildSliceIndices(n, start, end, step);
+                if (std::holds_alternative<StringMatrix>(val.data)) {
+                    auto srcFlat = std::get<StringMatrix>(val.data).rawData();
+
+                    if (m.getRows() == 1 || m.getCols() == 1) {
+                        if (static_cast<int>(srcFlat.size()) != static_cast<int>(ids.size()))
+                            throw std::runtime_error("VM Error: Slice assignment size mismatch.");
+                        if (m.getRows() == 1) {
+                            for (size_t k = 0; k < ids.size(); ++k) m(0, ids[k]) = srcFlat[k];
+                        }
+                        else {
+                            for (size_t k = 0; k < ids.size(); ++k) m(ids[k], 0) = srcFlat[k];
+                        }
+                    }
+                    else {
+                        if (static_cast<int>(srcFlat.size()) != static_cast<int>(ids.size()) * m.getCols())
+                            throw std::runtime_error("VM Error: Slice assignment size mismatch for matrix row.");
+                        for (size_t k = 0; k < ids.size(); ++k) {
+                            for (int j = 0; j < m.getCols(); ++j) {
+                                m(ids[k], j) = srcFlat[k * m.getCols() + j];
+                            }
+                        }
+                    }
+                }
+                else {
+                    std::string sv;
+                    if (std::holds_alternative<std::string>(val.data)) sv = std::get<std::string>(val.data);
+                    else { std::ostringstream oss; oss << val; sv = oss.str(); }
+
+                    if (m.getRows() == 1) {
+                        for (int id : ids) m(0, id) = sv;
+                    }
+                    else if (m.getCols() == 1) {
+                        for (int id : ids) m(id, 0) = sv;
+                    }
+                    else {
+                        for (int id : ids)
+                            for (int j = 0; j < m.getCols(); ++j) m(id, j) = sv;
+                    }
+                }
+            }
+            else {
+                throw std::runtime_error("VM Error: Cannot slice-assign this type.");
+            }
+        }
+        else if (dims == 2) {
+            Value val = pop();
+            auto cStep = readOptionalInt();
+            auto cEnd = readOptionalInt();
+            auto cStart = readOptionalInt();
+            auto rStep = readOptionalInt();
+            auto rEnd = readOptionalInt();
+            auto rStart = readOptionalInt();
+            Value& obj = peek(0);
+
+            auto processMatSliceSet = [&](auto& m) {
+                auto rIds = buildSliceIndices(m.getRows(), rStart, rEnd, rStep);
+                auto cIds = buildSliceIndices(m.getCols(), cStart, cEnd, cStep);
+                int dstR = static_cast<int>(rIds.size());
+                int dstC = static_cast<int>(cIds.size());
+
+                using ElemType = std::decay_t<decltype(m(0, 0))>;
+
+                // 检测右值是否为一个矩阵
+                bool isRhsMat = std::holds_alternative<RealMatrix>(val.data) ||
+                    std::holds_alternative<ComplexMatrix>(val.data) ||
+                    std::holds_alternative<StringMatrix>(val.data);
+
+                if (isRhsMat) {
+                    int srcR = 0, srcC = 0;
+                    if (std::holds_alternative<RealMatrix>(val.data)) {
+                        srcR = std::get<RealMatrix>(val.data).getRows();
+                        srcC = std::get<RealMatrix>(val.data).getCols();
+                    }
+                    else if (std::holds_alternative<ComplexMatrix>(val.data)) {
+                        srcR = std::get<ComplexMatrix>(val.data).getRows();
+                        srcC = std::get<ComplexMatrix>(val.data).getCols();
+                    }
+                    else {
+                        srcR = std::get<StringMatrix>(val.data).getRows();
+                        srcC = std::get<StringMatrix>(val.data).getCols();
+                    }
+
+                    if (srcR != dstR || srcC != dstC)
+                        throw std::runtime_error("VM Error: Slice assignment size mismatch.");
+
+                    for (int i = 0; i < dstR; ++i) {
+                        for (int j = 0; j < dstC; ++j) {
+                            if constexpr (std::is_same_v<ElemType, double>) {
+                                if (std::holds_alternative<RealMatrix>(val.data))
+                                    m(rIds[i], cIds[j]) = std::get<RealMatrix>(val.data)(i, j);
+                                else
+                                    throw std::runtime_error("VM Error: Cannot assign complex/string matrix to real matrix slice.");
+                            }
+                            else if constexpr (std::is_same_v<ElemType, Complex>) {
+                                if (std::holds_alternative<ComplexMatrix>(val.data))
+                                    m(rIds[i], cIds[j]) = std::get<ComplexMatrix>(val.data)(i, j);
+                                else if (std::holds_alternative<RealMatrix>(val.data))
+                                    m(rIds[i], cIds[j]) = Complex(std::get<RealMatrix>(val.data)(i, j));
+                                else
+                                    throw std::runtime_error("VM Error: Cannot assign string matrix to complex matrix slice.");
+                            }
+                            else if constexpr (std::is_same_v<ElemType, std::string>) {
+                                std::ostringstream oss;
+                                if (std::holds_alternative<StringMatrix>(val.data))
+                                    oss << std::get<StringMatrix>(val.data)(i, j);
+                                else if (std::holds_alternative<ComplexMatrix>(val.data))
+                                    oss << Value(std::get<ComplexMatrix>(val.data)(i, j));
+                                else
+                                    oss << Value(std::get<RealMatrix>(val.data)(i, j));
+                                m(rIds[i], cIds[j]) = oss.str();
+                            }
+                        }
+                    }
+                }
+                else {
+                    // 万能标量广播 (Scalar Broadcast)
+                    ElemType scalarVal{};
+                    if constexpr (std::is_same_v<ElemType, double>) {
+                        scalarVal = val.asDouble(); // 可承接 int, double, fraction 等
+                    }
+                    else if constexpr (std::is_same_v<ElemType, Complex>) {
+                        scalarVal = val.asComplex();
+                    }
+                    else if constexpr (std::is_same_v<ElemType, std::string>) {
+                        if (std::holds_alternative<std::string>(val.data))
+                            scalarVal = std::get<std::string>(val.data);
+                        else {
+                            std::ostringstream oss; oss << val; scalarVal = oss.str();
+                        }
+                    }
+
+                    for (int ri : rIds)
+                        for (int ci : cIds)
+                            m(ri, ci) = scalarVal;
+                }
+                };
+
+            if (std::holds_alternative<RealMatrix>(obj.data)) {
+                processMatSliceSet(std::get<RealMatrix>(obj.data));
+            }
+            else if (std::holds_alternative<ComplexMatrix>(obj.data)) {
+                processMatSliceSet(std::get<ComplexMatrix>(obj.data));
+            }
+            else if (std::holds_alternative<StringMatrix>(obj.data)) {
+                processMatSliceSet(std::get<StringMatrix>(obj.data));
+            }
+            else {
+                throw std::runtime_error("VM Error: 2D slice assignment requires a matrix.");
+            }
+        }
+        else {
+            throw std::runtime_error("VM Error: Unsupported slice assignment dimensionality.");
+        }
+        return;
+    }
+
+    void VM::execBuildMatrix(uint16_t rows, uint16_t cols) {
+        int total = rows * cols;
+
+        bool hasComplex = false;
+        bool hasString = false;
+        bool hasOther = false;
+
+        auto canBeMatrixElement = [](const Value& v) -> bool {
+            return std::holds_alternative<double>(v.data) ||
+                std::holds_alternative<BigInt>(v.data) ||
+                std::holds_alternative<Fraction>(v.data) ||
+                std::holds_alternative<BaseNum>(v.data) ||
+                std::holds_alternative<Complex>(v.data) ||
+                std::holds_alternative<std::string>(v.data) ||
+                std::holds_alternative<RealMatrix>(v.data) ||
+                std::holds_alternative<ComplexMatrix>(v.data) ||
+                std::holds_alternative<StringMatrix>(v.data);
+            };
+
+        for (int ii = 0; ii < total; ++ii) {
+            const Value& v = stack[stack.size() - total + ii];
+            if (std::holds_alternative<Complex>(v.data) ||
+                std::holds_alternative<ComplexMatrix>(v.data))
+                hasComplex = true;
+            if (std::holds_alternative<std::string>(v.data) ||
+                std::holds_alternative<StringMatrix>(v.data))
+                hasString = true;
+            if (!canBeMatrixElement(v))
+                hasOther = true;
+        }
+
+        Value result;
+
+        if (hasOther) {
+            if (rows == 1) {
+                List L;
+                for (int ii = 0; ii < total; ++ii)
+                    L.push_back(std::make_any<Value>(stack[stack.size() - total + ii]));
+                result = Value(L);
+            }
+            else {
+                List outer;
+                for (int i = 0; i < rows; ++i) {
+                    List inner;
+                    for (int j = 0; j < cols; ++j)
+                        inner.push_back(std::make_any<Value>(
+                            stack[stack.size() - total + i * cols + j]));
+                    outer.push_back(std::make_any<Value>(Value(inner)));
+                }
+                result = Value(outer);
+            }
+        }
+        else {
+            bool hasSubMatrix = false;
+            for (int ii = 0; ii < total; ++ii) {
+                const Value& v = stack[stack.size() - total + ii];
+                if (std::holds_alternative<RealMatrix>(v.data) ||
+                    std::holds_alternative<ComplexMatrix>(v.data) ||
+                    std::holds_alternative<StringMatrix>(v.data))
+                    hasSubMatrix = true;
+            }
+
+            if (hasSubMatrix) {
+                auto extractCell = [&](Value& cell) {
+                    if (!std::holds_alternative<RealMatrix>(cell.data) &&
+                        !std::holds_alternative<ComplexMatrix>(cell.data) &&
+                        !std::holds_alternative<StringMatrix>(cell.data)) {
+                        if (hasString) {
+                            std::ostringstream oss; oss << cell;
+                            cell = Value(StringMatrix(1, 1, { oss.str() }));
+                        }
+                        else if (hasComplex) {
+                            cell = Value(ComplexMatrix(1, 1, { cell.asComplex() }));
+                        }
+                        else {
+                            cell = Value(RealMatrix(1, 1, { cell.asDouble() }));
+                        }
+                    }
+                    if (hasString) {
+                        if (std::holds_alternative<RealMatrix>(cell.data)) {
+                            const auto& m = std::get<RealMatrix>(cell.data);
+                            std::vector<std::string> flat;
+                            for (int i = 0; i < m.getRows(); ++i)
+                                for (int j = 0; j < m.getCols(); ++j) {
+                                    std::ostringstream oss; oss << Value(m(i, j));
+                                    flat.push_back(oss.str());
+                                }
+                            cell = Value(StringMatrix(m.getRows(), m.getCols(), flat));
+                        }
+                        else if (std::holds_alternative<ComplexMatrix>(cell.data)) {
+                            const auto& m = std::get<ComplexMatrix>(cell.data);
+                            std::vector<std::string> flat;
+                            for (int i = 0; i < m.getRows(); ++i)
+                                for (int j = 0; j < m.getCols(); ++j) {
+                                    std::ostringstream oss; oss << Value(m(i, j));
+                                    flat.push_back(oss.str());
+                                }
+                            cell = Value(StringMatrix(m.getRows(), m.getCols(), flat));
+                        }
+                    }
+                    else if (hasComplex && std::holds_alternative<RealMatrix>(cell.data)) {
+                        cell = Value(cell.asComplexMatrix());
+                    }
+                    };
+
+                try {
+                    int idx = 0;
+                    Value matResult = Value::none();
+                    for (int i = 0; i < rows; ++i) {
+                        Value rowResult = Value::none();
+                        for (int j = 0; j < cols; ++j) {
+                            Value cell = stack[stack.size() - total + idx++];
+                            extractCell(cell);
+                            if (rowResult.isNone()) {
+                                rowResult = cell;
+                            }
+                            else {
+                                if (hasString)
+                                    rowResult = Value(std::get<StringMatrix>(rowResult.data)
+                                        .integR(std::get<StringMatrix>(cell.data)));
+                                else if (hasComplex)
+                                    rowResult = Value(std::get<ComplexMatrix>(rowResult.data)
+                                        .integR(std::get<ComplexMatrix>(cell.data)));
+                                else
+                                    rowResult = Value(std::get<RealMatrix>(rowResult.data)
+                                        .integR(std::get<RealMatrix>(cell.data)));
+                            }
+                        }
+                        if (matResult.isNone()) {
+                            matResult = rowResult;
+                        }
+                        else {
+                            if (hasString)
+                                matResult = Value(std::get<StringMatrix>(matResult.data)
+                                    .integC(std::get<StringMatrix>(rowResult.data)));
+                            else if (hasComplex)
+                                matResult = Value(std::get<ComplexMatrix>(matResult.data)
+                                    .integC(std::get<ComplexMatrix>(rowResult.data)));
+                            else
+                                matResult = Value(std::get<RealMatrix>(matResult.data)
+                                    .integC(std::get<RealMatrix>(rowResult.data)));
+                        }
+                    }
+                    result = matResult;
+                }
+                catch (...) {
+                    throw std::runtime_error(
+                        "VM Error: Dimension mismatch during block matrix concatenation.");
+                }
+            }
+            else if (hasString) {
+                std::vector<std::string> flat(total);
+                for (int ii = 0; ii < total; ++ii) {
+                    const Value& v = stack[stack.size() - total + ii];
+                    if (std::holds_alternative<std::string>(v.data))
+                        flat[ii] = std::get<std::string>(v.data);
+                    else {
+                        std::ostringstream oss; oss << v;
+                        flat[ii] = oss.str();
+                    }
+                }
+                result = Value(StringMatrix(rows, cols, flat));
+            }
+            else if (hasComplex) {
+                std::vector<Complex> flat(total);
+                for (int ii = 0; ii < total; ++ii)
+                    flat[ii] = stack[stack.size() - total + ii].asComplex();
+                result = Value(ComplexMatrix(rows, cols, flat));
+            }
+            else {
+                std::vector<double> flat(total);
+                for (int ii = 0; ii < total; ++ii)
+                    flat[ii] = stack[stack.size() - total + ii].asDouble();
+                result = Value(RealMatrix(rows, cols, flat));
+            }
+        }
+
+        for (int ii = 0; ii < total; ++ii) pop();
+        push(result);
+        return;
+    }
+
+    void VM::execIn() {
+        Value haystack = pop(), needle = pop();
+
+        if (std::holds_alternative<std::string>(needle.data) &&
+            std::holds_alternative<std::string>(haystack.data)) {
+            bool found = std::get<std::string>(haystack.data).find(
+                std::get<std::string>(needle.data)) != std::string::npos;
+            push(Value(found ? 1.0 : 0.0));
+            return;
+        }
+        if (std::holds_alternative<std::string>(haystack.data)) {
+            throw std::runtime_error(
+                "VM Error: 'in' on string requires a string on the left side.");
+        }
+
+        if (std::holds_alternative<RealMatrix>(haystack.data)) {
+            const auto& m = std::get<RealMatrix>(haystack.data);
+            double target;
+            try { target = needle.asDouble(); }
+            catch (...) { push(Value(0.0)); return; }
+            for (const auto& v : m.rawData()) {
+                if (Tol::isEq(v, target, 1e4)) { push(Value(1.0)); return; }
+            }
+            push(Value(0.0));
+            return;
+        }
+
+        if (std::holds_alternative<ComplexMatrix>(haystack.data)) {
+            const auto& m = std::get<ComplexMatrix>(haystack.data);
+            Complex target;
+            try { target = needle.asComplex(); }
+            catch (...) { push(Value(0.0)); return; }
+            for (const auto& v : m.rawData()) {
+                if (v == target) { push(Value(1.0)); return; }
+            }
+            push(Value(0.0));
+            return;
+        }
+
+        if (std::holds_alternative<StringMatrix>(haystack.data)) {
+            if (!std::holds_alternative<std::string>(needle.data))
+                throw std::runtime_error(
+                    "VM Error: 'in' on StringMatrix requires a string needle.");
+            const auto& m = std::get<StringMatrix>(haystack.data);
+            const auto& target = std::get<std::string>(needle.data);
+            for (const auto& v : m.rawData()) {
+                if (v == target) { push(Value(1.0)); return; }
+            }
+            push(Value(0.0));
+            return;
+        }
+
+        if (std::holds_alternative<List>(haystack.data)) {
+            const auto& L = std::get<List>(haystack.data);
+            for (const auto& e : L.raw()) {
+                try {
+                    Value elem = std::any_cast<Value>(e);
+                    if (vmValuesEqual(needle, elem)) {
+                        push(Value(1.0));
+                        return;
+                    }
+                }
+                catch (...) {}
+            }
+            push(Value(0.0));
+            return;
+        }
+
+        if (std::holds_alternative<Dict>(haystack.data)) {
+            std::string key;
+            if (std::holds_alternative<std::string>(needle.data))
+                key = std::get<std::string>(needle.data);
+            else {
+                std::ostringstream oss; oss << needle;
+                key = oss.str();
+            }
+            push(Value(std::get<Dict>(haystack.data).has(key) ? 1.0 : 0.0));
+            return;
+        }
+
+        if (std::holds_alternative<Set>(haystack.data)) {
+            push(Value(std::get<Set>(haystack.data).contains(setValueKey(needle)) ? 1.0 : 0.0));
+            return;
+        }
+
+        if (std::holds_alternative<std::shared_ptr<Instance>>(haystack.data)) {
+            auto method = findDunder(haystack, "__contains__");
+            if (method) {
+                push(Value(isTruthy(callDunder(haystack, "__contains__", { needle })) ? 1.0 : 0.0));
+                return;
+            }
+        }
+        throw std::runtime_error(
+            "VM Error: 'in' requires an array, vector, matrix, string, list, dict, or instance.");
+    }
+
+    // VM.cpp 中的实现：
+    Value VM::execReturn(bool& shouldExit) {
+        shouldExit = false;
+        Value result = pop();
+        int base = frame().stackBase;
+        std::string fnName = frame().function->name;
+
+        // --- ref writeback ---
+        pendingRefWritebacks.clear();
+        const auto& refFlags = frame().function->paramIsRef;
+        if (!refFlags.empty()) {
+            for (int i = 0; i < static_cast<int>(refFlags.size()); ++i) {
+                if (refFlags[i]) {
+                    int localIdx = base + i;
+                    if (localIdx < static_cast<int>(stack.size())) {
+                        pendingRefWritebacks.push_back({ i, stack[localIdx] });
+                    }
+                }
+            }
+        }
+
+        // ★ FIX: init 捕获 + 帧上下文保存（来自之前的修复）
+        Value initSelf;
+        if (fnName == "init") {
+            auto selfIt = globals.find("self");
+            if (selfIt != globals.end())
+                initSelf = selfIt->second;
+        }
+
+        bool needsRestore = frame().hasSavedContext;
+        Value savedSelf = frame().savedSelf;
+        Value savedClass = frame().savedClass;
+
+        while (!exceptionHandlers.empty() &&
+            exceptionHandlers.back().frameIndex == static_cast<int>(frames.size()) - 1) {
+            exceptionHandlers.pop_back();
+        }
+
+        frames.pop_back();
+
+        if (needsRestore) {
+            globals["self"] = savedSelf;
+            globals["__class__"] = savedClass;
+        }
+
+        // ★ 退出判定
+        if (static_cast<int>(frames.size()) <= currentTargetFrameDepth) {
+            if (currentTargetFrameDepth == 0) {
+                stack.clear();
+            }
+            else {
+                stack.resize(base);
+            }
+            shouldExit = true;  // ★ 通知 run() 退出
+            return result;
+        }
+
+        stack.resize(base);
+        if (fnName == "init") {
+            if (!initSelf.isNone())
+                push(initSelf);
+            else
+                push(result);
+        }
+        else {
+            push(result);
+        }
+        return Value::none();  // 返回值在不退出时不使用
+    }
+
+    void VM::execInvoke(uint16_t nameIdx, uint8_t argc) {
+        std::string methodName = std::get<std::string>(currentChunk().constants[nameIdx].data);
+
+        Value obj = stack[stack.size() - 1 - argc];
+
+        if (!std::holds_alternative<std::shared_ptr<Instance>>(obj.data))
+            throw std::runtime_error("VM Error: Cannot invoke method on non-instance.");
+
+        auto inst = std::get<std::shared_ptr<Instance>>(obj.data);
+
+        std::shared_ptr<FunctionClosure> method;
+        std::shared_ptr<ClassDefinition> owningClass;
+        auto c = inst->classDef;
+        while (c) {
+            auto it = c->methods.find(methodName);
+            if (it != c->methods.end()) {
+                method = it->second;
+                owningClass = c;
+                break;
+            }
+            c = c->parent;
+        }
+        if (!method)
+            throw std::runtime_error("VM Error: No method '" + methodName +
+                "' on '" + inst->classDef->name + "'.");
+
+        // ★ 不在这里赋值！等 saveSelfContext 保存完外层上下文后再赋值
+
+        if (method->isBytecode()) {
+            CallFrame newFrame;
+            saveSelfContext(newFrame);  // ★ 先保存外层的 self/__class__
+            globals["self"] = Value(inst);          // ★ 然后才设置新的
+            globals["__class__"] = Value(owningClass);
+            auto& fnDef = compiledFunctions[method->compiledFnIndex];
+            int padCount = fnDef->maxArity - static_cast<int>(argc);
+            for (int j = 0; j < padCount; ++j) push(Value::none());
+            int reserveCount = fnDef->localCount - fnDef->maxArity;
+            for (int j = 0; j < reserveCount; ++j) push(Value::none());
+            newFrame.function = fnDef.get();
+            newFrame.ip = 0;
+            newFrame.stackBase = static_cast<int>(stack.size()) - fnDef->localCount;
+            if (method->hasCaptures()) {
+                newFrame.upvalues = std::any_cast<std::shared_ptr<std::vector<Value>>>(
+                    method->capturedEnv);
+            }
+            stack.erase(stack.begin() + newFrame.stackBase - 1);
+            newFrame.stackBase--;
+            frames.push_back(newFrame);
+            return;
+        }
+        else if (method->isNative()) {
+            Value prevSelf = globals.count("self") ? globals["self"] : Value::none();
+            Value prevClass = globals.count("__class__") ? globals["__class__"] : Value::none();
+
+            globals["self"] = Value(inst);
+            globals["__class__"] = Value(owningClass);
+
+            std::vector<Value> args(argc);
+            for (int j = argc - 1; j >= 0; --j) args[j] = pop();
+            pop();
+
+            Value result;
+            try {
+                auto& fn = std::any_cast<NativeCallable&>(method->nativeFn);
+                result = fn(args);
+            }
+            catch (...) {
+                globals["self"] = prevSelf;
+                globals["__class__"] = prevClass;
+                throw;
+            }
+
+            globals["self"] = prevSelf;
+            globals["__class__"] = prevClass;
+            push(result);
+            return;
+        }
+
+        throw std::runtime_error("VM Error: Method '" + methodName +
+            "' has no callable implementation.");
+    }
+
+    void VM::execSuperInvoke(uint16_t nameIdx, uint8_t argc) {
+        std::string methodName = std::get<std::string>(currentChunk().constants[nameIdx].data);
+
+        Value selfVal = stack[stack.size() - 1 - argc];
+
+        if (!std::holds_alternative<std::shared_ptr<Instance>>(selfVal.data))
+            throw std::runtime_error("VM Error: 'super' requires an instance context.");
+
+        auto inst = std::get<std::shared_ptr<Instance>>(selfVal.data);
+
+        auto classIt = globals.find("__class__");
+        if (classIt == globals.end() ||
+            !std::holds_alternative<std::shared_ptr<ClassDefinition>>(classIt->second.data))
+            throw std::runtime_error("VM Error: 'super' requires class context (__class__).");
+
+        auto currentClass = std::get<std::shared_ptr<ClassDefinition>>(classIt->second.data);
+        auto parentClass = currentClass->parent;
+        if (!parentClass)
+            throw std::runtime_error("VM Error: Class '" + currentClass->name +
+                "' has no parent class.");
+
+        std::shared_ptr<FunctionClosure> method;
+        std::shared_ptr<ClassDefinition> owningClass;
+        auto c = parentClass;
+        while (c) {
+            auto it = c->methods.find(methodName);
+            if (it != c->methods.end()) {
+                method = it->second;
+                owningClass = c;
+                break;
+            }
+            c = c->parent;
+        }
+        if (!method)
+            throw std::runtime_error("VM Error: Parent class has no method '" +
+                methodName + "'.");
+
+        // ★ 不在这里赋值！
+
+        if (method->isBytecode()) {
+            CallFrame newFrame;
+            saveSelfContext(newFrame);  // ★ 先保存
+            globals["self"] = Value(inst);          // ★ 再赋值
+            globals["__class__"] = Value(owningClass);
+            auto& fnDef = compiledFunctions[method->compiledFnIndex];
+
+            int padCount = fnDef->maxArity - static_cast<int>(argc);
+            for (int j = 0; j < padCount; ++j) push(Value::none());
+            int reserveCount = fnDef->localCount - fnDef->maxArity;
+            for (int j = 0; j < reserveCount; ++j) push(Value::none());
+
+            newFrame.function = fnDef.get();
+            newFrame.ip = 0;
+            newFrame.stackBase = static_cast<int>(stack.size()) - fnDef->localCount;
+            if (method->hasCaptures()) {
+                newFrame.upvalues = std::any_cast<std::shared_ptr<std::vector<Value>>>(
+                    method->capturedEnv);
+            }
+            stack.erase(stack.begin() + newFrame.stackBase - 1);
+            newFrame.stackBase--;
+            frames.push_back(newFrame);
+            return;
+        }
+        else if (method->isNative()) {
+            Value prevSelf = globals.count("self") ? globals["self"] : Value::none();
+            Value prevClass = globals.count("__class__") ? globals["__class__"] : Value::none();
+            globals["self"] = Value(inst);
+            globals["__class__"] = Value(owningClass);
+            std::vector<Value> args(argc);
+            for (int j = argc - 1; j >= 0; --j) args[j] = pop();
+            pop();
+            Value result;
+            try {
+                auto& fn = std::any_cast<NativeCallable&>(method->nativeFn);
+                result = fn(args);
+            }
+            catch (...) {
+                globals["self"] = prevSelf;
+                globals["__class__"] = prevClass;
+                throw;
+            }
+            globals["self"] = prevSelf;
+            globals["__class__"] = prevClass;
+            push(result);
+            return;
+        }
+
+        throw std::runtime_error("VM Error: Parent method '" + methodName +
+            "' has no callable implementation.");
     }
 
 } // namespace jc
