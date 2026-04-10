@@ -24,6 +24,7 @@ Developed by Yu Liangyang, Tsinghua University.
 - **Error Handling**: `try/catch/throw` block constructs and functional `pcall` with safe VM-boundary exception containment.
 - **Functions**: First-class closures, lambdas `(x) => expr`, default parameters, variadic arguments (`...args`), and `ref` parameter binding for pass-by-reference semantics.
 - **Universal Generic API (v2.2.1)**: All 30+ array manipulation functions (`push`, `slice`, `map`, `filter`, `reduce`, `sort`, `join`, `zip`, etc.) operate uniformly across four container types — `RealMatrix`, `ComplexMatrix`, `StringMatrix`, and `List` — via compile-time `std::visit` dispatching with `if constexpr` type-aware branching. Functions automatically preserve the input container type in their output.
+- **Set Algebra**: Native `Set` type with O(1) membership testing (`in`), insertion-order preservation, and full set-theoretic operations. Supports operator syntax for union (`|`), intersection (`&`), difference (`-`), and Cartesian product (`*`), with compound assignment variants (`|=`, `&=`). Includes powerset generation (`setPow`), relation predicates (`isSubset`, `isSuperset`, `isDisjoint`), and symmetric difference. Sets use reference semantics and are tracked by the garbage collector.
 - **Paradigms**: 
   - *Data Manipulation*: List comprehensions, array/dictionary destructuring (`{x, y} = obj`), and object shorthand properties.
   - *Functional*: Partial application via `_` placeholder, argument unpacking (`apply()`), pipe operator `|>` for left-to-right evaluation chains, and functional primitives (`map`, `filter`, `reduce`).
@@ -72,6 +73,30 @@ All 30+ array manipulation built-in functions have been refactored from type-spe
 | toList / toMatrix | ✓ | ✓ | ✓ | ✓ |
 
 Validated by a 133-assertion automated test suite (`test_generic_api.jc2`).
+
+---
+
+### Set Data Type
+Introduced `Set` as a first-class unordered deduplicated collection with reference semantics and full garbage collector tracking. Key capabilities include:
+
+- **O(1) membership**: `3 in mySet` compiles to a hash-table lookup.
+- **Operator overloading**: `a | b` (union), `a & b` (intersection), `a - b` (difference), `a * b` (Cartesian product), with compound variants `|=`, `&=`.
+- **Advanced algebra**: `setPow(s)` generates the full powerset (2^n subsets), `setSymDiff(a, b)` computes symmetric difference.
+- **Relation predicates**: `isSubset`, `isSuperset`, `isDisjoint` for declarative set reasoning.
+- **Polymorphic elements**: Sets can hold any JC2 value type (numbers, strings, lists, even other sets) thanks to the `setValueKey` content-addressable hashing engine.
+- **Unified container API**: `add(s, val)`, `remove(s, val)`, `discard(s, val)`, `clear(s)`, `len(s)` — identical syntax to List and Dict operations.
+
+```jc2
+s = Set(1, 2, 3)
+t = Set(2, 3, 4)
+s | t                    // → Set{1, 2, 3, 4}
+s & t                    // → Set{2, 3}
+s - t                    // → Set{1}
+s * Set("a", "b")        // → Cartesian product
+isSubset(Set(1,2), s)    // → 1
+```
+
+---
 
 ### New Standard Libraries
 - **`discrete.jc2`**: Discrete mathematics module providing:
