@@ -385,133 +385,31 @@ namespace jc {
     std::unique_ptr<Expr> Parser::call() {
         auto expr = primary();
         while (true) {
-            if (match({ TokenType::LPAREN })) {
-                std::vector<std::unique_ptr<Expr>> args;
-                while (match({ TokenType::NEWLINE })) {}  // ★
-                if (!check(TokenType::RPAREN)) {
-                    do {
-                        while (match({ TokenType::NEWLINE })) {}  // ★
-                        args.push_back(assignment());
-                        while (match({ TokenType::NEWLINE })) {}  // ★
-                    } while (match({ TokenType::COMMA }));
-                }
-                while (match({ TokenType::NEWLINE })) {}  // ★
-                consume(TokenType::RPAREN, "Parser Error: Expect ')' after arguments.");
-                // =========================================================
-                // ★ 魔法糖 1：自动柯里化探测 (Partial Application)
-                // =========================================================
-                bool isPartial = false;
-                std::vector<Token> phParams;
-                std::vector<std::shared_ptr<Expr>> phDefaults;
-                int phCount = 0;
-                for (auto& arg : args) {
-                    if (auto* var = dynamic_cast<Variable*>(arg.get())) {
-                        if (var->name.lexeme == "_") {
-                            isPartial = true;
-                            // 制造一个隐形的变量名：__ph_0, __ph_1...
-                            Token phTok(TokenType::IDENTIFIER, "__ph_" + std::to_string(phCount++), var->name.line);
-                            phParams.push_back(phTok);
-                            phDefaults.push_back(nullptr);
-                            // 将暗号 `_` 替换为真实的内部变量传递
-                            arg = std::make_unique<Variable>(phTok);
-                        }
-                    }
-                }
-                std::unique_ptr<Expr> callNode;
-                if (auto* varExpr = dynamic_cast<Variable*>(expr.get())) {
-                    callNode = std::make_unique<Call>(varExpr->name, std::move(args));
-                }
-                else {
-                    callNode = std::make_unique<InvokeExpr>(std::move(expr), std::move(args));
-                }
-                // 如果有占位符，直接把这个调用包进一个 Lambda 里！
-                if (isPartial) {
-                    expr = std::make_unique<LambdaExpr>(
-                        std::move(phParams), std::move(phDefaults), false,
-                        "<partial_apply>", std::shared_ptr<Expr>(callNode.release())
-                    );
-                }
-                else {
-                    expr = std::move(callNode);
-                }
-            }
-            else if (match({ TokenType::LBRACKET })) {
-                std::vector<std::unique_ptr<Expr>> indices;
+            // ★ 智能跨行分发器 (Fluent API Semantic Lookahead)
+            // 先保存现场，跨越所有换行去偷看下一个物理 Token 是什么
+            int savePos = current;
+            while (match({ TokenType::NEWLINE })) {}
 
-                auto parseSliceArg = [this]() -> std::unique_ptr<Expr> {
-                    // ★ 增加安全检查：如果该维度完全是空的，但不是被切片符(:)占据，
-                    // 说明用户写了 M[,] 或者 M[0,] 这是非法的，必须填写参数或由切片代替
-                    if (check(TokenType::COMMA) || check(TokenType::RBRACKET)) {
-                        throw std::runtime_error("Syntax Error: Missing index expression.");
-                    }
-
-                    std::unique_ptr<Expr> st, en, sp;
-                    bool isSl = false;
-                    while (match({ TokenType::NEWLINE })) {}
-
-                    if (!check(TokenType::COLON) && !check(TokenType::COMMA) && !check(TokenType::RBRACKET)) {
-                        st = expression();
-                    }
-                    if (match({ TokenType::COLON })) {
-                        isSl = true;
-                        while (match({ TokenType::NEWLINE })) {}
-                        if (!check(TokenType::COLON) && !check(TokenType::COMMA) && !check(TokenType::RBRACKET)) {
-                            en = expression();
-                        }
-                        if (match({ TokenType::COLON })) {
-                            while (match({ TokenType::NEWLINE })) {}
-                            if (!check(TokenType::COMMA) && !check(TokenType::RBRACKET)) {
-                                sp = expression();
-                            }
-                        }
-                    }
-                    // ★ 允许单纯的 ":" 成为合法的切片 (st, en, sp 皆 nullptr)
-                    // 上面的 check 拦截的是彻头彻尾的空。如果是 ":" 起手，那么 isSl 为 true，合法。
-                    if (isSl) return std::make_unique<SliceExpr>(std::move(st), std::move(en), std::move(sp));
-                    return st;
-                    };
-
-                // ★ 切片/索引语法的起点校验：如果是纯粹的 [:] 也要兼容
-                if (check(TokenType::COLON)) {
-                    indices.push_back(parseSliceArg());
-                }
-                else {
-                    indices.push_back(parseSliceArg());
-                }
-
-                if (match({ TokenType::COMMA })) {
-                    while (match({ TokenType::NEWLINE })) {}
-                    // ★ 拦截 M[0, ] 这种尾随逗号缺少参数的情况
-                    if (check(TokenType::RBRACKET)) {
-                        throw std::runtime_error("Syntax Error: Missing index expression after comma.");
-                    }
-                    indices.push_back(parseSliceArg());
-                }
-
-                while (match({ TokenType::NEWLINE })) {}
-                consume(TokenType::RBRACKET, "Parser Error: Expect ']' after index.");
-                expr = std::make_unique<IndexAccess>(std::move(expr), std::move(indices));
-            }
-            else if (match({ TokenType::DOT })) {
-                while (match({ TokenType::NEWLINE })) {}  // ★
+            if (match({ TokenType::DOT })) {
+                // 如果下一行以 '.' 开头，我们确认这是一次链式调用延续！吃掉刚才跨越的换行。
+                while (match({ TokenType::NEWLINE })) {}  // 允许点号后面也有空行
                 Token field = consume(TokenType::IDENTIFIER,
                     "Parser Error: Expect field/method name after '.'.");
+
                 if (match({ TokenType::LPAREN })) {
                     std::vector<std::unique_ptr<Expr>> args;
-                    while (match({ TokenType::NEWLINE })) {}  // ★
+                    while (match({ TokenType::NEWLINE })) {}
                     if (!check(TokenType::RPAREN)) {
                         do {
-                            while (match({ TokenType::NEWLINE })) {}  // ★
+                            while (match({ TokenType::NEWLINE })) {}
                             args.push_back(assignment());
-                            while (match({ TokenType::NEWLINE })) {}  // ★
+                            while (match({ TokenType::NEWLINE })) {}
                         } while (match({ TokenType::COMMA }));
                     }
-                    while (match({ TokenType::NEWLINE })) {}  // ★
+                    while (match({ TokenType::NEWLINE })) {}
                     consume(TokenType::RPAREN, "Parser Error: Expect ')' after method arguments.");
 
-                    // =========================================================
                     // ★ 魔法糖 2：对象方法的自动柯里化
-                    // =========================================================
                     bool isPartial = false;
                     std::vector<Token> phParams;
                     std::vector<std::shared_ptr<Expr>> phDefaults;
@@ -542,6 +440,101 @@ namespace jc {
                 else {
                     expr = std::make_unique<DotAccess>(std::move(expr), field);
                 }
+                continue; // 成功解析完一个 DOT，进入下一个循环
+            }
+
+            // 如果探路发现不是 DOT 延续，立刻恢复现场（吐回刚才走过的换行符），让语句在上一行终结！
+            current = savePos;
+
+            // 处理紧随其后的普通调用和索引
+            // 注意：绝不允许 () 和 [] 被换行分开（比如 `a \n ()` 会解析成两条无关语句），所以直接原样验证
+            if (match({ TokenType::LPAREN })) {
+                std::vector<std::unique_ptr<Expr>> args;
+                while (match({ TokenType::NEWLINE })) {}
+                if (!check(TokenType::RPAREN)) {
+                    do {
+                        while (match({ TokenType::NEWLINE })) {}
+                        args.push_back(assignment());
+                        while (match({ TokenType::NEWLINE })) {}
+                    } while (match({ TokenType::COMMA }));
+                }
+                while (match({ TokenType::NEWLINE })) {}
+                consume(TokenType::RPAREN, "Parser Error: Expect ')' after arguments.");
+
+                // ★ 魔法糖 1：普通函数的自动柯里化
+                bool isPartial = false;
+                std::vector<Token> phParams;
+                std::vector<std::shared_ptr<Expr>> phDefaults;
+                int phCount = 0;
+                for (auto& arg : args) {
+                    if (auto* var = dynamic_cast<Variable*>(arg.get())) {
+                        if (var->name.lexeme == "_") {
+                            isPartial = true;
+                            Token phTok(TokenType::IDENTIFIER, "__ph_" + std::to_string(phCount++), var->name.line);
+                            phParams.push_back(phTok);
+                            phDefaults.push_back(nullptr);
+                            arg = std::make_unique<Variable>(phTok);
+                        }
+                    }
+                }
+                std::unique_ptr<Expr> callNode;
+                if (auto* varExpr = dynamic_cast<Variable*>(expr.get())) {
+                    callNode = std::make_unique<Call>(varExpr->name, std::move(args));
+                }
+                else {
+                    callNode = std::make_unique<InvokeExpr>(std::move(expr), std::move(args));
+                }
+                if (isPartial) {
+                    expr = std::make_unique<LambdaExpr>(
+                        std::move(phParams), std::move(phDefaults), false,
+                        "<partial_apply>", std::shared_ptr<Expr>(callNode.release())
+                    );
+                }
+                else {
+                    expr = std::move(callNode);
+                }
+            }
+            else if (match({ TokenType::LBRACKET })) {
+                std::vector<std::unique_ptr<Expr>> indices;
+                auto parseSliceArg = [this]() -> std::unique_ptr<Expr> {
+                    if (check(TokenType::COMMA) || check(TokenType::RBRACKET)) {
+                        throw std::runtime_error("Syntax Error: Missing index expression.");
+                    }
+                    std::unique_ptr<Expr> st, en, sp;
+                    bool isSl = false;
+                    while (match({ TokenType::NEWLINE })) {}
+
+                    if (!check(TokenType::COLON) && !check(TokenType::COMMA) && !check(TokenType::RBRACKET)) {
+                        st = expression();
+                    }
+                    if (match({ TokenType::COLON })) {
+                        isSl = true;
+                        while (match({ TokenType::NEWLINE })) {}
+                        if (!check(TokenType::COLON) && !check(TokenType::COMMA) && !check(TokenType::RBRACKET)) {
+                            en = expression();
+                        }
+                        if (match({ TokenType::COLON })) {
+                            while (match({ TokenType::NEWLINE })) {}
+                            if (!check(TokenType::COMMA) && !check(TokenType::RBRACKET)) {
+                                sp = expression();
+                            }
+                        }
+                    }
+                    if (isSl) return std::make_unique<SliceExpr>(std::move(st), std::move(en), std::move(sp));
+                    return st;
+                    };
+
+                if (check(TokenType::COLON)) indices.push_back(parseSliceArg());
+                else indices.push_back(parseSliceArg());
+
+                if (match({ TokenType::COMMA })) {
+                    while (match({ TokenType::NEWLINE })) {}
+                    if (check(TokenType::RBRACKET)) throw std::runtime_error("Syntax Error: Missing index expression after comma.");
+                    indices.push_back(parseSliceArg());
+                }
+                while (match({ TokenType::NEWLINE })) {}
+                consume(TokenType::RBRACKET, "Parser Error: Expect ']' after index.");
+                expr = std::make_unique<IndexAccess>(std::move(expr), std::move(indices));
             }
             else break;
         }
@@ -928,9 +921,10 @@ namespace jc {
                     std::shared_ptr<Expr>(body.release()));
             }
             else {
-                // 不是 lambda，回退
                 current = savedPos;
+                while (match({ TokenType::NEWLINE })) {}
                 auto expr = expression();
+                while (match({ TokenType::NEWLINE })) {}
                 consume(TokenType::RPAREN, "Parser Error: Expect ')' after expression.");
                 return expr;
             }
