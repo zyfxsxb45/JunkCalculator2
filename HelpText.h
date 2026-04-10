@@ -1360,8 +1360,13 @@ namespace jc {
   ──────────────────────
     v[i]                Element at zero-indexed position (negative wraps)
     v[i] = val          Modify element in-place
-    first(v) / last(v)  First and last elements
-    pop(v)              Return tail element (non-destructive)
+    first(v) / last(v)  Read first / last element (non-destructive)
+    pop(v)              Remove & return LAST element
+                          List:   O(1) destructive (mutates original in-place)
+                          Matrix: non-destructive (equivalent to last())
+    shift(v)            Remove & return FIRST element
+                          List:   O(n) destructive (mutates original in-place)
+                          Matrix: non-destructive (equivalent to first())
     len(v)              Element count
 
   Adding & Removing  (Returns new container of same type)
@@ -1513,11 +1518,18 @@ namespace jc {
     insert(L, idx, val)     Insert value at a specific index
     removeAt(L, idx)        Remove element at specific index
 
-  Element Access
+  Element Access (Destructive Operations — List Only)
   ──────────────────────
-    first(L) / last(L)     Endpoints
-    pop(L)                  Returns the last element (non-destructive)
+    first(L) / last(L)     Read endpoints (non-destructive)
+    pop(L)                  Remove & return last element — O(1) in-place
+    shift(L)                Remove & return first element — O(n) in-place
     len(L)                  Number of elements
+
+    Because Lists use reference semantics, pop() and shift() MUTATE
+    the original list directly:
+      L = list(1, 2, 3)
+      pop(L)                → 3     (L is now [1, 2])
+      shift(L)              → 1     (L is now [2])
 
   Slicing (Native Syntax)
   ──────────────────────

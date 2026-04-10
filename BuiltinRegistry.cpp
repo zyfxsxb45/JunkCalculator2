@@ -1104,15 +1104,40 @@ void BuiltinRegistry::registerArrayFunctions() {
         return std::visit([&](auto&& arg) -> Value {
             using T = std::decay_t<decltype(arg)>;
             if constexpr (std::is_same_v<T, List>) {
-                if (arg.empty()) throw std::runtime_error("Runtime Error: pop() on empty list.");
-                return anyToVal(arg.raw().back());
+                // ★ List: TRUE destructive O(1) pop — mutates original via shared_ptr
+                List L = arg; // shallow copy: same underlying data
+                if (L.empty()) throw std::runtime_error("Runtime Error: pop() on empty list.");
+                Value val = anyToVal(L.raw().back());
+                L.raw().pop_back();
+                return val;
             }
             else if constexpr (std::is_same_v<T, RealMatrix> || std::is_same_v<T, ComplexMatrix> || std::is_same_v<T, StringMatrix>) {
+                // Matrix (value semantics): non-destructive, returns last element
                 int n = arg.getRows() * arg.getCols();
                 if (n == 0) throw std::runtime_error("Runtime Error: pop() on empty vector.");
                 return Value(arg.rawData()[n - 1]);
             }
             return expectContainer("pop");
+            }, args[0].data);
+        });
+
+    reg("shift", { 1 }, [expectContainer](const std::vector<Value>& args) -> Value {
+        return std::visit([&](auto&& arg) -> Value {
+            using T = std::decay_t<decltype(arg)>;
+            if constexpr (std::is_same_v<T, List>) {
+                // ★ List: destructive O(n) shift — mutates original via shared_ptr
+                List L = arg;
+                if (L.empty()) throw std::runtime_error("Runtime Error: shift() on empty list.");
+                Value val = anyToVal(L.raw().front());
+                L.raw().erase(L.raw().begin());
+                return val;
+            }
+            else if constexpr (std::is_same_v<T, RealMatrix> || std::is_same_v<T, ComplexMatrix> || std::is_same_v<T, StringMatrix>) {
+                int n = arg.getRows() * arg.getCols();
+                if (n == 0) throw std::runtime_error("Runtime Error: shift() on empty vector.");
+                return Value(arg.rawData()[0]);
+            }
+            return expectContainer("shift");
             }, args[0].data);
         });
 

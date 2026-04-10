@@ -59,7 +59,7 @@ All 30+ array manipulation built-in functions have been refactored from type-spe
 
 | Function Group | RealMatrix | ComplexMatrix | StringMatrix | List |
 |---|:---:|:---:|:---:|:---:|
-| first / last / pop | ✓ | ✓ | ✓ | ✓ |
+| first / last / pop / shift | ✓ | ✓ | ✓ | ✓ |
 | push / prepend / insert / removeAt | ✓ | ✓ | ✓ | ✓ |
 | slice (function & syntax) | ✓ | ✓ | ✓ | ✓ |
 | reverse / flatten / unique | ✓ | ✓ | ✓ | ✓ |
@@ -72,7 +72,8 @@ All 30+ array manipulation built-in functions have been refactored from type-spe
 | cumsum / cumprod / diffs | ✓ | ✓ | — | ✓ |
 | toList / toMatrix | ✓ | ✓ | ✓ | ✓ |
 
-Validated by a 133-assertion automated test suite (`test_generic_api.jc2`).
+Validated by a 150-assertion automated test suite (`test_array.jc2`).
+ - *Note: the functions `pop()` and `shift()` are now destructive when applied to Lists.*
 
 ---
 
