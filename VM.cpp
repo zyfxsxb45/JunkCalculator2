@@ -3,6 +3,7 @@
 #include "Module.h"
 #include "BuiltinRegistry.h"
 #include "Highlight.h"
+#include "GcHeap.h"
 #include <iostream>
 #include <cmath>
 #include <stdexcept>
@@ -406,6 +407,15 @@ namespace jc {
     Value VM::run(int targetFrameDepth) {
         currentTargetFrameDepth = targetFrameDepth;
         while (true) {
+            
+            // ═══ GC 自动触发探针 ═══
+            if (++gcInstructionCounter_ >= 2048) {
+                gcInstructionCounter_ = 0;
+                if (GcHeap::get().shouldCollect()) {
+                    collectGarbage();
+                }
+            }
+
             // =======================================================
             // ★ 调试器拦截探针 (Debugger Interceptor)
             // =======================================================
@@ -421,11 +431,11 @@ namespace jc {
                     }
                 }
             }
-            // =======================================================
+
             if (frame().ip >= static_cast<int>(currentChunk().code.size())) {
                 return stack.empty() ? Value::none() : pop();
             }
-
+            
             OpCode op;
             try {
                 op = readOp();
@@ -3361,6 +3371,138 @@ namespace jc {
 
         funcProfiles.clear();
         opCounts.clear();
+    }
+
+// =================================================================
+// ★ 垃圾回收器实现 (Mark-and-Sweep Garbage Collector)
+// =================================================================
+
+    void VM::markClosure(const FunctionClosure& cl,
+        std::unordered_set<const void*>& marked)
+    {
+        if (!cl.capturedEnv.has_value()) return;
+        try {
+            auto env = std::any_cast<std::shared_ptr<std::vector<Value>>>(cl.capturedEnv);
+            if (!env) return;
+            for (const auto& v : *env)
+                markValue(v, marked);
+        }
+        catch (...) {}
+    }
+
+    void VM::markClassDef(const std::shared_ptr<ClassDefinition>& cls,
+        std::unordered_set<const void*>& marked)
+    {
+        if (!cls) return;
+        const void* id = cls.get();
+        if (marked.count(id)) return;    // 防止继承链递归循环
+        marked.insert(id);
+
+        for (const auto& [name, method] : cls->methods) {
+            if (method) markClosure(*method, marked);
+        }
+        markClassDef(cls->parent, marked);
+    }
+
+    void VM::markValue(const Value& val,
+        std::unordered_set<const void*>& marked)
+    {
+        // ── List ──
+        if (auto* p = std::get_if<List>(&val.data)) {
+            const void* id = p->id();
+            if (!id || marked.count(id)) return;
+            marked.insert(id);
+            for (const auto& elem : p->raw()) {
+                try { markValue(std::any_cast<const Value&>(elem), marked); }
+                catch (...) {}
+            }
+            return;
+        }
+
+        // ── Dict ──
+        if (auto* p = std::get_if<Dict>(&val.data)) {
+            const void* id = p->id();
+            if (!id || marked.count(id)) return;
+            marked.insert(id);
+            for (const auto& [key, anyVal] : p->getEntries()) {
+                try { markValue(std::any_cast<const Value&>(anyVal), marked); }
+                catch (...) {}
+            }
+            return;
+        }
+
+        // ── Instance ──
+        if (auto* p = std::get_if<std::shared_ptr<Instance>>(&val.data)) {
+            const void* id = p->get();
+            if (!id || marked.count(id)) return;
+            marked.insert(id);
+            // 追踪实例的所有字段
+            for (const auto& [key, anyVal] : (*p)->fields.getEntries()) {
+                try { markValue(std::any_cast<const Value&>(anyVal), marked); }
+                catch (...) {}
+            }
+            // 追踪实例的类定义 (方法中可能捕获了闭包环境)
+            markClassDef((*p)->classDef, marked);
+            return;
+        }
+
+        // ── FunctionClosure ──
+        if (auto* p = std::get_if<std::shared_ptr<FunctionClosure>>(&val.data)) {
+            if (*p) markClosure(**p, marked);
+            return;
+        }
+
+        // ── ClassDefinition ──
+        if (auto* p = std::get_if<std::shared_ptr<ClassDefinition>>(&val.data)) {
+            markClassDef(*p, marked);
+            return;
+        }
+
+        // 所有其他类型 (double, BigInt, string, Matrix 等) 都是叶子节点，无需追踪
+    }
+
+    void VM::collectGarbage() {
+        // ═══ Phase 1: MARK ═══
+        std::unordered_set<const void*> marked;
+
+        // 根集合 1: 全局变量
+        for (const auto& [name, val] : globals)
+            markValue(val, marked);
+
+        // 根集合 2: 虚拟机求值栈
+        for (const auto& val : stack)
+            markValue(val, marked);
+
+        // 根集合 3: 所有调用帧的闭包上值
+        for (const auto& f : frames) {
+            if (f.upvalues) {
+                for (const auto& val : *f.upvalues)
+                    markValue(val, marked);
+            }
+        }
+
+        // 根集合 4: 常量池 (编译后的函数里缓存的字面量)
+        for (const auto& fn : compiledFunctions) {
+            for (const auto& c : fn->chunk.constants)
+                markValue(c, marked);
+        }
+
+        // ═══ Phase 2: SWEEP ═══
+        GcHeap::get().sweep(marked);
+    }
+
+    int VM::runGC() {
+        std::unordered_set<const void*> marked;
+        for (const auto& [name, val] : globals)  markValue(val, marked);
+        for (const auto& val : stack)             markValue(val, marked);
+        for (const auto& f : frames) {
+            if (f.upvalues)
+                for (const auto& val : *f.upvalues) markValue(val, marked);
+        }
+        for (const auto& fn : compiledFunctions)
+            for (const auto& c : fn->chunk.constants) markValue(c, marked);
+
+        return GcHeap::get().sweep(marked);
     }
 
 } // namespace jc

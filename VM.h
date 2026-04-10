@@ -94,7 +94,13 @@ namespace jc {
         };
         std::map<std::string, FuncProfile> funcProfiles;
         // 当一次完整的脚本执行完，打印报告
-       
+           // ═══ 垃圾回收器 (Mark-and-Sweep GC) ═══
+        void collectGarbage();
+        void markValue(const Value& val, std::unordered_set<const void*>& marked);
+        void markClosure(const FunctionClosure& cl, std::unordered_set<const void*>& marked);
+        void markClassDef(const std::shared_ptr<ClassDefinition>& cls,
+            std::unordered_set<const void*>& marked);
+        int gcInstructionCounter_ = 0;
 
     public:
         VM();
@@ -134,6 +140,8 @@ namespace jc {
 
         void printProfileReport();
         void enableProfiler(bool enable) { profileMode = enable; }
+
+        int runGC();
     };
 
 } // namespace jc

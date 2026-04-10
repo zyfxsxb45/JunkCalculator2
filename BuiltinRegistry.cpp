@@ -2,6 +2,7 @@
 #include "Highlight.h"          // ★ highlightCode(), colorsEnabled
 #include "Module.h"
 #include "VM.h"
+#include "GcHeap.h"
 #include <algorithm>
 #include <cctype>
 #include <chrono>               // ★ clock() — high_resolution_clock
@@ -761,6 +762,31 @@ void BuiltinRegistry::registerSystemUtils() {
     builtins["loadPrimes"] = builtins["buildIndex"]; builtinArity["loadPrimes"] = builtinArity["buildIndex"];
     reg("mountPrimes", { 1 }, [](const std::vector<Value>& args) -> Value { if (!std::holds_alternative<std::string>(args[0].data)) throw std::runtime_error("Runtime Error: mountPrimes(\"path\") expects a string."); BigInt::setPrimeFilePath(std::get<std::string>(args[0].data)); return Value::none(); });
     reg("sysinfo", { 0 }, [](const std::vector<Value>&) -> Value { std::cout << "--- Junk Calculator System Info ---\n" << "Prime DB: " << BigInt::getPrimeFilePath() << "\n" << "Indexed:  " << BigInt::totalPrimesInFile << " primes\n"; if (BigInt::totalPrimesInFile > 0) std::cout << "Max:      " << BigInt::largestPrimeInFile << "\n"; std::cout << "-----------------------------------" << std::endl; return Value::none(); });
+    reg("gc", { 0, 1 }, [](const std::vector<Value>& args) -> Value {
+        if (!VM::activeVM) return Value(0.0);
+
+        // ★ gc(true) = 激进模式：先清掉 ANS 避免它充当隐形保护伞
+        bool aggressive = (args.size() == 1 && helpers::isTruthy(args[0]));
+        if (aggressive) {
+            VM::activeVM->setGlobal("ANS", Value::none());
+        }
+
+        int freed = VM::activeVM->runGC();
+
+        std::cout << "[GC] Collected " << freed << " unreachable object(s). "
+            << "Tracked: " << GcHeap::get().trackedCount() << std::endl;
+        return Value(static_cast<double>(freed));
+        });
+
+    reg("gcinfo", { 0 }, [](const std::vector<Value>&) -> Value {
+        auto& heap = GcHeap::get();
+        std::cout << "--- GC Status ---\n"
+            << "  Tracked objects:     " << heap.trackedCount() << "\n"
+            << "  Allocs since GC:     " << heap.allocsSinceGc() << "\n"
+            << "  Next GC threshold:   " << heap.threshold() << "\n"
+            << "-----------------" << std::endl;
+        return Value::none();
+        });
 }
 
 // =================================================================

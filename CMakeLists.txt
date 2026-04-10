@@ -39,6 +39,7 @@ set(JC2_HEADERS
     "Compiler.h"
     "VM.h"
     "Module.h"
+    "GcHeap.h"
     "BuiltinRegistry.h"
     "modules/json_module.h"
     "modules/image_module.h"

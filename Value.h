@@ -28,6 +28,7 @@
 #include "Tolerance.h"
 #include "Image.h"
 #include "Probability.h"
+#include "GcHeap.h"
 
 namespace jc {
 
@@ -52,7 +53,16 @@ namespace jc {
     private:
         std::shared_ptr<std::unordered_map<std::string, std::any>> ptr;
     public:
-        Dict() : ptr(std::make_shared<std::unordered_map<std::string, std::any>>()) {}
+        Dict() : ptr(std::make_shared<std::unordered_map<std::string, std::any>>()) {
+            // ★ GC 注册
+            GcHeap::get().track(
+                ptr.get(),
+                [w = std::weak_ptr<std::unordered_map<std::string, std::any>>(ptr)]()
+                { return !w.expired(); },
+                [w = std::weak_ptr<std::unordered_map<std::string, std::any>>(ptr)]()
+                { auto sp = w.lock(); if (sp) sp->clear(); }
+            );
+        }
 
         void set(const std::string& key, const std::any& val) {
             (*ptr)[key] = val;
@@ -96,6 +106,7 @@ namespace jc {
         }
 
         const void* id() const { return ptr.get(); }
+        void clear() { ptr->clear(); }
     };
 
     // =======================================================
@@ -105,7 +116,16 @@ namespace jc {
     private:
         std::shared_ptr<std::vector<std::any>> ptr;
     public:
-        List() : ptr(std::make_shared<std::vector<std::any>>()) {}
+        List() : ptr(std::make_shared<std::vector<std::any>>()) {
+            // ★ GC 注册
+            GcHeap::get().track(
+                ptr.get(),
+                [w = std::weak_ptr<std::vector<std::any>>(ptr)]()
+                { return !w.expired(); },
+                [w = std::weak_ptr<std::vector<std::any>>(ptr)]()
+                { auto sp = w.lock(); if (sp) sp->clear(); }
+            );
+        }
 
         void push_back(const std::any& val) { ptr->push_back(val); }
 
@@ -154,6 +174,7 @@ namespace jc {
         const std::vector<std::any>& raw() const { return *ptr; }
         std::vector<std::any>& raw() { return *ptr; }
         const void* id() const { return ptr.get(); }
+        void clear() { ptr->clear(); }
     };
 
     struct ClassDefinition {
@@ -739,19 +760,30 @@ namespace jc {
                     os << "<class " << arg->name << ">";
                 }
                 else if constexpr (std::is_same_v<T, std::shared_ptr<Instance>>) {
+                    // ═══ 循环引用打印防爆 ═══
+                    PrintGuard guard(visited, arg.get());
+                    if (guard.isCycle) {
+                        os << "<" << arg->classDef->name << " {...}>";
+                        return;
+                    }
+
+                    // ── 原生数据优先（Image / Distribution 等）──
+                    bool printedNative = false;
                     if (arg->nativeData.has_value()) {
                         if (arg->nativeData.type() == typeid(std::shared_ptr<Image>)) {
                             auto& img = std::any_cast<std::shared_ptr<Image>&>(arg->nativeData);
                             os << "<Image " << img->width() << "x" << img->height() << ">";
+                            printedNative = true;
                         }
                         else if (arg->nativeData.type() == typeid(std::shared_ptr<Distribution>)) {
                             auto& dist = std::any_cast<std::shared_ptr<Distribution>&>(arg->nativeData);
                             os << dist->toString();
+                            printedNative = true;
                         }
-                        else { goto printInstance; }
                     }
-                    else {
-                    printInstance:
+
+                    // ── 普通实例打印 ──
+                    if (!printedNative) {
                         os << "<" << arg->classDef->name << " {";
                         const auto& entries = arg->fields.getEntries();
                         for (size_t ii = 0; ii < entries.size(); ++ii) {
