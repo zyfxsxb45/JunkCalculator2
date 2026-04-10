@@ -1067,6 +1067,15 @@ namespace jc {
                 else { return "none()"; }
                 }, data);
         }
+
+        std::string toString() const {
+            if (std::holds_alternative<std::string>(data)) {
+                return std::get<std::string>(data);
+            }
+            std::ostringstream oss;
+            oss << *this; // 直接复用我们写好的 operator<< 完美格式化
+            return oss.str();
+        }
     }; // class Value
 
     inline Value ldivide(const Value& lhs, const Value& rhs) {

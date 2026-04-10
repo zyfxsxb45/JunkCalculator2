@@ -1240,7 +1240,7 @@ namespace jc {
     * Only with a different parameter count
 )HELP" },
 
-        { "string", R"HELP(
+{ "string", R"HELP(
 ═══ String Functions ═══
 
   Strings are created with double quotes:  s = "hello world"
@@ -1300,114 +1300,162 @@ namespace jc {
     islower(s)          All alphabetic characters are lowercase?
     isempty(s)          Is the string empty (length 0)?
 
-    These predicates return 0 for non-string arguments.
-    Empty strings return 0 for isalpha/isdigit/isalnum/isspace
-    (nothing to test) but 1 for isempty.
-
   String Interpolation (f-strings)
   ──────────────────────
-    f"text {expr} text"              Embed any expression directly
+    f"text {expr} text"              Embed any expression
     f"Hello, {name}!"               Variable interpolation
-    f"{x + 1} items"                Expression interpolation
     f"area = {PI * r^2::.2f}"       With format spec (:: separator)
-    f"{val::>10.3f}"                Right-aligned, 10 wide, 3 decimals
-
-    Format spec syntax: {expr::[<>^][width][.precision][type]}
-      <  left align       f  fixed float
-      >  right align      e  scientific
-      ^  center           d  integer
-                          x  hexadecimal
-
-    The :: separator is unambiguous — no conflict with ternary (?:):
-      f"{score >= 60 ? \"pass\" : \"fail\"}"     ✓ works
-      f"{PI::.4f}"                               ✓ works
 
   Raw Strings (r-strings)
   ──────────────────────
     r"text"              No escape processing — backslashes are literal.
     r"C:\Users\name"     → "C:\Users\name"
-    r"hello\nworld"      → "hello\nworld"   (literal backslash + n)
 
-    Custom Delimiter (like C++ raw strings):
-      r"(can contain "quotes" freely)"
-      r"TAG(anything goes, even ) and " here)TAG"
-
-      Syntax: r"DELIM( content )DELIM"
-        DELIM = any letters, digits, underscores (can be empty).
-        Content is captured verbatim until )DELIM" is found.
+    Custom Delimiter (for patterns containing parentheses):
+      r"TAG(content)TAG"
+      r"RE((\d+)-(\d+))RE"    ← Use this for regex patterns starting with (
 
   StringMatrix — Tabular String Data
   ──────────────────────
-    Placing a string inside brackets `["hello", "world"]` creates a
-    StringMatrix. All standard matrix operations apply (indexing, slicing,
-    transpose, concatenation).
+    ["hello", "world"]            Creates a StringMatrix (1×2)
+    ["a", "b"; "c", "d"]         Creates a StringMatrix (2×2)
+
+    ★ UNIVERSAL COMPATIBILITY:
+    StringMatrix now supports ALL array manipulation functions:
+      push, prepend, insert, removeAt, slice, reverse, flatten,
+      unique, indexOf, count, join, map, filter, reduce, sort,
+      any, all, countIf, zip, cat
     
-    matrix(2, 2, "a", "b", "c", "d")   StringMatrix via constructor
-    toStrMat(A)                         Convert any matrix → StringMatrix
-    See: help matrix
+    Examples:
+      push(["a","b"], "c")                    → ["a","b","c"]
+      sort(["banana","apple","cherry"])        → ["apple","banana","cherry"]
+      map((s) => upper(s), ["hello","world"]) → ["HELLO","WORLD"]
+      filter((s) => len(s) > 3, ["hi","hello"]) → ["hello"]
+      join(["x","y","z"], "-")                → "x-y-z"
+      reverse(["a","b","c"])                  → ["c","b","a"]
+
+    Conversion:
+      toStrMat(A)                         Convert any matrix → StringMatrix
+      toList(["a","b"])                    StringMatrix → List
+      matrix(2, 2, "a", "b", "c", "d")   StringMatrix via constructor
 )HELP" },
 
-        {"array", R"HELP(
+{ "array", R"HELP(
 ═══ Array / Data Functions ═══
   Arrays are structurally defined as row vectors (1×N matrices): `[1, 2, 3]`
   
+  ★ UNIVERSAL COMPATIBILITY:
+  All array functions below work seamlessly across FOUR container types:
+    • RealMatrix      [1, 2, 3]
+    • ComplexMatrix    [1+1i, 2+2i]
+    • StringMatrix    ["hello", "world"]
+    • List            list(1, "hi", [1,2])
+  Functions automatically preserve the input type in their output.
+
   CRITICAL: Unlike Lists, Arrays/Matrices use VALUE SEMANTICS. 
   Assigning `A = B` creates a completely independent deep copy. Modifying `A` 
   will never affect `B`. This guarantees high performance and math safety.
 
   Element Access
   ──────────────────────
-    v[i]                Element extracted at zero-indexed component
-    v[i] = val          Modify internal memory securely
-    first(v) / last(v)  Endpoints
-    pop(v)              Return tail element
-    len(v)              Array size
+    v[i]                Element at zero-indexed position (negative wraps)
+    v[i] = val          Modify element in-place
+    first(v) / last(v)  First and last elements
+    pop(v)              Return tail element (non-destructive)
+    len(v)              Element count
 
-  Adding & Removing  (Returns mutated matrices)
+  Adding & Removing  (Returns new container of same type)
   ──────────────────────
-    push(v, val)        Append val trailing array bound
-    prepend(v, val)     Prefix val preceding array bound
-    insert(v, idx, val) Inject at indexed bound
-    removeAt(v, idx)    Strip specific boundary cell
+    push(v, val)        Append to end
+    prepend(v, val)     Insert at beginning
+    insert(v, idx, val) Insert at index
+    removeAt(v, idx)    Remove at index (negative wraps)
 
-  Slicing & Memory Structure
+  Slicing (Native Syntax — works on ALL types)
   ──────────────────────
     v[start : end]            Extract elements [start, end)
-    v[start : end : step]     Extract with step exactly like Python
+    v[start : end : step]     Extract with step (Python-style)
     v[start :]                From start to the end
     v[: end]                  From beginning to end
     v[:]                      Full copy
+    v[::-1]                   Complete reversal
 
-    All indices smartly wrap negative boundaries:
+    All indices support negative wrapping:
       v[-3 : -1]              Extract 3rd-to-last to 2nd-to-last
 
-    slice(...)               Function alternative retains backward-compatibility.
-    reverse(v) / flatten(M) / unique(v)
+    Function form (also supports all types):
+      slice(v, start)         From start to end
+      slice(v, start, end)    From start to end (exclusive)
+
+  Structure Operations
+  ──────────────────────
+    reverse(v)          Reverse order (works on String, Matrix, List)
+    flatten(M)          Flatten 2D matrix or nested List → 1D
+    unique(v)           Remove duplicates (tolerance-aware for doubles)
+
+  Search
+  ──────────────────────
+    indexOf(v, val)     First index of val (-1 if absent)
+    count(v, val)       Count occurrences
+    val in v            Membership test → returns 1 or 0
 
   Destructuring
   ──────────────────────
-    [a, b, c] = [10, 20, 30]         Unpack array into memory variables
-    [first, _, last] = [1, 2, 3]     Discard intermediate components utilizing `_`
+    [a, b, c] = [10, 20, 30]         Unpack into variables
+    [first, _, last] = [1, 2, 3]     Discard with `_`
 
   Generation
   ──────────────────────
     range(n)            [0, 1, ..., n-1]
-    range(a, b, step)   Custom stepping threshold
-    fill(val, n)        n iterations of val
-    linspace(a, b, n)   n proportionately spread points intersecting bounds
+    range(a, b, step)   Custom stepping
+    fill(val, n)        n copies of val
+    linspace(a, b, n)   n evenly-spaced points from a to b
 
   List Comprehension
   ──────────────────────
-    [x^2 for x in range(10)]              Generate arrays inline
-    [x for x in data if x > 0]           Filter + transform in one step
+    [x^2 for x in range(10)]              Generate inline
+    [x for x in data if x > 0]           Filter + transform
     See: `help basic` (List Comprehension section)
 
-  Functional Programming
+  Functional Programming (Works on ALL container types)
   ──────────────────────
-    map(f, v)           Map function output across elements
-    filter(f, v)        Scrub data returning conditional matches
-    reduce(f, v, init)  Left folding algorithm
-    any(f, v) / all(f, v) / countIf(f, v)
+    map(f, v)           Apply f to each element, returns same container type
+                          map((x) => x*2, [1,2,3])              → [2,4,6]
+                          map((s) => upper(s), ["a","b"])        → ["A","B"]
+                          map((z) => z*2, [1+1i, 2+2i])         → [2+2i, 4+4i]
+                          map((x) => x*10, list(1,2,3))         → list(10,20,30)
+    filter(f, v)        Keep elements where f returns truthy
+                          filter((x) => x > 2, [1,2,3,4])       → [3,4]
+                          filter((s) => len(s) > 3, ["hi","hello"]) → ["hello"]
+    reduce(f, v, init)  Left fold
+                          reduce((a,b) => a+b, [1,2,3,4])       → 10
+                          reduce((a,b) => a+"+"+b, ["x","y","z"]) → "x+y+z"
+    any(f, v)           1 if any f(x) is truthy
+    all(f, v)           1 if all f(x) are truthy
+    countIf(f, v)       Count elements where f(x) is truthy
+
+  Sorting (Works on ALL container types)
+  ──────────────────────
+    sort(v)             Natural sort (numeric or lexicographic)
+                          sort([3,1,4])                  → [1,3,4]
+                          sort(["banana","apple"])        → ["apple","banana"]
+    sort(v, cmp)        Custom comparator function
+                          sort([3,1,4], (a,b) => a > b)  → [4,3,1]  (descending)
+                          sort(["bb","a"], (a,b) => len(a) < len(b)) → ["a","bb"]
+
+  Accumulation
+  ──────────────────────
+    cumsum(v)           Cumulative sum     [1,2,3] → [1,3,6]
+    cumprod(v)          Cumulative product  [1,2,3] → [1,2,6]
+    diffs(v)            Adjacent differences [10,20,35] → [10,15]
+
+  Concatenation & Joining
+  ──────────────────────
+    cat(a, b, ...)      Concatenate multiple arrays/lists
+    join(v, delim)      Join elements into a string with delimiter
+                          join([1,2,3], "-")             → "1-2-3"
+                          join(["a","b","c"], ", ")       → "a, b, c"
+    zip(a, b)           Pair-wise merge → N×2 matrix or list of pairs
 
   Pipe Operator
   ──────────────────────
@@ -1416,24 +1464,24 @@ namespace jc {
       // → [5, 4, 3]
 
     See: `help basic` (Pipe Operator section)
+)HELP" },
 
-  Concatenation
-  ──────────────────────
-    cat(a, b, ...)      Process multi-matrix elements horizontally forming new bounds
-    join(v, delim)      Aggregatively fuse bounds producing string
-    zip(a, b)           Pair-wise merge creating N×2 matrix
-)HELP"},
-
-        {"list", R"HELP(
+{ "list", R"HELP(
 ═══ List (Heterogeneous Dynamic Array) ═══
   Lists can store ANY value type available in JC2, including other Lists, 
   Dicts, matrices, strings, and function closures.
+
+  ★ UNIVERSAL COMPATIBILITY:
+  All array functions (push, slice, map, filter, reduce, sort, join, etc.)
+  now work natively on Lists. See `help array` for the complete reference.
 
   Creation
   ──────────────────────
     list()                         Creates an empty list
     list(1, "hello", [1;2])        Stores mixed types seamlessly
     toList([1, 2, 3])              Convert array → list of doubles
+    toList([1+1i, 2+2i])           Convert ComplexMatrix → list
+    toList(["a", "b"])             Convert StringMatrix → list
     toArray(L)                     Convert flat list → row vector (must be numeric)
     toMatrix(L)                    Convert nested List → Matrix/StringMatrix
     Auto-Degradation from [...]:
@@ -1446,12 +1494,6 @@ namespace jc {
         [sin, cos, tan]              → List  (contains functions)
         [{a: 1}, {b: 2}]             → List  (contains Dicts)
         [[1,2], [3,4]]               → List  (contains matrices)
-      Multi-row auto-degradation produces a List of Lists:
-        [1, list(2); "a", dict()]    → List([1, [2]], ["a", {}])
-      This means you can use [...] as a universal container:
-        points = [Point(1,0), Point(3,4), Point(0,5)]
-        fns = [sin, cos, (x) => x^2]
-        configs = [{debug: true}, {debug: false}]
 
   Access & Modification (0-indexed, negative wraps)
   ──────────────────────
@@ -1461,90 +1503,85 @@ namespace jc {
 
   Adding & Removing
   ──────────────────────
-    add(L, val)             Append value to the end (same as push)
-    remove(L, idx)          Remove the element at specific index
+    add(L, val)             Append value (same as push)
+    remove(L, idx)          Remove at specific index
     clear(L)                Erase all elements
 
-    You can also use legacy functions:
+    Legacy functions (also work):
     push(L, val)            Append value to the end
     prepend(L, val)         Insert value at the beginning
     insert(L, idx, val)     Insert value at a specific index
-    removeAt(L, idx)        Remove the element at specific index
+    removeAt(L, idx)        Remove element at specific index
 
   Element Access
   ──────────────────────
     first(L) / last(L)     Endpoints
-    pop(L)                  Returns the last element (Note: does not mutate L)
+    pop(L)                  Returns the last element (non-destructive)
     len(L)                  Number of elements
 
-  Structure
+  Slicing (Native Syntax)
   ──────────────────────
     L[start : end]          List slice [start, end)
     L[start : end : step]   List slice with stepping (negative wraps)
     
-    slice(L, start, end)    Function alternative retains backward-compatibility.
-    reverse(L)              Returns a reversed copy
-    cat(L1, L2, ...)        Concatenate multiple lists into one flat list
-    flatten(L)              Recursively flatten nested lists into a 1D list
-                              flatten(list(1, list(2, 3))) → [1, 2, 3]
-    unique(L)               Remove duplicates (uses deep equality checks)
+    Function form:
+    slice(L, start, end)    Equivalent to L[start:end]
 
-  Destructuring
+  Structure
   ──────────────────────
-    [name, age] = list("Alice", 30)
-    name       →  "Alice"
-    age        →  30
-    Destructured iteration:
-      for ([key, val] in list(list("a",1), list("b",2))) { ... }
+    reverse(L)              Returns a reversed copy
+    cat(L1, L2, ...)        Concatenate multiple lists
+    flatten(L)              Recursively flatten nested lists into 1D
+                              flatten(list(1, list(2, 3))) → [1, 2, 3]
+    unique(L)               Remove duplicates (deep equality)
 
   Search
   ──────────────────────
     indexOf(L, val)         First index of val (-1 if absent)
-    count(L, val)           Count number of matching occurrences
+    count(L, val)           Count matching occurrences
     val in L                Membership test → returns 1 or 0
 
   Sorting
   ──────────────────────
-    sort(L)                 Sorts elements by string representation (lexicographic)
-    sort(L, cmp)            Sort with a custom boolean comparator function
+    sort(L)                 Sorts by string representation (lexicographic)
+    sort(L, cmp)            Sort with custom boolean comparator
                               sort(L, (a, b) => a < b)
-    Sorting Dicts by a specific field:
-      users = [{name: "Bob", age: 20}, {name: "Alice", age: 30}]
-      sort(users, (a, b) => a.age < b.age)
 
-  Functional Programming
+  Functional Programming (Full support — identical to arrays)
   ──────────────────────
-    map(f, L)               Apply f(x) to each element, returns a new list
-    filter(f, L)            Keep elements where f(x) evaluates to truthy
-    reduce(f, L)            Left fold, utilizing the first element as initial state
-    reduce(f, L, init)      Left fold with an explicit starting accumulator
-    any(f, L)               Returns 1 if ANY f(x) is truthy
-    all(f, L)               Returns 1 if ALL f(x) are truthy
+    map(f, L)               Apply f(x) to each element → new list
+    filter(f, L)            Keep elements where f(x) is truthy → new list
+    reduce(f, L)            Left fold using first element as initial
+    reduce(f, L, init)      Left fold with explicit accumulator
+    any(f, L)               1 if ANY f(x) is truthy
+    all(f, L)               1 if ALL f(x) are truthy
     countIf(f, L)           Count elements where f(x) is truthy
+
+  Accumulation
+  ──────────────────────
+    cumsum(L)               Cumulative sum
+    cumprod(L)              Cumulative product
+    diffs(L)                Adjacent differences
 
   String Interop
   ──────────────────────
-    join(L, ", ")           Join all elements into a single string
-    zip(L1, L2)             Pair-wise merge → returns a list of 2-element lists
+    join(L, ", ")           Join all elements into a string
+    zip(L1, L2)             Pair-wise merge → list of 2-element lists
 
   Conversion
   ──────────────────────
     toList(matrix)          Matrix → List of Lists (2D structure)
     toList(vector)          Vector/Array → Flat List
-    toMatrix(L)             List → Matrix (auto-detects type constraints)
+    toList(string)          String → List of characters
+    toMatrix(L)             List → Matrix (auto-detects type)
                               list(1,2,3) → [1, 2, 3]  (row vector)
                               list(list(1,2), list(3,4)) → [1,2; 3,4]
 
   When to use List vs Array?
   ──────────────────────
     Array   [1, 2, 3]        Homogeneous doubles. Fast math. Use for numerics.
-                             Because scalars are natively broadcastable, [A, B]
-                             horizontally concatenates numeric matrices natively.
-    List    [Point(1,2), ...]Automatically created when [...] contains
-                             non-scalar types (instances, functions, dicts, etc.)
-                             Unlike arrays, [list1, list2] will NOT fuse elements,
-                             it creates a 2D List: [ [..], [..] ].
-    list()  list(1, "a")     Explicit creation for any heterogeneous data.
+    List    list(1, "a")     Heterogeneous. Use for mixed data.
+    Both support the SAME set of manipulation functions.
 
   Reference Semantics & Memory
   ──────────────────────
@@ -1552,20 +1589,14 @@ namespace jc {
     Lists use strictly REFERENCE SEMANTICS.
     
       L1 = list(1, 2, 3)
-      L2 = L1                   // L2 and L1 point to the exact same list in memory
+      L2 = L1                   // L2 and L1 share the same data
       L2[0] = 99                // L1[0] is now also 99!
-      
-    To pass a List to a function and modify it inside, you DO NOT need `ref`.
-    
-  Garbage Collection (Cycles)
-  ──────────────────────
-    Because Lists and Dicts can contain each other, they can form cycles
-    (e.g., pushing a list into itself). JC2 features a background Mark-and-Sweep
-    Garbage Collector to clean up disconnected cyclic islands.
-    You can observe or force this via:
-      gcinfo()                  View tracked objects and GC thresholds
-      gc()                      Force immediate memory sweep
 
+  Garbage Collection
+  ──────────────────────
+    Lists are tracked by the VM's Mark-and-Sweep Garbage Collector.
+      gcinfo()                  View tracked objects
+      gc()                      Force memory sweep
 )HELP" },
 
         {"dict", R"HELP(

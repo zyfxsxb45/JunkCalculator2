@@ -37,7 +37,7 @@ combinations(arr, k) = {
     
     res = list()
     first = arr[0]
-    rest = slice(arr, 1, len(arr))
+    rest = arr[1 : ]
     
     for (c in combinations(rest, k - 1)) {
         new_c = list(first)

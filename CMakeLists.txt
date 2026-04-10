@@ -136,7 +136,7 @@ endif()
 # 启用 CPack 生成 ZIP 包
 set(CPACK_GENERATOR "ZIP") # 最通用的便携格式
 set(CPACK_PACKAGE_NAME "JunkCalculator2")
-set(CPACK_PACKAGE_VERSION "2.2.0")
+set(CPACK_PACKAGE_VERSION "2.2.1")
 set(CPACK_PACKAGE_VENDOR "Yu Liangyang")
 set(CPACK_PACKAGE_FILE_NAME "${CPACK_PACKAGE_NAME}-${CPACK_PACKAGE_VERSION}-Windows-x64")
 include(CPack)

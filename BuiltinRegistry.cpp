@@ -4,6 +4,9 @@
 #include "VM.h"
 #include "GcHeap.h"
 #include "HelpText.h"           // ★ BuiltinHelp, DynamicHelp
+#ifdef _MSC_VER
+#pragma warning(disable: 4702)
+#endif
 #include <algorithm>
 #include <cctype>
 #include <chrono>               // ★ clock() — high_resolution_clock
@@ -1062,123 +1065,398 @@ void BuiltinRegistry::registerStringFunctions() {
 // [17] 数组引擎
 // =================================================================
 void BuiltinRegistry::registerArrayFunctions() {
-    reg("first", { 1 }, [](const std::vector<Value>& args) -> Value { if (std::holds_alternative<List>(args[0].data)) { const auto& L=std::get<List>(args[0].data); if (L.empty()) throw std::runtime_error("Runtime Error: first() on empty list."); return anyToVal(L.raw()[0]); } if (std::holds_alternative<RealMatrix>(args[0].data)) { const auto& m=std::get<RealMatrix>(args[0].data); if (m.getRows()*m.getCols()==0) throw std::runtime_error("Runtime Error: first() on empty vector."); return Value(m.rawData()[0]); } if (std::holds_alternative<ComplexMatrix>(args[0].data)) { const auto& m=std::get<ComplexMatrix>(args[0].data); if (m.getRows()*m.getCols()==0) throw std::runtime_error("Runtime Error: first() on empty vector."); return Value(m.rawData()[0]); } throw std::runtime_error("Type Error: first() expects a vector or list."); });
-    reg("last", { 1 }, [](const std::vector<Value>& args) -> Value { if (std::holds_alternative<List>(args[0].data)) { const auto& L=std::get<List>(args[0].data); if (L.empty()) throw std::runtime_error("Runtime Error: last() on empty list."); return anyToVal(L.raw().back()); } if (std::holds_alternative<RealMatrix>(args[0].data)) { const auto& m=std::get<RealMatrix>(args[0].data); int n=m.getRows()*m.getCols(); if (n==0) throw std::runtime_error("Runtime Error: last() on empty vector."); return Value(m.rawData()[n-1]); } if (std::holds_alternative<ComplexMatrix>(args[0].data)) { const auto& m=std::get<ComplexMatrix>(args[0].data); int n=m.getRows()*m.getCols(); if (n==0) throw std::runtime_error("Runtime Error: last() on empty vector."); return Value(m.rawData()[n-1]); } throw std::runtime_error("Type Error: last() expects a vector or list."); });
-    reg("pop", { 1 }, [](const std::vector<Value>& args) -> Value { if (std::holds_alternative<List>(args[0].data)) { const auto& L=std::get<List>(args[0].data); if (L.empty()) throw std::runtime_error("Runtime Error: pop() on empty list."); return anyToVal(L.raw().back()); } if (std::holds_alternative<RealMatrix>(args[0].data)) { auto flat=std::get<RealMatrix>(args[0].data).rawData(); if (flat.empty()) throw std::runtime_error("Runtime Error: pop() on empty vector."); return Value(flat.back()); } if (std::holds_alternative<ComplexMatrix>(args[0].data)) { auto flat=std::get<ComplexMatrix>(args[0].data).rawData(); if (flat.empty()) throw std::runtime_error("Runtime Error: pop() on empty vector."); return Value(flat.back()); } throw std::runtime_error("Type Error: pop() expects a vector or list."); });
+    auto expectContainer = [](const std::string& name) -> Value {
+        throw std::runtime_error("Type Error: " + name + "() expects a List or a Matrix (Real/Complex/String).");
+        };
 
-    reg("push", { 2 }, [](const std::vector<Value>& args) -> Value { if (std::holds_alternative<List>(args[0].data)) { List L=std::get<List>(args[0].data); L.push_back(valToAny(args[1])); return Value(L); } auto v=toVecHelper(args[0], "push"); v.push_back(args[1].asDouble()); return toRowVec(v); });
-    reg("prepend", { 2 }, [](const std::vector<Value>& args) -> Value { if (std::holds_alternative<List>(args[0].data)) { List L=std::get<List>(args[0].data); L.insert(0, valToAny(args[1])); return Value(L); } auto v=toVecHelper(args[0], "prepend"); v.insert(v.begin(), args[1].asDouble()); return toRowVec(v); });
-    reg("insert", { 3 }, [](const std::vector<Value>& args) -> Value { int idx=static_cast<int>(std::round(args[1].asDouble())); if (std::holds_alternative<List>(args[0].data)) { List L=std::get<List>(args[0].data); L.insert(idx, valToAny(args[2])); return Value(L); } auto v=toVecHelper(args[0], "insert"); if (idx<0) idx=static_cast<int>(v.size())+idx; if (idx<0||idx>static_cast<int>(v.size())) throw std::runtime_error("Runtime Error: insert() index out of range."); v.insert(v.begin()+idx, args[2].asDouble()); return toRowVec(v); });
-    reg("removeAt", { 2 }, [](const std::vector<Value>& args) -> Value { int idx=static_cast<int>(std::round(args[1].asDouble())); if (std::holds_alternative<List>(args[0].data)) { List L=std::get<List>(args[0].data); L.removeAt(idx); return Value(L); } auto v=toVecHelper(args[0], "removeAt"); if (v.empty()) throw std::runtime_error("Runtime Error: removeAt() on empty vector."); if (idx<0) idx=static_cast<int>(v.size())+idx; if (idx<0||idx>=static_cast<int>(v.size())) throw std::runtime_error("Runtime Error: removeAt() index out of range."); v.erase(v.begin()+idx); return toRowVec(v); });
-
-    reg("slice", { 2, 3 }, [](const std::vector<Value>& args) -> Value {
-        if (std::holds_alternative<List>(args[0].data)) { const auto& L=std::get<List>(args[0].data); int n=static_cast<int>(L.size()); int start=static_cast<int>(std::round(args[1].asDouble())); if (start<0) start=n+start; start=std::max(0,std::min(start,n)); int end=n; if (args.size()==3) { end=static_cast<int>(std::round(args[2].asDouble())); if (end<0) end=n+end; end=std::max(0,std::min(end,n)); } List result; for (int i=start;i<end;++i) result.push_back(L.raw()[i]); return Value(result); }
-        auto v=toVecHelper(args[0], "slice"); int n=static_cast<int>(v.size()); int start=static_cast<int>(std::round(args[1].asDouble())); if (start<0) start=n+start; start=std::max(0,std::min(start,n)); int end=n; if (args.size()==3) { end=static_cast<int>(std::round(args[2].asDouble())); if (end<0) end=n+end; end=std::max(0,std::min(end,n)); } if (start>=end) return toRowVec({}); return toRowVec(std::vector<double>(v.begin()+start, v.begin()+end));
-    });
-
-    reg("reverse", { 1 }, [](const std::vector<Value>& args) -> Value { if (std::holds_alternative<std::string>(args[0].data)) { std::string s=std::get<std::string>(args[0].data); std::reverse(s.begin(),s.end()); return Value(s); } if (std::holds_alternative<List>(args[0].data)) { List L=std::get<List>(args[0].data); std::reverse(L.raw().begin(),L.raw().end()); return Value(L); } auto v=toVecHelper(args[0], "reverse"); std::reverse(v.begin(),v.end()); return toRowVec(v); });
-
-    reg("flatten", { 1 }, [](const std::vector<Value>& args) -> Value {
-        if (std::holds_alternative<List>(args[0].data)) { List result; std::function<void(const List&)> flattenList = [&](const List& L) { for (const auto& e : L.raw()) { Value elem = anyToVal(e); if (std::holds_alternative<List>(elem.data)) flattenList(std::get<List>(elem.data)); else result.push_back(e); } }; flattenList(std::get<List>(args[0].data)); return Value(result); }
-        if (std::holds_alternative<RealMatrix>(args[0].data)) { const auto& m=std::get<RealMatrix>(args[0].data); int n=m.getRows()*m.getCols(); return Value(RealMatrix(n,1,m.rawData())); }
-        if (std::holds_alternative<ComplexMatrix>(args[0].data)) { const auto& m=std::get<ComplexMatrix>(args[0].data); int n=m.getRows()*m.getCols(); return Value(ComplexMatrix(n,1,m.rawData())); }
-        if (std::holds_alternative<StringMatrix>(args[0].data)) { const auto& m=std::get<StringMatrix>(args[0].data); int n=m.getRows()*m.getCols(); return Value(StringMatrix(n,1,m.rawData())); }
-        throw std::runtime_error("Type Error: flatten() expects a matrix or list.");
-    });
-
-    reg("unique", { 1 }, [](const std::vector<Value>& args) -> Value {
-        if (std::holds_alternative<List>(args[0].data)) { const auto& L=std::get<List>(args[0].data); List result; for (const auto& e : L.raw()) { Value elem = anyToVal(e); bool found=false; for (const auto& r : result.raw()) { Value rv=anyToVal(r); if (elem.data.index()==rv.data.index()) { std::ostringstream a,b; a<<elem; b<<rv; if (a.str()==b.str()) { found=true; break; } } } if (!found) result.push_back(e); } return Value(result); }
-        auto v=toVecHelper(args[0], "unique"); std::vector<double> result; for (double x:v) { bool found=false; for (double y:result) if (Tol::isEq(x,y,1e4)){found=true;break;} if (!found) result.push_back(x); } return toRowVec(result);
-    });
-
-    reg("range", { 1, 2, 3 }, [](const std::vector<Value>& args) -> Value {
-        if (args.size()==1) { int end=static_cast<int>(std::round(args[0].asDouble())); if (end<=0) return Value(RealMatrix(1,0)); std::vector<double> v(end); for (int i=0;i<end;++i) v[i]=static_cast<double>(i); return Value(RealMatrix(1,end,v)); }
-        if (args.size()==2) { int start=static_cast<int>(std::round(args[0].asDouble())); int end=static_cast<int>(std::round(args[1].asDouble())); if (start>=end) return Value(RealMatrix(1,0)); int n=end-start; std::vector<double> v(n); for (int i=0;i<n;++i) v[i]=static_cast<double>(start+i); return Value(RealMatrix(1,n,v)); }
-        double start=args[0].asDouble(),end=args[1].asDouble(),step=args[2].asDouble(); if (Tol::isEq(step,0.0)) throw std::runtime_error("Math Error: range() step cannot be zero."); std::vector<double> v; if (step>0) { for (double x=start;x<end-Tol::EPS*100;x+=step) v.push_back(x); } else { for (double x=start;x>end+Tol::EPS*100;x+=step) v.push_back(x); } int n=static_cast<int>(v.size()); if (n==0) return Value(RealMatrix(1,0)); return Value(RealMatrix(1,n,v));
-    });
-
-    reg("fill", { 2 }, [](const std::vector<Value>& args) -> Value { int n=static_cast<int>(std::round(args[1].asDouble())); if (n<0) throw std::runtime_error("Runtime Error: fill() count must be non-negative."); double val=args[0].asDouble(); return Value(RealMatrix(1,n,std::vector<double>(n,val))); });
-    reg("linspace", { 3 }, [](const std::vector<Value>& args) -> Value { double a=args[0].asDouble(),b=args[1].asDouble(); int n=static_cast<int>(std::round(args[2].asDouble())); if (n<1) throw std::runtime_error("Runtime Error: linspace() requires n >= 1."); std::vector<double> v(n); if (n==1) v[0]=a; else { for (int i=0;i<n;++i) v[i]=a+(b-a)*i/(n-1); } return Value(RealMatrix(1,n,v)); });
-    reg("cumsum", { 1 }, [](const std::vector<Value>& args) -> Value {
-        if (std::holds_alternative<List>(args[0].data)) {
-            const auto& L = std::get<List>(args[0].data);
-            List result;
-            if (L.empty()) return Value(result);
-            Value sum = anyToVal(L.raw()[0]);
-            result.push_back(valToAny(sum));
-            for (size_t i = 1; i < L.size(); ++i) {
-                sum = sum + anyToVal(L.raw()[i]);
-                result.push_back(valToAny(sum));
+    reg("first", { 1 }, [expectContainer](const std::vector<Value>& args) -> Value {
+        return std::visit([&](auto&& arg) -> Value {
+            using T = std::decay_t<decltype(arg)>;
+            if constexpr (std::is_same_v<T, List>) {
+                if (arg.empty()) throw std::runtime_error("Runtime Error: first() on empty list.");
+                return anyToVal(arg.raw()[0]);
             }
-            return Value(result);
-        }
-        auto v = toVecHelper(args[0], "cumsum");
-        for (size_t i = 1; i < v.size(); ++i) v[i] += v[i - 1];
-        return toRowVec(v);
+            else if constexpr (std::is_same_v<T, RealMatrix> || std::is_same_v<T, ComplexMatrix> || std::is_same_v<T, StringMatrix>) {
+                if (arg.getRows() * arg.getCols() == 0) throw std::runtime_error("Runtime Error: first() on empty vector.");
+                return Value(arg.rawData()[0]);
+            }
+            return expectContainer("first");
+            }, args[0].data);
         });
 
-    reg("cumprod", { 1 }, [](const std::vector<Value>& args) -> Value {
-        if (std::holds_alternative<List>(args[0].data)) {
-            const auto& L = std::get<List>(args[0].data);
-            List result;
-            if (L.empty()) return Value(result);
-            Value prod = anyToVal(L.raw()[0]);
-            result.push_back(valToAny(prod));
-            for (size_t i = 1; i < L.size(); ++i) {
-                prod = prod * anyToVal(L.raw()[i]);
-                result.push_back(valToAny(prod));
+    reg("last", { 1 }, [expectContainer](const std::vector<Value>& args) -> Value {
+        return std::visit([&](auto&& arg) -> Value {
+            using T = std::decay_t<decltype(arg)>;
+            if constexpr (std::is_same_v<T, List>) {
+                if (arg.empty()) throw std::runtime_error("Runtime Error: last() on empty list.");
+                return anyToVal(arg.raw().back());
             }
-            return Value(result);
-        }
-        auto v = toVecHelper(args[0], "cumprod");
-        for (size_t i = 1; i < v.size(); ++i) v[i] *= v[i - 1];
-        return toRowVec(v);
+            else if constexpr (std::is_same_v<T, RealMatrix> || std::is_same_v<T, ComplexMatrix> || std::is_same_v<T, StringMatrix>) {
+                int n = arg.getRows() * arg.getCols();
+                if (n == 0) throw std::runtime_error("Runtime Error: last() on empty vector.");
+                return Value(arg.rawData()[n - 1]);
+            }
+            return expectContainer("last");
+            }, args[0].data);
+        });
+
+    reg("pop", { 1 }, [expectContainer](const std::vector<Value>& args) -> Value {
+        return std::visit([&](auto&& arg) -> Value {
+            using T = std::decay_t<decltype(arg)>;
+            if constexpr (std::is_same_v<T, List>) {
+                if (arg.empty()) throw std::runtime_error("Runtime Error: pop() on empty list.");
+                return anyToVal(arg.raw().back());
+            }
+            else if constexpr (std::is_same_v<T, RealMatrix> || std::is_same_v<T, ComplexMatrix> || std::is_same_v<T, StringMatrix>) {
+                int n = arg.getRows() * arg.getCols();
+                if (n == 0) throw std::runtime_error("Runtime Error: pop() on empty vector.");
+                return Value(arg.rawData()[n - 1]);
+            }
+            return expectContainer("pop");
+            }, args[0].data);
+        });
+
+    reg("push", { 2 }, [expectContainer](const std::vector<Value>& args) -> Value {
+        return std::visit([&](auto&& arg) -> Value {
+            using T = std::decay_t<decltype(arg)>;
+            if constexpr (std::is_same_v<T, List>) {
+                List L = arg; L.push_back(valToAny(args[1])); return Value(L);
+            }
+            else if constexpr (std::is_same_v<T, RealMatrix> || std::is_same_v<T, ComplexMatrix> || std::is_same_v<T, StringMatrix>) {
+                auto v = arg.rawData();
+                using Elem = std::decay_t<decltype(v[0])>;
+                if constexpr (std::is_same_v<Elem, double>) v.push_back(args[1].asDouble());
+                else if constexpr (std::is_same_v<Elem, Complex>) v.push_back(args[1].asComplex());
+                else { std::ostringstream oss; oss << args[1]; v.push_back(std::holds_alternative<std::string>(args[1].data) ? std::get<std::string>(args[1].data) : oss.str()); }
+                int r = (arg.getCols() == 1 && arg.getRows() > 1) ? static_cast<int>(v.size()) : 1;
+                int c = (arg.getCols() == 1 && arg.getRows() > 1) ? 1 : static_cast<int>(v.size());
+                return Value(T(r, c, v));
+            }
+            return expectContainer("push");
+            }, args[0].data);
+        });
+
+    reg("prepend", { 2 }, [expectContainer](const std::vector<Value>& args) -> Value {
+        return std::visit([&](auto&& arg) -> Value {
+            using T = std::decay_t<decltype(arg)>;
+            if constexpr (std::is_same_v<T, List>) {
+                List L = arg; L.insert(0, valToAny(args[1])); return Value(L);
+            }
+            else if constexpr (std::is_same_v<T, RealMatrix> || std::is_same_v<T, ComplexMatrix> || std::is_same_v<T, StringMatrix>) {
+                auto v = arg.rawData();
+                using Elem = std::decay_t<decltype(v[0])>;
+                if constexpr (std::is_same_v<Elem, double>) v.insert(v.begin(), args[1].asDouble());
+                else if constexpr (std::is_same_v<Elem, Complex>) v.insert(v.begin(), args[1].asComplex());
+                else { std::ostringstream oss; oss << args[1]; v.insert(v.begin(), std::holds_alternative<std::string>(args[1].data) ? std::get<std::string>(args[1].data) : oss.str()); }
+                int r = (arg.getCols() == 1 && arg.getRows() > 1) ? static_cast<int>(v.size()) : 1;
+                int c = (arg.getCols() == 1 && arg.getRows() > 1) ? 1 : static_cast<int>(v.size());
+                return Value(T(r, c, v));
+            }
+            return expectContainer("prepend");
+            }, args[0].data);
+        });
+
+    reg("insert", { 3 }, [expectContainer](const std::vector<Value>& args) -> Value {
+        int idx = static_cast<int>(std::round(args[1].asDouble()));
+        return std::visit([&](auto&& arg) -> Value {
+            using T = std::decay_t<decltype(arg)>;
+            if constexpr (std::is_same_v<T, List>) {
+                List L = arg; L.insert(idx, valToAny(args[2])); return Value(L);
+            }
+            else if constexpr (std::is_same_v<T, RealMatrix> || std::is_same_v<T, ComplexMatrix> || std::is_same_v<T, StringMatrix>) {
+                auto v = arg.rawData();
+                int i = idx < 0 ? static_cast<int>(v.size()) + idx : idx;
+                if (i < 0 || i > static_cast<int>(v.size())) throw std::runtime_error("Runtime Error: insert() index out of range.");
+                using Elem = std::decay_t<decltype(v[0])>;
+                if constexpr (std::is_same_v<Elem, double>) v.insert(v.begin() + i, args[2].asDouble());
+                else if constexpr (std::is_same_v<Elem, Complex>) v.insert(v.begin() + i, args[2].asComplex());
+                else { std::ostringstream oss; oss << args[2]; v.insert(v.begin() + i, std::holds_alternative<std::string>(args[2].data) ? std::get<std::string>(args[2].data) : oss.str()); }
+                int r = (arg.getCols() == 1 && arg.getRows() > 1) ? static_cast<int>(v.size()) : 1;
+                int c = (arg.getCols() == 1 && arg.getRows() > 1) ? 1 : static_cast<int>(v.size());
+                return Value(T(r, c, v));
+            }
+            return expectContainer("insert");
+            }, args[0].data);
+        });
+
+    reg("removeAt", { 2 }, [expectContainer](const std::vector<Value>& args) -> Value {
+        int idx = static_cast<int>(std::round(args[1].asDouble()));
+        return std::visit([&](auto&& arg) -> Value {
+            using T = std::decay_t<decltype(arg)>;
+            if constexpr (std::is_same_v<T, List>) {
+                List L = arg; L.removeAt(idx); return Value(L);
+            }
+            else if constexpr (std::is_same_v<T, RealMatrix> || std::is_same_v<T, ComplexMatrix> || std::is_same_v<T, StringMatrix>) {
+                auto v = arg.rawData();
+                if (v.empty()) throw std::runtime_error("Runtime Error: removeAt() on empty vector.");
+                int i = idx < 0 ? static_cast<int>(v.size()) + idx : idx;
+                if (i < 0 || i >= static_cast<int>(v.size())) throw std::runtime_error("Runtime Error: removeAt() index out of range.");
+                v.erase(v.begin() + i);
+                int r = (arg.getCols() == 1 && arg.getRows() > 1) ? static_cast<int>(v.size()) : 1;
+                int c = (arg.getCols() == 1 && arg.getRows() > 1) ? 1 : static_cast<int>(v.size());
+                if (r * c == 0) return Value(T(1, 0));
+                return Value(T(r, c, v));
+            }
+            return expectContainer("removeAt");
+            }, args[0].data);
+        });
+
+    reg("slice", { 2, 3 }, [expectContainer](const std::vector<Value>& args) -> Value {
+        return std::visit([&](auto&& arg) -> Value {
+            using T = std::decay_t<decltype(arg)>;
+            if constexpr (std::is_same_v<T, List> || std::is_same_v<T, RealMatrix> || std::is_same_v<T, ComplexMatrix> || std::is_same_v<T, StringMatrix>) {
+                auto getLen = [](const auto& v) { if constexpr (std::is_same_v<T, List>) return v.size(); else return v.rawData().size(); };
+                int n = static_cast<int>(getLen(arg));
+                int start = static_cast<int>(std::round(args[1].asDouble()));
+                if (start < 0) start = n + start;
+                start = std::max(0, std::min(start, n));
+                int end = n;
+                if (args.size() == 3) {
+                    end = static_cast<int>(std::round(args[2].asDouble()));
+                    if (end < 0) end = n + end;
+                    end = std::max(0, std::min(end, n));
+                }
+                if constexpr (std::is_same_v<T, List>) {
+                    List result; for (int i = start; i < end; ++i) result.push_back(arg.raw()[i]); return Value(result);
+                }
+                else {
+                    auto v = arg.rawData();
+                    std::vector<std::decay_t<decltype(v[0])>> retV;
+                    if (start < end) retV.assign(v.begin() + start, v.begin() + end);
+                    int cr = (arg.getCols() == 1 && arg.getRows() > 1) ? static_cast<int>(retV.size()) : 1;
+                    int cc = (arg.getCols() == 1 && arg.getRows() > 1) ? 1 : static_cast<int>(retV.size());
+                    if (cr * cc == 0) return Value(T(1, 0));
+                    return Value(T(cr, cc, retV));
+                }
+            }
+            return expectContainer("slice");
+            }, args[0].data);
+        });
+
+    reg("reverse", { 1 }, [expectContainer](const std::vector<Value>& args) -> Value {
+        return std::visit([&](auto&& arg) -> Value {
+            using T = std::decay_t<decltype(arg)>;
+            if constexpr (std::is_same_v<T, std::string>) {
+                std::string s = arg; std::reverse(s.begin(), s.end()); return Value(s);
+            }
+            else if constexpr (std::is_same_v<T, List>) {
+                List L = arg; std::reverse(L.raw().begin(), L.raw().end()); return Value(L);
+            }
+            else if constexpr (std::is_same_v<T, RealMatrix> || std::is_same_v<T, ComplexMatrix> || std::is_same_v<T, StringMatrix>) {
+                auto v = arg.rawData(); std::reverse(v.begin(), v.end());
+                return Value(T(arg.getRows(), arg.getCols(), v));
+            }
+            return expectContainer("reverse");
+            }, args[0].data);
+        });
+
+    reg("flatten", { 1 }, [expectContainer](const std::vector<Value>& args) -> Value {
+        return std::visit([&](auto&& arg) -> Value {
+            using T = std::decay_t<decltype(arg)>;
+            if constexpr (std::is_same_v<T, List>) {
+                List result;
+                std::function<void(const List&)> flattenList = [&](const List& L) {
+                    for (const auto& e : L.raw()) {
+                        Value elem = anyToVal(e);
+                        if (std::holds_alternative<List>(elem.data)) flattenList(std::get<List>(elem.data));
+                        else result.push_back(e);
+                    }
+                    };
+                flattenList(arg);
+                return Value(result);
+            }
+            else if constexpr (std::is_same_v<T, RealMatrix> || std::is_same_v<T, ComplexMatrix> || std::is_same_v<T, StringMatrix>) {
+                int n = arg.getRows() * arg.getCols();
+                return Value(T(1, n, arg.rawData()));
+            }
+            return expectContainer("flatten");
+            }, args[0].data);
+        });
+
+    reg("unique", { 1 }, [expectContainer](const std::vector<Value>& args) -> Value {
+        return std::visit([&](auto&& arg) -> Value {
+            using T = std::decay_t<decltype(arg)>;
+            if constexpr (std::is_same_v<T, List>) {
+                List result;
+                for (const auto& e : arg.raw()) {
+                    Value elem = anyToVal(e); bool found = false;
+                    for (const auto& r : result.raw()) {
+                        Value rv = anyToVal(r);
+                        if (elem.data.index() == rv.data.index()) {
+                            std::ostringstream a, b; a << elem; b << rv;
+                            if (a.str() == b.str()) { found = true; break; }
+                        }
+                    }
+                    if (!found) result.push_back(e);
+                }
+                return Value(result);
+            }
+            else if constexpr (std::is_same_v<T, RealMatrix> || std::is_same_v<T, ComplexMatrix> || std::is_same_v<T, StringMatrix>) {
+                auto v = arg.rawData();
+                using Elem = std::decay_t<decltype(v[0])>;
+                std::vector<Elem> result;
+                for (const auto& x : v) {
+                    bool found = false;
+                    for (const auto& y : result) {
+                        if constexpr (std::is_same_v<Elem, double>) { if (Tol::isEq(x, y, 1e4)) { found = true; break; } }
+                        else { if (x == y) { found = true; break; } }
+                    }
+                    if (!found) result.push_back(x);
+                }
+                int cr = (arg.getCols() == 1 && arg.getRows() > 1) ? static_cast<int>(result.size()) : 1;
+                int cc = (arg.getCols() == 1 && arg.getRows() > 1) ? 1 : static_cast<int>(result.size());
+                if (cr * cc == 0) return Value(T(1, 0));
+                return Value(T(cr, cc, result));
+            }
+            return expectContainer("unique");
+            }, args[0].data);
+        });
+
+    reg("indexOf", { 2 }, [expectContainer](const std::vector<Value>& args) -> Value {
+        return std::visit([&](auto&& arg) -> Value {
+            using T = std::decay_t<decltype(arg)>;
+            if constexpr (std::is_same_v<T, List>) {
+                for (size_t i = 0; i < arg.size(); ++i) {
+                    std::ostringstream a, b; a << anyToVal(arg.raw()[i]); b << args[1];
+                    if (a.str() == b.str()) return Value(static_cast<double>(i));
+                }
+                return Value(-1.0);
+            }
+            else if constexpr (std::is_same_v<T, RealMatrix> || std::is_same_v<T, ComplexMatrix> || std::is_same_v<T, StringMatrix>) {
+                auto v = arg.rawData();
+                using Elem = std::decay_t<decltype(v[0])>;
+                Elem target{};
+                try {
+                    if constexpr (std::is_same_v<Elem, double>) target = args[1].asDouble();
+                    else if constexpr (std::is_same_v<Elem, Complex>) target = args[1].asComplex();
+                    else target = std::holds_alternative<std::string>(args[1].data) ? std::get<std::string>(args[1].data) : args[1].toString();
+                }
+                catch (...) { return Value(-1.0); }
+
+                for (size_t i = 0; i < v.size(); ++i) {
+                    if constexpr (std::is_same_v<Elem, double>) { if (Tol::isEq(v[i], target, 1e4)) return Value(static_cast<double>(i)); }
+                    else { if (v[i] == target) return Value(static_cast<double>(i)); }
+                }
+                return Value(-1.0);
+            }
+            return expectContainer("indexOf");
+            }, args[0].data);
+        });
+
+    reg("count", { 2 }, [expectContainer](const std::vector<Value>& args) -> Value {
+        return std::visit([&](auto&& arg) -> Value {
+            using T = std::decay_t<decltype(arg)>;
+            if constexpr (std::is_same_v<T, List>) {
+                int c = 0; std::ostringstream bs; bs << args[1]; std::string bstr = bs.str();
+                for (const auto& e : arg.raw()) { std::ostringstream as; as << anyToVal(e); if (as.str() == bstr) c++; }
+                return Value(static_cast<double>(c));
+            }
+            else if constexpr (std::is_same_v<T, RealMatrix> || std::is_same_v<T, ComplexMatrix> || std::is_same_v<T, StringMatrix>) {
+                auto v = arg.rawData();
+                using Elem = std::decay_t<decltype(v[0])>;
+                Elem target{}; int c = 0;
+                try {
+                    if constexpr (std::is_same_v<Elem, double>) target = args[1].asDouble();
+                    else if constexpr (std::is_same_v<Elem, Complex>) target = args[1].asComplex();
+                    else target = std::holds_alternative<std::string>(args[1].data) ? std::get<std::string>(args[1].data) : args[1].toString();
+                }
+                catch (...) { return Value(0.0); }
+                for (const auto& x : v) {
+                    if constexpr (std::is_same_v<Elem, double>) { if (Tol::isEq(x, target, 1e4)) c++; }
+                    else { if (x == target) c++; }
+                }
+                return Value(static_cast<double>(c));
+            }
+            return expectContainer("count");
+            }, args[0].data);
+        });
+
+    reg("join", { 2 }, [expectContainer](const std::vector<Value>& args) -> Value {
+        if (!std::holds_alternative<std::string>(args[1].data)) throw std::runtime_error("Type Error: delimiter must be a string.");
+        const std::string& delim = std::get<std::string>(args[1].data);
+        return std::visit([&](auto&& arg) -> Value {
+            using T = std::decay_t<decltype(arg)>;
+            if constexpr (std::is_same_v<T, List>) {
+                std::ostringstream oss;
+                for (size_t i = 0; i < arg.size(); ++i) { if (i > 0) oss << delim; oss << anyToVal(arg.raw()[i]); }
+                return Value(oss.str());
+            }
+            else if constexpr (std::is_same_v<T, RealMatrix> || std::is_same_v<T, ComplexMatrix> || std::is_same_v<T, StringMatrix>) {
+                std::ostringstream oss; auto v = arg.rawData();
+                for (size_t i = 0; i < v.size(); ++i) {
+                    if (i > 0) oss << delim;
+                    if constexpr (std::is_same_v<std::decay_t<decltype(v[i])>, double>) {
+                        double val = v[i]; double rounded = std::round(val);
+                        if (Tol::isEq(val, rounded, 1e5) && std::abs(rounded) < 1e15 && rounded == std::trunc(rounded)) oss << static_cast<int64_t>(rounded);
+                        else oss << val;
+                    }
+                    else { oss << Value(v[i]); }
+                }
+                return Value(oss.str());
+            }
+            return expectContainer("join");
+            }, args[0].data);
+        });
+
+    auto applyMathVectorOp = [expectContainer](const Value& val, auto opBody) -> Value {
+        return std::visit([&](auto&& arg) -> Value {
+            using T = std::decay_t<decltype(arg)>;
+            if constexpr (std::is_same_v<T, List>) {
+                List result; if (arg.empty()) return Value(result);
+                Value acc = anyToVal(arg.raw()[0]); result.push_back(valToAny(acc));
+                for (size_t i = 1; i < arg.size(); ++i) { acc = opBody(acc, anyToVal(arg.raw()[i])); result.push_back(valToAny(acc)); }
+                return Value(result);
+            }
+            else if constexpr (std::is_same_v<T, RealMatrix> || std::is_same_v<T, ComplexMatrix>) {
+                auto v = arg.rawData();
+                if (v.empty()) return Value(T(arg.getRows(), arg.getCols(), v));
+                for (size_t i = 1; i < v.size(); ++i) {
+                    Value res = opBody(Value(v[i - 1]), Value(v[i]));
+                    if constexpr (std::is_same_v<T, RealMatrix>) v[i] = res.asDouble();
+                    else v[i] = res.asComplex();
+                }
+                return Value(T(arg.getRows(), arg.getCols(), v));
+            }
+            throw std::runtime_error("Type Error: cumsum/cumprod expects a numeric vector or list.");
+            }, val.data);
+        };
+
+    reg("cumsum", { 1 }, [applyMathVectorOp](const std::vector<Value>& args) -> Value {
+        return applyMathVectorOp(args[0], [](const Value& a, const Value& b) { return a + b; });
+        });
+    reg("cumprod", { 1 }, [applyMathVectorOp](const std::vector<Value>& args) -> Value {
+        return applyMathVectorOp(args[0], [](const Value& a, const Value& b) { return a * b; });
         });
 
     reg("diffs", { 1 }, [](const std::vector<Value>& args) -> Value {
-        if (std::holds_alternative<List>(args[0].data)) {
-            const auto& L = std::get<List>(args[0].data);
-            if (L.size() < 2) throw std::runtime_error("Runtime Error: diffs() requires at least 2 elements.");
-            List result;
-            for (size_t i = 0; i < L.size() - 1; ++i) {
-                Value diff = anyToVal(L.raw()[i + 1]) - anyToVal(L.raw()[i]);
-                result.push_back(valToAny(diff));
+        return std::visit([&](auto&& arg) -> Value {
+            using T = std::decay_t<decltype(arg)>;
+            if constexpr (std::is_same_v<T, List>) {
+                if (arg.size() < 2) throw std::runtime_error("Runtime Error: diffs() requires at least 2 elements.");
+                List result;
+                for (size_t i = 0; i < arg.size() - 1; ++i) result.push_back(valToAny(anyToVal(arg.raw()[i + 1]) - anyToVal(arg.raw()[i])));
+                return Value(result);
             }
-            return Value(result);
-        }
-        auto v = toVecHelper(args[0], "diffs");
-        if (v.size() < 2) throw std::runtime_error("Runtime Error: diffs() requires at least 2 elements.");
-        std::vector<double> d(v.size() - 1);
-        for (size_t i = 0; i < d.size(); ++i) d[i] = v[i + 1] - v[i];
-        return toRowVec(d);
+            else if constexpr (std::is_same_v<T, RealMatrix> || std::is_same_v<T, ComplexMatrix>) {
+                auto v = arg.rawData();
+                if (v.size() < 2) throw std::runtime_error("Runtime Error: diffs() requires at least 2 elements.");
+                std::vector<std::decay_t<decltype(v[0])>> d(v.size() - 1);
+                for (size_t i = 0; i < d.size(); ++i) d[i] = v[i + 1] - v[i];
+                return Value(T(1, static_cast<int>(d.size()), d));
+            }
+            throw std::runtime_error("Type Error: diffs() expects a numeric vector or list.");
+            }, args[0].data);
         });
 
-    reg("indexOf", { 2 }, [](const std::vector<Value>& args) -> Value { if (std::holds_alternative<List>(args[0].data)) { const auto& L=std::get<List>(args[0].data); for (size_t i=0;i<L.size();++i) { std::ostringstream a,b; a<<anyToVal(L.raw()[i]); b<<args[1]; if (a.str()==b.str()) return Value(static_cast<double>(i)); } return Value(-1.0); } auto v=toVecHelper(args[0],"indexOf"); double target=args[1].asDouble(); for (size_t i=0;i<v.size();++i) if (Tol::isEq(v[i],target,1e4)) return Value(static_cast<double>(i)); return Value(-1.0); });
-    reg("count", { 2 }, [](const std::vector<Value>& args) -> Value { if (std::holds_alternative<List>(args[0].data)) { const auto& L=std::get<List>(args[0].data); int c=0; std::ostringstream bs; bs<<args[1]; std::string bstr=bs.str(); for (const auto& e:L.raw()) { std::ostringstream as; as<<anyToVal(e); if (as.str()==bstr) c++; } return Value(static_cast<double>(c)); } auto v=toVecHelper(args[0],"count"); double target=args[1].asDouble(); int c=0; for (double x:v) if (Tol::isEq(x,target,1e4)) c++; return Value(static_cast<double>(c)); });
-
-    reg("join", { 2 }, [](const std::vector<Value>& args) -> Value {
-        if (!std::holds_alternative<std::string>(args[1].data)) throw std::runtime_error("Type Error: join() delimiter must be a string.");
-        const std::string& delim=std::get<std::string>(args[1].data);
-        if (std::holds_alternative<List>(args[0].data)) { const auto& L=std::get<List>(args[0].data); std::ostringstream oss; for (size_t i=0;i<L.size();++i) { if (i>0) oss<<delim; oss<<anyToVal(L.raw()[i]); } return Value(oss.str()); }
-        auto v=toVecHelper(args[0],"join"); std::ostringstream oss; for (size_t i=0;i<v.size();++i) { if (i>0) oss<<delim; double val=v[i]; double rounded=std::round(val); if (Tol::isEq(val,rounded,1e5)&&std::abs(rounded)<1e15&&rounded==std::trunc(rounded)) oss<<static_cast<int64_t>(rounded); else oss<<val; } return Value(oss.str());
-    });
-
-    reg("zip", { 2 }, [](const std::vector<Value>& args) -> Value {
-        if (std::holds_alternative<List>(args[0].data)||std::holds_alternative<List>(args[1].data)) {
-            auto ensureList = [](const Value& v) -> List { if (std::holds_alternative<List>(v.data)) return std::get<List>(v.data); List L; if (std::holds_alternative<RealMatrix>(v.data)) { for (double d:std::get<RealMatrix>(v.data).rawData()) L.push_back(valToAny(Value(d))); } else if (std::holds_alternative<ComplexMatrix>(v.data)) { for (const auto& c:std::get<ComplexMatrix>(v.data).rawData()) L.push_back(valToAny(Value(c))); } else L.push_back(valToAny(v)); return L; };
-            List a=ensureList(args[0]),b=ensureList(args[1]); if (a.size()!=b.size()) throw std::runtime_error("Math Error: zip() requires same length."); List result; for (size_t i=0;i<a.size();++i) { List pair; pair.push_back(a.raw()[i]); pair.push_back(b.raw()[i]); result.push_back(valToAny(Value(pair))); } return Value(result);
-        }
-        if (std::holds_alternative<RealMatrix>(args[0].data)&&std::holds_alternative<RealMatrix>(args[1].data)) { const auto& a=std::get<RealMatrix>(args[0].data); const auto& b=std::get<RealMatrix>(args[1].data); auto fa=a.rawData(),fb=b.rawData(); if (fa.size()!=fb.size()) throw std::runtime_error("Math Error: zip() vectors must have same length."); int n=static_cast<int>(fa.size()); std::vector<double> flat(n*2); for (int i=0;i<n;++i){flat[i*2]=fa[i];flat[i*2+1]=fb[i];} return Value(RealMatrix(n,2,flat)); }
-        ComplexMatrix a=args[0].asComplexMatrix(),b=args[1].asComplexMatrix(); auto fa=a.rawData(),fb=b.rawData(); if (fa.size()!=fb.size()) throw std::runtime_error("Math Error: zip() vectors must have same length."); int n=static_cast<int>(fa.size()); std::vector<Complex> flat(n*2); for (int i=0;i<n;++i){flat[i*2]=fa[i];flat[i*2+1]=fb[i];} return Value(ComplexMatrix(n,2,flat));
-    });
-
-    reg("cat", {}, [](const std::vector<Value>& args) -> Value {
-        if (args.size()<1) throw std::runtime_error("Runtime Error: cat() expects at least 1 argument.");
-        bool hasList=false; for (const auto& a:args) if (std::holds_alternative<List>(a.data)){hasList=true;break;}
-        if (hasList) { List result; for (const auto& a:args) { if (std::holds_alternative<List>(a.data)) { for (const auto& e:std::get<List>(a.data).raw()) result.push_back(e); } else result.push_back(valToAny(a)); } return Value(result); }
-        std::vector<double> flat; for (const auto& a:args) { if (std::holds_alternative<RealMatrix>(a.data)) { const auto& d=std::get<RealMatrix>(a.data).rawData(); flat.insert(flat.end(),d.begin(),d.end()); } else if (std::holds_alternative<double>(a.data)) flat.push_back(std::get<double>(a.data)); else if (std::holds_alternative<BigInt>(a.data)) flat.push_back(std::get<BigInt>(a.data).toDouble()); else if (std::holds_alternative<Fraction>(a.data)) flat.push_back(std::get<Fraction>(a.data).toDouble()); else throw std::runtime_error("Type Error: cat() only accepts real scalars, real vectors, or Lists."); }
-        int n=static_cast<int>(flat.size()); if (n==0) return Value(RealMatrix(1,0)); return Value(RealMatrix(1,n,flat));
-    });
+    // range, fill, linspace
+    reg("range", { 1, 2, 3 }, [](const std::vector<Value>& args) -> Value {
+        if (args.size() == 1) { int end = static_cast<int>(std::round(args[0].asDouble())); if (end <= 0) return Value(RealMatrix(1, 0)); std::vector<double> v(end); for (int i = 0; i < end; ++i) v[i] = static_cast<double>(i); return Value(RealMatrix(1, end, v)); }
+        if (args.size() == 2) { int start = static_cast<int>(std::round(args[0].asDouble())); int end = static_cast<int>(std::round(args[1].asDouble())); if (start >= end) return Value(RealMatrix(1, 0)); int n = end - start; std::vector<double> v(n); for (int i = 0; i < n; ++i) v[i] = static_cast<double>(start + i); return Value(RealMatrix(1, n, v)); }
+        double start = args[0].asDouble(), end = args[1].asDouble(), step = args[2].asDouble(); if (Tol::isEq(step, 0.0)) throw std::runtime_error("Math Error: step cannot be zero."); std::vector<double> v; if (step > 0) { for (double x = start; x < end - Tol::EPS * 100; x += step) v.push_back(x); }
+        else { for (double x = start; x > end + Tol::EPS * 100; x += step) v.push_back(x); } int n = static_cast<int>(v.size()); if (n == 0) return Value(RealMatrix(1, 0)); return Value(RealMatrix(1, n, v));
+        });
+    reg("fill", { 2 }, [](const std::vector<Value>& args) -> Value { int n = static_cast<int>(std::round(args[1].asDouble())); if (n < 0) throw std::runtime_error("Runtime Error: count must be non-negative."); return Value(RealMatrix(1, n, std::vector<double>(n, args[0].asDouble()))); });
+    reg("linspace", { 3 }, [](const std::vector<Value>& args) -> Value { double a = args[0].asDouble(), b = args[1].asDouble(); int n = static_cast<int>(std::round(args[2].asDouble())); if (n < 1) throw std::runtime_error("Runtime Error: requires n >= 1."); std::vector<double> v(n); if (n == 1) v[0] = a; else { for (int i = 0; i < n; ++i) v[i] = a + (b - a) * i / (n - 1); } return Value(RealMatrix(1, n, v)); });
 }
 
 // =================================================================
@@ -1213,47 +1491,198 @@ void BuiltinRegistry::registerDictFunctions() {
 // [20] List & Conversion
 // =================================================================
 void BuiltinRegistry::registerListConversion() {
-    reg("list", {}, [](const std::vector<Value>& args) -> Value { List L; for (const auto& a:args) L.push_back(valToAny(a)); return Value(L); });
+    reg("list", {}, [](const std::vector<Value>& args) -> Value { List L; for (const auto& a : args) L.push_back(valToAny(a)); return Value(L); });
 
     reg("toList", { 1 }, [](const std::vector<Value>& args) -> Value {
-        if (std::holds_alternative<List>(args[0].data)) return args[0];
-        if (std::holds_alternative<RealMatrix>(args[0].data)) { const auto& m=std::get<RealMatrix>(args[0].data); if (m.getRows()==1||m.getCols()==1) { List L; for (const auto& d:m.rawData()) L.push_back(valToAny(Value(d))); return Value(L); } List rows; for (int i=0;i<m.getRows();++i) { List row; for (int j=0;j<m.getCols();++j) row.push_back(valToAny(Value(m(i,j)))); rows.push_back(valToAny(Value(row))); } return Value(rows); }
-        if (std::holds_alternative<ComplexMatrix>(args[0].data)) { const auto& m=std::get<ComplexMatrix>(args[0].data); if (m.getRows()==1||m.getCols()==1) { List L; for (const auto& c:m.rawData()) L.push_back(valToAny(Value(c))); return Value(L); } List rows; for (int i=0;i<m.getRows();++i) { List row; for (int j=0;j<m.getCols();++j) row.push_back(valToAny(Value(m(i,j)))); rows.push_back(valToAny(Value(row))); } return Value(rows); }
-        if (std::holds_alternative<StringMatrix>(args[0].data)) { const auto& m=std::get<StringMatrix>(args[0].data); if (m.getRows()==1||m.getCols()==1) { List L; for (const auto& s:m.rawData()) L.push_back(valToAny(Value(s))); return Value(L); } List rows; for (int i=0;i<m.getRows();++i) { List row; for (int j=0;j<m.getCols();++j) row.push_back(valToAny(Value(m(i,j)))); rows.push_back(valToAny(Value(row))); } return Value(rows); }
-        if (std::holds_alternative<std::string>(args[0].data)) { const auto& s=std::get<std::string>(args[0].data); List L; for (char c:s) L.push_back(valToAny(Value(std::string(1,c)))); return Value(L); }
-        if (std::holds_alternative<Set>(args[0].data)) {
-            const auto& S = std::get<Set>(args[0].data);
-            List L;
-            for (const auto& [key, val] : S.raw()) L.push_back(val);
-            return Value(L);
-        }
-        List L; L.push_back(valToAny(args[0])); return Value(L);
-    });
+        return std::visit([&args](auto&& arg) -> Value {   // ★ 修改1: 捕获 &args
+            using T = std::decay_t<decltype(arg)>;
+            if constexpr (std::is_same_v<T, List>) return Value(arg);
+            else if constexpr (std::is_same_v<T, RealMatrix> || std::is_same_v<T, ComplexMatrix> || std::is_same_v<T, StringMatrix>) {
+                if (arg.getRows() == 1 || arg.getCols() == 1) {
+                    List L; for (const auto& d : arg.rawData()) L.push_back(valToAny(Value(d))); return Value(L);
+                }
+                List rows;
+                for (int i = 0; i < arg.getRows(); ++i) {
+                    List row; for (int j = 0; j < arg.getCols(); ++j) row.push_back(valToAny(Value(arg(i, j)))); rows.push_back(valToAny(Value(row)));
+                }
+                return Value(rows);
+            }
+            else if constexpr (std::is_same_v<T, std::string>) {
+                List L; for (char c : arg) L.push_back(valToAny(Value(std::string(1, c)))); return Value(L);
+            }
+            else if constexpr (std::is_same_v<T, Set>) {
+                List L; for (const auto& [key, val] : arg.raw()) L.push_back(val); return Value(L);
+            }
+            List L; L.push_back(valToAny(args[0])); return Value(L);  // ★ 修改2: 用 args[0] 替代 Value(arg)
+            }, args[0].data);
+        });
 
-    reg("toStrVec", { 1 }, [](const std::vector<Value>& args) -> Value { if (std::holds_alternative<List>(args[0].data)) { const auto& L=std::get<List>(args[0].data); std::vector<std::string> flat; for (const auto& e:L.raw()) { Value v=anyToVal(e); if (std::holds_alternative<std::string>(v.data)) flat.push_back(std::get<std::string>(v.data)); else { std::ostringstream oss; oss<<v; flat.push_back(oss.str()); } } return Value(StringMatrix(static_cast<int>(flat.size()),1,flat)); } if (std::holds_alternative<StringMatrix>(args[0].data)) return args[0]; throw std::runtime_error("Type Error: toStrVec() expects a List or StringMatrix."); });
-    reg("toArray", { 1 }, [](const std::vector<Value>& args) -> Value { if (!std::holds_alternative<List>(args[0].data)) throw std::runtime_error("Type Error: toArray() expects a List."); const auto& L=std::get<List>(args[0].data); std::vector<double> flat; for (const auto& e:L.raw()) flat.push_back(anyToVal(e).asDouble()); return Value(RealMatrix(1,static_cast<int>(flat.size()),flat)); });
+    reg("toStrVec", { 1 }, [](const std::vector<Value>& args) -> Value {
+        if (std::holds_alternative<List>(args[0].data)) {
+            const auto& L = std::get<List>(args[0].data); std::vector<std::string> flat;
+            for (const auto& e : L.raw()) {
+                Value v = anyToVal(e);
+                if (std::holds_alternative<std::string>(v.data)) flat.push_back(std::get<std::string>(v.data));
+                else { std::ostringstream oss; oss << v; flat.push_back(oss.str()); }
+            }
+            return Value(StringMatrix(static_cast<int>(flat.size()), 1, flat));
+        }
+        if (std::holds_alternative<StringMatrix>(args[0].data)) return args[0];
+        throw std::runtime_error("Type Error: toStrVec() expects a List or StringMatrix.");
+        });
+
+    reg("toArray", { 1 }, [](const std::vector<Value>& args) -> Value {
+        if (!std::holds_alternative<List>(args[0].data)) throw std::runtime_error("Type Error: expects a List.");
+        const auto& L = std::get<List>(args[0].data); std::vector<double> flat;
+        for (const auto& e : L.raw()) flat.push_back(anyToVal(e).asDouble());
+        return Value(RealMatrix(1, static_cast<int>(flat.size()), flat));
+        });
 
     reg("toMatrix", { 1 }, [](const std::vector<Value>& args) -> Value {
-        if (std::holds_alternative<RealMatrix>(args[0].data)||std::holds_alternative<ComplexMatrix>(args[0].data)||std::holds_alternative<StringMatrix>(args[0].data)) return args[0];
-        if (!std::holds_alternative<List>(args[0].data)) throw std::runtime_error("Type Error: toMatrix() expects a List or matrix.");
-        const auto& L=std::get<List>(args[0].data);
-        if (L.empty()) return Value(RealMatrix(0,0));
-        Value first=anyToVal(L.raw()[0]);
-        bool isNested=std::holds_alternative<List>(first.data);
-        auto isReal=[](const Value& v){return std::holds_alternative<double>(v.data)||std::holds_alternative<BigInt>(v.data)||std::holds_alternative<Fraction>(v.data);};
-        auto isNumeric=[](const Value& v){return std::holds_alternative<double>(v.data)||std::holds_alternative<BigInt>(v.data)||std::holds_alternative<Fraction>(v.data)||std::holds_alternative<Complex>(v.data);};
-        auto isStr=[](const Value& v){return std::holds_alternative<std::string>(v.data);};
-        auto valToStr=[](const Value& v)->std::string{if(std::holds_alternative<std::string>(v.data))return std::get<std::string>(v.data);std::ostringstream oss;oss<<v;return oss.str();};
-        if (!isNested) { int n=static_cast<int>(L.size()); bool allReal=true,allNum=true,allStr=true; for (const auto& e:L.raw()){Value v=anyToVal(e);if(!isReal(v))allReal=false;if(!isNumeric(v))allNum=false;if(!isStr(v))allStr=false;} if (allStr){std::vector<std::string> flat;for(const auto& e:L.raw())flat.push_back(std::get<std::string>(anyToVal(e).data));return Value(StringMatrix(1,n,flat));} if (allReal){std::vector<double> flat;for(const auto& e:L.raw())flat.push_back(anyToVal(e).asDouble());return Value(RealMatrix(1,n,flat));} if (allNum){std::vector<Complex> flat;for(const auto& e:L.raw())flat.push_back(anyToVal(e).asComplex());return Value(ComplexMatrix(1,n,flat));} std::vector<std::string> flat;for(const auto& e:L.raw())flat.push_back(valToStr(anyToVal(e)));return Value(StringMatrix(1,n,flat)); }
-        int rows=static_cast<int>(L.size()),cols=-1; bool allReal=true,allNum=true,allStr=true;
+        if (std::holds_alternative<RealMatrix>(args[0].data) || std::holds_alternative<ComplexMatrix>(args[0].data) || std::holds_alternative<StringMatrix>(args[0].data)) return args[0];
+        if (!std::holds_alternative<List>(args[0].data)) throw std::runtime_error("Type Error: expects a List or matrix.");
+        const auto& L = std::get<List>(args[0].data);
+        if (L.empty()) return Value(RealMatrix(0, 0));
+        Value first = anyToVal(L.raw()[0]);
+        bool isNested = std::holds_alternative<List>(first.data);
+        auto isReal = [](const Value& v) { return std::holds_alternative<double>(v.data) || std::holds_alternative<BigInt>(v.data) || std::holds_alternative<Fraction>(v.data); };
+        auto isNumeric = [](const Value& v) { return std::holds_alternative<double>(v.data) || std::holds_alternative<BigInt>(v.data) || std::holds_alternative<Fraction>(v.data) || std::holds_alternative<Complex>(v.data); };
+        auto isStr = [](const Value& v) { return std::holds_alternative<std::string>(v.data); };
+        auto valToStr = [](const Value& v) -> std::string { if (std::holds_alternative<std::string>(v.data)) return std::get<std::string>(v.data); std::ostringstream oss; oss << v; return oss.str(); };
+
+        if (!isNested) {
+            int n = static_cast<int>(L.size()); bool allReal = true, allNum = true, allStr = true;
+            for (const auto& e : L.raw()) { Value v = anyToVal(e); if (!isReal(v)) allReal = false; if (!isNumeric(v)) allNum = false; if (!isStr(v)) allStr = false; }
+            if (allStr) { std::vector<std::string> flat; for (const auto& e : L.raw()) flat.push_back(std::get<std::string>(anyToVal(e).data)); return Value(StringMatrix(1, n, flat)); }
+            if (allReal) { std::vector<double> flat; for (const auto& e : L.raw()) flat.push_back(anyToVal(e).asDouble()); return Value(RealMatrix(1, n, flat)); }
+            if (allNum) { std::vector<Complex> flat; for (const auto& e : L.raw()) flat.push_back(anyToVal(e).asComplex()); return Value(ComplexMatrix(1, n, flat)); }
+            std::vector<std::string> flat; for (const auto& e : L.raw()) flat.push_back(valToStr(anyToVal(e))); return Value(StringMatrix(1, n, flat));
+        }
+
+        int rows = static_cast<int>(L.size()), cols = -1; bool allReal = true, allNum = true, allStr = true;
         std::vector<std::vector<Value>> grid;
-        for(const auto& rowAny:L.raw()){Value rowVal=anyToVal(rowAny);if(!std::holds_alternative<List>(rowVal.data))throw std::runtime_error("Type Error: toMatrix() expects uniform List of Lists.");const auto& rowList=std::get<List>(rowVal.data);if(cols==-1)cols=static_cast<int>(rowList.size());else if(static_cast<int>(rowList.size())!=cols)throw std::runtime_error("Type Error: toMatrix() rows must have equal length.");std::vector<Value> rowVec;for(const auto& e:rowList.raw()){Value v=anyToVal(e);if(!isReal(v))allReal=false;if(!isNumeric(v))allNum=false;if(!isStr(v))allStr=false;rowVec.push_back(v);}grid.push_back(std::move(rowVec));}
-        if(cols<=0)return Value(RealMatrix(0,0));
-        if(allStr){std::vector<std::string> flat;for(const auto& row:grid)for(const auto& v:row)flat.push_back(std::get<std::string>(v.data));return Value(StringMatrix(rows,cols,flat));}
-        if(allReal){std::vector<double> flat;for(const auto& row:grid)for(const auto& v:row)flat.push_back(v.asDouble());return Value(RealMatrix(rows,cols,flat));}
-        if(allNum){std::vector<Complex> flat;for(const auto& row:grid)for(const auto& v:row)flat.push_back(v.asComplex());return Value(ComplexMatrix(rows,cols,flat));}
-        std::vector<std::string> flat;for(const auto& row:grid)for(const auto& v:row)flat.push_back(valToStr(v));return Value(StringMatrix(rows,cols,flat));
-    });
+        for (const auto& rowAny : L.raw()) {
+            Value rowVal = anyToVal(rowAny);
+            if (!std::holds_alternative<List>(rowVal.data)) throw std::runtime_error("Type Error: expects uniform List of Lists.");
+            const auto& rowList = std::get<List>(rowVal.data);
+            if (cols == -1) cols = static_cast<int>(rowList.size()); else if (static_cast<int>(rowList.size()) != cols) throw std::runtime_error("Type Error: rows must have equal length.");
+            std::vector<Value> rowVec;
+            for (const auto& e : rowList.raw()) { Value v = anyToVal(e); if (!isReal(v)) allReal = false; if (!isNumeric(v)) allNum = false; if (!isStr(v)) allStr = false; rowVec.push_back(v); }
+            grid.push_back(std::move(rowVec));
+        }
+        if (cols <= 0) return Value(RealMatrix(0, 0));
+        if (allStr) { std::vector<std::string> flat; for (const auto& row : grid) for (const auto& v : row) flat.push_back(std::get<std::string>(v.data)); return Value(StringMatrix(rows, cols, flat)); }
+        if (allReal) { std::vector<double> flat; for (const auto& row : grid) for (const auto& v : row) flat.push_back(v.asDouble()); return Value(RealMatrix(rows, cols, flat)); }
+        if (allNum) { std::vector<Complex> flat; for (const auto& row : grid) for (const auto& v : row) flat.push_back(v.asComplex()); return Value(ComplexMatrix(rows, cols, flat)); }
+        std::vector<std::string> flat; for (const auto& row : grid) for (const auto& v : row) flat.push_back(valToStr(v)); return Value(StringMatrix(rows, cols, flat));
+        });
+
+    reg("zip", { 2 }, [](const std::vector<Value>& args) -> Value {
+        if (std::holds_alternative<List>(args[0].data) || std::holds_alternative<List>(args[1].data)) {
+            auto extractL = [](const Value& v) -> List {
+                if (std::holds_alternative<List>(v.data)) return std::get<List>(v.data);
+                List L;
+                if (std::holds_alternative<RealMatrix>(v.data)) { for (double d : std::get<RealMatrix>(v.data).rawData()) L.push_back(valToAny(Value(d))); }
+                else if (std::holds_alternative<ComplexMatrix>(v.data)) { for (const auto& c : std::get<ComplexMatrix>(v.data).rawData()) L.push_back(valToAny(Value(c))); }
+                else if (std::holds_alternative<StringMatrix>(v.data)) { for (const auto& s : std::get<StringMatrix>(v.data).rawData()) L.push_back(valToAny(Value(s))); }
+                else L.push_back(valToAny(v));
+                return L;
+                };
+            List a = extractL(args[0]), b = extractL(args[1]);
+            if (a.size() != b.size()) throw std::runtime_error("Math Error: zip() requires same length.");
+            List result;
+            for (size_t i = 0; i < a.size(); ++i) { List pair; pair.push_back(a.raw()[i]); pair.push_back(b.raw()[i]); result.push_back(valToAny(Value(pair))); }
+            return Value(result);
+        }
+
+        bool hasString = std::holds_alternative<StringMatrix>(args[0].data) || std::holds_alternative<StringMatrix>(args[1].data);
+        bool hasComplex = std::holds_alternative<ComplexMatrix>(args[0].data) || std::holds_alternative<ComplexMatrix>(args[1].data);
+
+        auto getLenAndFetch = [](const Value& v, int i, bool toString, bool toComplex) -> Value {
+            if (std::holds_alternative<StringMatrix>(v.data)) return Value(std::get<StringMatrix>(v.data).rawData()[i]);
+            if (std::holds_alternative<ComplexMatrix>(v.data)) {
+                if (toString) { std::ostringstream oss; oss << Value(std::get<ComplexMatrix>(v.data).rawData()[i]); return Value(oss.str()); }
+                return Value(std::get<ComplexMatrix>(v.data).rawData()[i]);
+            }
+            if (std::holds_alternative<RealMatrix>(v.data)) {
+                if (toString) { std::ostringstream oss; oss << Value(std::get<RealMatrix>(v.data).rawData()[i]); return Value(oss.str()); }
+                if (toComplex) return Value(Complex(std::get<RealMatrix>(v.data).rawData()[i]));
+                return Value(std::get<RealMatrix>(v.data).rawData()[i]);
+            }
+            return v;
+            };
+
+        auto getLen = [](const Value& v) {
+            if (std::holds_alternative<StringMatrix>(v.data)) return std::get<StringMatrix>(v.data).rawData().size();
+            if (std::holds_alternative<ComplexMatrix>(v.data)) return std::get<ComplexMatrix>(v.data).rawData().size();
+            if (std::holds_alternative<RealMatrix>(v.data)) return std::get<RealMatrix>(v.data).rawData().size();
+            return size_t(1);
+            };
+
+        int nA = static_cast<int>(getLen(args[0])), nB = static_cast<int>(getLen(args[1]));
+        if (nA != nB) throw std::runtime_error("Math Error: zip() vectors must have same length.");
+        int n = nA;
+
+        if (hasString) {
+            std::vector<std::string> flat(n * 2);
+            for (int i = 0; i < n; ++i) { flat[i * 2] = std::get<std::string>(getLenAndFetch(args[0], i, true, false).data); flat[i * 2 + 1] = std::get<std::string>(getLenAndFetch(args[1], i, true, false).data); }
+            return Value(StringMatrix(n, 2, flat));
+        }
+        if (hasComplex) {
+            std::vector<Complex> flat(n * 2);
+            for (int i = 0; i < n; ++i) { flat[i * 2] = getLenAndFetch(args[0], i, false, true).asComplex(); flat[i * 2 + 1] = getLenAndFetch(args[1], i, false, true).asComplex(); }
+            return Value(ComplexMatrix(n, 2, flat));
+        }
+        std::vector<double> flat(n * 2);
+        for (int i = 0; i < n; ++i) { flat[i * 2] = getLenAndFetch(args[0], i, false, false).asDouble(); flat[i * 2 + 1] = getLenAndFetch(args[1], i, false, false).asDouble(); }
+        return Value(RealMatrix(n, 2, flat));
+        });
+
+    reg("cat", {}, [](const std::vector<Value>& args) -> Value {
+        if (args.empty()) throw std::runtime_error("Runtime Error: cat() expects at least 1 argument.");
+        bool hasList = false, hasStringMat = false, hasComplexMat = false;
+        for (const auto& a : args) {
+            if (std::holds_alternative<List>(a.data)) hasList = true;
+            else if (std::holds_alternative<StringMatrix>(a.data) || std::holds_alternative<std::string>(a.data)) hasStringMat = true;
+            else if (std::holds_alternative<ComplexMatrix>(a.data) || std::holds_alternative<Complex>(a.data)) hasComplexMat = true;
+            else if (!std::holds_alternative<RealMatrix>(a.data) && !std::holds_alternative<double>(a.data) && !std::holds_alternative<BigInt>(a.data) && !std::holds_alternative<Fraction>(a.data)) {
+                hasList = true;
+            }
+        }
+        if (hasList) {
+            List result;
+            for (const auto& a : args) {
+                if (std::holds_alternative<List>(a.data)) { for (const auto& e : std::get<List>(a.data).raw()) result.push_back(e); }
+                else result.push_back(valToAny(a));
+            }
+            return Value(result);
+        }
+        if (hasStringMat) {
+            std::vector<std::string> flat;
+            for (const auto& a : args) {
+                if (std::holds_alternative<StringMatrix>(a.data)) { auto d = std::get<StringMatrix>(a.data).rawData(); flat.insert(flat.end(), d.begin(), d.end()); }
+                else if (std::holds_alternative<RealMatrix>(a.data)) { for (auto d : std::get<RealMatrix>(a.data).rawData()) { std::ostringstream oss; oss << Value(d); flat.push_back(oss.str()); } }
+                else if (std::holds_alternative<ComplexMatrix>(a.data)) { for (auto d : std::get<ComplexMatrix>(a.data).rawData()) { std::ostringstream oss; oss << Value(d); flat.push_back(oss.str()); } }
+                else { std::ostringstream oss; oss << a; flat.push_back(oss.str()); }
+            }
+            return Value(StringMatrix(1, static_cast<int>(flat.size()), flat));
+        }
+        if (hasComplexMat) {
+            std::vector<Complex> flat;
+            for (const auto& a : args) {
+                if (std::holds_alternative<ComplexMatrix>(a.data)) { auto d = std::get<ComplexMatrix>(a.data).rawData(); flat.insert(flat.end(), d.begin(), d.end()); }
+                else if (std::holds_alternative<RealMatrix>(a.data)) { for (auto d : std::get<RealMatrix>(a.data).rawData()) flat.push_back(Complex(d)); }
+                else { flat.push_back(a.asComplex()); }
+            }
+            return Value(ComplexMatrix(1, static_cast<int>(flat.size()), flat));
+        }
+        std::vector<double> flat;
+        for (const auto& a : args) {
+            if (std::holds_alternative<RealMatrix>(a.data)) { auto d = std::get<RealMatrix>(a.data).rawData(); flat.insert(flat.end(), d.begin(), d.end()); }
+            else { flat.push_back(a.asDouble()); }
+        }
+        return Value(RealMatrix(1, static_cast<int>(flat.size()), flat));
+        });
 }
 
 // =================================================================
@@ -1338,236 +1767,222 @@ void BuiltinRegistry::registerHigherOrder() {
 
     reg("apply", { 2 }, [](const std::vector<Value>& args) -> Value {
         auto cl = args[0].asFunction();
-
         std::vector<Value> unpackedArgs;
-
         const Value& argList = args[1];
 
-        if (std::holds_alternative<List>(argList.data)) {
-            const auto& L = std::get<List>(argList.data);
-            for (const auto& e : L.raw()) unpackedArgs.push_back(std::any_cast<Value>(e));
-        }
-        else if (std::holds_alternative<RealMatrix>(argList.data)) {
-            const auto& m = std::get<RealMatrix>(argList.data);
-            if (m.getRows() == 1 || m.getCols() == 1) {
-                for (double d : m.rawData()) unpackedArgs.push_back(Value(d));
+        return std::visit([&](auto&& arg) -> Value {
+            using T = std::decay_t<decltype(arg)>;
+            if constexpr (std::is_same_v<T, List>) {
+                for (const auto& e : arg.raw()) unpackedArgs.push_back(std::any_cast<Value>(e));
+            }
+            else if constexpr (std::is_same_v<T, RealMatrix> || std::is_same_v<T, ComplexMatrix> || std::is_same_v<T, StringMatrix>) {
+                if (arg.getRows() != 1 && arg.getCols() != 1) throw std::runtime_error("Type Error: map() expects 1D vector.");
+                for (const auto& d : arg.rawData()) unpackedArgs.push_back(Value(d));
+            }
+            else if constexpr (std::is_same_v<T, std::string>) {
+                for (char c : arg) unpackedArgs.push_back(Value(std::string(1, c)));
             }
             else {
-                throw std::runtime_error("Type Error: apply() requires a 1D vector or list.");
+                throw std::runtime_error("Type Error: apply() expects a function and an iterable argument list/vector.");
             }
-        }
-        else if (std::holds_alternative<ComplexMatrix>(argList.data)) {
-            const auto& m = std::get<ComplexMatrix>(argList.data);
-            if (m.getRows() == 1 || m.getCols() == 1) {
-                for (const auto& c : m.rawData()) unpackedArgs.push_back(Value(c));
-            }
-            else {
-                throw std::runtime_error("Type Error: apply() requires a 1D vector or list.");
-            }
-        }
-        // ★ 补齐：StringMatrix 的解包支持
-        else if (std::holds_alternative<StringMatrix>(argList.data)) {
-            const auto& m = std::get<StringMatrix>(argList.data);
-            if (m.getRows() == 1 || m.getCols() == 1) {
-                for (const auto& s : m.rawData()) unpackedArgs.push_back(Value(s));
-            }
-            else {
-                throw std::runtime_error("Type Error: apply() requires a 1D string vector or list.");
-            }
-        }
-        // ★ 附赠：支持把普通字符串打散当参数（如 "abc" -> 'a', 'b', 'c'）
-        else if (std::holds_alternative<std::string>(argList.data)) {
-            const auto& str = std::get<std::string>(argList.data);
-            for (char c : str) unpackedArgs.push_back(Value(std::string(1, c)));
-        }
-        else {
-            throw std::runtime_error("Type Error: apply() expects a function and an iterable argument list/vector.");
-        }
-
-        // 把展开的参数序列精准投喂给目标函数
-        return safeCallFunction(cl, unpackedArgs);
+            return safeCallFunction(cl, unpackedArgs);
+            }, argList.data);
         });
 
     reg("map", { 2 }, [](const std::vector<Value>& args) -> Value {
         auto cl = args[0].asFunction();
-        if (!cl->acceptsArgCount(1))
-            throw std::runtime_error("Runtime Error: map() requires a single-parameter function.");
-        if (std::holds_alternative<List>(args[1].data)) {
-            const auto& L = std::get<List>(args[1].data);
-            List result;
-            for (const auto& e : L.raw()) {
-                Value y = safeCallFunction(cl, { anyToVal(e) });   // ★ 关键替换
-                result.push_back(valToAny(y));
+        if (!cl->acceptsArgCount(1)) throw std::runtime_error("Runtime Error: map() requires a single-parameter function.");
+
+        return std::visit([&](auto&& arg) -> Value {
+            using T = std::decay_t<decltype(arg)>;
+            if constexpr (std::is_same_v<T, List>) {
+                List result;
+                for (const auto& e : arg.raw()) result.push_back(valToAny(safeCallFunction(cl, { anyToVal(e) })));
+                return Value(result);
             }
-            return Value(result);
-        }
-        if (std::holds_alternative<RealMatrix>(args[1].data)) {
-            auto flat = std::get<RealMatrix>(args[1].data).rawData();
-            std::vector<double> rd; std::vector<Complex> rc; bool hasComplex = false;
-            for (double x : flat) {
-                Value y = safeCallFunction(cl, { Value(x) });      // ★ 关键替换
-                if (!hasComplex) {
-                    try { rd.push_back(y.asDouble()); }
-                    catch (...) { hasComplex = true; for (double d : rd) rc.push_back(Complex(d)); rc.push_back(y.asComplex()); }
+            else if constexpr (std::is_same_v<T, RealMatrix> || std::is_same_v<T, ComplexMatrix> || std::is_same_v<T, StringMatrix>) {
+                auto flat = arg.rawData();
+                List fallback; bool typeConflict = false;
+                bool hasString = false, hasComp = false;
+                std::vector<double> rd; std::vector<Complex> rc; std::vector<std::string> rs;
+
+                for (size_t i = 0; i < flat.size(); ++i) {
+                    Value y = safeCallFunction(cl, { Value(flat[i]) });
+                    if (i == 0) {
+                        if (std::holds_alternative<std::string>(y.data)) hasString = true;
+                        else if (std::holds_alternative<Complex>(y.data)) hasComp = true;
+                        else if (!std::holds_alternative<double>(y.data) && !std::holds_alternative<BigInt>(y.data) && !std::holds_alternative<Fraction>(y.data)) typeConflict = true;
+                    }
+                    if (typeConflict) { fallback.push_back(valToAny(y)); }
+                    else if (hasString) {
+                        if (std::holds_alternative<std::string>(y.data)) rs.push_back(std::get<std::string>(y.data));
+                        else { std::ostringstream oss; oss << y; rs.push_back(oss.str()); }
+                    }
+                    else if (hasComp) {
+                        try { rc.push_back(y.asComplex()); }
+                        catch (...) { typeConflict = true; fallback.clear(); for (auto r : rc) fallback.push_back(valToAny(Value(r))); fallback.push_back(valToAny(y)); }
+                    }
+                    else {
+                        try { rd.push_back(y.asDouble()); }
+                        catch (...) {
+                            try { rc.clear(); for (auto d : rd) rc.push_back(Complex(d)); rc.push_back(y.asComplex()); hasComp = true; }
+                            catch (...) { typeConflict = true; fallback.clear(); for (auto d : rd) fallback.push_back(valToAny(Value(d))); fallback.push_back(valToAny(y)); }
+                        }
+                    }
                 }
-                else { rc.push_back(y.asComplex()); }
+
+                if (typeConflict) {
+                    for (size_t i = fallback.size(); i < flat.size(); ++i) fallback.push_back(valToAny(safeCallFunction(cl, { Value(flat[i]) })));
+                    return Value(fallback);
+                }
+                if (hasString) return Value(StringMatrix(arg.getRows(), arg.getCols(), rs));
+                if (hasComp) return Value(ComplexMatrix(arg.getRows(), arg.getCols(), rc));
+                return Value(RealMatrix(arg.getRows(), arg.getCols(), rd));
             }
-            int n = static_cast<int>(flat.size());
-            if (hasComplex) return Value(ComplexMatrix(1, n, rc));
-            return Value(RealMatrix(1, n, rd));
-        }
-        if (std::holds_alternative<ComplexMatrix>(args[1].data)) {
-            auto flat = std::get<ComplexMatrix>(args[1].data).rawData();
-            std::vector<Complex> rc;
-            for (const auto& x : flat) rc.push_back(safeCallFunction(cl, { Value(x) }).asComplex());  // ★ 关键替换
-            return Value(ComplexMatrix(1, static_cast<int>(flat.size()), rc));
-        }
-        throw std::runtime_error("Type Error: map() expects a vector/matrix/list.");
+            throw std::runtime_error("Type Error: map() expects a vector/matrix/list.");
+            }, args[1].data);
         });
 
     reg("filter", { 2 }, [](const std::vector<Value>& args) -> Value {
         auto cl = args[0].asFunction();
-        if (!cl->acceptsArgCount(1))
-            throw std::runtime_error("Runtime Error: filter() requires a single-parameter function.");
-        if (std::holds_alternative<List>(args[1].data)) {
-            const auto& L = std::get<List>(args[1].data);
-            List result;
-            for (const auto& e : L.raw()) {
-                if (isTruthy(safeCallFunction(cl, { anyToVal(e) }))) result.push_back(e); // ★
+        if (!cl->acceptsArgCount(1)) throw std::runtime_error("Runtime Error: filter() requires a single-parameter function.");
+
+        return std::visit([&](auto&& arg) -> Value {
+            using T = std::decay_t<decltype(arg)>;
+            if constexpr (std::is_same_v<T, List>) {
+                List result;
+                for (const auto& e : arg.raw()) { if (isTruthy(safeCallFunction(cl, { anyToVal(e) }))) result.push_back(e); }
+                return Value(result);
             }
-            return Value(result);
-        }
-        if (std::holds_alternative<RealMatrix>(args[1].data)) {
-            auto flat = std::get<RealMatrix>(args[1].data).rawData();
-            std::vector<double> result;
-            for (double x : flat) {
-                if (isTruthy(safeCallFunction(cl, { Value(x) }))) result.push_back(x); // ★
+            else if constexpr (std::is_same_v<T, RealMatrix> || std::is_same_v<T, ComplexMatrix> || std::is_same_v<T, StringMatrix>) {
+                auto flat = arg.rawData();
+                using Elem = std::decay_t<decltype(flat[0])>;
+                std::vector<Elem> result;
+                for (const auto& x : flat) { if (isTruthy(safeCallFunction(cl, { Value(x) }))) result.push_back(x); }
+                int n = static_cast<int>(result.size());
+                if (n == 0) return Value(T(1, 0));
+                return Value(T(1, n, result));
             }
-            int n = static_cast<int>(result.size());
-            if (n == 0) return Value(RealMatrix(1, 0));
-            return Value(RealMatrix(1, n, result));
-        }
-        if (std::holds_alternative<ComplexMatrix>(args[1].data)) {
-            auto flat = std::get<ComplexMatrix>(args[1].data).rawData();
-            std::vector<Complex> result;
-            for (const auto& x : flat) {
-                if (isTruthy(safeCallFunction(cl, { Value(x) }))) result.push_back(x); // ★
-            }
-            int n = static_cast<int>(result.size());
-            if (n == 0) return Value(ComplexMatrix(1, 0));
-            return Value(ComplexMatrix(1, n, result));
-        }
-        throw std::runtime_error("Type Error: filter() expects a vector/matrix/list.");
+            throw std::runtime_error("Type Error: filter() expects a vector/matrix/list.");
+            }, args[1].data);
         });
 
     reg("reduce", { 2, 3 }, [](const std::vector<Value>& args) -> Value {
         auto cl = args[0].asFunction();
-        if (!cl->acceptsArgCount(2))
-            throw std::runtime_error("Runtime Error: reduce() requires a two-parameter function.");
-        if (std::holds_alternative<List>(args[1].data)) {
-            const auto& L = std::get<List>(args[1].data);
-            Value acc; size_t startIdx = 0;
-            if (args.size() == 3) { acc = args[2]; }
-            else { if (L.empty()) throw std::runtime_error("Runtime Error: reduce() on empty list without initial value."); acc = anyToVal(L.raw()[0]); startIdx = 1; }
-            for (size_t i = startIdx; i < L.size(); ++i)
-                acc = safeCallFunction(cl, { acc, anyToVal(L.raw()[i]) }); // ★
-            return acc;
-        }
-        std::vector<double> flat;
-        if (std::holds_alternative<RealMatrix>(args[1].data))
-            flat = std::get<RealMatrix>(args[1].data).rawData();
-        else if (std::holds_alternative<ComplexMatrix>(args[1].data)) {
-            auto cd = std::get<ComplexMatrix>(args[1].data).rawData();
-            for (const auto& c : cd) { if (!Tol::isEq(c.imag, 0.0)) throw std::runtime_error("reduce() requires real data."); flat.push_back(c.real); }
-        }
-        else throw std::runtime_error("Type Error: reduce() expects a vector/list.");
-        Value acc; size_t startIdx = 0;
-        if (args.size() == 3) { acc = args[2]; }
-        else { if (flat.empty()) throw std::runtime_error("Runtime Error: reduce() on empty vector without initial value."); acc = Value(flat[0]); startIdx = 1; }
-        for (size_t i = startIdx; i < flat.size(); ++i)
-            acc = safeCallFunction(cl, { acc, Value(flat[i]) }); // ★
-        return acc;
+        if (!cl->acceptsArgCount(2)) throw std::runtime_error("Runtime Error: reduce() requires a two-parameter function.");
+
+        return std::visit([&](auto&& arg) -> Value {
+            using T = std::decay_t<decltype(arg)>;
+            if constexpr (std::is_same_v<T, List>) {
+                Value acc; size_t startIdx = 0;
+                if (args.size() == 3) { acc = args[2]; }
+                else { if (arg.empty()) throw std::runtime_error("Runtime Error: reduce() on empty."); acc = anyToVal(arg.raw()[0]); startIdx = 1; }
+                for (size_t i = startIdx; i < arg.size(); ++i) acc = safeCallFunction(cl, { acc, anyToVal(arg.raw()[i]) });
+                return acc;
+            }
+            else if constexpr (std::is_same_v<T, RealMatrix> || std::is_same_v<T, ComplexMatrix> || std::is_same_v<T, StringMatrix>) {
+                auto flat = arg.rawData();
+                Value acc; size_t startIdx = 0;
+                if (args.size() == 3) { acc = args[2]; }
+                else { if (flat.empty()) throw std::runtime_error("Runtime Error: reduce() on empty."); acc = Value(flat[0]); startIdx = 1; }
+                for (size_t i = startIdx; i < flat.size(); ++i) acc = safeCallFunction(cl, { acc, Value(flat[i]) });
+                return acc;
+            }
+            throw std::runtime_error("Type Error: reduce() expects a vector/matrix/list.");
+            }, args[1].data);
         });
 
     reg("any", { 2 }, [](const std::vector<Value>& args) -> Value {
         auto cl = args[0].asFunction();
         if (!cl->acceptsArgCount(1)) throw std::runtime_error("Runtime Error: any() requires a single-parameter function.");
-        if (std::holds_alternative<List>(args[1].data)) { for (const auto& e : std::get<List>(args[1].data).raw()) { if (isTruthy(safeCallFunction(cl, { anyToVal(e) }))) return Value(1.0); } return Value(0.0); } // ★
-        auto flat = toVecHelper(args[1], "any");
-        for (double x : flat) { if (isTruthy(safeCallFunction(cl, { Value(x) }))) return Value(1.0); } // ★
-        return Value(0.0);
+        return std::visit([&](auto&& arg) -> Value {
+            using T = std::decay_t<decltype(arg)>;
+            if constexpr (std::is_same_v<T, List>) {
+                for (const auto& e : arg.raw()) { if (isTruthy(safeCallFunction(cl, { anyToVal(e) }))) return Value(1.0); } return Value(0.0);
+            }
+            else if constexpr (std::is_same_v<T, RealMatrix> || std::is_same_v<T, ComplexMatrix> || std::is_same_v<T, StringMatrix>) {
+                for (const auto& x : arg.rawData()) { if (isTruthy(safeCallFunction(cl, { Value(x) }))) return Value(1.0); } return Value(0.0);
+            }
+            throw std::runtime_error("Type Error: any() expects a vector/list.");
+            }, args[1].data);
         });
 
     reg("all", { 2 }, [](const std::vector<Value>& args) -> Value {
         auto cl = args[0].asFunction();
         if (!cl->acceptsArgCount(1)) throw std::runtime_error("Runtime Error: all() requires a single-parameter function.");
-        if (std::holds_alternative<List>(args[1].data)) { for (const auto& e : std::get<List>(args[1].data).raw()) { if (!isTruthy(safeCallFunction(cl, { anyToVal(e) }))) return Value(0.0); } return Value(1.0); } // ★
-        auto flat = toVecHelper(args[1], "all");
-        for (double x : flat) { if (!isTruthy(safeCallFunction(cl, { Value(x) }))) return Value(0.0); } // ★
-        return Value(1.0);
+        return std::visit([&](auto&& arg) -> Value {
+            using T = std::decay_t<decltype(arg)>;
+            if constexpr (std::is_same_v<T, List>) {
+                for (const auto& e : arg.raw()) { if (!isTruthy(safeCallFunction(cl, { anyToVal(e) }))) return Value(0.0); } return Value(1.0);
+            }
+            else if constexpr (std::is_same_v<T, RealMatrix> || std::is_same_v<T, ComplexMatrix> || std::is_same_v<T, StringMatrix>) {
+                for (const auto& x : arg.rawData()) { if (!isTruthy(safeCallFunction(cl, { Value(x) }))) return Value(0.0); } return Value(1.0);
+            }
+            throw std::runtime_error("Type Error: all() expects a vector/list.");
+            }, args[1].data);
         });
 
     reg("countIf", { 2 }, [](const std::vector<Value>& args) -> Value {
         auto cl = args[0].asFunction();
         if (!cl->acceptsArgCount(1)) throw std::runtime_error("Runtime Error: countIf() requires a single-parameter function.");
-        int c = 0;
-        if (std::holds_alternative<List>(args[1].data)) { for (const auto& e : std::get<List>(args[1].data).raw()) { if (isTruthy(safeCallFunction(cl, { anyToVal(e) }))) c++; } return Value(static_cast<double>(c)); } // ★
-        auto flat = toVecHelper(args[1], "countIf");
-        for (double x : flat) { if (isTruthy(safeCallFunction(cl, { Value(x) }))) c++; } // ★
-        return Value(static_cast<double>(c));
+        return std::visit([&](auto&& arg) -> Value {
+            using T = std::decay_t<decltype(arg)>;
+            int c = 0;
+            if constexpr (std::is_same_v<T, List>) {
+                for (const auto& e : arg.raw()) { if (isTruthy(safeCallFunction(cl, { anyToVal(e) }))) c++; } return Value(static_cast<double>(c));
+            }
+            else if constexpr (std::is_same_v<T, RealMatrix> || std::is_same_v<T, ComplexMatrix> || std::is_same_v<T, StringMatrix>) {
+                for (const auto& x : arg.rawData()) { if (isTruthy(safeCallFunction(cl, { Value(x) }))) c++; } return Value(static_cast<double>(c));
+            }
+            throw std::runtime_error("Type Error: countIf() expects a vector/list.");
+            }, args[1].data);
         });
 
     reg("sort", { 1, 2 }, [](const std::vector<Value>& args) -> Value {
-        if (args.size() == 1 && std::holds_alternative<RealMatrix>(args[0].data)) {
-            auto f = std::get<RealMatrix>(args[0].data).rawData();
-            std::sort(f.begin(), f.end());
-            return Value(RealMatrix(1, static_cast<int>(f.size()), f));
+        if (args.size() == 1) {
+            return std::visit([&](auto&& arg) -> Value {
+                using T = std::decay_t<decltype(arg)>;
+                if constexpr (std::is_same_v<T, RealMatrix>) {
+                    auto f = arg.rawData(); std::sort(f.begin(), f.end()); return Value(RealMatrix(1, static_cast<int>(f.size()), f));
+                }
+                else if constexpr (std::is_same_v<T, StringMatrix>) {
+                    auto f = arg.rawData(); std::sort(f.begin(), f.end()); return Value(StringMatrix(1, static_cast<int>(f.size()), f));
+                }
+                else if constexpr (std::is_same_v<T, List>) {
+                    List L = arg;
+                    std::sort(L.raw().begin(), L.raw().end(), [](const std::any& a, const std::any& b) {
+                        std::ostringstream oa, ob; oa << anyToVal(a); ob << anyToVal(b); return oa.str() < ob.str();
+                        });
+                    return Value(L);
+                }
+                throw std::runtime_error("Type Error: sort() without comparator expects an array or list.");
+                }, args[0].data);
         }
-        if (args.size() == 1 && std::holds_alternative<List>(args[0].data)) {
-            List L = std::get<List>(args[0].data);
-            std::sort(L.raw().begin(), L.raw().end(), [](const std::any& a, const std::any& b) {
-                std::ostringstream oa, ob; oa << anyToVal(a); ob << anyToVal(b);
-                return oa.str() < ob.str();
-                });
-            return Value(L);
-        }
-        if (args.size() == 2) {
+        else if (args.size() == 2) {
             auto cmp = args[1].asFunction();
-            if (!cmp->acceptsArgCount(2))
-                throw std::runtime_error("Runtime Error: sort() comparator must be a 2-parameter function.");
-            if (std::holds_alternative<List>(args[0].data)) {
-                List L = std::get<List>(args[0].data);
-                std::sort(L.raw().begin(), L.raw().end(), [&](const std::any& a, const std::any& b) {
-                    return isTruthy(safeCallFunction(cmp, { anyToVal(a), anyToVal(b) })); // ★
-                    });
-                return Value(L);
-            }
-            if (std::holds_alternative<RealMatrix>(args[0].data)) {
-                auto f = std::get<RealMatrix>(args[0].data).rawData();
-                std::sort(f.begin(), f.end(), [&](double a, double b) {
-                    return isTruthy(safeCallFunction(cmp, { Value(a), Value(b) })); // ★
-                    });
-                return Value(RealMatrix(1, static_cast<int>(f.size()), f));
-            }
-            throw std::runtime_error("Type Error: sort() expects an array or list.");
+            if (!cmp->acceptsArgCount(2)) throw std::runtime_error("Runtime Error: sort() comparator must be a 2-parameter function.");
+            return std::visit([&](auto&& arg) -> Value {
+                using T = std::decay_t<decltype(arg)>;
+                if constexpr (std::is_same_v<T, List>) {
+                    List L = arg;
+                    std::sort(L.raw().begin(), L.raw().end(), [&](const std::any& a, const std::any& b) {
+                        return isTruthy(safeCallFunction(cmp, { anyToVal(a), anyToVal(b) }));
+                        });
+                    return Value(L);
+                }
+                else if constexpr (std::is_same_v<T, RealMatrix> || std::is_same_v<T, ComplexMatrix> || std::is_same_v<T, StringMatrix>) {
+                    auto f = arg.rawData();
+                    std::sort(f.begin(), f.end(), [&](const auto& a, const auto& b) {
+                        return isTruthy(safeCallFunction(cmp, { Value(a), Value(b) }));
+                        });
+                    return Value(T(1, static_cast<int>(f.size()), f));
+                }
+                throw std::runtime_error("Type Error: sort() expects a vector or list.");
+                }, args[0].data);
         }
         throw std::runtime_error("Runtime Error: sort() expects 1 or 2 arguments.");
         });
 
-    reg("strmap", { 2 }, [](const std::vector<Value>& args) -> Value {
-        auto cl = args[0].asFunction();
-        if (!cl->acceptsArgCount(1)) throw std::runtime_error("Runtime Error: strmap() requires a single-parameter function.");
-        if (!std::holds_alternative<StringMatrix>(args[1].data)) throw std::runtime_error("Type Error: strmap() expects a StringMatrix.");
-        const auto& m = std::get<StringMatrix>(args[1].data);
-        std::vector<std::string> result; result.reserve(m.getRows() * m.getCols());
-        for (int i = 0; i < m.getRows(); ++i)
-            for (int j = 0; j < m.getCols(); ++j) {
-                Value y = safeCallFunction(cl, { Value(m(i, j)) }); // ★
-                if (std::holds_alternative<std::string>(y.data)) result.push_back(std::get<std::string>(y.data));
-                else { std::ostringstream oss; oss << y; result.push_back(oss.str()); }
-            }
-        return Value(StringMatrix(m.getRows(), m.getCols(), result));
-        });
 }
 
 // =================================================================
