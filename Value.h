@@ -705,7 +705,11 @@ namespace jc {
 
         friend std::ostream& operator<<(std::ostream& os, const Value& val) {
             static thread_local std::vector<const void*> visited;
-            std::visit([&os](auto&& arg) {
+            auto printNested = [&os](const Value& v) {
+                if (v.isNone()) os << "none";
+                else os << v;
+                };
+            std::visit([&os, &printNested](auto&& arg) {
                 using T = std::decay_t<decltype(arg)>;
                 if constexpr (std::is_same_v<T, std::monostate>) {}
                 else if constexpr (std::is_same_v<T, double>) {
@@ -728,14 +732,14 @@ namespace jc {
                 else if constexpr (std::is_same_v<T, jc::StringMatrix>) os << arg;
                 else if constexpr (std::is_same_v<T, jc::Dict>) {
                     PrintGuard guard(visited, arg.id());
-                    if (guard.isCycle) { os << "{...}"; return; } // 防爆护盾！
+                    if (guard.isCycle) { os << "{...}"; return; }
                     os << "{";
                     const auto& entries = arg.getEntries();
                     for (size_t ii = 0; ii < entries.size(); ++ii) {
                         os << "\"" << entries[ii].first << "\": ";
                         try {
                             const auto& v = std::any_cast<const jc::Value&>(entries[ii].second);
-                            os << v;
+                            printNested(v);  // ★ 替换 os << v
                         }
                         catch (...) { os << "?"; }
                         if (ii < entries.size() - 1) os << ", ";
@@ -744,12 +748,12 @@ namespace jc {
                 }
                 else if constexpr (std::is_same_v<T, jc::List>) {
                     PrintGuard guard(visited, arg.id());
-                    if (guard.isCycle) { os << "[...]"; return; } // 防爆护盾！
+                    if (guard.isCycle) { os << "[...]"; return; }
                     os << "[";
                     for (size_t ii = 0; ii < arg.size(); ++ii) {
                         try {
                             const auto& v = std::any_cast<const jc::Value&>(arg.raw()[ii]);
-                            os << v;
+                            printNested(v);  // ★ 替换 os << v
                         }
                         catch (...) { os << "?"; }
                         if (ii < arg.size() - 1) os << ", ";
@@ -760,14 +764,11 @@ namespace jc {
                     os << "<class " << arg->name << ">";
                 }
                 else if constexpr (std::is_same_v<T, std::shared_ptr<Instance>>) {
-                    // ═══ 循环引用打印防爆 ═══
                     PrintGuard guard(visited, arg.get());
                     if (guard.isCycle) {
                         os << "<" << arg->classDef->name << " {...}>";
                         return;
                     }
-
-                    // ── 原生数据优先（Image / Distribution 等）──
                     bool printedNative = false;
                     if (arg->nativeData.has_value()) {
                         if (arg->nativeData.type() == typeid(std::shared_ptr<Image>)) {
@@ -781,15 +782,13 @@ namespace jc {
                             printedNative = true;
                         }
                     }
-
-                    // ── 普通实例打印 ──
                     if (!printedNative) {
                         os << "<" << arg->classDef->name << " {";
                         const auto& entries = arg->fields.getEntries();
                         for (size_t ii = 0; ii < entries.size(); ++ii) {
                             if (ii > 0) os << ", ";
                             os << entries[ii].first << ": ";
-                            try { os << std::any_cast<const jc::Value&>(entries[ii].second); }
+                            try { printNested(std::any_cast<const jc::Value&>(entries[ii].second)); }  // ★
                             catch (...) { os << "?"; }
                         }
                         os << "}>";
