@@ -1,6 +1,6 @@
 // ═══════════════════════════════════════════════════════════════
 // regex.jc2 — Regular Expression Standard Library
-// Pure JC2 2.2.0 Implementation (Backtracking NFA)
+// Pure JC2 2.2.1 Implementation (Backtracking NFA)
 // 
 // Upgraded: Added Bounded Quantifiers {m,n}, {m,}, {m} Support!
 // ═══════════════════════════════════════════════════════════════

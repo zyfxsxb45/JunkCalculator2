@@ -9,7 +9,7 @@ namespace jc {
 
     const std::map<std::string, std::string> BuiltinHelp = {
         {"main", R"HELP(
-=================== Junk Calculator 2.2.0 [VM Edition] — Help ===================
+=================== Junk Calculator 2.2.1 — Help ===================
 
   Session Commands
   ────────────────────────────────────────────────────────────────────

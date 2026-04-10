@@ -1,6 +1,6 @@
 // ═══════════════════════════════════════════════════════════════
 // discrete.jc2 — Discrete Mathematics Standard Library
-// Pure JC2 2.2.0 Implementation
+// Pure JC2 2.2.1 Implementation
 //
 // Modernized features used:
 //   - Resilient Type System (Matrix Value vs List Reference Semantics)
