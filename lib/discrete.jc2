@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════
-// discrete.jc2 — Discrete Mathematics Standard Library
+// discrete.jc2 — Discrete Mathematics Standard Library v2.1
 // Pure JC2 2.2.1 Implementation
 //
 // Features:
@@ -48,17 +48,6 @@ combinations(arr, k) = {
 
 // ┌────────────────────────────────────────────────────────┐
 // │ 2. PROPOSITIONAL LOGIC (class Prop)                    │
-// │                                                        │
-// │ Usage:                                                 │
-// │   P = Var("P"); Q = Var("Q")                           │
-// │   expr = (P & Q) | -P          // AND, OR, NOT         │
-// │   expr.eval({P: 1, Q: 0})      // → 1                 │
-// │   expr.table()                  // print truth table    │
-// │   (P.implies(Q)).isTautology()  // → false             │
-// └────────────────────────────────────────────────────────┘
-
-// ┌────────────────────────────────────────────────────────┐
-// │ 2. PROPOSITIONAL LOGIC (class Prop)                    │
 // └────────────────────────────────────────────────────────┘
 
 class Prop {
@@ -68,52 +57,35 @@ class Prop {
         self.b = b    
     }
 
-    // ── Operator Overloading ──
     __bitand__(other) = Prop("and", self, other)
     __bitor__(other)  = Prop("or",  self, other)
     __neg__()         = Prop("not", self, "null")
 
-    // ── Named Connectives ──
     implies(other) = Prop("imp", self, other)
     iff(other)     = Prop("iff", self, other)
 
-    // ── Evaluation ──
     eval(env) = {
         me = self; tp = me.tp; a = me.a; b = me.b
-        
         if (tp == "var") { return env[str(a)] ? 1 : 0 }
-        
-        if (tp == "not") {
-            v = a.eval(env)
-            return v ? 0 : 1
-        }
-        
+        if (tp == "not") { v = a.eval(env); return v ? 0 : 1 }
         ea = a.eval(env)
         eb = b.eval(env)
-        
         if (tp == "and") { return (ea && eb) ? 1 : 0 }
         if (tp == "or")  { return (ea || eb) ? 1 : 0 }
         if (tp == "imp") { return (!ea || eb) ? 1 : 0 }
         if (tp == "iff") { return ea == eb ? 1 : 0 }
-        
         return 0
     }
 
-    // ── Variable Collection ──
     vars() = {
         me = self; tp = me.tp; a = me.a; b = me.b
-        
         if (tp == "var") { return Set(str(a)) }
         if (tp == "not") { return a.vars() }
-        
         return a.vars() | b.vars()
     }
 
-    // ── Semantic Tests ──
     isTautology() = {
-        me = self
-        varList = sort(toList(me.vars()))
-        n = len(varList)
+        me = self; varList = sort(toList(me.vars())); n = len(varList)
         for (i in range(2^n)) {
             env = dict()
             for (j in range(n)) { env[varList[j]] = int(i / (2^(n-1-j))) % 2 }
@@ -123,9 +95,7 @@ class Prop {
     }
 
     isContradiction() = {
-        me = self
-        varList = sort(toList(me.vars()))
-        n = len(varList)
+        me = self; varList = sort(toList(me.vars())); n = len(varList)
         for (i in range(2^n)) {
             env = dict()
             for (j in range(n)) { env[varList[j]] = int(i / (2^(n-1-j))) % 2 }
@@ -135,78 +105,52 @@ class Prop {
     }
 
     isSatisfiable() = { me = self; return !me.isContradiction() }
-
     equiv(other) = { me = self; return me.iff(other).isTautology() }
 
-    // ── Pure Data Generation (No Printing) ──
     table() = {
-        me = self
-        varList = sort(toList(me.vars()))
-        n = len(varList)
+        me = self; varList = sort(toList(me.vars())); n = len(varList)
         total = 2 ^ n
-        
         results = list()
         for (i in range(total)) {
             env = dict()
-            for (j in range(n)) {
-                env[varList[j]] = int(i / (2^(n-1-j))) % 2
-            }
+            for (j in range(n)) { env[varList[j]] = int(i / (2^(n-1-j))) % 2 }
             res = me.eval(env)
             add(results, {env: env, result: res})
         }
         return results
     }
 
-    // ── Formatted Output (Printing Only) ──
     printTable() = {
-        me = self
-        varList = sort(toList(me.vars()))
-        n = len(varList)
+        me = self; varList = sort(toList(me.vars())); n = len(varList)
         formula = str(me)
-
         sep = "-" * (n * 4 + len(formula) + 5)
-        
         header = ""
         for (v in varList) { header += " " + str(v) + "  " }
         header += " | " + formula
-
-        print(sep)
-        print(header)
-        print(sep)
-
-        // Retrieve the clean data model
+        print(sep); print(header); print(sep)
         data = me.table()
-        
         for (row in data) {
-            env = row.env
-            rowStr = ""
-            for (v in varList) {
-                rowStr += " " + str(env[v]) + "  "
-            }
+            env = row.env; rowStr = ""
+            for (v in varList) { rowStr += " " + str(env[v]) + "  " }
             rowStr += " | " + str(row.result)
             print(rowStr)
         }
         print(sep)
     }
 
-    // ── String Representation ──
     __str__() = {
         me = self; tp = me.tp; a = me.a; b = me.b
-        
         if (tp == "var") { return str(a) }
-        
         if (tp == "not") {
             sA = str(a)
             if (a.tp == "var") { return "~" + sA }
             return "~(" + sA + ")"
         }
-        
         opStr = " ? "
         if (tp == "and") { opStr = " & " }
         if (tp == "or")  { opStr = " | " }
         if (tp == "imp") { opStr = " => " }
         if (tp == "iff") { opStr = " <=> " }
-        
         return "(" + str(a) + opStr + str(b) + ")"
     }
 
@@ -214,28 +158,17 @@ class Prop {
         me = self
         if (!isinstance(other, Prop)) { return false }
         tp = me.tp; a = me.a; b = me.b
-        
         if (tp != other.tp) { return false }
         if (tp == "var") { return a == other.a }
         if (tp == "not") { return a == other.a }
-        
         return (a == other.a) && (b == other.b)
     }
 }
 
-// Factory function
 Var(name) = Prop("var", name, "null")
 
 // ┌────────────────────────────────────────────────────────┐
 // │ 3. BINARY RELATIONS (class Relation)                   │
-// │                                                        │
-// │ Usage:                                                 │
-// │   r = Relation(Set(1,2,3))                             │
-// │        .addPair(1,1).addPair(2,2).addPair(3,3)         │
-// │        .addPair(1,2).addPair(2,1)                      │
-// │   r.isEquivalence()     // → true                      │
-// │   [1, 2] in r           // → true                      │
-// │   r.transitiveClosure() // → Relation                  │
 // └────────────────────────────────────────────────────────┘
 
 class Relation {
@@ -251,34 +184,37 @@ class Relation {
         }
     }
 
-    // ── Pair Factory (respects user's data type) ──
+    // Pair factory internally constructs the unified tuple shape
     _mp(a, b) = self._pt == "List" ? list(a, b) : [a, b]
 
-    // ── Fluent Builder ──
+    // ── Public Facing API ──
     addPair(a, b) = { add(self.R, self._mp(a, b)); return self }
+    
+    // ★ Added explicit type-safe query method
+    hasPair(a, b) = self._mp(a, b) in self.R
 
     // ── Property Tests ──
     isReflexive() = {
-        for (x in self.S) { if (!(self._mp(x, x) in self.R)) { return false } }
+        for (x in self.S) { if (!self.hasPair(x, x)) { return false } }
         return true
     }
     isIrreflexive() = {
-        for (x in self.S) { if (self._mp(x, x) in self.R) { return false } }
+        for (x in self.S) { if (self.hasPair(x, x)) { return false } }
         return true
     }
     isSymmetric() = {
-        for (p in self.R) { [a, b] = p; if (!(self._mp(b, a) in self.R)) { return false } }
+        for (p in self.R) { [a, b] = p; if (!self.hasPair(b, a)) { return false } }
         return true
     }
     isAntiSymmetric() = {
-        for (p in self.R) { [a, b] = p; if (a != b && (self._mp(b, a) in self.R)) { return false } }
+        for (p in self.R) { [a, b] = p; if (a != b && self.hasPair(b, a)) { return false } }
         return true
     }
     isTransitive() = {
         for (p1 in self.R) {
             for (p2 in self.R) {
                 [a, b] = p1; [c, d] = p2
-                if (b == c && !(self._mp(a, d) in self.R)) { return false }
+                if (b == c && !self.hasPair(a, d)) { return false }
             }
         }
         return true
@@ -291,7 +227,7 @@ class Relation {
         if (!self.isPartialOrder()) { return false }
         for (a in self.S) {
             for (b in self.S) {
-                if (!(self._mp(a, b) in self.R) && !(self._mp(b, a) in self.R)) { return false }
+                if (!self.hasPair(a, b) && !self.hasPair(b, a)) { return false }
             }
         }
         return true
@@ -299,15 +235,13 @@ class Relation {
 
     // ── Algebraic Operations ──
     inverse() = {
-        r = Relation(self.S)
-        r._pt = self._pt
+        r = Relation(self.S); r._pt = self._pt
         for (p in self.R) { [a, b] = p; add(r.R, r._mp(b, a)) }
         return r
     }
 
     compose(other) = {
-        r = Relation(self.S)
-        r._pt = self._pt
+        r = Relation(self.S); r._pt = self._pt
         for (p1 in self.R) {
             for (p2 in other.R) {
                 [a, b] = p1; [c, d] = p2
@@ -319,16 +253,14 @@ class Relation {
 
     // ── Closure Operations ──
     reflexiveClosure() = {
-        r = Relation(self.S)
-        r._pt = self._pt
+        r = Relation(self.S); r._pt = self._pt
         for (p in self.R) { add(r.R, p) }
         for (x in self.S) { add(r.R, r._mp(x, x)) }
         return r
     }
 
     symmetricClosure() = {
-        r = Relation(self.S)
-        r._pt = self._pt
+        r = Relation(self.S); r._pt = self._pt
         for (p in self.R) { [a, b] = p; add(r.R, p); add(r.R, r._mp(b, a)) }
         return r
     }
@@ -354,9 +286,7 @@ class Relation {
                 changed = true
             }
         }
-        r = Relation(self.S)
-        r._pt = self._pt
-        r.R = current
+        r = Relation(self.S); r._pt = self._pt; r.R = current
         return r
     }
 
@@ -369,7 +299,7 @@ class Relation {
             if (x in assigned) { continue }
             cls = Set()
             for (y in self.S) {
-                if (self._mp(x, y) in self.R) { add(cls, y); add(assigned, y) }
+                if (self.hasPair(x, y)) { add(cls, y); add(assigned, y) }
             }
             add(classes, cls)
         }
@@ -384,13 +314,6 @@ class Relation {
 
 // ┌────────────────────────────────────────────────────────┐
 // │ 4. GRAPH THEORY (class Graph)                          │
-// │                                                        │
-// │ Usage:                                                 │
-// │   g = Graph()                                          │
-// │   g.addEdge("A","B").addEdge("B","C").addEdge("C","A") │
-// │   g.bfs("A")           // → traversal order            │
-// │   g.hasCycle()          // → true                      │
-// │   g.shortestPath("A","C") // → {path:..., dist:...}    │
 // └────────────────────────────────────────────────────────┘
 
 class Graph {
@@ -400,7 +323,7 @@ class Graph {
         self._ec = 0
     }
 
-    // ── Construction (Fluent API — returns self) ──
+    // ── Construction (Fluent API) ──
     addVertex(v) = {
         k = str(v)
         if (!hasKey(self.adj, k)) { self.adj[k] = list() }
@@ -427,6 +350,15 @@ class Graph {
         tv = str(v)
         for (e in self.adj[k]) { if (e[0] == tv) { return true } }
         return false
+    }
+    
+    // ★ Added edge weight query
+    getWeight(u, v) = {
+        k = str(u); tv = str(v)
+        if (hasKey(self.adj, k)) {
+            for (e in self.adj[k]) { if (e[0] == tv) { return e[1] } }
+        }
+        return none()
     }
 
     neighbors(v) = {
@@ -456,16 +388,12 @@ class Graph {
         return c
     }
 
-    // ── BFS ──
+    // ── Traversals ──
     bfs(start) = {
-        adj = self.adj
-        ks = str(start)
-        visited = Set(ks)
-        q = list(ks)
-        res = list()
+        adj = self.adj; ks = str(start)
+        visited = Set(ks); q = list(ks); res = list()
         while (len(q) > 0) {
-            curr = shift(q)
-            add(res, curr)
+            curr = shift(q); add(res, curr)
             if (hasKey(adj, curr)) {
                 for (e in adj[curr]) {
                     if (!(e[0] in visited)) { add(visited, e[0]); add(q, e[0]) }
@@ -475,11 +403,8 @@ class Graph {
         return res
     }
 
-    // ── DFS ──
     dfs(start) = {
-        adj = self.adj
-        visited = Set()
-        res = list()
+        adj = self.adj; visited = Set(); res = list()
         _go(v) = {
             if (v in visited) { return none }
             add(visited, v); add(res, v)
@@ -491,47 +416,30 @@ class Graph {
         return res
     }
 
-    // ── Unweighted Shortest Path (BFS) ──
+    // ── Path Algorithms ──
     findPath(start, end) = {
-        adj = self.adj
-        ks = str(start); ke = str(end)
+        adj = self.adj; ks = str(start); ke = str(end)
         if (ks == ke) { return list(ks) }
-        visited = Set(ks)
-        q = list(list(ks))
+        visited = Set(ks); q = list(list(ks))
         while (len(q) > 0) {
-            path = shift(q)
-            curr = last(path)
+            path = shift(q); curr = last(path)
             if (hasKey(adj, curr)) {
                 for (e in adj[curr]) {
                     nbr = e[0]
-                    if (nbr == ke) {
-                        np = list()
-                        for (p in path) { add(np, p) }
-                        add(np, nbr)
-                        return np
-                    }
-                    if (!(nbr in visited)) {
-                        add(visited, nbr)
-                        np = list()
-                        for (p in path) { add(np, p) }
-                        add(np, nbr)
-                        add(q, np)
-                    }
+                    np = list(); for (p in path) { add(np, p) }; add(np, nbr)
+                    if (nbr == ke) { return np }
+                    if (!(nbr in visited)) { add(visited, nbr); add(q, np) }
                 }
             }
         }
         return list()
     }
 
-    // ── Dijkstra (Weighted Shortest Path) ──
     dijkstra(start) = {
-        adj = self.adj
-        ks = str(start)
-        vs = toList(keys(adj))
+        adj = self.adj; ks = str(start); vs = toList(keys(adj))
         dist = dict(); prev = dict()
         for (v in vs) { dist[v] = none }
-        dist[ks] = 0
-        visited = Set()
+        dist[ks] = 0; visited = Set()
         while (len(visited) < len(vs)) {
             minV = none; minD = none
             for (v in vs) {
@@ -555,8 +463,7 @@ class Graph {
     }
 
     shortestPath(start, end) = {
-        r = self.dijkstra(start)
-        ke = str(end)
+        r = self.dijkstra(start); ke = str(end)
         if (isnone(r.dist[ke])) { return {path: list(), dist: none} }
         path = list(); curr = ke
         while (!isnone(curr)) {
@@ -566,15 +473,13 @@ class Graph {
         return {path: reverse(path), dist: r.dist[ke]}
     }
 
-    // ── Cycle Detection ──
+    // ── Topology & Properties ──
     hasCycle() = {
-        adj = self.adj
-        vs = toList(keys(adj))
+        adj = self.adj; vs = toList(keys(adj))
         found = list(false)
 
         if (self.directed) {
-            color = dict()
-            for (v in vs) { color[v] = 0 }
+            color = dict(); for (v in vs) { color[v] = 0 }
             _visit(v) = {
                 if (found[0]) { return none }
                 color[v] = 1
@@ -605,13 +510,10 @@ class Graph {
         return found[0]
     }
 
-    // ── Topological Sort (Kahn's Algorithm, DAG only) ──
     topSort() = {
         if (!self.directed) { throw "Graph Error: topSort() requires a directed graph." }
-        adj = self.adj
-        vs = toList(keys(adj))
-        inDeg = dict()
-        for (v in vs) { inDeg[v] = 0 }
+        adj = self.adj; vs = toList(keys(adj))
+        inDeg = dict(); for (v in vs) { inDeg[v] = 0 }
         for (v in vs) {
             if (hasKey(adj, v)) {
                 for (e in adj[v]) { inDeg[e[0]] = inDeg[e[0]] + 1 }
@@ -621,8 +523,7 @@ class Graph {
         for (v in vs) { if (inDeg[v] == 0) { add(q, v) } }
         res = list()
         while (len(q) > 0) {
-            v = shift(q)
-            add(res, v)
+            v = shift(q); add(res, v)
             if (hasKey(adj, v)) {
                 for (e in adj[v]) {
                     inDeg[e[0]] = inDeg[e[0]] - 1
@@ -634,20 +535,14 @@ class Graph {
         return res
     }
 
-    // ── Connected Components (Undirected only) ──
     components() = {
         if (self.directed) { throw "Graph Error: components() requires an undirected graph." }
-        adj = self.adj
-        visited = Set()
-        comps = list()
+        adj = self.adj; visited = Set(); comps = list()
         for (v in toList(keys(adj))) {
             if (v in visited) { continue }
-            comp = list()
-            q = list(v)
-            add(visited, v)
+            comp = list(); q = list(v); add(visited, v)
             while (len(q) > 0) {
-                curr = shift(q)
-                add(comp, curr)
+                curr = shift(q); add(comp, curr)
                 if (hasKey(adj, curr)) {
                     for (e in adj[curr]) {
                         if (!(e[0] in visited)) { add(visited, e[0]); add(q, e[0]) }
@@ -659,13 +554,9 @@ class Graph {
         return comps
     }
 
-    // ── Dunder Methods ──
     __contains__(v) = self.hasVertex(v)
     __len__() = len(keys(self.adj))
-    __str__() = {
-        kind = self.directed ? "directed" : "undirected"
-        return f"<Graph({kind}) V={len(self)} E={self._ec}>"
-    }
+    __str__() = f"<Graph({self.directed ? \"directed\" : \"undirected\"}) V={len(self)} E={self._ec}>"
 }
 
 // ┌────────────────────────────────────────────────────────┐
@@ -673,8 +564,7 @@ class Graph {
 // └────────────────────────────────────────────────────────┘
 
 truthTable(n, fn) = {
-    total = 2 ^ n
-    res_list = list()
+    total = 2 ^ n; res_list = list()
     for (i in range(total)) {
         vars = zeros(1, n)
         for (j in range(n)) { vars[j] = int(i / (2^(n - 1 - j))) % 2 }
@@ -690,8 +580,7 @@ printTruthTable(n, fn) = {
     header = ""
     for (i in range(n)) { header += f"V{i}     " }
     header += "|   Out"
-    print(header)
-    print("-" * (n * 7 + 10))
+    print(header); print("-" * (n * 7 + 10))
     for (i in range(total)) {
         vars = zeros(1, n)
         for (j in range(n)) { vars[j] = int(i / (2^(n - 1 - j))) % 2 }
@@ -704,87 +593,16 @@ printTruthTable(n, fn) = {
 }
 
 // ┌────────────────────────────────────────────────────────┐
-// │ 6. BACKWARD-COMPATIBLE STANDALONE FUNCTIONS            │
-// └────────────────────────────────────────────────────────┘
-
-_pair(sample, a, b) = type(sample) == "List" ? list(a, b) : [a, b]
-
-isReflexive(R, S) = {
-    sample = len(R) > 0 ? toList(R)[0] : [0, 0]
-    for (x in S) { if (!(_pair(sample, x, x) in R)) { return false } }
-    return true
-}
-isSymmetric(R) = {
-    for (p in R) { [a, b] = p; if (!(_pair(p, b, a) in R)) { return false } }
-    return true
-}
-isTransitive(R) = {
-    for (p1 in R) { for (p2 in R) {
-        [a, b] = p1; [c, d] = p2
-        if (b == c && !(_pair(p1, a, d) in R)) { return false }
-    }}
-    return true
-}
-isAntiSymmetric(R) = {
-    for (p in R) { [a, b] = p; if (a != b && (_pair(p, b, a) in R)) { return false } }
-    return true
-}
-isIrreflexive(R, S) = {
-    sample = len(R) > 0 ? toList(R)[0] : [0, 0]
-    for (x in S) { if (_pair(sample, x, x) in R) { return false } }
-    return true
-}
-isEquivalence(R, S) = isReflexive(R, S) && isSymmetric(R) && isTransitive(R)
-isPartialOrder(R, S) = isReflexive(R, S) && isAntiSymmetric(R) && isTransitive(R)
-
-bfs(graph, start) = {
-    visited = Set(start); q = list(start); res = list()
-    while (len(q) > 0) {
-        curr = shift(q); add(res, curr)
-        if (hasKey(graph, curr)) {
-            for (nbr in graph[curr]) {
-                if (!(nbr in visited)) { add(visited, nbr); add(q, nbr) }
-            }
-        }
-    }
-    return res
-}
-dfs(graph, start) = {
-    visited = Set(); res = list()
-    _go(node) = {
-        if (node in visited) { return none }
-        add(visited, node); add(res, node)
-        if (hasKey(graph, node)) { for (nbr in graph[node]) { _go(nbr) } }
-    }
-    _go(start)
-    return res
-}
-findPath(graph, start, end) = {
-    visited = Set(start); q = list(list(start))
-    while (len(q) > 0) {
-        path = shift(q); curr = last(path)
-        if (curr == end) { return path }
-        if (hasKey(graph, curr)) {
-            for (nbr in graph[curr]) {
-                if (!(nbr in visited)) {
-                    add(visited, nbr)
-                    np = list(); for (p in path) { add(np, p) }
-                    add(np, nbr); add(q, np)
-                }
-            }
-        }
-    }
-    return list()
-}
-
-// ┌────────────────────────────────────────────────────────┐
-// │ 7. HELP TEXT REGISTRATION                              │
+// │ 6. HELP TEXT REGISTRATION                              │
 // └────────────────────────────────────────────────────────┘
 
 __register_help("discrete", r"DOC(
-=== Discrete Mathematics Standard Library ===
+═══ Discrete Mathematics Standard Library ═══
 
   Requires: import "discrete"
+
+  A pure JC2 implementation covering Combinatorics, Graph Theory, 
+  Binary Relations, and Boolean Logic generation.
 
   ── Propositional Logic (class Prop) ───────────────────
     Var(name)              Create an atomic proposition variable
@@ -796,7 +614,8 @@ __register_help("discrete", r"DOC(
 
     expr.eval(env)         Evaluate with variable bindings (Dict)
     expr.vars()            Collect all variable names (Set)
-    expr.table()           Print and return full truth table
+    expr.table()           Return full truth table data model
+    expr.printTable()      Print truth table to terminal
     expr.isTautology()     True for all assignments?
     expr.isContradiction() False for all assignments?
     expr.isSatisfiable()   True for at least one assignment?
@@ -805,6 +624,7 @@ __register_help("discrete", r"DOC(
   ── Binary Relations (class Relation) ──────────────────
     r = Relation(S)                 Create on base set S
     r.addPair(a, b)                 Fluent pair insertion (chainable)
+    r.hasPair(a, b)                 Safe tuple presence query
     r.isReflexive()  r.isSymmetric()  r.isTransitive()
     r.isAntiSymmetric()  r.isIrreflexive()
     r.isEquivalence()  r.isPartialOrder()  r.isTotalOrder()
@@ -812,33 +632,26 @@ __register_help("discrete", r"DOC(
     r.compose(other)                R ; S composition
     r.reflexiveClosure()  r.symmetricClosure()  r.transitiveClosure()
     r.equivalenceClasses()          Partition into equivalence classes
-    [a, b] in r                     Membership test (O(1))
 
   ── Graph Theory (class Graph) ─────────────────────────
     g = Graph()                     Directed graph (default)
     g = Graph(false)                Undirected graph
-    g.addVertex(v)                  Add vertex (chainable)
-    g.addEdge(u, v, w=1)           Add edge with optional weight (chainable)
+    g.addVertex(v)                  Add vertex
+    g.addEdge(u, v, w=1)           Add edge with optional weight
     g.vertices()  g.edges()  g.neighbors(v)
-    g.hasVertex(v)  g.hasEdge(u, v)
+    g.hasVertex(v)  g.hasEdge(u, v)  g.getWeight(u, v)
     g.inDegree(v)  g.outDegree(v)
     g.bfs(start)  g.dfs(start)
     g.findPath(start, end)          Unweighted shortest path (BFS)
     g.dijkstra(start)               Weighted shortest paths (returns dist/prev)
     g.shortestPath(start, end)      Weighted path + distance
     g.hasCycle()                     Directed: 3-color DFS, Undirected: parent DFS
-    g.topSort()                      Topological sort (DAG only, Kahn's algorithm)
+    g.topSort()                      TopOLOGICAL sort (DAG only)
     g.components()                   Connected components (undirected only)
-    v in g                           Vertex membership test
 
   ── Combinatorics ──────────────────────────────────────
     permutations(arr)          All permutations of elements
     combinations(arr, k)       All k-subsets
-
-  ── Standalone Functions (Backward Compatible) ─────────
-    isReflexive(R, S)  isSymmetric(R)  isTransitive(R)
-    bfs(graph, start)  dfs(graph, start)  findPath(graph, a, b)
-    truthTable(n, fn)  printTruthTable(n, fn)
 )DOC")
 
-print("[System] discrete.jc2 loaded successfully.")
+print("[System] discrete.jc2 loaded successfully (v2.1).")

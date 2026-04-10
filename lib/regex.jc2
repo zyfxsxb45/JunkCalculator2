@@ -1,11 +1,6 @@
 // ═══════════════════════════════════════════════════════════════
-// regex.jc2 — Regular Expression Standard Library v2.0
+// regex.jc2 — Regular Expression Standard Library v2.1
 // Pure JC2 2.2.1 Implementation (Backtracking NFA)
-// 
-// Modernized: 
-//   - Full OOP refactor (`Regex` and `ReMatch` classes).
-//   - Supports bounded quantifiers {m,n}.
-//   - Native C++ character predicates & Set membership.
 // ═══════════════════════════════════════════════════════════════
 
 const _RE_SHORTHANDS = Set("d", "D", "w", "W", "s", "S")
@@ -247,10 +242,9 @@ class Regex {
     }
 
     _run(text, startPos) = {
-        tl = len(text)
-        caps = _ReCaps(self.groups)
+        tl = len(text); caps = _ReCaps(self.groups)
         endPos = _rm(self.nodes, 0, text, startPos, tl, caps)
-        if (endPos < 0) { return 0 } // Legacy 0 for backward compatibility
+        if (endPos < 0) { return 0 }
         
         matched = substr(text, startPos, endPos - startPos)
         groups = list()
@@ -271,10 +265,7 @@ class Regex {
 
     search(text) = {
         tl = len(text)
-        for (i in range(tl + 1)) {
-            r = self._run(text, i)
-            if (r != 0) { return r }
-        }
+        for (i in range(tl + 1)) { r = self._run(text, i); if (r != 0) { return r } }
         return 0
     }
 
@@ -339,9 +330,8 @@ class Regex {
 
 // ─── Legacy Global API (Auto-Compiles or uses cached Regex) ───
 
-re_compile(pat) = Regex(pat)
-
-_re_ensure(pat) = isinstance(pat, Regex) ? pat : Regex(pat)
+re_compile(pat)               = Regex(pat)
+_re_ensure(pat)               = isinstance(pat, Regex) ? pat : Regex(pat)
 
 re_test(pat, text)            = _re_ensure(pat).test(text)
 re_match(pat, text)           = _re_ensure(pat).match(text)
@@ -353,7 +343,7 @@ re_split(pat, text)           = _re_ensure(pat).split(text)
 // ─── Dynamic Help Registry ────────────────────────────────────
 
 __register_help("regex", r"DOC(
-═══ Regular Expressions (Standard Library v2) ═══
+═══ Regular Expressions (Standard Library v2.1) ═══
 
   Requires: import "regex"
 
@@ -400,4 +390,4 @@ __register_help("regex", r"DOC(
     |             Alternation (OR)
 )DOC")
 
-print("[System] regex.jc2 loaded successfully.")
+print("[System] regex.jc2 loaded successfully (v2.1).")
