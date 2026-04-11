@@ -354,11 +354,16 @@ namespace jc {
             List restList;
             if (static_cast<int>(argc) > fixedMax) {
                 int restCount = static_cast<int>(argc) - fixedMax;
-                std::vector<std::any> temp(restCount);
-                for (int j = 0; j < restCount; j++) temp[restCount - 1 - j] = std::make_any<Value>(pop());
-                for (int j = 0; j < restCount; j++) restList.push_back(temp[j]);
+                std::vector<Value> tempValues(restCount);
+                for (int j = 0; j < restCount; j++) {
+                    tempValues[restCount - 1 - j] = pop();
+                }
+                for (int j = 0; j < restCount; j++) {
+                    restList.push_back(std::make_any<Value>(tempValues[j]));
+                }
                 argc = static_cast<uint8_t>(fixedMax);
             }
+
 
             int padCount = fixedMax - static_cast<int>(argc);
             for (int j = 0; j < padCount; ++j) push(Value::none());
@@ -2099,9 +2104,14 @@ namespace jc {
                     List restList;
                     if (static_cast<int>(argc) > fixedMax) {
                         int restCount = static_cast<int>(argc) - fixedMax;
-                        std::vector<std::any> temp(restCount);
-                        for (int j = 0; j < restCount; j++) temp[restCount - 1 - j] = std::make_any<Value>(pop());
-                        for (int j = 0; j < restCount; j++) restList.push_back(temp[j]);
+                        std::vector<Value> tempValues(restCount);      // ★ 换成 Value 以切断 any 隐患
+                        for (int j = 0; j < restCount; j++) {
+                            tempValues[restCount - 1 - j] = pop();     // ★ 老老实实先取出来作为稳定的 Value
+                        }
+                        for (int j = 0; j < restCount; j++) {
+                            // ★ 在丢进 List 之前包装为 any，并直接拷贝强注入！
+                            restList.push_back(std::make_any<Value>(tempValues[j]));
+                        }
                         argc = static_cast<uint8_t>(fixedMax);
                     }
 
@@ -2167,9 +2177,14 @@ namespace jc {
                     List restList;
                     if (static_cast<int>(argc) > fixedMax) {
                         int restCount = static_cast<int>(argc) - fixedMax;
-                        std::vector<std::any> temp(restCount);
-                        for (int j = 0; j < restCount; j++) temp[restCount - 1 - j] = std::make_any<Value>(pop());
-                        for (int j = 0; j < restCount; j++) restList.push_back(temp[j]);
+                        std::vector<Value> tempValues(restCount);      // ★ 换成 Value 以切断 any 隐患
+                        for (int j = 0; j < restCount; j++) {
+                            tempValues[restCount - 1 - j] = pop();     // ★ 老老实实先取出来作为稳定的 Value
+                        }
+                        for (int j = 0; j < restCount; j++) {
+                            // ★ 在丢进 List 之前包装为 any，并直接拷贝强注入！
+                            restList.push_back(std::make_any<Value>(tempValues[j]));
+                        }
                         argc = static_cast<uint8_t>(fixedMax);
                     }
 
@@ -3558,8 +3573,39 @@ namespace jc {
             globals["self"] = Value(inst);          // ★ 然后才设置新的
             globals["__class__"] = Value(owningClass);
             auto& fnDef = compiledFunctions[method->compiledFnIndex];
-            int padCount = fnDef->maxArity - static_cast<int>(argc);
-            for (int j = 0; j < padCount; ++j) push(Value::none());
+            // =============================================================
+            // ★ 核心变长参数打包引擎 (OOP Invoke 端)
+            // =============================================================
+            if (fnDef->hasRestParam) {
+                int fixedMax = fnDef->maxArity - 1;
+                if (static_cast<int>(argc) < fnDef->arity) {
+                    throw std::runtime_error("VM Error: '" + fnDef->name + "' requires at least " + std::to_string(fnDef->arity) + " arguments.");
+                }
+
+                List restList;
+                if (static_cast<int>(argc) > fixedMax) {
+                    int restCount = static_cast<int>(argc) - fixedMax;
+                    std::vector<Value> tempValues(restCount);
+                    for (int j = 0; j < restCount; j++) {
+                        tempValues[restCount - 1 - j] = pop();
+                    }
+                    for (int j = 0; j < restCount; j++) {
+                        restList.push_back(std::make_any<Value>(tempValues[j]));
+                    }
+                    argc = static_cast<uint8_t>(fixedMax);
+                }
+
+                int padCount = fixedMax - static_cast<int>(argc);
+                for (int j = 0; j < padCount; ++j) push(Value::none());
+                push(Value(restList));
+            }
+            else {
+                if (static_cast<int>(argc) < fnDef->arity || static_cast<int>(argc) > fnDef->maxArity)
+                    throw std::runtime_error("VM Error: '" + fnDef->name + "' expects " + std::to_string(fnDef->arity) + " to " + std::to_string(fnDef->maxArity) + " arguments, got " + std::to_string(argc) + ".");
+                int padCount = fnDef->maxArity - static_cast<int>(argc);
+                for (int j = 0; j < padCount; ++j) push(Value::none());
+            }
+
             int reserveCount = fnDef->localCount - fnDef->maxArity;
             for (int j = 0; j < reserveCount; ++j) push(Value::none());
             newFrame.function = fnDef.get();
@@ -3652,8 +3698,39 @@ namespace jc {
             globals["__class__"] = Value(owningClass);
             auto& fnDef = compiledFunctions[method->compiledFnIndex];
 
-            int padCount = fnDef->maxArity - static_cast<int>(argc);
-            for (int j = 0; j < padCount; ++j) push(Value::none());
+            // =============================================================
+            // ★ 核心变长参数打包引擎 (OOP SuperInvoke 端)
+            // =============================================================
+            if (fnDef->hasRestParam) {
+                int fixedMax = fnDef->maxArity - 1;
+                if (static_cast<int>(argc) < fnDef->arity) {
+                    throw std::runtime_error("VM Error: '" + fnDef->name + "' requires at least " + std::to_string(fnDef->arity) + " arguments.");
+                }
+
+                List restList;
+                if (static_cast<int>(argc) > fixedMax) {
+                    int restCount = static_cast<int>(argc) - fixedMax;
+                    std::vector<Value> tempValues(restCount);
+                    for (int j = 0; j < restCount; j++) {
+                        tempValues[restCount - 1 - j] = pop();
+                    }
+                    for (int j = 0; j < restCount; j++) {
+                        restList.push_back(std::make_any<Value>(tempValues[j]));
+                    }
+                    argc = static_cast<uint8_t>(fixedMax);
+                }
+
+                int padCount = fixedMax - static_cast<int>(argc);
+                for (int j = 0; j < padCount; ++j) push(Value::none());
+                push(Value(restList));
+            }
+            else {
+                if (static_cast<int>(argc) < fnDef->arity || static_cast<int>(argc) > fnDef->maxArity)
+                    throw std::runtime_error("VM Error: '" + fnDef->name + "' expects " + std::to_string(fnDef->arity) + " to " + std::to_string(fnDef->maxArity) + " arguments, got " + std::to_string(argc) + ".");
+                int padCount = fnDef->maxArity - static_cast<int>(argc);
+                for (int j = 0; j < padCount; ++j) push(Value::none());
+            }
+
             int reserveCount = fnDef->localCount - fnDef->maxArity;
             for (int j = 0; j < reserveCount; ++j) push(Value::none());
 

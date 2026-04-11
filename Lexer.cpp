@@ -81,10 +81,22 @@ namespace jc {
     void Lexer::scanToken() {
         char c = advance();
         switch (c) {
-        case '(': addToken(TokenType::LPAREN); break;
-        case ')': addToken(TokenType::RPAREN); break;
-        case '[': addToken(TokenType::LBRACKET); break;
-        case ']': addToken(TokenType::RBRACKET); break;
+        case '(':
+            parenBracketDepth++;
+            addToken(TokenType::LPAREN);
+            break;
+        case ')':
+            if (parenBracketDepth > 0) parenBracketDepth--;
+            addToken(TokenType::RPAREN);
+            break;
+        case '[':
+            parenBracketDepth++;
+            addToken(TokenType::LBRACKET);
+            break;
+        case ']':
+            if (parenBracketDepth > 0) parenBracketDepth--;
+            addToken(TokenType::RBRACKET);
+            break;
         case '{': addToken(TokenType::LBRACE); break;    // ★ 新增
         case '}': addToken(TokenType::RBRACE); break;    // ★ 新增
         case ',': addToken(TokenType::COMMA); break;

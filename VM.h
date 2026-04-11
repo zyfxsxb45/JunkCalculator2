@@ -145,6 +145,15 @@ namespace jc {
         void clearGlobals() {
             globals.clear();
             constGlobals.clear();
+            importedModules.clear(); // ★ 核心修复：彻底粉碎模块导入的防环缓存！
+            // ★ 贴心修复：清理全局变量后，自动把系统必不可少的基础常量重新注入环境
+            globals["PI"] = Value(3.14159265358979323846);
+            globals["E"] = Value(2.71828182845904523536);
+            globals["i"] = Value(Complex(0.0, 1.0));
+            globals["I"] = Value(Complex(0.0, 1.0));
+            globals["true"] = Value(1.0);
+            globals["false"] = Value(0.0);
+            globals["none"] = Value::none();
         }
         void removeGlobal(const std::string& name) {
             globals.erase(name);
