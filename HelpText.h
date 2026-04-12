@@ -2093,69 +2093,69 @@ namespace jc {
 
   Requires: import "json"
 
-  Provides JSON serialization and deserialization between JC2 values
-  and JSON strings. Backed by native C++ for performance.
+  Provides high-performance, native C++ state-machine based JSON serialization
+  and deserialization. It guarantees memory safety and DOM-level formatting
+  without external dependencies.
 
-  Functions
+  Functions & JS Aliases
   ──────────────────────
-    json_encode(value)              Convert any JC2 value → JSON string
-    json_decode(str)                Parse JSON string → JC2 value
-    json_pretty(value)              Pretty-print with indentation
-    json_pretty(value, indent)      Custom indent width (default: 2)
+    Both traditional and Node.js-style aliases are injected directly into
+    the global namespace upon import.
+
+    json_encode(val)  /  stringify(val)    Convert JC2 value → JSON string
+    json_decode(str)  /  parse(str)        Parse JSON string → JC2 value
+    json_pretty(val)                       Pretty-print with 4-space indent
+    json_pretty(val, indent)               Custom indent width (e.g., 2)
 
   Type Mapping (JC2 → JSON)
   ──────────────────────
-    double / BigInt / Fraction   →  number
-    String                       →  string (escaped)
+    double / BigInt / Fraction   →  number (integers are cleanly truncated)
+    String                       →  string (Deep RFC standard escaping)
     List                         →  array
     Dict                         →  object
-    RealMatrix (row)             →  array of numbers
-    RealMatrix (2D)              →  array of arrays
-    Complex                      →  {"real": r, "imag": i}
-    none                         →  null
-    true (1.0) / false (0.0)     →  number (use booleans explicitly)
+    RealMatrix (1D / 2D)         →  array / array of arrays
+    none()                       →  null
+    Complex / Special types      →  "<unserializable_type>" (Fallback)
 
   Type Mapping (JSON → JC2)
   ──────────────────────
-    number (integer)             →  BigInt
+    number (integer)             →  BigInt (avoids precision loss on IDs)
     number (float)               →  double
     string                       →  String
     array                        →  List
     object                       →  Dict
-    true                         →  1.0
-    false                        →  0.0
-    null                         →  none
+    true / false                 →  1.0 / 0.0 (JC2 native boolean representation)
+    null                         →  none()
 
   Examples
   ──────────────────────
     import "json"
 
-    // Encode
-    d = {name: "Alice", age: 30, scores: [85, 92, 78]}
-    s = json_encode(d)
-    // → {"name":"Alice","age":30,"scores":[85,92,78]}
+    // 1. Serialization (Object to String)
+    d = { name: "Alice", active: true, scores: [85, 92] }
+    s = stringify(d)             
+    // → '{"name": "Alice", "active": 1, "scores": [85, 92]}'
 
-    // Pretty print
-    print(json_pretty(d))
+    // 2. Pretty Print (Perfect for writing config files)
+    print(json_pretty(d, 2))     
     // → {
     //     "name": "Alice",
-    //     "age": 30,
-    //     ...
+    //     "active": 1,
+    //     "scores": [
+    //       85,
+    //       92
+    //     ]
     //   }
 
-    // Decode
-    data = json_decode(r"({"x": 3.14, "items": [1, true, null]})")
-    data["x"]           → 3.14
-    data["items"][2]     → none
+    // 3. Deserialization (String to Object)
+    raw = r"({"host": "127.0.0.1", "port": 8080})"
+    conf = parse(raw)
+    conf.port                    // → 8080 (Parsed as BigInt)
+    conf.host                    // → "127.0.0.1"
 
-    // Round-trip
-    original = {users: [{name: "Bob"}, {name: "Eve"}]}
-    restored = json_decode(json_encode(original))
-    restored.users[0].name    → "Bob"
-
-    // File I/O
-    writeFile("data.json", json_pretty(d))
-    loaded = json_decode(readFile("data.json"))
+    // 4. File I/O Full Pipeline
+    writeFile("config.json", json_pretty(conf))
+    loaded = parse(readFile("config.json"))
 )HELP" },
 
         { "import", R"HELP(
