@@ -1,11 +1,11 @@
 // ═══════════════════════════════════════════════════════════════
-// discrete.jc2 — Discrete Mathematics Standard Library v2.1
+// discrete.jc2 — Discrete Mathematics Standard Library v2.2
 // Pure JC2 2.2.1 Implementation
 //
 // Features:
 //   • Prop   — Composable propositional logic with operator overloading
-//   • Relation — Binary relation analysis with closure operations
-//   • Graph  — Directed/undirected graph with traversal & shortest path
+//   • Relation — Binary relations (Strict bounds, CRUD, closures)
+//   • Graph  — Directed/undirected graph (Implicit nodes, CRUD, traversal)
 //   • Combinatorics — Permutations & combinations generators
 // ═══════════════════════════════════════════════════════════════
 
@@ -180,17 +180,33 @@ class Relation {
         if (!isnone(pairs)) {
             src = type(pairs) == "Set" ? toList(pairs) : pairs
             if (len(src) > 0) { self._pt = type(src[0]) }
-            for (p in src) { add(self.R, p) }
+            // Route seamlessly to safe addPair for strict bounds checking
+            for (p in src) { self.addPair(p[0], p[1]) } 
         }
     }
 
-    // Pair factory internally constructs the unified tuple shape
     _mp(a, b) = self._pt == "List" ? list(a, b) : [a, b]
 
-    // ── Public Facing API ──
-    addPair(a, b) = { add(self.R, self._mp(a, b)); return self }
+    // ── Public Facing API (Safe CRUD) ──
+
+    addPair(a, b) = { 
+        if (!(a in self.S) || !(b in self.S)) {
+            throw f"Relation Error: Both elements '{a}' and '{b}' must exist in the base set S."
+        }
+        add(self.R, self._mp(a, b))
+        return self 
+    }
+
+    removePair(a, b) = {
+        discard(self.R, self._mp(a, b))
+        return self
+    }
+
+    clearPairs() = {
+        clear(self.R)
+        return self
+    }
     
-    // ★ Added explicit type-safe query method
     hasPair(a, b) = self._mp(a, b) in self.R
 
     // ── Property Tests ──
@@ -236,6 +252,7 @@ class Relation {
     // ── Algebraic Operations ──
     inverse() = {
         r = Relation(self.S); r._pt = self._pt
+        // By-pass bounds checking internally for maximum O(N) performance
         for (p in self.R) { [a, b] = p; add(r.R, r._mp(b, a)) }
         return r
     }
@@ -323,19 +340,70 @@ class Graph {
         self._ec = 0
     }
 
-    // ── Construction (Fluent API) ──
+    // ── Construction & Erasure (CRUD API) ──
     addVertex(v) = {
         k = str(v)
         if (!hasKey(self.adj, k)) { self.adj[k] = list() }
         return self
     }
 
+    removeVertex(v) = {
+        k = str(v)
+        if (!hasKey(self.adj, k)) { return self }
+        discard(self.adj, k) 
+        
+        // Traverse entire graph to clean up orphan edges pointing to this vertex
+        for (u in keys(self.adj)) {
+            new_edges = list()
+            for (e in self.adj[u]) {
+                if (e[0] != k) { add(new_edges, e) }
+            }
+            self.adj[u] = new_edges
+        }
+        
+        // Recalculate edge count securely
+        c = 0
+        for (u in keys(self.adj)) { c += len(self.adj[u]) }
+        self._ec = self.directed ? c : c / 2
+        
+        return self
+    }
+
     addEdge(u, v, w = 1) = {
         ku = str(u); kv = str(v)
+        // ★ Implicit vertex creation (Restored per user request!)
         self.addVertex(ku); self.addVertex(kv)
+        
         add(self.adj[ku], list(kv, w))
         if (!self.directed) { add(self.adj[kv], list(ku, w)) }
         self._ec += 1
+        return self
+    }
+
+    removeEdge(u, v) = {
+        ku = str(u); kv = str(v)
+        removed = false
+        if (hasKey(self.adj, ku)) {
+            new_u = list()
+            for (e in self.adj[ku]) {
+                if (e[0] != kv) { add(new_u, e) } else { removed = true }
+            }
+            self.adj[ku] = new_u
+        }
+        if (!self.directed && hasKey(self.adj, kv)) {
+            new_v = list()
+            for (e in self.adj[kv]) {
+                if (e[0] != ku) { add(new_v, e) }
+            }
+            self.adj[kv] = new_v
+        }
+        if (removed) { self._ec -= 1 }
+        return self
+    }
+
+    clear() = {
+        self.adj = dict()
+        self._ec =  0
         return self
     }
 
@@ -352,7 +420,6 @@ class Graph {
         return false
     }
     
-    // ★ Added edge weight query
     getWeight(u, v) = {
         k = str(u); tv = str(v)
         if (hasKey(self.adj, k)) {
@@ -622,9 +689,12 @@ __register_help("discrete", r"DOC(
     expr.equiv(other)      Logically equivalent?
 
   ── Binary Relations (class Relation) ──────────────────
+    S = Set(1, 2, 3)
     r = Relation(S)                 Create on base set S
-    r.addPair(a, b)                 Fluent pair insertion (chainable)
+    r.addPair(a, b)                 Add pair (Checks if a,b in S)
+    r.removePair(a, b)              Remove pair securely
     r.hasPair(a, b)                 Safe tuple presence query
+    r.clearPairs()                  Delete all pairs
     r.isReflexive()  r.isSymmetric()  r.isTransitive()
     r.isAntiSymmetric()  r.isIrreflexive()
     r.isEquivalence()  r.isPartialOrder()  r.isTotalOrder()
@@ -636,8 +706,11 @@ __register_help("discrete", r"DOC(
   ── Graph Theory (class Graph) ─────────────────────────
     g = Graph()                     Directed graph (default)
     g = Graph(false)                Undirected graph
-    g.addVertex(v)                  Add vertex
-    g.addEdge(u, v, w=1)           Add edge with optional weight
+    g.addVertex(v)                  Add vertex explicitly
+    g.removeVertex(v)               Remove vertex & prune related edges
+    g.addEdge(u, v, w=1)           Add edge (Auto-creates missing vertices)
+    g.removeEdge(u, v)              Remove edge
+    g.clear()                       Clear all vertices and edges
     g.vertices()  g.edges()  g.neighbors(v)
     g.hasVertex(v)  g.hasEdge(u, v)  g.getWeight(u, v)
     g.inDegree(v)  g.outDegree(v)
@@ -654,4 +727,4 @@ __register_help("discrete", r"DOC(
     combinations(arr, k)       All k-subsets
 )DOC")
 
-print("[System] discrete.jc2 loaded successfully (v2.1).")
+print("[System] discrete.jc2 loaded successfully (v2.2).")
