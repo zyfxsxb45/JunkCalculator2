@@ -486,6 +486,7 @@ namespace jc {
 
     struct CompiledFunction {
         std::string name;
+        std::string sourceFile;
         int arity = 0;
         int maxArity = 0;
         int localCount = 0;

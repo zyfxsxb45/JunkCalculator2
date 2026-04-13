@@ -13,6 +13,7 @@ namespace jc {
     private:
         std::vector<Token> tokens;
         int current = 0;
+        std::string sourceFile;
 
         // --- 文法规则 (优先级从低到高) ---
         std::unique_ptr<Expr> expression();
@@ -53,7 +54,8 @@ namespace jc {
         Token consume(TokenType type, const std::string& message);
 
     public:
-        explicit Parser(std::vector<Token> tokens) : tokens(std::move(tokens)) {}
+        explicit Parser(std::vector<Token> tokens, std::string sourceFile = "")
+            : tokens(std::move(tokens)), sourceFile(std::move(sourceFile)) {}
         std::unique_ptr<Expr> parse();
     };
 

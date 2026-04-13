@@ -268,17 +268,17 @@ namespace jc {
         }
     }
 
-    Chunk Compiler::compile(Expr* ast) {
+    Chunk Compiler::compile(Expr* ast, const std::string& sourceFile) {
+        currentSourceFile = sourceFile; // 记住
         auto mainFn = std::make_shared<CompiledFunction>();
         mainFn->name = "<script>";
+        mainFn->sourceFile = sourceFile; // ★ 打上文件烙印
+
         compiledFunctions.push_back(mainFn);
         initCompiler(mainFn.get());
         compileNode(ast);
         emit(OpCode::OP_RETURN, lastLine);
-
-        // ★ 在 pop 之前记录正确的 localCount
         mainFn->localCount = current().maxLocals;
-
         stateStack.pop_back();
         return mainFn->chunk;
     }

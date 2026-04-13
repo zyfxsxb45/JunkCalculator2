@@ -3,6 +3,8 @@
 
 #include "../Module.h"
 #include "../Image.h"
+#include <fstream>   // 追加这行：用于读取文件
+#include <sstream>   // 追加这行：用于转换二进制流
 
 namespace jc_image {
     using namespace jc;
@@ -163,6 +165,19 @@ JC2_MODULE(image) {
             throw std::runtime_error("IO Error: Failed to save image to '" + path + "'.");
         std::cout << "  Image saved: " << path << " (" << im->width() << "x" << im->height() << ")" << std::endl;
         return jc::Value::none();
+        });
+
+    R.reg("imgReadBytes", { 1 }, [](const std::vector<jc::Value>& args) -> jc::Value {
+        if (!std::holds_alternative<std::string>(args[0].data))
+            throw std::runtime_error("Type Error: imgReadBytes() expects a file path.");
+        std::string path = std::get<std::string>(args[0].data);
+
+        std::ifstream file(path, std::ios::binary);
+        if (!file) throw std::runtime_error("IO Error: Failed to read '" + path + "'.");
+
+        std::ostringstream ss;
+        ss << file.rdbuf(); // 将图片二进制数据无损吸入内存
+        return jc::Value(ss.str()); // 塞回 JC2 虚拟机
         });
 }
 #endif

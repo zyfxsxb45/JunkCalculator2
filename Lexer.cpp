@@ -2,6 +2,7 @@
 #include <cctype>
 #include <stdexcept>
 #include <unordered_map>   // ★ 新增
+#include <filesystem>
 
 namespace jc {
 
@@ -67,7 +68,17 @@ namespace jc {
         }
     }
 
-    Lexer::Lexer(std::string source) : source(std::move(source)) {}
+    Lexer::Lexer(std::string source, std::string sourceFile)
+        : source(std::move(source)), sourceFile(std::move(sourceFile)) {
+    }
+
+    void Lexer::throwError(const std::string& msg) {
+        std::string fn = "Script";
+        try { fn = std::filesystem::path(sourceFile).filename().string(); }
+        catch (...) {}
+        if (fn.empty()) fn = "Script";
+        throw std::runtime_error("[" + fn + " : " + std::to_string(line) + "] Lexer Error: " + msg);
+    }
 
     std::vector<Token> Lexer::tokenize() {
         while (!isAtEnd()) {
@@ -174,7 +185,7 @@ namespace jc {
             if (parenBracketDepth == 0 && !tokens.empty()) {
                 TokenType lastType = tokens.back().type;
                 if (!isContinuationToken(lastType)) {
-                    tokens.emplace_back(TokenType::NEWLINE, "\\n", current - 1);
+                    tokens.emplace_back(TokenType::NEWLINE, "\\n", current - 1, line - 1); 
                 }
             }
             break;
@@ -190,7 +201,7 @@ namespace jc {
             }
             else if (std::isalpha(c) || c == '_') { identifier(); }
             else {
-                throw std::runtime_error("Lexer Error: Unexpected character '" + std::string(1, c) + "' at pos " + std::to_string(current));
+                throwError("Unexpected character '" + std::string(1, c) + "'.");
             }
             break;
         }
@@ -289,7 +300,7 @@ namespace jc {
             }
         }
         if (isAtEnd()) {
-            throw std::runtime_error("Lexer Error: Unterminated string at pos " + std::to_string(start));
+            throwError("Unterminated string.");
         }
         advance(); // 吃掉右引号
         tokens.emplace_back(TokenType::STRING, value, start);
@@ -349,7 +360,7 @@ namespace jc {
                     }
                 }
                 if (depth != 0)
-                    throw std::runtime_error("Lexer Error: Unmatched '{' in f-string at pos " + std::to_string(start));
+                    throwError("Unmatched '{' in f-string.");
             }
             else if (c == '\\') {
                 // ★ 文本段的转义序列
@@ -372,7 +383,7 @@ namespace jc {
             }
         }
         if (isAtEnd())
-            throw std::runtime_error("Lexer Error: Unterminated f-string at pos " + std::to_string(start));
+            throwError("Unterminated f-string.");
         advance(); // consume closing "
         tokens.emplace_back(TokenType::FSTRING, value, start);
     }
@@ -438,9 +449,7 @@ namespace jc {
                 }
                 value += source[current++];
             }
-            throw std::runtime_error(
-                "Lexer Error: Unterminated raw string (expected )" + delimiter + "\") at pos " +
-                std::to_string(start));
+            throwError("Unterminated raw string (expected )" + delimiter + "\").");
         }
         else {
             // ═══ 简单模式: r"content" ═══
@@ -450,7 +459,7 @@ namespace jc {
                 value += advance();
             }
             if (isAtEnd())
-                throw std::runtime_error("Lexer Error: Unterminated raw string at pos " + std::to_string(start));
+                throwError("Unterminated raw string.");
             advance();  // consume closing "
             tokens.emplace_back(TokenType::RSTRING, value, start);
         }

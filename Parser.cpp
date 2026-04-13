@@ -1,5 +1,6 @@
 #include "Lexer.h"  // ★ f-string 子解析需要
 #include "Parser.h"
+#include <filesystem>
 
 namespace jc {
 
@@ -72,7 +73,25 @@ namespace jc {
             if (stmts.size() == 1) return std::move(stmts[0]);
             return std::make_unique<Block>(std::move(stmts));
         }
-        catch (const std::exception&) { throw; }
+        catch (const std::exception& e) {
+            std::string msg = e.what();
+            if (msg.find("[") != 0) { 
+                int errLine = 0;
+                if (peek().type == TokenType::END_OF_FILE || peek().type == TokenType::NEWLINE) {
+                    errLine = previous().line;
+                }
+                else {
+                    errLine = peek().line > 0 ? peek().line : previous().line;
+                }
+
+                std::string fn = "Script";
+                try { fn = std::filesystem::path(sourceFile).filename().string(); }
+                catch (...) {}
+                if (fn.empty()) fn = "Script";
+                msg = "[" + fn + " : " + std::to_string(errLine) + "] " + msg;
+            }
+            throw std::runtime_error(msg);
+        }
     }
 
     std::unique_ptr<Expr> Parser::ternary() {
@@ -1195,9 +1214,9 @@ namespace jc {
                 currentLit.clear();
 
                 // ★ 子词法分析 + 子语法分析
-                Lexer subLexer(exprStr);
+                Lexer subLexer(exprStr, sourceFile);
                 auto subTokens = subLexer.tokenize();
-                Parser subParser(subTokens);
+                Parser subParser(subTokens, sourceFile);
                 auto exprAst = subParser.parse();
 
                 exprs.push_back(std::move(exprAst));

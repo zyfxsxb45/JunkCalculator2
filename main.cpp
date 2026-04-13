@@ -1,3 +1,4 @@
+#include "modules/socket_module.h"
 #include <iostream>
 #include <string>
 #include <cstdlib>
@@ -18,6 +19,8 @@
 #include "modules/json_module.h"
 #include "modules/image_module.h"
 #include "modules/prob_module.h"
+#include "modules/bytes_module.h"
+
 
 // 延续字符串判定
 static bool endsWithContinuation(const std::string& line) {
@@ -79,15 +82,14 @@ bool g_autoDebug = false;
 bool g_profile = false;
 
 // ★ 执行一段任意多行/单行代码的统一接口
-jc::Value evalCode(const std::string& code, bool isFile = false) {
-    jc::Lexer lexer(code);
+jc::Value evalCode(const std::string& code, const std::string& sourceFile, bool isFile = false) {
+    jc::Lexer lexer(code, sourceFile);                       // ★
     auto tokens = lexer.tokenize();
-    jc::Parser parser(tokens);
+    jc::Parser parser(tokens, sourceFile);                   // ★
     auto ast = parser.parse();
-
     jc::Compiler compiler;
     compiler.setFunctionIndexOffset(static_cast<int>(allFunctions.size()));
-    jc::Chunk chunk = compiler.compile(ast.get());
+    jc::Chunk chunk = compiler.compile(ast.get(), sourceFile); // ★
 
     if (g_showDisasm) {
         chunk.disassemble(isFile ? "Script Chunk" : "REPL Chunk");
@@ -109,6 +111,7 @@ jc::Value evalCode(const std::string& code, bool isFile = false) {
     evalFn->maxArity = 0;
     evalFn->localCount = rootLocalCount;
     evalFn->chunk = chunk;
+    evalFn->sourceFile = sourceFile;
 
     int evalIdx = static_cast<int>(allFunctions.size());
     if (g_autoDebug) {
@@ -122,7 +125,7 @@ jc::Value evalCode(const std::string& code, bool isFile = false) {
     return vm.callVMFunction(evalIdx, {});
 }
 
-void runScript(const std::string& filepath) {
+void runScript(const std::string& filepath, bool isImport = false) {
     std::string resolvedPath = jc::helpers::safeResolvePath(filepath);
     if (!std::filesystem::exists(resolvedPath))
         resolvedPath = jc::helpers::safeResolvePath(filepath + ".jc2");
@@ -145,12 +148,16 @@ void runScript(const std::string& filepath) {
         std::filesystem::path(resolvedPath).parent_path().string());
 
     try {
-        jc::Value result = evalCode(code, true);
+        // ★ 将 resolvedPath 传进虚拟机
+        jc::Value result = evalCode(code, resolvedPath, true);
         if (!result.isNone()) vm.setGlobal("ANS", result);
     }
     catch (const std::exception& ex) {
+        // ★ 核心熔断机制：如果是 import 触发的代码编译/运行报错，绝对不准吞没，立刻向上一层炸穿！
+        if (isImport) throw;
+
         std::cerr << jc::col(jc::Ansi::BRIGHT_RED)
-            << "   Error in '" << resolvedPath << "': "    // ★ 修改：附带文件名
+            << "   Error in '" << resolvedPath << "':\n   "
             << ex.what() << jc::col(jc::Ansi::RESET) << std::endl;
     }
     if (g_profile && jc::VM::activeVM) {
@@ -224,8 +231,8 @@ int main(int argc, char* argv[]) {
         auto it = vm.getGlobals().find(name);
         return (it != vm.getGlobals().end()) ? it->second : jc::Value::none();
         };
-    jc::helpers::evalCallback = [](const std::string& code) -> jc::Value { return evalCode(code, false); };
-    jc::helpers::runFileCallback = [](const std::string& path) { runScript(path); }; // ★ 提供标准库文件挂载服务
+    jc::helpers::evalCallback = [](const std::string& code) -> jc::Value { return evalCode(code, "<eval>", false); };
+    jc::helpers::runFileCallback = [](const std::string& path) { runScript(path, true);}; 
     jc::helpers::callFunctionCallback = nullptr;
     jc::helpers::resolvePathCallback = [exeDir](const std::string& path) -> std::string {
         namespace fs = std::filesystem;
@@ -362,7 +369,7 @@ int main(int argc, char* argv[]) {
         if (input.substr(0, 5) == "load ") { loadWorkspace(input.substr(5)); continue; }
 
         try {
-            jc::Value result = evalCode(input, false);
+            jc::Value result = evalCode(input, "REPL", false);
             if (!result.isNone()) {
                 vm.setGlobal("ANS", result);
                 std::string typeColor;

@@ -42,6 +42,7 @@ namespace jc {
         std::vector<std::shared_ptr<CompiledFunction>> compiledFunctions;
         int functionIndexOffset = 0;
         int lastLine = 0;
+        std::string currentSourceFile;
 
         CompilerState& current() { return stateStack.back(); }
         Chunk* chunk() { return &current().function->chunk; }
@@ -68,7 +69,7 @@ namespace jc {
         void emitStoreTarget(Expr* target);
 
     public:
-        Chunk compile(Expr* ast);
+        Chunk compile(Expr* ast, const std::string& sourceFile = "");
 
         const std::vector<std::shared_ptr<CompiledFunction>>& getCompiledFunctions() const { return compiledFunctions; }
         void setFunctionIndexOffset(int offset) { functionIndexOffset = offset; }

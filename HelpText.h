@@ -75,6 +75,8 @@ namespace jc {
     image       BMP image generation (import "image")
     prob        Probability distributions & hypothesis tests (import "prob")
     json        JSON encode/decode/pretty (import "json")
+    bytes       Bare-metal memory & binary file I/O (import "bytes")
+    socket      Low-level TCP/IP operating system bindings (import "socket")
 
     Type `modules()` in the REPL to see all available native modules.
 
@@ -82,6 +84,8 @@ namespace jc {
   ────────────────────────────────────────────────────────────────────
     regex       Regular Expression standard library (import "regex")
     discrete    Discrete math utilities standard library (import "discrete")
+    buffer      High-level binary buffer and cursor API (import "buffer")
+    net         High-level TCP socket OOP wrapper (import "net")
 
   Quick-Start Cheatsheet
   ────────────────────────────────────────────────────────────────────
@@ -2273,6 +2277,89 @@ namespace jc {
     imgPlot(c, sin, -10, 10, -1.5, 1.5, "red", 2)
     imgPlot(c, cos, -10, 10, -1.5, 1.5, "blue", 2)
     imgSave(c, "plot.bmp")
+)HELP" },
+
+        { "bytes", R"HELP(
+═══ Bare-Metal Memory Engine — Native Module ═══
+
+  Requires: import "bytes"
+
+  The `bytes` module provides low-level, zero-dependency C++ memory buffers. 
+  It grants absolute control over binary reading, writing, and file I/O.
+  
+  ★ Note: For everyday use, it is highly recommended to use the standard 
+    library wrapper `import "buffer"`, which provides an OOP interface.
+
+  Buffer Allocation & I/O
+  ──────────────────────
+    b_alloc(size)               Allocate a zeroed buffer of `size` bytes.
+    b_pack(array)               Create a buffer from an array of 8-bit integers.
+    readFileBytes(path)         Map an entire file from disk into a buffer.
+    writeFileBytes(path, buf)   Flush a byte buffer directly to your disk.
+    b_len(buf)                  Get the total size of the buffer in bytes.
+
+  Low-Level Reading & Writing (Absolute Offsets)
+  ──────────────────────
+    b_set(buf, offset, val, type)   Write a value into memory at `offset`.
+    b_get(buf, offset, type)        Read a value from memory at `offset`.
+    b_get(buf, offset, "str", len)  Read specifically a string of `len` bytes.
+
+    Supported formats (passed as strings): 
+      "u8", "i8", "u16", "i16", "u32", "i32", "f32", "f64", "str"
+
+  High-Performance Bulk Operations
+  ──────────────────────
+    b_write_arr(buf, off, arr, type)  
+        Directly memcpy a JC2 Array/Matrix into memory at C++ speeds. 
+        (Currently supports "i16" and "f64"). 
+        Provides massive performance boosts for audio/data generation.
+
+  Example
+  ──────────────────────
+    import "bytes"
+    b = b_alloc(4)
+    b_set(b, 0, 255, "u8")
+    b_set(b, 1, 65535, "u16") 
+    b_get(b, 1, "u16")             → 65535
+)HELP" },
+
+        { "socket", R"HELP(
+═══ Native Socket Binding — Native Module ═══
+
+  Requires: import "socket"
+
+  The `socket` module provides unfiltered access to the operating system's 
+  network stack (WinSock2 on Windows, POSIX Sockets on Linux/macOS).
+
+  ★ Note: For everyday networking, it is HIGHLY recommended to use the standard 
+    library wrapper `import "net"`, which abstracts these pointers into managed 
+    TCP objects (`TcpSocket` and `TcpServer`).
+
+  Outbound Connections (Client)
+  ──────────────────────
+    net_tcp_connect(host, port)
+        Resolves domain records (DNS) and dials a TCP stream to the remote peer.
+        Returns an opaque pointer wrapped inside a `NativeSocket` Class instance.
+
+  Inbound Listeners (Server)
+  ──────────────────────
+    net_tcp_server(host, port)
+        Binds to a specified local interface (e.g., "127.0.0.1" or "0.0.0.0") 
+        and puts the OS networking stack into LISTEN mode with SO_REUSEADDR enabled.
+        Returns a server socket wrapper.
+
+    net_tcp_accept(server_socket)
+        Blocks the active VM thread pending incoming network traffic. 
+        When a peer connects, returns a brand-new client socket wrapper.
+
+  Raw Data Exchange / Teardown
+  ──────────────────────
+    net_send(socket, text)
+        Performs a deep C++ 'send()' call, flushing strings over the TCP boundary.
+    net_recv(socket, max_bytes)
+        Blocks and reads incoming packets. Returns "" on disconnect.
+    net_close(socket)
+        Silently severs an established network pipe.
 )HELP" },
     };
 

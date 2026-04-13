@@ -7,8 +7,21 @@
 #include <iostream>
 #include <cmath>
 #include <stdexcept>
+#include <filesystem>
 
 namespace jc {
+
+    auto formatEscape = [](int errLine, const std::string& rawMsg, const std::string& sourceFile) {
+        std::string m = rawMsg;
+        if (errLine > 0 && m.find("[") != 0) {
+            std::string fn = "Script";
+            try { fn = std::filesystem::path(sourceFile).filename().string(); }
+            catch (...) {}
+            if (fn.empty()) fn = "Script";
+            m = "[" + fn + " : " + std::to_string(errLine) + "] " + m;
+        }
+        return m;
+        };
 
     int VM::currentLine() {
         if (frames.empty()) return 0;
@@ -315,12 +328,8 @@ namespace jc {
             frame().ip = handler.ip;
         }
         else {
-            int errLine = currentLine();
-            std::string fullMsg = msg;
-            if (errLine > 0 && msg.find("[Line") == std::string::npos) {
-                fullMsg = "[Line " + std::to_string(errLine) + "] " + msg;
-            }
-            throw std::runtime_error(fullMsg);
+            std::string sfile = frames.empty() ? "" : frame().function->sourceFile;
+            throw std::runtime_error(formatEscape(currentLine(), msg, sfile));
         }
     }
 
@@ -436,6 +445,9 @@ namespace jc {
 
     Value VM::run(int targetFrameDepth) {
         currentTargetFrameDepth = targetFrameDepth;
+
+		
+
         while (true) {
             
             // ═══ GC 自动触发探针 ═══
@@ -1608,8 +1620,8 @@ namespace jc {
                     while (static_cast<int>(frames.size()) > handler.frameIndex + 1) frames.pop_back();
                     stack.resize(handler.stackSize);
 
-                    // ★ 内部拦截器净化：剥离下层 run() 逃逸时可能附带的行号
-                    if (msg.find("[Line ") == 0) {
+                    // 原地捕获也顺手清洗，保证极致干净
+                    if (msg.find("[") == 0) {
                         size_t c = msg.find("] ");
                         if (c != std::string::npos) msg = msg.substr(c + 2);
                     }
@@ -1617,9 +1629,9 @@ namespace jc {
                     frame().ip = handler.ip;
                     continue;
                 }
-                int errLine = currentLine();
-                if (errLine > 0 && msg.find("[Line") == std::string::npos) msg = "[Line " + std::to_string(errLine) + "] " + msg;
-                throw std::runtime_error(msg); // 彻底逃逸，带上行号
+
+                std::string sfile = frames.empty() ? "" : frame().function->sourceFile;
+                throw std::runtime_error(formatEscape(currentLine(), sig.message, sfile));
             }
             catch (const std::exception& ex) {
                 std::string msg = ex.what();
@@ -1629,8 +1641,7 @@ namespace jc {
                     while (static_cast<int>(frames.size()) > handler.frameIndex + 1) frames.pop_back();
                     stack.resize(handler.stackSize);
 
-                    // ★ 内部拦截器净化：剥离下层 run() 逃逸时可能附带的行号
-                    if (msg.find("[Line ") == 0) {
+                    if (msg.find("[") == 0) {
                         size_t c = msg.find("] ");
                         if (c != std::string::npos) msg = msg.substr(c + 2);
                     }
@@ -1638,12 +1649,12 @@ namespace jc {
                     frame().ip = handler.ip;
                     continue;
                 }
-                int errLine = currentLine();
-                if (errLine > 0 && msg.find("[Line") == std::string::npos) msg = "[Line " + std::to_string(errLine) + "] " + msg;
-                throw std::runtime_error(msg); // 彻底逃逸，带上行号
+
+                std::string sfile = frames.empty() ? "" : frame().function->sourceFile;
+                throw std::runtime_error(formatEscape(currentLine(), ex.what(), sfile));
             }
             catch (...) {
-                std::string msg = "Unknown error";
+                std::string msg = "Unknown VM Error";
                 if (!exceptionHandlers.empty() && exceptionHandlers.back().frameIndex >= currentTargetFrameDepth) {
                     auto handler = exceptionHandlers.back();
                     exceptionHandlers.pop_back();
@@ -1653,9 +1664,9 @@ namespace jc {
                     frame().ip = handler.ip;
                     continue;
                 }
-                int errLine = currentLine();
-                if (errLine > 0) msg = "[Line " + std::to_string(errLine) + "] " + msg;
-                throw std::runtime_error(msg); // 彻底逃逸，带上行号
+
+                std::string sfile = frames.empty() ? "" : frame().function->sourceFile;
+                throw std::runtime_error(formatEscape(currentLine(), "Unknown VM Error", sfile));
             }
         }
     }

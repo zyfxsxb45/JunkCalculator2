@@ -44,7 +44,8 @@ set(JC2_HEADERS
     "modules/json_module.h"
     "modules/image_module.h"
     "modules/prob_module.h"
-)
+     "modules/bytes_module.h" 
+     "modules/socket_module.h")
 
 set(JC2_SOURCES
     "Lexer.cpp"
@@ -55,7 +56,7 @@ set(JC2_SOURCES
     "main.cpp"
 )
 
-add_executable(JunkCalculator2 ${JC2_HEADERS} ${JC2_SOURCES})
+add_executable(JunkCalculator2 ${JC2_HEADERS} ${JC2_SOURCES} "modules/bytes_module.h" "modules/socket_module.h")
 target_include_directories(JunkCalculator2 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
 # ==============================================================================

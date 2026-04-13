@@ -17,6 +17,8 @@ namespace jc {
         int parenBracketDepth = 0;
         int line = 1;
 
+        std::string sourceFile;
+
         // --- 内部核心扫描逻辑 ---
         void scanToken();           // 识别下一个单词
         void identifier();          // 处理字母开头的标识符 (变量或函数，如 sin, x_1)
@@ -37,8 +39,10 @@ namespace jc {
         void fstringLiteral();  // ★
         void rstringLiteral();  // ★
 
+        void throwError(const std::string& msg);
+
     public:
-        explicit Lexer(std::string source);
+        explicit Lexer(std::string source, std::string sourceFile = "");
 
         // 启动词法分析的主入口
         std::vector<Token> tokenize();
