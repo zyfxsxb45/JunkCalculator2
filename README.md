@@ -38,19 +38,30 @@ Developed by Yu Liangyang, Tsinghua University.
 
 ### Native Modules & Standard Library
 Native C++ extensions exposed to the execution context:
-- `image`: 24-bit BMP generation, plotting functions, and Bresenham line drawing.
+- `image`: 24-bit BMP generation, plotting functions, Bresenham line drawing, and binary file reading (`imgReadBytes`).
 - `prob`: 11 statistical distributions (PDF, CDF, Quantile via Newton iteration) and hypothesis tests (t-test, Welch, chi-squared).
 - `json`: Serialization and deserialization between JC2 data structures and JSON strings.
+- `socket`: Low-level TCP/IP networking stack (WinSock2/POSIX bindings) supporting client and server configurations.
+- `bytes`: Memory buffering and low-level binary I/O operations.
 
 JC2 standard libraries loaded via `import`:
 - `regex`: Backtracking NFA regex engine with capture groups, character classes, alternation, and bounded quantifiers (`{m,n}`).
 - `discrete`: Discrete mathematics toolkit covering combinatorics, binary relation analysis, graph traversal algorithms, and boolean logic truth table generation.
+- `net`: Object-Oriented wrapper for TCP streams (`TcpSocket` and `TcpServer`).
+- `http`: HTTP/1.1 client supporting URL parsing, header extraction, and GET/POST requests.
+- `buffer`: High-level binary manipulation API with cursor support.
 
 Standard libraries register their documentation dynamically via the `__register_help` API, providing `help("module")` support at runtime.
 
 ---
 
 ## What's New in v2.2.1
+
+### Networking & Binary I/O
+- **TCP Sockets**: Added `socket_module.h` to provide cross-platform OS network bindings (WinSock2/POSIX). Supports both client connections and server daemonization with `SO_REUSEADDR`.
+- **Net & HTTP Libraries**: Introduced `net.jc2` offering an object-oriented wrapper (`TcpSocket`, `TcpServer`) over native sockets. Added `http.jc2` for basic HTTP/1.1 protocol handling (GET/POST requests, header parsing).
+- **Binary Manipulation**: Added `bytes_module.h` for raw binary stream handling and file I/O. Introduced the standard library `buffer.jc2` to handle structured binary reading and writing at the byte level.
+- **Image I/O**: Added `imgReadBytes` to the `image` module to load binary files into string buffers, facilitating data transmission over TCP sockets.
 
 ### Generic Container API
 Array manipulation built-in functions have been refactored to a unified architecture using `std::visit`. Functions operate uniformly across container types and preserve the input container type in their output:
@@ -149,11 +160,16 @@ Requires a C++20 compliant compiler and CMake 3.15+.
     +-- GcHeap.h                    Mark-and-Sweep Garbage Collector
     +-- modules/
     |   +-- json_module.h           JSON encode/decode native module
-    |   +-- image_module.h          Image wrapper native module
+    |   +-- image_module.h          Image wrapper & binary I/O module
     |   +-- prob_module.h           Probability distribution native module
+    |   +-- socket_module.h         TCP/IP network bindings module
+    |   +-- bytes_module.h          Memory buffering & binary I/O module
     +-- lib/
     |   +-- regex.jc2               Standard library: NFA Regex engine
     |   +-- discrete.jc2            Standard library: Discrete Mathematics
+    |   +-- net.jc2                 Standard library: OOP TCP Sockets
+    |   +-- http.jc2                Standard library: HTTP/1.1 Client
+    |   +-- buffer.jc2              Standard library: Binary buffer and cursor API
     +-- jc2-language/               VS Code Language Support Extension
 
 ---
