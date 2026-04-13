@@ -1,0 +1,113 @@
+// ═══════════════════════════════════════════════════════════════
+// net.jc2 — TCP Native Networking Standard Library v2.0
+// Pure, Zero-Dependency Socket Engine (Client & Server)
+// ═══════════════════════════════════════════════════════════════
+
+import "socket" // Bridge to the low-level C++ bindings
+
+// ─── Socket Object (Client) ───────────────────────────────────
+
+class TcpSocket {
+    init(host, port) = {
+        self.host = host
+        self.port = port
+        self.sock = none()
+    }
+
+    connect() = {
+        self.sock = net_tcp_connect(self.host, self.port)
+        return self
+    }
+
+    close() = {
+        if (!isnone(self.sock)) {
+            net_close(self.sock)
+            self.sock = none()
+        }
+    }
+
+    send(text) = {
+        if (isnone(self.sock)) { throw "Network Error: Socket is not connected!" }
+        net_send(self.sock, text)
+        return self
+    }
+
+    recv(max_bytes = 4096) = {
+        if (isnone(self.sock)) { throw "Network Error: Socket is not connected!" }
+        return net_recv(self.sock, max_bytes)
+    }
+
+    __str__() = f"<TcpSocket host=\"{self.host}\" port={self.port} connected={!isnone(self.sock)}>"
+}
+
+// ─── Server Object (Daemon) ───────────────────────────────────
+
+class TcpServer {
+    init(host, port) = {
+        self.host = host
+        self.port = port
+        self.sock = none()
+    }
+
+    bind() = {
+        self.sock = net_tcp_server(self.host, self.port)
+        return self
+    }
+
+    accept() = {
+        if (isnone(self.sock)) { throw "TCP Server is not bound to a port!" }
+        native_client = net_tcp_accept(self.sock)
+        
+        client = TcpSocket(self.host, self.port)
+        client.sock = native_client
+        return client
+    }
+
+    close() = {
+        if (!isnone(self.sock)) {
+            net_close(self.sock)
+            self.sock = none()
+        }
+    }
+}
+
+// ─── Dynamic Help Registry ────────────────────────────────────
+
+__register_help("net", r"DOC(
+═══ Network (Standard Library v2.0) ═══
+
+  Requires: import "net"
+
+  The `net` module provides a comprehensive object-oriented API for zero-dependency 
+  TCP networking. It supports both outbound Client requests and inbound Server hosting.
+
+  [1] Client Mode (TcpSocket)
+  ──────────────────────
+    client = TcpSocket("example.com", 80).connect()
+    client.send("GET / HTTP/1.1\r\n\r\n")
+    data = client.recv(4096)
+    client.close()
+
+  [2] Server Mode (TcpServer)
+  ──────────────────────
+    server = TcpServer("127.0.0.1", 8080).bind()
+    
+    // Server Event Loop:
+    while (true) {
+        client = server.accept()     // Blocks until a browser/client connects
+        req = client.recv(1024)      // Read incoming HTTP request
+        
+        client.send("HTTP/1.1 200 OK\r\n\r\nHello from JC2!")
+        client.close()               // Hang up to finalize the HTTP transmission
+    }
+
+  Transmission Mechanics
+  ──────────────────────
+    client.send(string)
+        Transmits raw string/byte payload over the TCP stream.
+    client.recv(max_bytes = 4096)
+        Blocks and waits until data is received. Returns an EMPTY STRING ("") 
+        if the remote server closed the connection.
+)DOC")
+
+print("[System] net.jc2 loaded successfully (v2.0).")

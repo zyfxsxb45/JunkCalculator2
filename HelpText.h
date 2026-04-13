@@ -2220,63 +2220,48 @@ namespace jc {
 )HELP" },
 
         { "image", R"HELP(
-═══ Image Engine — Native Module ═══
+═══ Image Processing — Native Module ═══
 
   Requires: import "image"
 
-  JC2 includes a native, zero-dependency graphics engine capable of rendering
-  and saving 24-bit uncompressed BMP images. After importing, Image objects
-  are class instances (type → "Image").
+  The `image` module provides a high-performance 2D rasterization API backed 
+  by C++. It allows rendering geometric shapes, statistical plots, and manipulating 
+  pixels directly in memory, which can be encoded to BMP formats.
 
-  Creation & Basics
+  Initialization Details
   ──────────────────────
-    import "image"
-    c = img(w, h)                   White canvas
-    c = img(w, h, "black")          Custom background color
-    imgWidth(c) / imgHeight(c)      Returns dimensions
-    imgClear(c, color)              Erases all pixels
-    type(c)                         → "Image"
+    im = img(width, height [, background_color])
+        Allocates a new image surface in RAM. 
+        Note: Colors are passed as hex strings (e.g., "#282C34" or "#FF0000").
+        
+    imgWidth(im)  /  imgHeight(im)
+        Returns the respective boundary dimensions of the image.
 
-  Drawing Primitives
+  Geometry & Drawing API
   ──────────────────────
-    imgPixel(c, x, y, color)
-    imgLine(c, x0,y0, x1,y1, color [,thick])
-    imgRect(c, x,y, w,h, color [,thick])
-    imgFillRect(c, x,y, w,h, color)
-    imgCircle(c, cx,cy, r, color [,thick])
-    imgFillCircle(c, cx,cy, r, color)
+    imgClear(im, color)
+    imgPixel(im, x, y, color)
+    imgLine(im, x1, y1, x2, y2, color [, thickness=1])
+    imgRect(im, x, y, width, height, color [, thickness=1])
+    imgFillRect(im, x, y, width, height, color)
+    imgCircle(im, cx, cy, radius, color [, thickness=1])
+    imgFillCircle(im, cx, cy, radius, color)
 
-  Data Plotting
+  Data Visualization (Plotting)
   ──────────────────────
-    imgAxes(c, xMin, xMax, yMin, yMax [,color])
-        Draws X/Y coordinate axes and a background grid.
+    imgAxes(im, xMin, xMax, yMin, yMax [, color])
+        Draws cartesian coordinate axes mapped to the specified range.
+    imgScatter(im, x_matrix, y_matrix, xMin, xMax, yMin, yMax [, color])
+        Projects data points from two matrices onto the image canvas.
 
-    imgPlot(c, f, xMin, xMax, yMin, yMax, color [,thick])
-        Plots a continuous single-variable function f(x).
-
-    imgScatter(c, xArr, yArr, xMin, xMax, yMin, yMax [,color])
-        Plots Cartesian data points from two arrays.
-
-  Saving
+  I/O & Network Streaming
   ──────────────────────
-    imgSave(c, "path.bmp")          Writes the image to disk.
-
-  Color Parsing
-  ──────────────────────
-    Hex RGB:       "#FF0000" (Red), "#00FF00" (Lime)
-    Named Colors:  "red", "blue", "green", "black", "white", "yellow",
-                   "cyan", "magenta", "orange", "purple", "pink",
-                   "gray", "brown", "lime", "navy", "teal", "maroon",
-                   "silver", "olive"
-
-  Example
-  ──────────────────────
-    import "image"
-    c = img(800, 600, "white")
-    imgAxes(c, -10, 10, -1.5, 1.5)
-    imgPlot(c, sin, -10, 10, -1.5, 1.5, "red", 2)
-    imgPlot(c, cos, -10, 10, -1.5, 1.5, "blue", 2)
-    imgSave(c, "plot.bmp")
+    imgSave(im, "filepath.bmp")
+        Encodes the memory surface and flushes it to a valid Windows BMP file.
+    
+    data = imgReadBytes("filepath.bmp")
+        Opens a binary file and reads its EXACT byte sequence into a JC2 String.
+        Crucial for injecting image blobs into HTTP TCP packets!
 )HELP" },
 
         { "bytes", R"HELP(

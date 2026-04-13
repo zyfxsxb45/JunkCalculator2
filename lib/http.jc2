@@ -1,0 +1,161 @@
+// ═══════════════════════════════════════════════════════════════
+// http.jc2 — Modern HTTP Client Standard Library v1.1
+// Built with strict JC2 Lexer / Scope standards
+// ═══════════════════════════════════════════════════════════════
+
+import "net"
+
+// ─── Response Class ───────────────────────────────────────────
+// 面向对象，支持点号调用： res.status, res.body
+class HttpResponse {
+    init(status, headers, body, raw) = {
+        self.status = status     
+        self.headers = headers   
+        self.body = body         
+        self.raw = raw           
+    }
+
+    json() = {
+        import "json"
+        return parse(self.body)
+    }
+
+    __str__() = f"<HttpResponse [{self.status}] body_len={len(self.body)}>"
+}
+
+// ─── Internal URL Parser ──────────────────────────────────────
+
+_parse_url(url_str) = {
+    u = url_str
+    if (startsWith(u, "https://")) {
+        throw "HTTP Library currently only supports plain HTTP (TCP 80)."
+    }
+    if (startsWith(u, "http://")) {
+        u = substr(u, 7)
+    }
+
+    url_host = ""
+    url_path = "/"
+    slash_idx = find(u, "/", 0)
+    
+    if (slash_idx == -1) {
+        url_host = u
+    } else {
+        url_host = substr(u, 0, slash_idx)
+        url_path = substr(u, slash_idx)
+    }
+
+    url_port = 80
+    colon_idx = find(url_host, ":", 0)
+    if (colon_idx != -1) {
+        port_str = substr(url_host, colon_idx + 1)
+        url_port = int(parseNum(port_str))
+        url_host = substr(url_host, 0, colon_idx)
+    }
+
+    // 强类型字典返回
+    res_dict = dict()
+    res_dict["host"] = url_host
+    res_dict["port"] = url_port
+    res_dict["path"] = url_path
+    return res_dict
+}
+
+// ─── Internal Response Parser ─────────────────────────────────
+
+_parse_response(raw) = {
+    header_end = find(raw, "\r\n\r\n", 0)
+    if (header_end == -1) {
+        return HttpResponse(0, dict(), raw, raw)
+    }
+
+    head_part = substr(raw, 0, header_end)
+    body_part = substr(raw, header_end + 4)
+
+    lines = split(head_part, "\r\n")
+    
+    status_code = 0
+    if (len(lines) > 0) {
+        parts = split(lines[0], " ")
+        if (len(parts) > 1) {
+            status_code = int(parseNum(parts[1]))
+        }
+    }
+
+    // 逐行切分 Headers
+    headers_dict = dict()
+    lines_count = len(lines)
+    i = 1
+    while (i < lines_count) {
+        line = lines[i]
+        colon = find(line, ":", 0)
+        if (colon != -1) {
+            k = trim(substr(line, 0, colon))
+            v = trim(substr(line, colon + 1))
+            headers_dict[k] = v
+        }
+        i = i + 1
+    }
+
+    return HttpResponse(status_code, headers_dict, body_part, raw)
+}
+
+// ─── Public API ───────────────────────────────────────────────
+
+http_get(url) = {
+    target = _parse_url(url)
+    
+    t_host = target["host"]
+    t_port = target["port"]
+    t_path = target["path"]
+
+    client = TcpSocket(t_host, t_port).connect()
+
+    req = f"GET {t_path} HTTP/1.1\r\n"
+    req += f"Host: {t_host}\r\n"
+    req += "Connection: close\r\n"
+    req += "User-Agent: JC2-HTTP/1.1\r\n\r\n"
+
+    client.send(req)
+
+    raw_res = ""
+    while (true) {
+        chunk = client.recv(4096)
+        if (len(chunk) == 0) { break }
+        raw_res += chunk
+    }
+    
+    client.close()
+    return _parse_response(raw_res)
+}
+
+// ─── Dynamic Help Registry ────────────────────────────────────
+
+__register_help("http", r"DOC(
+═══ HTTP Client (Standard Library v1.1) ═══
+
+  Requires: import "http"
+
+  A modern, high-level HTTP client capable of parsing URLs, dispatching GET 
+  requests, and cleanly separating HTTP metadata from the payload body.
+
+  Functions
+  ──────────────────────
+    res = http_get(url)
+
+  HttpResponse Object Properties
+  ──────────────────────
+    res.status          Integer (e.g., 200, 404, 500)
+    res.headers         Dict of response headers
+    res.body            String containing the exact HTTP raw body
+    res.raw             String containing the entire TCP stream packet
+    res.json()          Helper: maps text to abstract dictionary via C++ parser
+
+  Example
+  ──────────────────────
+    import "http"
+    response = http_get("httpbin.org/get")
+    print(response.status)
+)DOC")
+
+print("[System] http.jc2 loaded successfully (v1.1).")
