@@ -71,7 +71,7 @@ namespace jc {
             if (!f) throw std::runtime_error("IO Error: Cannot open file '" + path + "'.");
             std::streamsize size = f.tellg();
             f.seekg(0, std::ios::beg);
-            std::vector<uint8_t> buffer(size);
+            std::vector<uint8_t> buffer(static_cast<size_t>(size));
             if (f.read(reinterpret_cast<char*>(buffer.data()), size)) {
                 return makeBytesInstance(std::move(buffer));
             }
