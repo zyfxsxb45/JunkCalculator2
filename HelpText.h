@@ -844,16 +844,18 @@ namespace jc {
       Poisson(lambda)       Poisson
       Geom(p)               Geometric (# trials until first success)
 
-  Generic Operations (work on ANY distribution type)
+  Distribution Methods (Object-Oriented API)
   ──────────────────────
-    pdf(D, x)             Probability density / mass
-    cdf(D, x)             Cumulative distribution P(X ≤ x)
-    quantile(D, p)        Inverse CDF: find x such that P(X ≤ x) = p
-    mean(D)               Distribution mean  (also: dmean(D))
-    var(D)                Distribution variance (also: dvar(D))
-    std(D)                Distribution std dev (also: dstd(D))
-    distInfo(D)           Print summary (type, mean, var, std)
-    sample(D, n)          Draw n random samples → returns a row array
+    D.pdf(x)              Probability density / mass
+    D.cdf(x)              Cumulative distribution P(X ≤ x)
+    D.quantile(p)         Inverse CDF: find x such that P(X ≤ x) = p
+    D.mean()              Distribution mean
+    D.var()               Distribution variance
+    D.std()               Distribution std dev
+    D.sample(n)           Draw n random samples → returns a row array
+
+    * Global variants like distInfo(D), pdf(D, x), and mean(D) are also 
+      supported for backward compatibility and functional piping.
 
   Special Math Functions (available after import "prob")
   ──────────────────────
@@ -877,10 +879,10 @@ namespace jc {
   ──────────────────────
     import "prob"
     d = Normal(100, 15)
-    cdf(d, 130)                  → 0.9772  (97.72%)
-    quantile(d, 0.95)            → 124.67
-    mean(d)                      → 100
-    s = sample(d, 1000)
+    d.cdf(130)                   → 0.9772  (97.72%)
+    d.quantile(0.95)             → 124.67
+    d.mean()                     → 100
+    s = d.sample(1000)
     mean(s)                      ≈ 100
 )HELP" },
 

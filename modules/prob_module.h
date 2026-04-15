@@ -11,10 +11,10 @@ namespace jc_prob {
 
     inline std::shared_ptr<Distribution>& getDist(const Value& v) {
         if (!std::holds_alternative<std::shared_ptr<Instance>>(v.data))
-            throw std::runtime_error("Type Error: Expected a Distribution.");
+            throw std::runtime_error("Type Error: Expected a Distribution instance.");
         auto inst = std::get<std::shared_ptr<Instance>>(v.data);
         if (!inst->nativeData.has_value())
-            throw std::runtime_error("Type Error: Expected a Distribution.");
+            throw std::runtime_error("Type Error: Expected a Distribution native object.");
         return std::any_cast<std::shared_ptr<Distribution>&>(inst->nativeData);
     }
 
@@ -32,13 +32,15 @@ JC2_MODULE(prob) {
     distClass = std::make_shared<jc::ClassDefinition>();
     distClass->name = "Distribution";
     R.set("Distribution", jc::Value(distClass));
+
+    // ── 原生全局纯函数 (Global Math Functions) ──
     R.reg("gamma", { 1 }, [](const std::vector<jc::Value>& a) -> jc::Value { return jc::Value(jc::prob::tgamma(a[0].asDouble())); });
     R.reg("lgamma", { 1 }, [](const std::vector<jc::Value>& a) -> jc::Value { return jc::Value(jc::prob::lngamma(a[0].asDouble())); });
     R.reg("betaFn", { 2 }, [](const std::vector<jc::Value>& a) -> jc::Value { return jc::Value(jc::prob::betafn(a[0].asDouble(), a[1].asDouble())); });
     R.reg("erf", { 1 }, [](const std::vector<jc::Value>& a) -> jc::Value { return jc::Value(jc::prob::erf_impl(a[0].asDouble())); });
     R.reg("erfc", { 1 }, [](const std::vector<jc::Value>& a) -> jc::Value { return jc::Value(jc::prob::erfc_impl(a[0].asDouble())); });
 
-    // ── 分布构造器 ──
+    // ── 分布构造器 (Distribution Constructors) ──
     R.reg("Normal", { 0, 1, 2 }, [](const std::vector<jc::Value>& a) -> jc::Value {
         double mu = a.size() >= 1 ? a[0].asDouble() : 0;
         double sigma = a.size() >= 2 ? a[1].asDouble() : 1;
@@ -55,7 +57,54 @@ JC2_MODULE(prob) {
     R.reg("Binom", { 2 }, [](const std::vector<jc::Value>& a) -> jc::Value { return makeDist(Distribution::binomial(static_cast<int>(std::round(a[0].asDouble())), a[1].asDouble())); });
     R.reg("Poisson", { 1 }, [](const std::vector<jc::Value>& a) -> jc::Value { return makeDist(Distribution::poisson(a[0].asDouble())); });
     R.reg("Geom", { 1 }, [](const std::vector<jc::Value>& a) -> jc::Value { return makeDist(Distribution::geometric(a[0].asDouble())); });
-    // ── 泛型操作 ──
+
+    // =========================================================================
+    // ★ 追加 OOP 成员方法绑定支持 (Method Bindings for Distribution Class)
+    // =========================================================================
+    auto addDistMethod = [&](const std::string& name, jc::NativeCallable fn) {
+        auto fc = std::make_shared<jc::FunctionClosure>(
+            std::vector<std::string>{}, std::vector<bool>{}, name, nullptr);
+        fc->nativeFn = std::make_any<jc::NativeCallable>(fn);
+        distClass->methods[name] = std::move(fc);
+        };
+
+    addDistMethod("pdf", [](const std::vector<jc::Value>& a) -> jc::Value {
+        jc::Value selfVal = jc::helpers::getGlobalCallback("self");
+        return jc::Value(getDist(selfVal)->pdf(a[0].asDouble()));
+        });
+    addDistMethod("pmf", [](const std::vector<jc::Value>& a) -> jc::Value {
+        jc::Value selfVal = jc::helpers::getGlobalCallback("self");
+        return jc::Value(getDist(selfVal)->pdf(a[0].asDouble()));
+        });
+    addDistMethod("cdf", [](const std::vector<jc::Value>& a) -> jc::Value {
+        jc::Value selfVal = jc::helpers::getGlobalCallback("self");
+        return jc::Value(getDist(selfVal)->cdf(a[0].asDouble()));
+        });
+    addDistMethod("quantile", [](const std::vector<jc::Value>& a) -> jc::Value {
+        jc::Value selfVal = jc::helpers::getGlobalCallback("self");
+        return jc::Value(getDist(selfVal)->quantile(a[0].asDouble()));
+        });
+    addDistMethod("mean", [](const std::vector<jc::Value>&) -> jc::Value {
+        jc::Value selfVal = jc::helpers::getGlobalCallback("self");
+        return jc::Value(getDist(selfVal)->distMean());
+        });
+    addDistMethod("var", [](const std::vector<jc::Value>&) -> jc::Value {
+        jc::Value selfVal = jc::helpers::getGlobalCallback("self");
+        return jc::Value(getDist(selfVal)->distVar());
+        });
+    addDistMethod("std", [](const std::vector<jc::Value>&) -> jc::Value {
+        jc::Value selfVal = jc::helpers::getGlobalCallback("self");
+        return jc::Value(std::sqrt(getDist(selfVal)->distVar()));
+        });
+    addDistMethod("sample", [](const std::vector<jc::Value>& a) -> jc::Value {
+        int n = static_cast<int>(std::round(a[0].asDouble()));
+        if (n <= 0) throw std::runtime_error("Runtime Error: sample() count must be positive.");
+        jc::Value selfVal = jc::helpers::getGlobalCallback("self");
+        auto data = getDist(selfVal)->sample(n);
+        return jc::Value(jc::RealMatrix(1, n, data));
+        });
+
+    // ── 保留兼容全局泛型操作 (Backward Compatibility API) ──
     R.reg("pdf", { 2 }, [](const std::vector<jc::Value>& a) -> jc::Value { return jc::Value(getDist(a[0])->pdf(a[1].asDouble())); });
     R.reg("pmf", { 2 }, [](const std::vector<jc::Value>& a) -> jc::Value { return jc::Value(getDist(a[0])->pdf(a[1].asDouble())); });
     R.reg("cdf", { 2 }, [](const std::vector<jc::Value>& a) -> jc::Value { return jc::Value(getDist(a[0])->cdf(a[1].asDouble())); });
@@ -84,7 +133,7 @@ JC2_MODULE(prob) {
         return Value::none();
         });
 
-    // ── 假设检验 ──
+    // ── 假设检验数据预处理 ──
     auto extractDS = [](const Value& v, const std::string& f) -> std::vector<double> {
         if (std::holds_alternative<RealMatrix>(v.data)) return std::get<RealMatrix>(v.data).rawData();
         if (std::holds_alternative<ComplexMatrix>(v.data)) {
@@ -109,6 +158,7 @@ JC2_MODULE(prob) {
         else                       std::cout << "  Significance: n.s. (p >= 0.05)" << std::endl;
         };
 
+    // ── 假设检验接口 ──
     R.reg("ttest", { 1, 2 }, [extractDS, printTest](const std::vector<jc::Value>& a) -> jc::Value {
         auto data = extractDS(a[0], "ttest");
         double mu0 = a.size() >= 2 ? a[1].asDouble() : 0.0;
@@ -138,7 +188,7 @@ JC2_MODULE(prob) {
         return jc::Value(jc::RealMatrix(1, 3, { r.statistic, r.df, r.pValue }));
         });
 
-    // ★ 覆盖 mean/var/std 以支持 Distribution
+    // ★ 覆盖 mean/var/std 支持泛型多态调用
     {
         auto oldMean = builtins["mean"];
         R.reg("mean", { 1 }, [oldMean](const std::vector<jc::Value>& args) -> jc::Value {
