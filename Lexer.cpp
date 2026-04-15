@@ -150,7 +150,8 @@ namespace jc {
             addToken(match('=') ? TokenType::CARET_ASSIGN : TokenType::CARET);
             break;
         case '\\': addToken(TokenType::BACKSLASH); break;
-        case '"': stringLiteral(); break;
+        case '"': stringLiteral('"'); break;     // ★
+        case '\'': stringLiteral('\''); break;   // ★
         case '=':
             if (match('=')) addToken(TokenType::EQUAL);
             else if (match('>')) addToken(TokenType::ARROW);      // ★
@@ -177,7 +178,7 @@ namespace jc {
         case '>':
             addToken(match('=') ? TokenType::GREATER_EQUAL : TokenType::GREATER);
             break;
-        case ' ': case '\r': case '\t': 
+        case ' ': case '\r': case '\t':
             break;
         case '\n':
             line++;
@@ -185,19 +186,19 @@ namespace jc {
             if (parenBracketDepth == 0 && !tokens.empty()) {
                 TokenType lastType = tokens.back().type;
                 if (!isContinuationToken(lastType)) {
-                    tokens.emplace_back(TokenType::NEWLINE, "\\n", current - 1, line - 1); 
+                    tokens.emplace_back(TokenType::NEWLINE, "\\n", current - 1, line - 1);
                 }
             }
             break;
         default:
             if (std::isdigit(c)) { number(); }
-            else if (c == 'f' && peek() == '"') {
-                advance(); // consume opening "
-                fstringLiteral();
+            else if (c == 'f' && (peek() == '"' || peek() == '\'')) { // ★ 支持 f" 和 f'
+                char quote = advance(); // consume opening quote
+                fstringLiteral(quote);
             }
-            else if (c == 'r' && peek() == '"') {  // ★ raw string
-                advance(); // consume opening "
-                rstringLiteral();
+            else if (c == 'r' && (peek() == '"' || peek() == '\'')) { // ★ 支持 r" 和 r'
+                char quote = advance(); // consume opening quote
+                rstringLiteral(quote);
             }
             else if (std::isalpha(c) || c == '_') { identifier(); }
             else {
@@ -273,9 +274,9 @@ namespace jc {
     bool Lexer::match(char expected) { if (isAtEnd() || source[current] != expected) return false; current++; return true; }
     void Lexer::addToken(TokenType type) { tokens.emplace_back(type, source.substr(start, current - start), start, line); }
 
-    void Lexer::stringLiteral() {
+    void Lexer::stringLiteral(char quoteChar) {
         std::string value;
-        while (peek() != '"' && !isAtEnd()) {
+        while (peek() != quoteChar && !isAtEnd()) {
             if (peek() == '\n') line++;
             char c = advance();
             if (c == '\\' && !isAtEnd()) {
@@ -287,9 +288,9 @@ namespace jc {
                 case 'r':  value += '\r'; break;
                 case '\\': value += '\\'; break;
                 case '"':  value += '"';  break;
+                case '\'': value += '\''; break; // ★ 支持单引号转义
                 case '0':  value += '\0'; break;
                 default:
-                    // 不认识的转义原样保留
                     value += '\\';
                     value += esc;
                     break;
@@ -302,37 +303,28 @@ namespace jc {
         if (isAtEnd()) {
             throwError("Unterminated string.");
         }
-        advance(); // 吃掉右引号
+        advance(); // 吃掉对应的右引号
         tokens.emplace_back(TokenType::STRING, value, start);
     }
 
-    void Lexer::fstringLiteral() {
+    void Lexer::fstringLiteral(char quoteChar) {
         std::string value;
-        while (!isAtEnd() && peek() != '"') {
+        while (!isAtEnd() && peek() != quoteChar) {
             char c = peek();
             if (c == '{') {
                 // ★ 表达式段：追踪花括号深度
                 value += advance(); // consume and include '{'
                 int depth = 1;
-                bool inStr = false;
+                char inStrQuote = '\0'; // ★ 动态跟踪内部嵌套的字符串界定符
                 while (!isAtEnd() && depth > 0) {
                     c = peek();
-                    if (inStr) {
+                    if (inStrQuote != '\0') {
                         // ★ 在表达式内的字符串中
-                        if (c == '\\' && peekNext() == '"') {
-                            // \" 在 inStr 中 → 结束字符串（剥离反斜杠）
-                            advance(); // skip backslash
-                            value += advance(); // add " (closes string for sub-lexer)
-                            inStr = false;
+                        if (c == '\\' && !isAtEnd()) {
+                            value += advance(); value += advance();
                         }
-                        else if (c == '\\' && !isAtEnd()) {
-                            // 其他转义序列原样保留给子词法分析器处理
-                            value += advance(); // add backslash
-                            if (!isAtEnd()) value += advance(); // add escaped char
-                        }
-                        else if (c == '"') {
-                            // 裸 " 也关闭字符串（兼容不带反斜杠的情况）
-                            inStr = false;
+                        else if (c == inStrQuote) {
+                            inStrQuote = '\0';
                             value += advance();
                         }
                         else {
@@ -341,21 +333,12 @@ namespace jc {
                     }
                     else {
                         // ★ 在表达式中，但不在字符串内
-                        if (c == '\\' && peekNext() == '"') {
-                            // \" 在表达式中 → 开始字符串（剥离反斜杠，传裸 " 给子词法分析器）
-                            advance(); // skip backslash
-                            value += advance(); // add " (starts string for sub-lexer)
-                            inStr = true;
-                        }
-                        else if (c == '"') {
-                            inStr = true;
+                        if (c == '"' || c == '\'') {
+                            inStrQuote = c;
                             value += advance();
                         }
                         else if (c == '{') { depth++; value += advance(); }
-                        else if (c == '}') {
-                            depth--;
-                            value += advance(); // include '}' in value
-                        }
+                        else if (c == '}') { depth--; value += advance(); }
                         else { value += advance(); }
                     }
                 }
@@ -373,6 +356,7 @@ namespace jc {
                 case 'r':  value += '\r'; break;
                 case '\\': value += '\\'; break;
                 case '"':  value += '"';  break;
+                case '\'': value += '\''; break; // ★
                 case '0':  value += '\0'; break;
                 default:   value += '\\'; value += esc; break;
                 }
@@ -384,21 +368,11 @@ namespace jc {
         }
         if (isAtEnd())
             throwError("Unterminated f-string.");
-        advance(); // consume closing "
+        advance(); // consume closing quote
         tokens.emplace_back(TokenType::FSTRING, value, start);
     }
 
-    void Lexer::rstringLiteral() {
-        // r" 已经被消费，current 指向 " 后面的第一个字符
-        //
-        // 两种模式：
-        //   1. 简单模式:     r"content"         → 到下一个 " 为止
-        //   2. 定界符模式:   r"TAG(content)TAG"  → 到 )TAG" 为止
-        //
-        // 判定：从当前位置向前探测，如果遇到的全是 [a-zA-Z0-9_] 然后紧跟 '('，
-        //        就是定界符模式；否则就是简单模式。
-
-        // ★ 探测阶段（不消费字符）
+    void Lexer::rstringLiteral(char quoteChar) {
         int probePos = current;
         std::string delimiter;
         bool hasDelimiter = false;
@@ -406,7 +380,6 @@ namespace jc {
         while (probePos < static_cast<int>(source.size())) {
             char c = source[probePos];
             if (c == '(') {
-                // 找到开括号 → 确认为定界符模式
                 hasDelimiter = true;
                 break;
             }
@@ -414,53 +387,44 @@ namespace jc {
                 delimiter += c;
                 probePos++;
             }
-            else {
-                // 遇到其他字符（普通文本内容） → 不是定界符模式
-                break;
-            }
+            else { break; }
         }
 
         if (hasDelimiter) {
-            // ═══ 定界符模式: r"TAG(content)TAG" ═══
-            current = probePos + 1;  // 跳过 '('
-
-            // 构造终止模式: )TAG"
-            std::string endMarker = ")" + delimiter + "\"";
+            current = probePos + 1;
+            // ★ 修改结束标记匹配符为当前的 quoteChar
+            std::string endMarker = ")" + delimiter + quoteChar;
             size_t endLen = endMarker.size();
 
             std::string value;
             while (current < static_cast<int>(source.size())) {
                 if (source[current] == '\n') line++;
-                // 检查当前位置是否匹配终止模式
                 if (source[current] == ')' &&
                     current + static_cast<int>(endLen) <= static_cast<int>(source.size())) {
                     bool match = true;
                     for (size_t k = 0; k < endLen; ++k) {
                         if (source[current + k] != endMarker[k]) {
-                            match = false;
-                            break;
+                            match = false; break;
                         }
                     }
                     if (match) {
-                        current += static_cast<int>(endLen);  // 消费 )TAG"
+                        current += static_cast<int>(endLen);
                         tokens.emplace_back(TokenType::RSTRING, value, start);
                         return;
                     }
                 }
                 value += source[current++];
             }
-            throwError("Unterminated raw string (expected )" + delimiter + "\").");
+            throwError("Unterminated raw string (expected " + endMarker + ").");
         }
         else {
-            // ═══ 简单模式: r"content" ═══
             std::string value;
-            while (!isAtEnd() && peek() != '"') {
+            while (!isAtEnd() && peek() != quoteChar) {
                 if (peek() == '\n') line++;
                 value += advance();
             }
-            if (isAtEnd())
-                throwError("Unterminated raw string.");
-            advance();  // consume closing "
+            if (isAtEnd()) throwError("Unterminated raw string.");
+            advance();
             tokens.emplace_back(TokenType::RSTRING, value, start);
         }
     }

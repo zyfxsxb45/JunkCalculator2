@@ -387,7 +387,7 @@ namespace jc {
             }
         }
 
-        BigInt(const std::string& s) {
+        explicit BigInt(const std::string& s) {
             if (s.empty()) throw std::invalid_argument("BigInt Error: Empty string.");
             size_t start = 0;
             negative = false;

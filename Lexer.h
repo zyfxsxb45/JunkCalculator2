@@ -35,9 +35,9 @@ namespace jc {
         // --- 添加 Token 工具 ---
         void addToken(TokenType type);
 
-        void stringLiteral();
-        void fstringLiteral();  // ★
-        void rstringLiteral();  // ★
+        void stringLiteral(char quoteChar);
+        void fstringLiteral(char quoteChar);  // ★
+        void rstringLiteral(char quoteChar);  // ★
 
         void throwError(const std::string& msg);
 
