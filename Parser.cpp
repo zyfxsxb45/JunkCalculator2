@@ -404,14 +404,8 @@ namespace jc {
     std::unique_ptr<Expr> Parser::call() {
         auto expr = primary();
         while (true) {
-            // ★ 智能跨行分发器 (Fluent API Semantic Lookahead)
-            // 先保存现场，跨越所有换行去偷看下一个物理 Token 是什么
-            int savePos = current;
-            while (match({ TokenType::NEWLINE })) {}
-
+            // 1. 点属性/方法调用访问 (必须与对象在同一行，或被 () 整体包裹)
             if (match({ TokenType::DOT })) {
-                // 如果下一行以 '.' 开头，我们确认这是一次链式调用延续！吃掉刚才跨越的换行。
-                while (match({ TokenType::NEWLINE })) {}  // 允许点号后面也有空行
                 Token field = consume(TokenType::IDENTIFIER,
                     "Parser Error: Expect field/method name after '.'.");
 
@@ -459,15 +453,9 @@ namespace jc {
                 else {
                     expr = std::make_unique<DotAccess>(std::move(expr), field);
                 }
-                continue; // 成功解析完一个 DOT，进入下一个循环
             }
-
-            // 如果探路发现不是 DOT 延续，立刻恢复现场（吐回刚才走过的换行符），让语句在上一行终结！
-            current = savePos;
-
-            // 处理紧随其后的普通调用和索引
-            // 注意：绝不允许 () 和 [] 被换行分开（比如 `a \n ()` 会解析成两条无关语句），所以直接原样验证
-            if (match({ TokenType::LPAREN })) {
+            // 2. 普通函数调用
+            else if (match({ TokenType::LPAREN })) {
                 std::vector<std::unique_ptr<Expr>> args;
                 while (match({ TokenType::NEWLINE })) {}
                 if (!check(TokenType::RPAREN)) {
@@ -513,6 +501,7 @@ namespace jc {
                     expr = std::move(callNode);
                 }
             }
+            // 3. 数组/矩阵索引访问
             else if (match({ TokenType::LBRACKET })) {
                 std::vector<std::unique_ptr<Expr>> indices;
                 auto parseSliceArg = [this]() -> std::unique_ptr<Expr> {
@@ -555,7 +544,9 @@ namespace jc {
                 consume(TokenType::RBRACKET, "Parser Error: Expect ']' after index.");
                 expr = std::make_unique<IndexAccess>(std::move(expr), std::move(indices));
             }
-            else break;
+            else {
+                break; // 如果既不是 . 也不是 ( 也不是 [，说明后缀访问结束，跳出循环
+            }
         }
         return expr;
     }
