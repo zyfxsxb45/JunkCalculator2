@@ -82,6 +82,7 @@ namespace jc {
 
         int width() const { return w; }
         int height() const { return h; }
+        const std::vector<uint8_t>& getRawPixels() const { return pixels; }
 
         void setPixel(int x, int y, Color c) {
             if (x < 0 || x >= w || y < 0 || y >= h) return;

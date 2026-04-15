@@ -77,6 +77,7 @@ namespace jc {
     json        JSON encode/decode/pretty (import "json")
     bytes       Bare-metal memory & binary file I/O (import "bytes")
     socket      Low-level TCP/IP operating system bindings (import "socket")
+    window      Real-time Native GUI window rendering (import "window")
 
     Type `modules()` in the REPL to see all available native modules.
 
@@ -2349,6 +2350,53 @@ namespace jc {
         Blocks and reads incoming packets. Returns "" on disconnect.
     net_close(socket)
         Silently severs an established network pipe.
+)HELP" },
+
+        { "window", R"HELP(
+═══ Native Window Engine — Native Module ═══
+
+  Requires: import "window"
+  (Note: Currently restricted to Win32 architectures. Requires User32 / Gdi32)
+
+  The `window` module pierces the OS layer to spawn a hardware-accelerated 
+  GUI window. It couples natively with the `image` module to enable real-time 
+  rendering and interactive visual applications.
+
+  Spawning a Window
+  ──────────────────────
+    win = Window(title, width, height)
+        Requests the OS to create an overlapped tracking window.
+        Returns a NativeWindow Object. 
+        Example: win = Window("JC2 Live View", 800, 600)
+
+  Methods (Object-Oriented API)
+  ──────────────────────
+    win.isOpen()
+        Polls the OS message pump. Returns 1 if the window is alive, 
+        or 0 if the user has clicked the close (X) button.
+
+    win.show(image_obj)
+        Bit-block transfers (Blits) a JC2 `Image` object's memory buffer 
+        directly onto the window's device context (HDC) instantly.
+
+  The Main Rendering Loop
+  ──────────────────────
+    import "image"
+    import "window"
+
+    im = img(800, 600)
+    win = Window("Real-Time Render", 800, 600)
+
+    t = 0.0
+    while (win.isOpen()) {
+        im.clear("black")
+        
+        // ... Call im.circle() / im.line() based on time 't' here ...
+        
+        win.show(im)          // Blit pixels to display
+        t = (t + 0.01) % 1.0  // Advance time step
+        sleep(0.016)          // Yield to OS (target ~60 FPS)
+    }
 )HELP" },
     };
 

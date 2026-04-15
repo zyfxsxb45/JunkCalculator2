@@ -29,6 +29,7 @@ set(JC2_HEADERS
     "modules/prob_module.h"
     "modules/bytes_module.h" 
     "modules/socket_module.h"
+    "modules/window_module.h"
 )
 
 set(JC2_SOURCES
@@ -41,7 +42,7 @@ target_include_directories(JunkCalculator2 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
 # ★ 核心修复：如果是 Windows 系统，必须链接 WinSock2 网络库！
 if(WIN32)
-    target_link_libraries(JunkCalculator2 PRIVATE ws2_32)
+    target_link_libraries(JunkCalculator2 PRIVATE ws2_32 User32 Gdi32)
 endif()
 
 # ==============================================================================
