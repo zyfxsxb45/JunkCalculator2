@@ -2230,40 +2230,42 @@ namespace jc {
   by C++. It allows rendering geometric shapes, statistical plots, and manipulating 
   pixels directly in memory, which can be encoded to BMP formats.
 
-  Initialization Details
+  Initialization
   ──────────────────────
     im = img(width, height [, background_color])
-        Allocates a new image surface in RAM. 
-        Note: Colors are passed as hex strings (e.g., "#282C34" or "#FF0000").
-        
-    imgWidth(im)  /  imgHeight(im)
-        Returns the respective boundary dimensions of the image.
+        Allocates a new image surface in RAM. Returns an Image object.
+        Colors are passed as hex strings (e.g., "#282C34") or standard
+        names (e.g., "red", "black", "white").
 
-  Geometry & Drawing API
+  Image Methods (Object-Oriented & Chainable)
   ──────────────────────
-    imgClear(im, color)
-    imgPixel(im, x, y, color)
-    imgLine(im, x1, y1, x2, y2, color [, thickness=1])
-    imgRect(im, x, y, width, height, color [, thickness=1])
-    imgFillRect(im, x, y, width, height, color)
-    imgCircle(im, cx, cy, radius, color [, thickness=1])
-    imgFillCircle(im, cx, cy, radius, color)
+    Most drawing methods return `self`, allowing fluent method chaining.
+
+    im.width()  /  im.height()
+    im.clear(color)
+    im.setPixel(x, y, color)
+    im.getPixel(x, y)                Returns the color as a hex string "#RRGGBB"
+    im.line(x0, y0, x1, y1, color [, thick=1])
+    im.rect(x, y, w, h, color [, thick=1])
+    im.fillRect(x, y, w, h, color)
+    im.circle(cx, cy, radius, color [, thick=1])
+    im.fillCircle(cx, cy, radius, color)
 
   Data Visualization (Plotting)
   ──────────────────────
-    imgAxes(im, xMin, xMax, yMin, yMax [, color])
+    im.axes(xMin, xMax, yMin, yMax [, color])
         Draws cartesian coordinate axes mapped to the specified range.
-    imgScatter(im, x_matrix, y_matrix, xMin, xMax, yMin, yMax [, color])
+    im.scatter(x_matrix, y_matrix, xMin, xMax, yMin, yMax [, color])
         Projects data points from two matrices onto the image canvas.
 
   I/O & Network Streaming
   ──────────────────────
-    imgSave(im, "filepath.bmp")
+    im.save("filepath.bmp")
         Encodes the memory surface and flushes it to a valid Windows BMP file.
     
     data = imgReadBytes("filepath.bmp")
-        Opens a binary file and reads its EXACT byte sequence into a JC2 String.
-        Crucial for injecting image blobs into HTTP TCP packets!
+        (Global Function) Opens a binary file and reads its EXACT byte sequence 
+        into a JC2 String buffer.
 )HELP" },
 
         { "bytes", R"HELP(

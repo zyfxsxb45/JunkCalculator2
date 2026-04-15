@@ -8,6 +8,7 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include <cstdio> // ★ 追加以支持 snprintf
 
 namespace jc {
 
@@ -53,6 +54,13 @@ namespace jc {
             if (!s.empty() && s[0] == '#') return fromHex(s);
             return fromName(s);
         }
+
+        // ★ 新增：输出十六进制颜色字符串（供脚本读取像素使用）
+        std::string toHex() const {
+            char buf[16];
+            std::snprintf(buf, sizeof(buf), "#%02X%02X%02X", r, g, b);
+            return std::string(buf);
+        }
     };
 
     class Image {
@@ -60,7 +68,7 @@ namespace jc {
         int w, h;
         std::vector<uint8_t> pixels; // RGB, row-major
 
-    public:
+    public: // ===... 原有内容保持不变 ...===
         Image() : w(0), h(0) {}
         Image(int width, int height, Color bg = { 255,255,255 })
             : w(width), h(height), pixels(width* height * 3) {
@@ -94,7 +102,6 @@ namespace jc {
         }
 
         void line(int x0, int y0, int x1, int y1, Color c, int thickness = 1) {
-            // Bresenham
             int dx = std::abs(x1 - x0), dy = std::abs(y1 - y0);
             int sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1;
             int err = dx - dy;
@@ -128,7 +135,6 @@ namespace jc {
         }
 
         void circle(int cx, int cy, int radius, Color c, int thickness = 1) {
-            // Midpoint circle
             int x = radius, y = 0, err = 1 - radius;
             while (x >= y) {
                 auto plot = [&](int px, int py) {
@@ -162,43 +168,30 @@ namespace jc {
             int marginL = 40, int marginR = 10, int marginT = 10, int marginB = 30) {
             int plotW = w - marginL - marginR;
             int plotH = h - marginT - marginB;
-
-            // 坐标轴
             auto mapX = [&](double v) -> int { return marginL + static_cast<int>((v - xMin) / (xMax - xMin) * plotW); };
             auto mapY = [&](double v) -> int { return marginT + static_cast<int>((1.0 - (v - yMin) / (yMax - yMin)) * plotH); };
-
-            // X 轴
             if (yMin <= 0 && yMax >= 0) {
                 int y0 = mapY(0);
                 line(marginL, y0, w - marginR, y0, c);
             }
-
-            // Y 轴
             if (xMin <= 0 && xMax >= 0) {
                 int x0 = mapX(0);
                 line(x0, marginT, x0, h - marginB, c);
             }
-
-            // 边框
             Color border = { 200, 200, 200 };
             rect(marginL, marginT, plotW, plotH, border);
-
-            // 网格线（虚线效果）
             Color grid = { 230, 230, 230 };
             int numGridX = 10, numGridY = 8;
             for (int i = 1; i < numGridX; ++i) {
                 int x = marginL + i * plotW / numGridX;
-                for (int y = marginT; y < h - marginB; y += 3)
-                    setPixel(x, y, grid);
+                for (int y = marginT; y < h - marginB; y += 3) setPixel(x, y, grid);
             }
             for (int i = 1; i < numGridY; ++i) {
                 int y = marginT + i * plotH / numGridY;
-                for (int x = marginL; x < w - marginR; x += 3)
-                    setPixel(x, y, grid);
+                for (int x = marginL; x < w - marginR; x += 3) setPixel(x, y, grid);
             }
         }
 
-        // 坐标映射辅助
         int mapPlotX(double v, double xMin, double xMax, int marginL = 40, int marginR = 10) const {
             int plotW = w - marginL - marginR;
             return marginL + static_cast<int>((v - xMin) / (xMax - xMin) * plotW);
@@ -217,27 +210,24 @@ namespace jc {
             std::ofstream f(path, std::ios::binary);
             if (!f) return false;
 
-            // File header (14 bytes)
             auto writeLE16 = [&](uint16_t v) { f.write(reinterpret_cast<char*>(&v), 2); };
             auto writeLE32 = [&](uint32_t v) { f.write(reinterpret_cast<char*>(&v), 4); };
 
             f.write("BM", 2);
             writeLE32(static_cast<uint32_t>(fileSize));
-            writeLE32(0); // reserved
-            writeLE32(54); // pixel data offset
+            writeLE32(0);
+            writeLE32(54);
 
-            // DIB header (40 bytes)
-            writeLE32(40); // header size
+            writeLE32(40);
             writeLE32(static_cast<uint32_t>(w));
             writeLE32(static_cast<uint32_t>(h));
-            writeLE16(1);  // planes
-            writeLE16(24); // bpp
-            writeLE32(0);  // compression
+            writeLE16(1);
+            writeLE16(24);
+            writeLE32(0);
             writeLE32(static_cast<uint32_t>(dataSize));
-            writeLE32(2835); writeLE32(2835); // resolution (72 dpi)
-            writeLE32(0); writeLE32(0); // palette
+            writeLE32(2835); writeLE32(2835);
+            writeLE32(0); writeLE32(0);
 
-            // Pixel data (bottom-up, BGR)
             uint8_t pad[3] = { 0, 0, 0 };
             for (int y = h - 1; y >= 0; --y) {
                 for (int x = 0; x < w; ++x) {
