@@ -506,16 +506,16 @@ namespace jc {
     // ═══════════════════════════════════════════
     // 调用帧 (Call Frame)
     // ═══════════════════════════════════════════
-	struct CallFrame {
-		const CompiledFunction* function = nullptr;
-		int ip = 0;
-		int stackBase = 0;
-		std::shared_ptr<std::vector<Value>> upvalues;
-		// ★ 嵌套调用保护：保存调用前的 self/__class__，防止覆盖
-		Value savedSelf;
-		Value savedClass;
-		bool hasSavedContext = false;
-	};
+    struct CallFrame {
+        const CompiledFunction* function = nullptr;
+        int ip = 0;
+        int stackBase = 0;
+        std::shared_ptr<std::vector<Value>> upvalues;
+
+        // ★ 新增：独立与当前调用帧绑定的物理上下文寄存器！
+        Value selfContext = Value::none();
+        Value classContext = Value::none();
+    };
 
 
 } // namespace jc

@@ -192,41 +192,55 @@ namespace jc {
         auto method = findDunder(obj, name);
         if (!method) throw std::runtime_error("VM Error: No callable dunder '" + name + "'.");
 
-        // ★ FIX: 保存上下文
-        Value prevSelf = globals.count("self") ? globals["self"] : Value::none();
-        Value prevClass = globals.count("__class__") ? globals["__class__"] : Value::none();
-
-        globals["self"] = Value(inst);
-
-        Value result;
-        try {
-            if (method->isNative() && !method->isBytecode()) {
+        if (method->isNative() && !method->isBytecode()) {
+            helpers::nativeSelfStack.push_back(Value(inst));
+            helpers::nativeClassStack.push_back(Value(inst->classDef));
+            Value result;
+            try {
                 auto& fn = std::any_cast<NativeCallable&>(method->nativeFn);
                 result = fn(args);
             }
-            else if (method->isBytecode()) {
-                std::shared_ptr<std::vector<Value>> captures = nullptr;
-                if (method->hasCaptures())
-                    captures = std::any_cast<std::shared_ptr<std::vector<Value>>>(method->capturedEnv);
-                result = callVMFunction(method->compiledFnIndex, args, captures);
+            catch (...) {
+                helpers::nativeSelfStack.pop_back(); helpers::nativeClassStack.pop_back();
+                throw;
             }
-            else {
-                throw std::runtime_error("VM Error: No callable dunder '" + name + "'.");
-            }
+            helpers::nativeSelfStack.pop_back(); helpers::nativeClassStack.pop_back();
+            return result;
         }
-        catch (...) {
-            globals["self"] = prevSelf;       // ★ FIX
-            globals["__class__"] = prevClass;
-            throw;
+        else if (method->isBytecode()) {
+            std::shared_ptr<std::vector<Value>> captures = nullptr;
+            if (method->hasCaptures())
+                captures = std::any_cast<std::shared_ptr<std::vector<Value>>>(method->capturedEnv);
+            // ★ 无污染传参：直接送入 VM CallFrame 的 boundSelf
+            return callVMFunction(method->compiledFnIndex, args, captures, Value(inst), Value(inst->classDef));
         }
-
-        globals["self"] = prevSelf;           // ★ FIX
-        globals["__class__"] = prevClass;
-        return result;
+        else {
+            throw std::runtime_error("VM Error: No callable dunder '" + name + "'.");
+        }
     }
 
     VM::VM() {
         activeVM = this;
+
+        // ★ 核心重定向器：C++ 层索要 "self" 时，直接打劫当前虚拟机的寄存器！
+        helpers::getGlobalCallback = [this](const std::string& name) -> Value {
+            // 1. 优先满足正在运行的 C++ 原生方法栈 (如 isArray 等内置方法内部调用)
+            if (name == "self" && !helpers::nativeSelfStack.empty()) return helpers::nativeSelfStack.back();
+            if (name == "__class__" && !helpers::nativeClassStack.empty()) return helpers::nativeClassStack.back();
+
+            // 2. 然后满足 VM 字节码的 CallFrame 寄存器
+            if (name == "self") {
+                if (frames.empty() || frames.back().selfContext.isNone()) return Value::none();
+                return frames.back().selfContext;
+            }
+            if (name == "__class__") {
+                if (frames.empty() || frames.back().classContext.isNone()) return Value::none();
+                return frames.back().classContext;
+            }
+            // 3. 最后才是普通的全局变量
+            auto it = globals.find(name);
+            return it != globals.end() ? it->second : Value::none();
+            };
 
         globals["PI"] = Value(3.14159265358979323846);
         globals["E"] = Value(2.71828182845904523536);
@@ -333,20 +347,15 @@ namespace jc {
         }
     }
 
-    Value VM::callVMFunction(int fnIdx, const std::vector<Value>& args, std::shared_ptr<std::vector<Value>> upvalues) {
+    Value VM::callVMFunction(int fnIdx, const std::vector<Value>& args,
+        std::shared_ptr<std::vector<Value>> upvalues,
+        Value boundSelf, Value boundClass) {
         if (fnIdx < 0 || fnIdx >= static_cast<int>(compiledFunctions.size()))
             throw std::runtime_error("VM Error: Invalid function index in callback.");
-
         auto& fn = compiledFunctions[fnIdx];
-
         int savedTargetFrameDepth = currentTargetFrameDepth;
         auto savedRefWritebacks = pendingRefWritebacks;
         pendingRefWritebacks.clear();
-
-        // ★ 核心修复：保存 self 上下文，防止内部构造函数/方法调用污染外层
-        Value prevSelf = globals.count("self") ? globals["self"] : Value::none();
-        Value prevClass = globals.count("__class__") ? globals["__class__"] : Value::none();
-
         int originalStackSize = static_cast<int>(stack.size());
         int originalFramesSize = static_cast<int>(frames.size());
 
@@ -396,6 +405,9 @@ namespace jc {
         newFrame.ip = 0;
         newFrame.stackBase = static_cast<int>(stack.size()) - fn->localCount;
         newFrame.upvalues = upvalues;
+        // ★ 清爽下发！寄存器已就位：
+        newFrame.selfContext = boundSelf;
+        newFrame.classContext = boundClass;
         frames.push_back(newFrame);
 
         int boundary = static_cast<int>(frames.size()) - 1;
@@ -413,11 +425,6 @@ namespace jc {
             pendingRefWritebacks = savedRefWritebacks;
             frames.resize(originalFramesSize);
             stack.resize(originalStackSize);
-
-            // ★ 异常时也恢复 self 上下文
-            globals["self"] = prevSelf;
-            globals["__class__"] = prevClass;
-
             throw;
         }
         if (profileMode) {
@@ -435,11 +442,6 @@ namespace jc {
         if (!myRefWritebacks.empty()) {
             pendingRefWritebacks = myRefWritebacks;
         }
-
-        // ★ 正常返回时也恢复 self 上下文
-        globals["self"] = prevSelf;
-        globals["__class__"] = prevClass;
-
         return result;
     }
 
@@ -671,6 +673,16 @@ namespace jc {
                 case OpCode::OP_GET_GLOBAL: {
                     uint16_t idx = readShort();
                     std::string name = std::get<std::string>(currentChunk().constants[idx].data);
+
+                    // ★ 虚拟机级别拦截：遇到 'self'，直接去它该在的物理寄存器里拿！
+                    if (name == "self") {
+                        if (frame().selfContext.isNone()) throw std::runtime_error("VM Error: 'self' accessed outside of context.");
+                        push(frame().selfContext); break;
+                    }
+                    if (name == "__class__") {
+                        if (frame().classContext.isNone()) throw std::runtime_error("VM Error: '__class__' accessed outside of context.");
+                        push(frame().classContext); break;
+                    }
                     auto it = globals.find(name);
                     if (it != globals.end()) {
                         push(it->second);
@@ -693,6 +705,11 @@ namespace jc {
                 case OpCode::OP_SET_GLOBAL: {
                     uint16_t idx = readShort();
                     std::string name = std::get<std::string>(currentChunk().constants[idx].data);
+
+                    // ★ 关键字保护：绝不许改写 self !
+                    if (name == "self" || name == "__class__")
+                        throw std::runtime_error("Syntax Error: cannot override context keyword '" + name + "'.");
+
                     if (constGlobals.count(name))
                         throw std::runtime_error("Runtime Error: Cannot modify const variable '" + name + "'.");
 
@@ -813,9 +830,14 @@ namespace jc {
                     auto capturedUpvalues = captures;
                     VM* vm = this;
 
+                    Value currentSelf = frame().selfContext;
+                    Value currentClass = frame().classContext;
                     closure->nativeFn = std::make_any<NativeCallable>(
-                        [vm, capturedFnIdx, capturedUpvalues](const std::vector<Value>& args) -> Value {
-                            return vm->callVMFunction(capturedFnIdx, args, capturedUpvalues);
+                        [vm, capturedFnIdx, capturedUpvalues, currentSelf, currentClass](const std::vector<Value>& args) -> Value {
+                            // ★ 智能窃取：如果有 Dunder 方法等触发的原生调用，优先使用隔离栈里的运行态 Target
+                            Value s = !helpers::nativeSelfStack.empty() ? helpers::nativeSelfStack.back() : currentSelf;
+                            Value c = !helpers::nativeClassStack.empty() ? helpers::nativeClassStack.back() : currentClass;
+                            return vm->callVMFunction(capturedFnIdx, args, capturedUpvalues, s, c);
                         }
                     );
 
@@ -864,7 +886,8 @@ namespace jc {
 
                     // ★ 必须保留这个标志供 C++ 层 API 重用识别
                     closure->hasRestParam = fn->hasRestParam;
-
+                    closure->boundSelf = frame().selfContext;
+                    closure->boundClass = frame().classContext;
                     push(Value(closure));
                     break;
                 }
@@ -911,27 +934,83 @@ namespace jc {
 
                     auto inst = std::get<std::shared_ptr<Instance>>(selfVal.data);
 
-                    auto classIt = globals.find("__class__");
-                    if (classIt == globals.end() ||
-                        !std::holds_alternative<std::shared_ptr<ClassDefinition>>(classIt->second.data))
+                    Value classVal = frame().classContext;
+                    if (!std::holds_alternative<std::shared_ptr<ClassDefinition>>(classVal.data))
                         throw std::runtime_error("VM Error: 'super' requires class context.");
 
-                    auto currentClass = std::get<std::shared_ptr<ClassDefinition>>(classIt->second.data);
+                    auto currentClass = std::get<std::shared_ptr<ClassDefinition>>(classVal.data);
                     auto parentClass = currentClass->parent;
                     if (!parentClass)
                         throw std::runtime_error("VM Error: No parent class.");
 
+                    std::shared_ptr<FunctionClosure> rawMethod;
+                    std::shared_ptr<ClassDefinition> ownerClass;
                     auto c = parentClass;
                     while (c) {
                         auto it = c->methods.find(field);
                         if (it != c->methods.end()) {
-                            push(Value(it->second));
+                            rawMethod = it->second;
+                            ownerClass = c;
                             break;
                         }
                         c = c->parent;
                     }
-                    if (!c)
+                    if (!rawMethod)
                         throw std::runtime_error("VM Error: Parent class has no method '" + field + "'.");
+
+                    // ★ FIX: 像 OP_GET_PROPERTY 一样，打包一个携带严格上下文的绑定方法（Bound Method）！
+                    auto bound = std::make_shared<FunctionClosure>(
+                        std::vector<std::string>{}, std::vector<bool>{},
+                        field, nullptr
+                    );
+
+                    bound->paramNames = rawMethod->paramNames;
+                    bound->isRef = rawMethod->isRef;
+                    bound->defaultValues = rawMethod->defaultValues;
+                    bound->hasRestParam = rawMethod->hasRestParam;
+
+                    VM* vm = this;
+                    auto capturedInst = inst;
+                    auto capturedOwner = ownerClass;
+                    auto capturedMethod = rawMethod;
+                    auto capturedField = field;
+
+                    bound->nativeFn = std::make_any<NativeCallable>(
+                        [vm, capturedInst, capturedOwner, capturedMethod, capturedField]
+                        (const std::vector<Value>& args) -> Value
+                        {
+                            Value result;
+                            if (capturedMethod->isBytecode()) {
+                                std::shared_ptr<std::vector<Value>> captures = nullptr;
+                                if (capturedMethod->hasCaptures())
+                                    captures = std::any_cast<std::shared_ptr<std::vector<Value>>>(
+                                        capturedMethod->capturedEnv);
+                                // 安全通道进针
+                                result = vm->callVMFunction(
+                                    capturedMethod->compiledFnIndex, args, captures, Value(capturedInst), Value(capturedOwner)
+                                );
+                            }
+                            else if (capturedMethod->isNative()) {
+                                helpers::nativeSelfStack.push_back(Value(capturedInst));
+                                helpers::nativeClassStack.push_back(Value(capturedOwner));
+                                try {
+                                    auto& fn = std::any_cast<NativeCallable&>(capturedMethod->nativeFn);
+                                    result = fn(args);
+                                }
+                                catch (...) {
+                                    helpers::nativeSelfStack.pop_back(); helpers::nativeClassStack.pop_back();
+                                    throw;
+                                }
+                                helpers::nativeSelfStack.pop_back(); helpers::nativeClassStack.pop_back();
+                            }
+                            else {
+                                throw std::runtime_error("VM Error: Parent method '" + capturedField + "' has no callable implementation.");
+                            }
+                            return result;
+                        }
+                    );
+
+                    push(Value(bound));
                     break;
                 }
 
@@ -1512,45 +1591,34 @@ namespace jc {
                             [vm, capturedInst, capturedOwner, capturedMethod, capturedField]
                             (const std::vector<Value>& args) -> Value
                             {
-                                // RAII 式保存/恢复 self 上下文
-                                Value prevSelf = vm->globals.count("self")
-                                    ? vm->globals["self"] : Value::none();
-                                Value prevClass = vm->globals.count("__class__")
-                                    ? vm->globals["__class__"] : Value::none();
-
-                                vm->globals["self"] = Value(capturedInst);
-                                vm->globals["__class__"] = Value(capturedOwner);
-
                                 Value result;
-                                try {
-                                    if (capturedMethod->isBytecode()) {
-                                        std::shared_ptr<std::vector<Value>> captures = nullptr;
-                                        if (capturedMethod->hasCaptures())
-                                            captures = std::any_cast<
-                                            std::shared_ptr<std::vector<Value>>
-                                            >(capturedMethod->capturedEnv);
-                                        result = vm->callVMFunction(
-                                            capturedMethod->compiledFnIndex, args, captures);
-                                    }
-                                    else if (capturedMethod->isNative()) {
-                                        auto& fn = std::any_cast<NativeCallable&>(
-                                            capturedMethod->nativeFn);
+                                if (capturedMethod->isBytecode()) {
+                                    std::shared_ptr<std::vector<Value>> captures = nullptr;
+                                    if (capturedMethod->hasCaptures())
+                                        captures = std::any_cast<std::shared_ptr<std::vector<Value>>>(
+                                            capturedMethod->capturedEnv);
+                                    // ★ 神迹：直接通过参数通道安全喂入 selfContext!
+                                    result = vm->callVMFunction(
+                                        capturedMethod->compiledFnIndex, args, captures, Value(capturedInst), Value(capturedOwner)
+                                    );
+                                }
+                                else if (capturedMethod->isNative()) {
+                                    // ★ Native 函数也是进入隔离堆栈
+                                    helpers::nativeSelfStack.push_back(Value(capturedInst));
+                                    helpers::nativeClassStack.push_back(Value(capturedOwner));
+                                    try {
+                                        auto& fn = std::any_cast<NativeCallable&>(capturedMethod->nativeFn);
                                         result = fn(args);
                                     }
-                                    else {
-                                        throw std::runtime_error(
-                                            "VM Error: Method '" + capturedField +
-                                            "' has no callable implementation.");
+                                    catch (...) {
+                                        helpers::nativeSelfStack.pop_back(); helpers::nativeClassStack.pop_back();
+                                        throw;
                                     }
+                                    helpers::nativeSelfStack.pop_back(); helpers::nativeClassStack.pop_back();
                                 }
-                                catch (...) {
-                                    vm->globals["self"] = prevSelf;
-                                    vm->globals["__class__"] = prevClass;
-                                    throw;
+                                else {
+                                    throw std::runtime_error("VM Error: Method '" + capturedField + "' has no callable implementation.");
                                 }
-
-                                vm->globals["self"] = prevSelf;
-                                vm->globals["__class__"] = prevClass;
                                 return result;
                             }
                         );
@@ -1954,6 +2022,7 @@ namespace jc {
     void VM::execCall(uint8_t argc) {
         Value callee = stack[stack.size() - 1 - argc];
         pendingRefWritebacks.clear();
+
         // ======== [1] 字符串动态调用 (晚绑定) ========
         if (std::holds_alternative<std::string>(callee.data)) {
             const std::string& tag = std::get<std::string>(callee.data);
@@ -1976,7 +2045,6 @@ namespace jc {
                 for (int j = argc - 1; j >= 0; --j) args[j] = pop();
                 pop(); push(nativeBuiltins.find(fnName)->second(args)); return;
             }
-            // ★ 核心判断：内建函数判定（最高优先级）
             auto nIt = nativeBuiltins.find(tag);
             if (nIt != nativeBuiltins.end()) {
                 auto arityIt = builtinArity.find(tag);
@@ -1985,25 +2053,22 @@ namespace jc {
                     if (arityIt->second.count(argc)) arityMatched = true;
                 }
                 else {
-                    arityMatched = true; // 支持无元数限制
+                    arityMatched = true;
                 }
 
-                // 参数一致，直接引爆执行原生算法！
                 if (arityMatched) {
                     std::vector<Value> args(argc);
                     for (int j = argc - 1; j >= 0; --j) args[j] = pop();
-                    pop(); // 弹出 tag字符串名
+                    pop();
                     push(nIt->second(args));
                     return;
                 }
             }
 
-            // ★ 退回判定：用户全局变量判定
             auto it = globals.find(tag);
             if (it != globals.end()) {
                 callee = it->second;
                 stack[stack.size() - 1 - argc] = callee;
-                // ↓ 继续往下流进下一层的 Instance / FunctionClosure 统一执行块中执行 ↓
             }
             else {
                 if (nIt != nativeBuiltins.end()) {
@@ -2018,8 +2083,9 @@ namespace jc {
                 }
                 throw std::runtime_error("Runtime Error: Unknown function or not callable '" + tag + "()'.");
             }
-        }
+        } // 结束 if (holds_string)
 
+        // ======== [2] 类实例化 ========
         if (std::holds_alternative<std::shared_ptr<ClassDefinition>>(callee.data)) {
             auto cls = std::get<std::shared_ptr<ClassDefinition>>(callee.data);
             auto instance = std::make_shared<Instance>();
@@ -2040,16 +2106,17 @@ namespace jc {
 
             if (initMethod) {
                 if (initMethod->isBytecode()) {
-                    // ★ FIX: 保存当前 self 上下文到新帧
                     CallFrame newFrame;
-                    saveSelfContext(newFrame);  // ★ FIX
-                    globals["self"] = Value(instance);
-                    globals["__class__"] = Value(initOwner);
+                    // ★ NEW: 直接将新建的 instance 注入帧寄存器！绝不弄脏 globals
+                    newFrame.selfContext = Value(instance);
+                    newFrame.classContext = Value(initOwner);
+
                     auto& fnDef = compiledFunctions[initMethod->compiledFnIndex];
                     int padCount = fnDef->maxArity - static_cast<int>(argc);
                     for (int j = 0; j < padCount; ++j) push(Value::none());
                     int reserveCount = fnDef->localCount - fnDef->maxArity;
                     for (int j = 0; j < reserveCount; ++j) push(Value::none());
+
                     newFrame.function = fnDef.get();
                     newFrame.ip = 0;
                     newFrame.stackBase = static_cast<int>(stack.size()) - fnDef->localCount;
@@ -2063,29 +2130,37 @@ namespace jc {
                     return;
                 }
                 else if (initMethod->isNative()) {
-                    // ★ FIX: 同步调用 — RAII 式保存/恢复
-                    Value prevSelf = globals.count("self") ? globals["self"] : Value::none();
-                    Value prevClass = globals.count("__class__") ? globals["__class__"] : Value::none();
-                    globals["self"] = Value(instance);
-                    globals["__class__"] = Value(initOwner);
+                    // ★ NEW: C++ 原生构造器，直接压入专属隔离栈！
+                    helpers::nativeSelfStack.push_back(Value(instance));
+                    helpers::nativeClassStack.push_back(Value(initOwner));
+
                     std::vector<Value> args(argc);
                     for (int j = argc - 1; j >= 0; --j) args[j] = pop();
                     pop();
+
                     try {
                         auto& fn = std::any_cast<NativeCallable&>(initMethod->nativeFn);
                         fn(args);
                     }
                     catch (...) {
-                        globals["self"] = prevSelf;       // ★ FIX: 异常时也恢复
-                        globals["__class__"] = prevClass;
+                        helpers::nativeSelfStack.pop_back();
+                        helpers::nativeClassStack.pop_back();
                         throw;
                     }
-                    globals["self"] = prevSelf;           // ★ FIX: 正常恢复
-                    globals["__class__"] = prevClass;
+                    helpers::nativeSelfStack.pop_back();
+                    helpers::nativeClassStack.pop_back();
+
                     push(Value(instance));
                 }
             }
             else if (!initMethod) {
+                if (argc > 0) {
+                    throw std::runtime_error(
+                        "TypeError: Class '" + cls->name +
+                        "' takes no arguments directly (no 'init' method defined).");
+                }
+
+                // 如果是无参调用（合法），则弹出 Callee 并推入空壳 Instance
                 for (int j = 0; j < argc; ++j) pop();
                 pop();
                 push(Value(instance));
@@ -2094,18 +2169,15 @@ namespace jc {
                 throw std::runtime_error("VM Error: init has no callable implementation.");
             }
             return;
-        }
+        } // 结束 if (holds_class)
 
+        // ======== [3] 闭包执行 ========
         if (std::holds_alternative<std::shared_ptr<FunctionClosure>>(callee.data)) {
             auto closure = std::get<std::shared_ptr<FunctionClosure>>(callee.data);
 
             if (closure->isBytecode()) {
-                // ★ 核心扁平化调用，不触发 C++ nativeFn 回调
                 auto& fnDef = compiledFunctions[closure->compiledFnIndex];
 
-                // =============================================================
-                // ★ 核心变长参数打包引擎 (Closure 端)
-                // =============================================================
                 if (fnDef->hasRestParam) {
                     int fixedMax = fnDef->maxArity - 1;
                     if (static_cast<int>(argc) < fnDef->arity) {
@@ -2115,12 +2187,11 @@ namespace jc {
                     List restList;
                     if (static_cast<int>(argc) > fixedMax) {
                         int restCount = static_cast<int>(argc) - fixedMax;
-                        std::vector<Value> tempValues(restCount);      // ★ 换成 Value 以切断 any 隐患
+                        std::vector<Value> tempValues(restCount);
                         for (int j = 0; j < restCount; j++) {
-                            tempValues[restCount - 1 - j] = pop();     // ★ 老老实实先取出来作为稳定的 Value
+                            tempValues[restCount - 1 - j] = pop();
                         }
                         for (int j = 0; j < restCount; j++) {
-                            // ★ 在丢进 List 之前包装为 any，并直接拷贝强注入！
                             restList.push_back(std::make_any<Value>(tempValues[j]));
                         }
                         argc = static_cast<uint8_t>(fixedMax);
@@ -2139,19 +2210,20 @@ namespace jc {
 
                 int reserveCount = fnDef->localCount - fnDef->maxArity;
                 for (int j = 0; j < reserveCount; ++j) push(Value::none());
-                // =============================================================
 
                 CallFrame newFrame;
                 newFrame.function = fnDef.get();
                 newFrame.ip = 0;
-                // ★ 栈基址对齐
                 newFrame.stackBase = static_cast<int>(stack.size()) - fnDef->localCount;
 
                 if (closure->hasCaptures()) {
                     newFrame.upvalues = std::any_cast<std::shared_ptr<std::vector<Value>>>(closure->capturedEnv);
                 }
 
-                // 抹除原本在参数下方的 closure 对象
+                // ★ NEW：将该闭包出生时带的 self 塞进新帧的心房！
+                newFrame.selfContext = closure->boundSelf;
+                newFrame.classContext = closure->boundClass;
+
                 stack.erase(stack.begin() + newFrame.stackBase - 1);
                 newFrame.stackBase--;
 
@@ -2162,13 +2234,27 @@ namespace jc {
                 std::vector<Value> args(argc);
                 for (int j = argc - 1; j >= 0; --j) args[j] = pop();
                 pop();
+
+                // ★ NEW：C++ 原生闭包也进隔离池
+                helpers::nativeSelfStack.push_back(closure->boundSelf);
+                helpers::nativeClassStack.push_back(closure->boundClass);
+
                 auto& fn = std::any_cast<NativeCallable&>(closure->nativeFn);
-                push(fn(args));
+                Value result;
+                try { result = fn(args); }
+                catch (...) {
+                    helpers::nativeSelfStack.pop_back(); helpers::nativeClassStack.pop_back();
+                    throw;
+                }
+                helpers::nativeSelfStack.pop_back(); helpers::nativeClassStack.pop_back();
+
+                push(result);
                 return;
             }
             throw std::runtime_error("VM Error: Invalid closure.");
-        }
+        } // 结束 if (holds_function)
 
+        // ======== [4] String Tag fallback ========
         if (std::holds_alternative<std::string>(callee.data)) {
             const std::string& tag = std::get<std::string>(callee.data);
 
@@ -2176,9 +2262,6 @@ namespace jc {
                 int fnIdx = std::stoi(tag.substr(5));
                 auto& fn = compiledFunctions[fnIdx];
 
-                // =============================================================
-                // ★ 核心变长参数打包引擎 (String-Tag 晚绑定端)
-                // =============================================================
                 if (fn->hasRestParam) {
                     int fixedMax = fn->maxArity - 1;
                     if (static_cast<int>(argc) < fn->arity) {
@@ -2188,12 +2271,11 @@ namespace jc {
                     List restList;
                     if (static_cast<int>(argc) > fixedMax) {
                         int restCount = static_cast<int>(argc) - fixedMax;
-                        std::vector<Value> tempValues(restCount);      // ★ 换成 Value 以切断 any 隐患
+                        std::vector<Value> tempValues(restCount);
                         for (int j = 0; j < restCount; j++) {
-                            tempValues[restCount - 1 - j] = pop();     // ★ 老老实实先取出来作为稳定的 Value
+                            tempValues[restCount - 1 - j] = pop();
                         }
                         for (int j = 0; j < restCount; j++) {
-                            // ★ 在丢进 List 之前包装为 any，并直接拷贝强注入！
                             restList.push_back(std::make_any<Value>(tempValues[j]));
                         }
                         argc = static_cast<uint8_t>(fixedMax);
@@ -2212,7 +2294,6 @@ namespace jc {
 
                 int reserveCount = fn->localCount - fn->maxArity;
                 for (int j = 0; j < reserveCount; ++j) push(Value::none());
-                // =============================================================
 
                 CallFrame newFrame; newFrame.function = fn.get(); newFrame.ip = 0;
                 newFrame.stackBase = static_cast<int>(stack.size()) - fn->localCount;
@@ -2231,7 +2312,7 @@ namespace jc {
                 push(nit->second(args));
                 return;
             }
-        }
+        } // 结束 if (fallback string tag)
 
         {
             std::vector<Value> args(argc);
@@ -2246,7 +2327,7 @@ namespace jc {
             }
             throw std::runtime_error("VM Error: '" + desc + "' is not callable.");
         }
-    }
+    } // 结束 execCall
 
     void VM::execIndexGet(uint8_t dims) {
         if (dims == 1) {
@@ -2338,7 +2419,7 @@ namespace jc {
                     c = c->parent;
                 }
                 if (getitemMethod) {
-                    globals["self"] = Value(inst);
+                    // ★ 不再使用 globals["self"] = Value(inst); 
                     if (getitemMethod->isBytecode()) {
                         auto& fnDef = compiledFunctions[getitemMethod->compiledFnIndex];
 
@@ -2361,12 +2442,29 @@ namespace jc {
                         if (getitemMethod->hasCaptures()) {
                             newFrame.upvalues = std::any_cast<std::shared_ptr<std::vector<Value>>>(getitemMethod->capturedEnv);
                         }
+
+                        // ★ NEW：直接注入专属上下文帧！
+                        newFrame.selfContext = Value(inst);
+                        newFrame.classContext = Value(inst->classDef);
+
                         frames.push_back(newFrame);
                         return;
                     }
                     else if (getitemMethod->isNative()) {
-                        auto& fn = std::any_cast<NativeCallable&>(getitemMethod->nativeFn);
-                        push(fn({ idx }));
+                        // ★ NEW：如果是 C++ 层，压入原生保护栈
+                        helpers::nativeSelfStack.push_back(Value(inst));
+                        helpers::nativeClassStack.push_back(Value(inst->classDef));
+                        Value result;
+                        try {
+                            auto& fn = std::any_cast<NativeCallable&>(getitemMethod->nativeFn);
+                            result = fn({ idx });
+                        }
+                        catch (...) {
+                            helpers::nativeSelfStack.pop_back(); helpers::nativeClassStack.pop_back();
+                            throw;
+                        }
+                        helpers::nativeSelfStack.pop_back(); helpers::nativeClassStack.pop_back();
+                        push(result);
                     }
                     else {
                         throw std::runtime_error("VM Error: __getitem__ has no callable implementation.");
@@ -2594,19 +2692,27 @@ namespace jc {
                     c = c->parent;
                 }
                 if (setitemMethod) {
-                    globals["self"] = Value(inst);
-
-                    // ★ 不管是 bytecode 还是 native，统一使用回调安全执行
-                    // 避免其内部的 OP_RETURN 破坏属于复合赋值等所需的栈顶 obj 指针
+                    // ★ 不再使用 globals["self"] = Value(inst); 
                     if (setitemMethod->isBytecode()) {
                         std::shared_ptr<std::vector<Value>> captures = nullptr;
                         if (setitemMethod->hasCaptures())
                             captures = std::any_cast<std::shared_ptr<std::vector<Value>>>(setitemMethod->capturedEnv);
-                        callVMFunction(setitemMethod->compiledFnIndex, { idx, val }, captures);
+
+                        // ★ NEW：向 callVMFunction 直接投喂 boundSelf 和 boundClass！
+                        callVMFunction(setitemMethod->compiledFnIndex, { idx, val }, captures, Value(inst), Value(inst->classDef));
                     }
                     else if (setitemMethod->isNative()) {
-                        auto& fn = std::any_cast<NativeCallable&>(setitemMethod->nativeFn);
-                        fn({ idx, val });
+                        helpers::nativeSelfStack.push_back(Value(inst));
+                        helpers::nativeClassStack.push_back(Value(inst->classDef));
+                        try {
+                            auto& fn = std::any_cast<NativeCallable&>(setitemMethod->nativeFn);
+                            fn({ idx, val });
+                        }
+                        catch (...) {
+                            helpers::nativeSelfStack.pop_back(); helpers::nativeClassStack.pop_back();
+                            throw;
+                        }
+                        helpers::nativeSelfStack.pop_back(); helpers::nativeClassStack.pop_back();
                     }
                     else {
                         throw std::runtime_error("VM Error: __setitem__ has no callable implementation.");
@@ -2615,9 +2721,6 @@ namespace jc {
                 else {
                     throw std::runtime_error("VM Error: Cannot assign index on this instance (no __setitem__).");
                 }
-            }
-            else {
-                throw std::runtime_error("VM Error: Cannot assign index on this type.");
             }
         }
         else if (dims == 2) {
@@ -3487,6 +3590,9 @@ namespace jc {
         int base = frame().stackBase;
         std::string fnName = frame().function->name;
 
+        // ★ 核心：记录下属于当前自身心跳的上下文
+        Value activeSelf = frame().selfContext;
+
         // --- ref writeback ---
         pendingRefWritebacks.clear();
         const auto& refFlags = frame().function->paramIsRef;
@@ -3501,29 +3607,12 @@ namespace jc {
             }
         }
 
-        // ★ FIX: init 捕获 + 帧上下文保存（来自之前的修复）
-        Value initSelf;
-        if (fnName == "init") {
-            auto selfIt = globals.find("self");
-            if (selfIt != globals.end())
-                initSelf = selfIt->second;
-        }
-
-        bool needsRestore = frame().hasSavedContext;
-        Value savedSelf = frame().savedSelf;
-        Value savedClass = frame().savedClass;
-
         while (!exceptionHandlers.empty() &&
             exceptionHandlers.back().frameIndex == static_cast<int>(frames.size()) - 1) {
             exceptionHandlers.pop_back();
         }
 
         frames.pop_back();
-
-        if (needsRestore) {
-            globals["self"] = savedSelf;
-            globals["__class__"] = savedClass;
-        }
 
         // ★ 退出判定
         if (static_cast<int>(frames.size()) <= currentTargetFrameDepth) {
@@ -3533,60 +3622,91 @@ namespace jc {
             else {
                 stack.resize(base);
             }
-            shouldExit = true;  // ★ 通知 run() 退出
+            shouldExit = true;  // 通知 run() 退出
             return result;
         }
 
         stack.resize(base);
+
+        // ★ 唯独构造函数返回时做个特判：如果你调用了 init()，VM 会默默返回正在创建的对象
         if (fnName == "init") {
-            if (!initSelf.isNone())
-                push(initSelf);
-            else
-                push(result);
+            push(activeSelf.isNone() ? result : activeSelf);
         }
         else {
             push(result);
         }
-        return Value::none();  // 返回值在不退出时不使用
+        return Value::none();
     }
 
     void VM::execInvoke(uint16_t nameIdx, uint8_t argc) {
         std::string methodName = std::get<std::string>(currentChunk().constants[nameIdx].data);
-
         Value obj = stack[stack.size() - 1 - argc];
 
-        if (!std::holds_alternative<std::shared_ptr<Instance>>(obj.data))
-            throw std::runtime_error("VM Error: Cannot invoke method on non-instance.");
-
-        auto inst = std::get<std::shared_ptr<Instance>>(obj.data);
-
         std::shared_ptr<FunctionClosure> method;
-        std::shared_ptr<ClassDefinition> owningClass;
-        auto c = inst->classDef;
-        while (c) {
-            auto it = c->methods.find(methodName);
-            if (it != c->methods.end()) {
-                method = it->second;
-                owningClass = c;
-                break;
+        std::shared_ptr<ClassDefinition> owningClass = nullptr;
+
+        // ==============================================================
+        // 1. 如果它是原生 Dict！我们要像对待对象一样去调用它内部的闭包
+        // ==============================================================
+        if (std::holds_alternative<Dict>(obj.data)) {
+            const auto* v = std::get<Dict>(obj.data).get(methodName);
+            if (v) {
+                Value fv = std::any_cast<Value>(*v);
+                if (std::holds_alternative<std::shared_ptr<FunctionClosure>>(fv.data)) {
+                    method = std::get<std::shared_ptr<FunctionClosure>>(fv.data);
+                }
             }
-            c = c->parent;
+            if (!method) {
+                throw std::runtime_error("VM Error: No callable field '" + methodName + "' in Dict.");
+            }
         }
-        if (!method)
-            throw std::runtime_error("VM Error: No method '" + methodName +
-                "' on '" + inst->classDef->name + "'.");
+        // ==============================================================
+        // 2. 经典面向对象 Instance 的方法查询（优先类模板，后查原型挂载）
+        // ==============================================================
+        else if (std::holds_alternative<std::shared_ptr<Instance>>(obj.data)) {
+            auto inst = std::get<std::shared_ptr<Instance>>(obj.data);
+            auto c = inst->classDef;
+            while (c) {
+                auto it = c->methods.find(methodName);
+                if (it != c->methods.end()) {
+                    method = it->second;
+                    owningClass = c;
+                    break;
+                }
+                c = c->parent;
+            }
 
-        // ★ 不在这里赋值！等 saveSelfContext 保存完外层上下文后再赋值
+            if (!method) {
+                auto* fieldVal = inst->fields.get(methodName);
+                if (fieldVal) {
+                    Value fv = std::any_cast<Value>(*fieldVal);
+                    if (std::holds_alternative<std::shared_ptr<FunctionClosure>>(fv.data)) {
+                        method = std::get<std::shared_ptr<FunctionClosure>>(fv.data);
+                        owningClass = inst->classDef;
+                    }
+                }
+            }
 
+            if (!method) {
+                throw std::runtime_error("VM Error: No method '" + methodName +
+                    "' on instances of class '" + inst->classDef->name + "'.");
+            }
+        }
+        else {
+            throw std::runtime_error("VM Error: Cannot invoke method on this type.");
+        }
+
+        // ==============================================================
+        // ★ 核心方法执行引擎：此时的 obj 不论是 Dict 还是 Instance，
+        // 都会被公平地当做 `self` 注入环境！
+        // ==============================================================
         if (method->isBytecode()) {
             CallFrame newFrame;
-            saveSelfContext(newFrame);  // ★ 先保存外层的 self/__class__
-            globals["self"] = Value(inst);          // ★ 然后才设置新的
-            globals["__class__"] = Value(owningClass);
+            // ★ Magic: 跨过 globals 的直接帧级注入！
+            newFrame.selfContext = obj;
+            newFrame.classContext = owningClass ? Value(owningClass) : Value::none();
             auto& fnDef = compiledFunctions[method->compiledFnIndex];
-            // =============================================================
-            // ★ 核心变长参数打包引擎 (OOP Invoke 端)
-            // =============================================================
+
             if (fnDef->hasRestParam) {
                 int fixedMax = fnDef->maxArity - 1;
                 if (static_cast<int>(argc) < fnDef->arity) {
@@ -3597,12 +3717,8 @@ namespace jc {
                 if (static_cast<int>(argc) > fixedMax) {
                     int restCount = static_cast<int>(argc) - fixedMax;
                     std::vector<Value> tempValues(restCount);
-                    for (int j = 0; j < restCount; j++) {
-                        tempValues[restCount - 1 - j] = pop();
-                    }
-                    for (int j = 0; j < restCount; j++) {
-                        restList.push_back(std::make_any<Value>(tempValues[j]));
-                    }
+                    for (int j = 0; j < restCount; j++) tempValues[restCount - 1 - j] = pop();
+                    for (int j = 0; j < restCount; j++) restList.push_back(std::make_any<Value>(tempValues[j]));
                     argc = static_cast<uint8_t>(fixedMax);
                 }
 
@@ -3632,29 +3748,23 @@ namespace jc {
             return;
         }
         else if (method->isNative()) {
-            Value prevSelf = globals.count("self") ? globals["self"] : Value::none();
-            Value prevClass = globals.count("__class__") ? globals["__class__"] : Value::none();
-
-            globals["self"] = Value(inst);
-            globals["__class__"] = Value(owningClass);
+            // ★ C++ 原生函数直接进隔离池
+            helpers::nativeSelfStack.push_back(obj);
+            helpers::nativeClassStack.push_back(owningClass ? Value(owningClass) : Value::none());
 
             std::vector<Value> args(argc);
             for (int j = argc - 1; j >= 0; --j) args[j] = pop();
             pop();
-
             Value result;
             try {
                 auto& fn = std::any_cast<NativeCallable&>(method->nativeFn);
                 result = fn(args);
             }
             catch (...) {
-                globals["self"] = prevSelf;
-                globals["__class__"] = prevClass;
+                helpers::nativeSelfStack.pop_back(); helpers::nativeClassStack.pop_back();
                 throw;
             }
-
-            globals["self"] = prevSelf;
-            globals["__class__"] = prevClass;
+            helpers::nativeSelfStack.pop_back(); helpers::nativeClassStack.pop_back();
             push(result);
             return;
         }
@@ -3665,20 +3775,15 @@ namespace jc {
 
     void VM::execSuperInvoke(uint16_t nameIdx, uint8_t argc) {
         std::string methodName = std::get<std::string>(currentChunk().constants[nameIdx].data);
-
         Value selfVal = stack[stack.size() - 1 - argc];
-
         if (!std::holds_alternative<std::shared_ptr<Instance>>(selfVal.data))
             throw std::runtime_error("VM Error: 'super' requires an instance context.");
-
         auto inst = std::get<std::shared_ptr<Instance>>(selfVal.data);
-
-        auto classIt = globals.find("__class__");
-        if (classIt == globals.end() ||
-            !std::holds_alternative<std::shared_ptr<ClassDefinition>>(classIt->second.data))
+        // ★ FIX: 直接从当前函数的帧寄存器提取！
+        Value classVal = frame().classContext;
+        if (!std::holds_alternative<std::shared_ptr<ClassDefinition>>(classVal.data))
             throw std::runtime_error("VM Error: 'super' requires class context (__class__).");
-
-        auto currentClass = std::get<std::shared_ptr<ClassDefinition>>(classIt->second.data);
+        auto currentClass = std::get<std::shared_ptr<ClassDefinition>>(classVal.data);
         auto parentClass = currentClass->parent;
         if (!parentClass)
             throw std::runtime_error("VM Error: Class '" + currentClass->name +
@@ -3704,9 +3809,9 @@ namespace jc {
 
         if (method->isBytecode()) {
             CallFrame newFrame;
-            saveSelfContext(newFrame);  // ★ 先保存
-            globals["self"] = Value(inst);          // ★ 再赋值
-            globals["__class__"] = Value(owningClass);
+            newFrame.selfContext = Value(inst);         
+            newFrame.classContext = Value(owningClass); 
+
             auto& fnDef = compiledFunctions[method->compiledFnIndex];
 
             // =============================================================
@@ -3758,10 +3863,10 @@ namespace jc {
             return;
         }
         else if (method->isNative()) {
-            Value prevSelf = globals.count("self") ? globals["self"] : Value::none();
-            Value prevClass = globals.count("__class__") ? globals["__class__"] : Value::none();
-            globals["self"] = Value(inst);
-            globals["__class__"] = Value(owningClass);
+            // ★ 压入原生方法隔离池
+            helpers::nativeSelfStack.push_back(Value(inst));
+            helpers::nativeClassStack.push_back(Value(owningClass));
+
             std::vector<Value> args(argc);
             for (int j = argc - 1; j >= 0; --j) args[j] = pop();
             pop();
@@ -3771,12 +3876,10 @@ namespace jc {
                 result = fn(args);
             }
             catch (...) {
-                globals["self"] = prevSelf;
-                globals["__class__"] = prevClass;
+                helpers::nativeSelfStack.pop_back(); helpers::nativeClassStack.pop_back();
                 throw;
             }
-            globals["self"] = prevSelf;
-            globals["__class__"] = prevClass;
+            helpers::nativeSelfStack.pop_back(); helpers::nativeClassStack.pop_back();
             push(result);
             return;
         }

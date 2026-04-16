@@ -149,24 +149,32 @@ JC2_MODULE(window) {
 
     windowClass = std::make_shared<jc::ClassDefinition>();
     windowClass->name = "Window";
+    // ★ 注册为唯一的类名，不再有命名冲突！
     R.set("Window", jc::Value(windowClass));
-
-    R.reg("Window", { 3 }, [](const std::vector<jc::Value>& args) -> jc::Value {
-        std::string title = std::get<std::string>(args[0].data);
-        int w = static_cast<int>(std::round(args[1].asDouble()));
-        int h = static_cast<int>(std::round(args[2].asDouble()));
-
-        auto inst = std::make_shared<Instance>();
-        inst->classDef = windowClass;
-        inst->nativeData = std::make_shared<NativeWindow>(title, w, h);
-        return Value(inst);
-        });
 
     auto addWinMethod = [&](const std::string& name, jc::NativeCallable fn) {
         auto fc = std::make_shared<FunctionClosure>(std::vector<std::string>{}, std::vector<bool>{}, name, nullptr);
         fc->nativeFn = std::make_any<NativeCallable>(fn);
         windowClass->methods[name] = std::move(fc);
         };
+
+    addWinMethod("init", [](const std::vector<jc::Value>& args) -> jc::Value {
+        if (args.size() != 3) {
+            throw std::runtime_error("TypeError: Window() constructor takes exactly 3 arguments (title, width, height).");
+        }
+        std::string title = std::get<std::string>(args[0].data);
+        int w = static_cast<int>(std::round(args[1].asDouble()));
+        int h = static_cast<int>(std::round(args[2].asDouble()));
+
+        // 获取 VM 自动分配的空 Instance (即 self)
+        auto selfVal = jc::helpers::getGlobalCallback("self");
+        auto inst = std::get<std::shared_ptr<Instance>>(selfVal.data);
+
+        // 实例化 C++ 底层视窗，并注入 nativeData
+        inst->nativeData = std::make_shared<NativeWindow>(title, w, h);
+
+        return jc::Value::none(); // init 规范：无需返回值
+        });
 
     addWinMethod("isOpen", [](const std::vector<jc::Value>&) -> jc::Value {
         auto inst = std::get<std::shared_ptr<Instance>>(jc::helpers::getGlobalCallback("self").data);

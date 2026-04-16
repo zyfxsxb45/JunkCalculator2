@@ -1134,6 +1134,10 @@ namespace jc {
         std::vector<Value> defaultValues;
         bool hasRestParam = false;
 
+        // ★ 新增：闭包词法绑定的上下文 (Arrow Function this绑定)
+        Value boundSelf = Value::none();
+        Value boundClass = Value::none();
+
         int minArgs() const {
             int count = static_cast<int>(paramNames.size());
             for (int i = static_cast<int>(paramNames.size()) - 1; i >= 0; --i) {

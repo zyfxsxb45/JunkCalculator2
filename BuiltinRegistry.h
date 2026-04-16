@@ -21,6 +21,12 @@ namespace helpers {
     inline Value anyToVal(const std::any& a) { return std::any_cast<Value>(a); }
     inline std::any valToAny(const Value& v) { return std::make_any<Value>(v); }
 
+    inline Dict getDictMap(const Value& v, const std::string& fnName) {
+        if (std::holds_alternative<Dict>(v.data)) return std::get<Dict>(v.data);
+        if (std::holds_alternative<std::shared_ptr<Instance>>(v.data)) return std::get<std::shared_ptr<Instance>>(v.data)->fields;
+        throw std::runtime_error("Type Error: " + fnName + "() expects a Dict or Instance.");
+    }
+
     inline bool isTruthy(const Value& v) {
         if (std::holds_alternative<std::monostate>(v.data)) return false;
         if (std::holds_alternative<double>(v.data)) {
@@ -151,7 +157,12 @@ namespace helpers {
         }
         return false;
     }
-    // ===== 修复后的代码 =====
+    // ==============================================================
+    // ★ Native 上下文栈：供 C++ 内建原生态环境使用
+    // ==============================================================
+    inline std::vector<Value> nativeSelfStack;
+    inline std::vector<Value> nativeClassStack;
+
     inline std::pair<bool, Value> tryCallDunder(
         const std::shared_ptr<Instance>& inst,
         const std::string& methodName,
@@ -161,34 +172,18 @@ namespace helpers {
         while (c) {
             auto it = c->methods.find(methodName);
             if (it != c->methods.end()) {
-                // ★ FIX: 保存当前的 self 和 __class__
-                Value prevSelf = getGlobalCallback ? getGlobalCallback("self") : Value::none();
-                Value prevClass = getGlobalCallback ? getGlobalCallback("__class__") : Value::none();
-
-                if (setGlobalCallback) {
-                    setGlobalCallback("self", Value(inst));
-                    setGlobalCallback("__class__", Value(c));
-                }
-
+                // ★ 启用原生无污染栈压入环境 (避开污染 globals! )
+                nativeSelfStack.push_back(Value(inst));
+                nativeClassStack.push_back(Value(c));
                 Value result;
                 try {
                     result = safeCallFunction(it->second, args);
                 }
                 catch (...) {
-                    // ★ FIX: 异常时也必须恢复
-                    if (setGlobalCallback) {
-                        setGlobalCallback("self", prevSelf);
-                        setGlobalCallback("__class__", prevClass);
-                    }
+                    nativeSelfStack.pop_back(); nativeClassStack.pop_back();
                     throw;
                 }
-
-                // ★ FIX: 正常返回时恢复
-                if (setGlobalCallback) {
-                    setGlobalCallback("self", prevSelf);
-                    setGlobalCallback("__class__", prevClass);
-                }
-
+                nativeSelfStack.pop_back(); nativeClassStack.pop_back();
                 return { true, result };
             }
             c = c->parent;

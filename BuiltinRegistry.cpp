@@ -923,85 +923,81 @@ void BuiltinRegistry::registerControlFlow() {
     reg("add", { 2, 3 }, [](const std::vector<Value>& args) -> Value {
         if (std::holds_alternative<Set>(args[0].data)) {
             if (args.size() != 2) throw std::runtime_error("Runtime Error: add() on Set takes 2 args (set, val).");
-            Set s = std::get<Set>(args[0].data); // ★ 拷贝剥离 const
+            Set s = std::get<Set>(args[0].data);
             s.insert(setValueKey(args[1]), valToAny(args[1]));
             return Value(s);
         }
         else if (std::holds_alternative<List>(args[0].data)) {
             if (args.size() != 2) throw std::runtime_error("Runtime Error: add() on List takes 2 args (list, val).");
-            List l = std::get<List>(args[0].data); // ★ 拷贝剥离 const
+            List l = std::get<List>(args[0].data);
             l.push_back(valToAny(args[1]));
             return Value(l);
         }
-        else if (std::holds_alternative<Dict>(args[0].data)) {
-            if (args.size() != 3) throw std::runtime_error("Runtime Error: add() on Dict takes 3 args (dict, key, val).");
-            Dict d = std::get<Dict>(args[0].data); // ★ 拷贝剥离 const
+        else if (std::holds_alternative<Dict>(args[0].data) || std::holds_alternative<std::shared_ptr<Instance>>(args[0].data)) {
+            if (args.size() != 3) throw std::runtime_error("Runtime Error: add() on Dict/Instance takes 3 args (obj, key, val).");
+            Dict d = helpers::getDictMap(args[0], "add");
             std::string key;
             if (std::holds_alternative<std::string>(args[1].data)) key = std::get<std::string>(args[1].data);
             else { std::ostringstream oss; oss << args[1]; key = oss.str(); }
             d.set(key, valToAny(args[2]));
-            return Value(d);
+            return args[0]; // 返回原对象
         }
-        throw std::runtime_error("Type Error: add() expects a Set, List, or Dict as 1st argument.");
+        throw std::runtime_error("Type Error: add() expects a Set, List, Dict, or Instance.");
         });
 
     reg("remove", { 2 }, [](const std::vector<Value>& args) -> Value {
         if (std::holds_alternative<Set>(args[0].data)) {
-            Set s = std::get<Set>(args[0].data); // ★ 拷贝剥离 const
+            Set s = std::get<Set>(args[0].data);
             if (!s.erase(setValueKey(args[1]))) throw std::runtime_error("Runtime Error: Element not found in Set.");
             return Value(s);
         }
         else if (std::holds_alternative<List>(args[0].data)) {
-            List l = std::get<List>(args[0].data); // ★ 拷贝剥离 const
+            List l = std::get<List>(args[0].data);
             int idx = static_cast<int>(std::round(args[1].asDouble()));
             l.removeAt(idx);
             return Value(l);
         }
-        else if (std::holds_alternative<Dict>(args[0].data)) {
-            Dict d = std::get<Dict>(args[0].data); // ★ 拷贝剥离 const
+        else if (std::holds_alternative<Dict>(args[0].data) || std::holds_alternative<std::shared_ptr<Instance>>(args[0].data)) {
+            Dict d = helpers::getDictMap(args[0], "remove");
             std::string key;
             if (std::holds_alternative<std::string>(args[1].data)) key = std::get<std::string>(args[1].data);
             else { std::ostringstream oss; oss << args[1]; key = oss.str(); }
-            if (!d.remove(key)) throw std::runtime_error("Runtime Error: Key '" + key + "' not found in Dict.");
-            return Value(d);
+            if (!d.remove(key)) throw std::runtime_error("Runtime Error: Key '" + key + "' not found.");
+            return args[0];
         }
-        throw std::runtime_error("Type Error: remove() expects a Set, List, or Dict.");
+        throw std::runtime_error("Type Error: remove() expects a Set, List, Dict, or Instance.");
         });
 
     reg("discard", { 2 }, [](const std::vector<Value>& args) -> Value {
         if (std::holds_alternative<Set>(args[0].data)) {
-            Set s = std::get<Set>(args[0].data); // ★ 拷贝剥离 const
-            s.erase(setValueKey(args[1])); // 静默处理
+            Set s = std::get<Set>(args[0].data);
+            s.erase(setValueKey(args[1]));
             return Value(s);
         }
-        else if (std::holds_alternative<Dict>(args[0].data)) {
-            Dict d = std::get<Dict>(args[0].data); // ★ 拷贝剥离 const
+        else if (std::holds_alternative<Dict>(args[0].data) || std::holds_alternative<std::shared_ptr<Instance>>(args[0].data)) {
+            Dict d = helpers::getDictMap(args[0], "discard");
             std::string key;
             if (std::holds_alternative<std::string>(args[1].data)) key = std::get<std::string>(args[1].data);
             else { std::ostringstream oss; oss << args[1]; key = oss.str(); }
             d.remove(key); // 静默处理
-            return Value(d);
+            return args[0];
         }
-        throw std::runtime_error("Type Error: discard() expects a Set or Dict.");
+        throw std::runtime_error("Type Error: discard() expects a Set, Dict, or Instance.");
         });
 
     reg("clear", { 1 }, [](const std::vector<Value>& args) -> Value {
         if (std::holds_alternative<Set>(args[0].data)) {
-            Set s = std::get<Set>(args[0].data); // ★ 拷贝剥离 const
-            s.clear();
-            return Value(s);
+            Set s = std::get<Set>(args[0].data); s.clear(); return Value(s);
         }
         else if (std::holds_alternative<List>(args[0].data)) {
-            List l = std::get<List>(args[0].data); // ★ 拷贝剥离 const
-            l.clear();
-            return Value(l);
+            List l = std::get<List>(args[0].data); l.clear(); return Value(l);
         }
-        else if (std::holds_alternative<Dict>(args[0].data)) {
-            Dict d = std::get<Dict>(args[0].data); // ★ 拷贝剥离 const
+        else if (std::holds_alternative<Dict>(args[0].data) || std::holds_alternative<std::shared_ptr<Instance>>(args[0].data)) {
+            Dict d = helpers::getDictMap(args[0], "clear");
             d.clear();
-            return Value(d);
+            return args[0];
         }
-        throw std::runtime_error("Type Error: clear() expects a Set, List, or Dict.");
+        throw std::runtime_error("Type Error: clear() expects a Set, List, Dict, or Instance.");
         });
 }
 
@@ -1025,6 +1021,7 @@ void BuiltinRegistry::registerStringFunctions() {
             auto inst = std::get<std::shared_ptr<Instance>>(args[0].data);
             auto [found, result] = tryCallDunder(inst, "__len__");
             if (found) return result;
+            return Value(static_cast<double>(inst->fields.size()));
         }
         if (std::holds_alternative<std::string>(args[0].data)) return Value(static_cast<double>(std::get<std::string>(args[0].data).size()));
         if (std::holds_alternative<RealMatrix>(args[0].data)) { const auto& m = std::get<RealMatrix>(args[0].data); if (m.getCols() == 1) return Value(static_cast<double>(m.getRows())); if (m.getRows() == 1) return Value(static_cast<double>(m.getCols())); return Value(static_cast<double>(m.getRows() * m.getCols())); }
@@ -1499,17 +1496,63 @@ void BuiltinRegistry::registerStringMatrix() {
 }
 
 // =================================================================
-// [19] Dict
+// [19] Dict / Instance 属性大一统透视 API
 // =================================================================
 void BuiltinRegistry::registerDictFunctions() {
-    reg("dict", {}, [](const std::vector<Value>& args) -> Value { Dict d; if (args.size()%2!=0) throw std::runtime_error("Runtime Error: dict() expects even number of arguments."); for (size_t i=0;i<args.size();i+=2) { std::string key; if (std::holds_alternative<std::string>(args[i].data)) key=std::get<std::string>(args[i].data); else { std::ostringstream oss; oss<<args[i]; key=oss.str(); } d.set(key, valToAny(args[i+1])); } return Value(d); });
-    reg("keys", { 1 }, [](const std::vector<Value>& args) -> Value { if (!std::holds_alternative<Dict>(args[0].data)) throw std::runtime_error("Type Error: keys() expects a Dict."); auto ks=std::get<Dict>(args[0].data).getKeys(); std::vector<std::string> flat(ks.begin(),ks.end()); return Value(StringMatrix(1,static_cast<int>(flat.size()),flat)); });
-    reg("values", { 1 }, [](const std::vector<Value>& args) -> Value { if (!std::holds_alternative<Dict>(args[0].data)) throw std::runtime_error("Type Error: values() expects a Dict."); const auto& entries=std::get<Dict>(args[0].data).getEntries(); std::vector<double> nums; bool allDouble=true; for (const auto& [k,v]:entries) { try { const auto& val=std::any_cast<const Value&>(v); if (allDouble) { try{nums.push_back(val.asDouble());}catch(...){allDouble=false;} } } catch(...){allDouble=false;} } if (allDouble&&!nums.empty()) return Value(RealMatrix(1,static_cast<int>(nums.size()),nums)); std::vector<std::string> strs; for (const auto& [k,v]:entries) { try { const auto& val=std::any_cast<const Value&>(v); std::ostringstream oss; oss<<val; strs.push_back(oss.str()); } catch(...){strs.push_back("?");} } return Value(StringMatrix(1,static_cast<int>(strs.size()),strs)); });
-    reg("hasKey", { 2 }, [](const std::vector<Value>& args) -> Value { if (!std::holds_alternative<Dict>(args[0].data)) throw std::runtime_error("Type Error: hasKey() expects a Dict."); std::string key; if (std::holds_alternative<std::string>(args[1].data)) key=std::get<std::string>(args[1].data); else { std::ostringstream oss; oss<<args[1]; key=oss.str(); } return Value(std::get<Dict>(args[0].data).has(key)?1.0:0.0); });
-    reg("removeKey", { 2 }, [](const std::vector<Value>& args) -> Value { if (!std::holds_alternative<Dict>(args[0].data)) throw std::runtime_error("Type Error: removeKey() expects a Dict."); Dict d=std::get<Dict>(args[0].data); std::string key; if (std::holds_alternative<std::string>(args[1].data)) key=std::get<std::string>(args[1].data); else { std::ostringstream oss; oss<<args[1]; key=oss.str(); } if (!d.remove(key)) throw std::runtime_error("Runtime Error: Key '"+key+"' not found in Dict."); return Value(d); });
-    reg("dictSize", { 1 }, [](const std::vector<Value>& args) -> Value { if (!std::holds_alternative<Dict>(args[0].data)) throw std::runtime_error("Type Error: dictSize() expects a Dict."); return Value(static_cast<double>(std::get<Dict>(args[0].data).size())); });
-    reg("dictMerge", { 2 }, [](const std::vector<Value>& args) -> Value { if (!std::holds_alternative<Dict>(args[0].data)||!std::holds_alternative<Dict>(args[1].data)) throw std::runtime_error("Type Error: dictMerge() expects two Dicts."); Dict result=std::get<Dict>(args[0].data); for (const auto& [k,v]:std::get<Dict>(args[1].data).getEntries()) result.set(k,v); return Value(result); });
-    reg("dictPairs", { 1 }, [](const std::vector<Value>& args) -> Value { if (!std::holds_alternative<Dict>(args[0].data)) throw std::runtime_error("Type Error: dictPairs() expects a Dict."); const auto& entries=std::get<Dict>(args[0].data).getEntries(); std::vector<std::string> flat; for (const auto& [k,v]:entries) { flat.push_back(k); try { const auto& val=std::any_cast<const Value&>(v); std::ostringstream oss; oss<<val; flat.push_back(oss.str()); } catch(...){flat.push_back("?");} } return Value(StringMatrix(static_cast<int>(entries.size()),2,flat)); });
+    reg("dict", {}, [](const std::vector<Value>& args) -> Value { Dict d; if (args.size() % 2 != 0) throw std::runtime_error("Runtime Error: dict() expects even number of arguments."); for (size_t i = 0; i < args.size(); i += 2) { std::string key; if (std::holds_alternative<std::string>(args[i].data)) key = std::get<std::string>(args[i].data); else { std::ostringstream oss; oss << args[i]; key = oss.str(); } d.set(key, valToAny(args[i + 1])); } return Value(d); });
+
+    reg("keys", { 1 }, [](const std::vector<Value>& args) -> Value {
+        Dict d = helpers::getDictMap(args[0], "keys");
+        auto ks = d.getKeys(); std::vector<std::string> flat(ks.begin(), ks.end());
+        return Value(StringMatrix(1, static_cast<int>(flat.size()), flat));
+        });
+    // ★ 设定属性拾取别名！完美融合 Instance
+    builtins["getFields"] = builtins["keys"]; builtinArity["getFields"] = builtinArity["keys"];
+
+    reg("values", { 1 }, [](const std::vector<Value>& args) -> Value {
+        Dict d = helpers::getDictMap(args[0], "values");
+        const auto& entries = d.getEntries();
+        std::vector<double> nums; bool allDouble = true;
+        for (const auto& [k, v] : entries) { try { const auto& val = std::any_cast<const Value&>(v); if (allDouble) { try { nums.push_back(val.asDouble()); } catch (...) { allDouble = false; } } } catch (...) { allDouble = false; } }
+        if (allDouble && !nums.empty()) return Value(RealMatrix(1, static_cast<int>(nums.size()), nums));
+        std::vector<std::string> strs;
+        for (const auto& [k, v] : entries) { try { const auto& val = std::any_cast<const Value&>(v); std::ostringstream oss; oss << val; strs.push_back(oss.str()); } catch (...) { strs.push_back("?"); } }
+        return Value(StringMatrix(1, static_cast<int>(strs.size()), strs));
+        });
+
+    reg("hasKey", { 2 }, [](const std::vector<Value>& args) -> Value {
+        Dict d = helpers::getDictMap(args[0], "hasKey");
+        std::string key; if (std::holds_alternative<std::string>(args[1].data)) key = std::get<std::string>(args[1].data); else { std::ostringstream oss; oss << args[1]; key = oss.str(); }
+        return Value(d.has(key) ? 1.0 : 0.0);
+        });
+    // ★ 设定查询别名
+    builtins["hasField"] = builtins["hasKey"]; builtinArity["hasField"] = builtinArity["hasKey"];
+    builtins["has"] = builtins["hasKey"]; builtinArity["has"] = builtinArity["hasKey"];
+
+    reg("removeKey", { 2 }, [](const std::vector<Value>& args) -> Value {
+        Dict d = helpers::getDictMap(args[0], "removeKey");
+        std::string key; if (std::holds_alternative<std::string>(args[1].data)) key = std::get<std::string>(args[1].data); else { std::ostringstream oss; oss << args[1]; key = oss.str(); }
+        if (!d.remove(key)) throw std::runtime_error("Runtime Error: Key '" + key + "' not found.");
+        return args[0];
+        });
+
+    reg("dictSize", { 1 }, [](const std::vector<Value>& args) -> Value {
+        Dict d = helpers::getDictMap(args[0], "dictSize"); return Value(static_cast<double>(d.size()));
+        });
+    builtins["size"] = builtins["dictSize"]; builtinArity["size"] = builtinArity["dictSize"];
+
+    reg("dictMerge", { 2 }, [](const std::vector<Value>& args) -> Value {
+        Dict d1 = helpers::getDictMap(args[0], "dictMerge"); Dict d2 = helpers::getDictMap(args[1], "dictMerge");
+        for (const auto& [k, v] : d2.getEntries()) d1.set(k, v);
+        return args[0];
+        });
+
+    reg("dictPairs", { 1 }, [](const std::vector<Value>& args) -> Value {
+        Dict d = helpers::getDictMap(args[0], "dictPairs");
+        const auto& entries = d.getEntries(); std::vector<std::string> flat;
+        for (const auto& [k, v] : entries) { flat.push_back(k); try { const auto& val = std::any_cast<const Value&>(v); std::ostringstream oss; oss << val; flat.push_back(oss.str()); } catch (...) { flat.push_back("?"); } }
+        return Value(StringMatrix(static_cast<int>(entries.size()), 2, flat));
+        });
 }
 
 // =================================================================
@@ -1729,8 +1772,6 @@ void BuiltinRegistry::registerIntrospection() {
         while (c) { if (c.get() == cls.get()) return Value(1.0); c = c->parent; }
         return Value(0.0);
         });    
-    reg("hasField", { 2 }, [](const std::vector<Value>& args) -> Value { if (!std::holds_alternative<std::shared_ptr<Instance>>(args[0].data)) return Value(0.0); if (!std::holds_alternative<std::string>(args[1].data)) throw std::runtime_error("Type Error: hasField() field name must be a string."); return Value(std::get<std::shared_ptr<Instance>>(args[0].data)->fields.has(std::get<std::string>(args[1].data))?1.0:0.0); });
-    reg("getFields", { 1 }, [](const std::vector<Value>& args) -> Value { if (!std::holds_alternative<std::shared_ptr<Instance>>(args[0].data)) throw std::runtime_error("Type Error: getFields() expects an instance."); auto ks=std::get<std::shared_ptr<Instance>>(args[0].data)->fields.getKeys(); if(ks.empty()) return Value(StringMatrix(1,0)); std::vector<std::string> flat(ks.begin(),ks.end()); return Value(StringMatrix(1,static_cast<int>(flat.size()),flat)); });
     reg("getClass", { 1 }, [](const std::vector<Value>& args) -> Value { if (!std::holds_alternative<std::shared_ptr<Instance>>(args[0].data)) throw std::runtime_error("Type Error: getClass() expects an instance."); return Value(std::get<std::shared_ptr<Instance>>(args[0].data)->classDef); });
     reg("getParent", { 1 }, [](const std::vector<Value>& args) -> Value { std::shared_ptr<ClassDefinition> cls; if (std::holds_alternative<std::shared_ptr<ClassDefinition>>(args[0].data)) cls=std::get<std::shared_ptr<ClassDefinition>>(args[0].data); else if (std::holds_alternative<std::shared_ptr<Instance>>(args[0].data)) cls=std::get<std::shared_ptr<Instance>>(args[0].data)->classDef; else throw std::runtime_error("Type Error: getParent() expects a class or instance."); if (!cls->parent) return Value::none(); return Value(cls->parent); });
 }
