@@ -30,6 +30,7 @@ set(JC2_HEADERS
     "modules/bytes_module.h" 
     "modules/socket_module.h"
     "modules/window_module.h"
+    "modules/latex_module.h"
 )
 
 set(JC2_SOURCES
