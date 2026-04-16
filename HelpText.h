@@ -78,6 +78,7 @@ namespace jc {
     bytes       Bare-metal memory & binary file I/O (import "bytes")
     socket      Low-level TCP/IP operating system bindings (import "socket")
     window      Real-time Native GUI window rendering (import "window")
+    latex       Bi-directional LaTeX compiler & serializer (import "latex")
 
     Type `modules()` in the REPL to see all available native modules.
 
@@ -2397,6 +2398,66 @@ namespace jc {
         t = (t + 0.01) % 1.0  // Advance time step
         sleep(0.016)          // Yield to OS (target ~60 FPS)
     }
+)HELP" },
+
+        { "latex", R"HELP(
+═══ LaTeX Mathematical Engine — Native Module ═══
+
+  Requires: import "latex"
+
+  The `latex` module provides bi-directional integration with standard LaTeX 
+  math syntax. It can serialize JC2 matrices, fractions, and complex numbers 
+  into beautiful LaTeX code, and conversely, it can parse, compile, and 
+  evaluate raw LaTeX formulas into blazing-fast native JC2 closures.
+
+  Serialization (JC2 → LaTeX)
+  ──────────────────────
+    to_latex(obj)
+        Converts a JC2 value into a clean LaTeX code string.
+        • Fraction:  frac(1,2)      → "\frac{1}{2}"
+        • Complex:   3+4i           → "3+4i"
+        • Matrix:    [1, 2; 3, 4]   → "\begin{pmatrix} 1 & 2 \\ ... \end{pmatrix}"
+        • List:      list(1, 2)     → "\left[ 1, 2 \right]"
+
+  Direct Evaluation (LaTeX → Number)
+  ──────────────────────
+    eval_latex("formula")
+        Parses and evaluates a constant LaTeX math string directly.
+        (Tip: Use r-strings `r"..."` so you don't have to double-escape backslashes!)
+        
+        eval_latex(r"\frac{1+\sqrt{5}}{2}")       → 1.618033
+        eval_latex(r"\sin(\pi / 2) + e^0")        → 2.0
+
+  JIT Compilation to JC2 Closures (LaTeX → JC2 Function)
+  ──────────────────────
+    compile_latex("formula", variable_names)
+        Dynamically compiles a parameterized LaTeX formula into an executable 
+        JC2 abstract syntax tree, returning a true JC2 function closure.
+        `variable_names` must be a List or StringMatrix.
+
+        // 1. Compile the LaTeX math into a native callable function f(x, \theta)
+        f = compile_latex(r"\frac{\sin(\theta)}{x^2}", ["x", r"\theta"])
+        
+        // 2. Call it interactively with lightning speed!
+        f(2.0, PI/2)                 → 0.25
+        
+        // 3. It works with all higher-order and calculus functions!
+        table(f, [1, 2, 3], fill(PI/2, 3)|>trans)    → Tabulates results over a vector
+        diff(f(_, PI/2), 2.0)        → Derivative w.r.t 'x' at x=2.0
+
+  Supported LaTeX Syntax (Parser Engine)
+  ──────────────────────
+    • Operations:   +, -, *, /, ^
+    • Grouping:     { }, ( ), [ ]
+    • Fractions:    \frac{numerator}{denominator}
+    • Functions:    \sin, \cos, \tan, \sqrt, \ln, \log, \exp, \abs
+    • Constants:    \pi, e
+    
+    ★ Advanced Feature: Implicit Multiplication
+      The recursive descent parser fully understands implicit mathematical 
+      multiplication just like a human reading a paper. 
+      Expressions like "2x", "xy", and "2 \sin(x)" act identically to 
+      "2*x", "x*y", and "2 * \sin(x)".
 )HELP" },
     };
 

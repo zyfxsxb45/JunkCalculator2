@@ -41,7 +41,7 @@ namespace jc_latex {
         }
         else if (std::holds_alternative<RealMatrix>(val.data)) {
             const auto& m = std::get<RealMatrix>(val.data);
-            std::ostringstream oss; oss << "\\begin{bmatrix}\n";
+            std::ostringstream oss; oss << "\\begin{pmatrix}\n";
             for (int i = 0; i < m.getRows(); ++i) {
                 for (int j = 0; j < m.getCols(); ++j) {
                     oss << std::defaultfloat << std::setprecision(4) << m(i, j);
@@ -49,7 +49,7 @@ namespace jc_latex {
                 }
                 oss << (i < m.getRows() - 1 ? " \\\\\n" : "\n");
             }
-            oss << "\\end{bmatrix}";
+            oss << "\\end{pmatrix}";
             return oss.str();
         }
         else if (std::holds_alternative<List>(val.data)) {
