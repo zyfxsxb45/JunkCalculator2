@@ -1952,9 +1952,15 @@ namespace jc {
             return;
         }
 
-        // ── FunctionClosure ──
+               // ── FunctionClosure ──
         if (auto* p = std::get_if<std::shared_ptr<FunctionClosure>>(&val.data)) {
-            if (*p) markClosure(**p, marked);
+            if (*p) {
+                // ★ FIX: 闭包递归阻断锁！防止函数自己调用自己产生的死循环！
+                const void* id = p->get();
+                if (marked.count(id)) return;
+                marked.insert(id);
+                markClosure(**p, marked);
+            }
             return;
         }
 
@@ -1963,9 +1969,14 @@ namespace jc {
             markClassDef(*p, marked);
             return;
         }
-        // ── SuperProxy ── (★ 增加这一块)
+        
+        // ── SuperProxy ──
         if (auto* p = std::get_if<SuperProxyPtr>(&val.data)) {
             if (*p) {
+                // ★ FIX: 代理阻断锁
+                const void* id = p->get();
+                if (marked.count(id)) return;
+                marked.insert(id);
                 markValue(Value((*p)->instance), marked);
                 markClassDef((*p)->parentClass, marked);
             }
@@ -1987,12 +1998,15 @@ namespace jc {
         for (const auto& val : stack)
             markValue(val, marked);
 
-        // 根集合 3: 所有调用帧的闭包上值
+        // 根集合 3: 所有调用帧的闭包上值，以及存活帧的上下文引擎！
         for (const auto& f : frames) {
             if (f.upvalues) {
                 for (const auto& val : *f.upvalues)
                     markValue(val, marked);
             }
+            // ★ 世纪补漏：必须追踪目前存活函数的上下文环境！
+            markValue(f.selfContext, marked);
+            markValue(f.classContext, marked);
         }
 
         // 根集合 4: 常量池 (编译后的函数里缓存的字面量)
@@ -2001,6 +2015,10 @@ namespace jc {
                 markValue(c, marked);
         }
 
+        // 根集合 5: C++ 层当前正在执行跨界调用的原生对象栈！
+        for (const auto& val : helpers::nativeSelfStack) markValue(val, marked);
+        for (const auto& val : helpers::nativeClassStack) markValue(val, marked);
+
         // ═══ Phase 2: SWEEP ═══
         GcHeap::get().sweep(marked);
     }
@@ -2008,13 +2026,20 @@ namespace jc {
     int VM::runGC() {
         std::unordered_set<const void*> marked;
         for (const auto& [name, val] : globals)  markValue(val, marked);
-        for (const auto& val : stack)             markValue(val, marked);
+        for (const auto& val : stack)            markValue(val, marked);
         for (const auto& f : frames) {
             if (f.upvalues)
                 for (const auto& val : *f.upvalues) markValue(val, marked);
+            // ★ 防止手动 gc() 触发对象丢失
+            markValue(f.selfContext, marked);
+            markValue(f.classContext, marked);
         }
         for (const auto& fn : compiledFunctions)
             for (const auto& c : fn->chunk.constants) markValue(c, marked);
+
+        // ★ C++ 原生堆栈手动同步
+        for (const auto& val : helpers::nativeSelfStack) markValue(val, marked);
+        for (const auto& val : helpers::nativeClassStack) markValue(val, marked);
 
         return GcHeap::get().sweep(marked);
     }
