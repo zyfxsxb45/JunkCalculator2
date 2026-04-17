@@ -1188,7 +1188,17 @@ namespace jc {
         }
     };
 
-    struct ErrorSignal { std::string message; };
+    struct ErrorSignal : public std::runtime_error {
+        std::string message;
+        explicit ErrorSignal(const std::string& msg) : std::runtime_error(msg), message(msg) {}
+    };
+
+    struct StackTracedException : public std::runtime_error {
+        std::string rawMessage;
+
+        StackTracedException(const std::string& raw, const std::string& fullTraceText)
+            : std::runtime_error(fullTraceText), rawMessage(raw) {}
+    };
 
 } // namespace jc
 

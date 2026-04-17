@@ -90,6 +90,7 @@ namespace jc {
     net         High-level TCP socket OOP wrapper (import "net")
     http        Modern HTTP/1.1 Client with JSON support (import "http")
     engine      Object-Oriented Game & GUI Framework (import "engine")
+    collections Data structures: stacks, queues, heaps, trees (import "collections")
 
   Quick-Start Cheatsheet
   ────────────────────────────────────────────────────────────────────

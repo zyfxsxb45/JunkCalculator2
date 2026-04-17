@@ -2335,27 +2335,22 @@ void BuiltinRegistry::registerErrorHandling() {
         if (!cl->acceptsArgCount(0))
             throw std::runtime_error("Runtime Error: pcall() expects a zero-parameter function.");
 
-        // ★ 核心净化器：如果异常是从虚拟机深处逃逸出来的，剥离自动贴上的调试行号
-        auto stripLineInfo = [](const std::string& m) {
-            std::string msg = m;
-            if (msg.find("[Line ") == 0) {
-                size_t c = msg.find("] ");
-                if (c != std::string::npos) msg = msg.substr(c + 2);
-            }
-            return msg;
-            };
-
         try {
             Value result = safeCallFunction(cl, {});
             List L; L.push_back(valToAny(Value(1.0))); L.push_back(valToAny(result));
             return Value(L);
         }
-        catch (ErrorSignal& sig) {
-            List L; L.push_back(valToAny(Value(0.0))); L.push_back(valToAny(Value(stripLineInfo(sig.message))));
+        catch (const StackTracedException& ex) {
+            // ★ 完美拿到纯净的出错理由字符串！无视底下挂着的多行追踪栈
+            List L; L.push_back(valToAny(Value(0.0))); L.push_back(valToAny(Value(ex.rawMessage)));
+            return Value(L);
+        }
+        catch (const ErrorSignal& sig) {
+            List L; L.push_back(valToAny(Value(0.0))); L.push_back(valToAny(Value(sig.message)));
             return Value(L);
         }
         catch (const std::exception& ex) {
-            List L; L.push_back(valToAny(Value(0.0))); L.push_back(valToAny(Value(stripLineInfo(std::string(ex.what())))));
+            List L; L.push_back(valToAny(Value(0.0))); L.push_back(valToAny(Value(std::string(ex.what()))));
             return Value(L);
         }
         });

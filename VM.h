@@ -56,16 +56,18 @@ namespace jc {
         Value run(int targetFrameDepth = 0);
         int currentTargetFrameDepth = 0;
 
-        // ★ 异常处理帧
         struct ExceptionHandler {
             int frameIndex = 0;     // 哪个 CallFrame
-            int ip = 0;            // catch 块的起始地址
+            int ip = 0;             // catch 块的起始地址
             int stackSize = 0;      // 进入 try 时的栈大小
             std::string catchVarName = ""; // catch 变量名（空则不绑定）
         };
         std::vector<ExceptionHandler> exceptionHandlers;
-
-        void throwError(const std::string& msg);
+        // ==============================================================
+        // ★ 新增：干净统一的异常回滚处理与栈轨迹抓取 (Stack Trace)
+        // ==============================================================
+        bool handleExceptionUnwind(std::string& msg);
+        std::string buildStackTrace(const std::string& errorMsg);
         Value callDunder(const Value& obj, const std::string& name,
             const std::vector<Value>& args);
 

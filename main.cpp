@@ -155,12 +155,11 @@ void runScript(const std::string& filepath, bool isImport = false) {
         if (!result.isNone()) vm.setGlobal("ANS", result);
     }
     catch (const std::exception& ex) {
-        // ★ 核心熔断机制：如果是 import 触发的代码编译/运行报错，绝对不准吞没，立刻向上一层炸穿！
         if (isImport) throw;
-
-        std::cerr << jc::col(jc::Ansi::BRIGHT_RED)
-            << "   Error in '" << resolvedPath << "':\n   "
-            << ex.what() << jc::col(jc::Ansi::RESET) << std::endl;
+        // 注意这里不在最后加 RESET，交给底层传递回来的字符串本身控制
+        std::cerr << "\n" << jc::col(jc::Ansi::BRIGHT_RED)
+            << "Error in '" << resolvedPath << "':\n"
+            << ex.what() << std::endl;
     }
     if (g_profile && jc::VM::activeVM) {
         jc::VM::activeVM->printProfileReport();
@@ -401,7 +400,8 @@ int main(int argc, char* argv[]) {
             }
         }
         catch (const std::exception& e) {
-            std::cerr << jc::col(jc::Ansi::BRIGHT_RED) << "   " << e.what() << jc::col(jc::Ansi::RESET) << std::endl;
+            std::cerr << jc::col(jc::Ansi::BRIGHT_RED)
+                << "Error: " << e.what() << jc::col(jc::Ansi::RESET) << std::endl;
         }
     }
 

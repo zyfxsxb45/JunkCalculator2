@@ -1,4 +1,4 @@
-// VM.cpp
+//Vm.cpp
 #include "VM.h"
 #include "Module.h"
 #include "BuiltinRegistry.h"
@@ -8,32 +8,77 @@
 #include <cmath>
 #include <stdexcept>
 #include <filesystem>
-
+#include <sstream>
 namespace jc {
 
-    auto formatEscape = [](int errLine, const std::string& rawMsg, const std::string& sourceFile) {
-        std::string m = rawMsg;
-        if (errLine > 0 && m.find("[") != 0) {
-            std::string fn = "Script";
-            try { fn = std::filesystem::path(sourceFile).filename().string(); }
-            catch (...) {}
-            if (fn.empty()) fn = "Script";
-            m = "[" + fn + " : " + std::to_string(errLine) + "] " + m;
+    // =======================================================
+    // ★ 统一拦截与展开 Try-Catch 栈
+    // =======================================================
+    bool VM::handleExceptionUnwind(std::string& msg) {
+        if (!exceptionHandlers.empty() && exceptionHandlers.back().frameIndex >= currentTargetFrameDepth) {
+            auto handler = exceptionHandlers.back();
+            exceptionHandlers.pop_back();
+
+            // 剥除所有比 catch 更深的函数堆栈
+            while (static_cast<int>(frames.size()) > handler.frameIndex + 1) frames.pop_back();
+
+            // 回复当时的变量栈大小
+            stack.resize(handler.stackSize);
+
+            // 向前兼容清洗（万一由内部某处带上了 [Line，强行剥离保证纯净赋给 e 变量）
+            if (msg.find("[Line ") == 0) {
+                size_t c = msg.find("] ");
+                if (c != std::string::npos) msg = msg.substr(c + 2);
+            }
+
+            push(Value(msg));
+            frame().ip = handler.ip;
+            return true; // 代表已经成功捕获，指示外层继续 run()
         }
-        return m;
-        };
+        return false; // 无人捕获，通知外层构建 StackTrace 熔断！
+    }
+    // =======================================================
+    // ★ 构建绚丽的 Traceback 调用栈回溯日志
+    // =======================================================
+    std::string VM::buildStackTrace(const std::string& errorMsg) {
+        std::ostringstream oss;
+        oss << errorMsg << "\n";
 
-    int VM::currentLine() {
-        if (frames.empty()) return 0;
+        // ★ 核心修复 1：不要使用 RESET 把外层的红洗没，使用专属于后续文本的颜色控制！
+        oss << col(Ansi::GRAY) << "Traceback (most recent call last):\n";
 
-        int errorIp = frame().ip - 1;
-        if (errorIp < 0) errorIp = 0;
+        for (int i = static_cast<int>(frames.size()) - 1; i >= 0; --i) {
+            const CallFrame& f = frames[i];
 
-        const auto& lines = currentChunk().lines;
-        for (int i = std::min(errorIp, static_cast<int>(lines.size()) - 1); i >= 0; --i) {
-            if (lines[i] > 0) return lines[i];
+            int ip = f.ip - 1;
+            if (ip < 0) ip = 0;
+
+            const auto& lines = f.function->chunk.lines;
+            int errLine = 0;
+            if (!lines.empty()) {
+                if (ip >= static_cast<int>(lines.size())) ip = static_cast<int>(lines.size()) - 1;
+                errLine = lines[ip];
+            }
+
+            std::string fnName = f.function->name;
+            if (fnName == "<script>" || fnName == "<eval>") {
+                std::string sfile = f.function->sourceFile;
+                if (sfile.empty()) sfile = "REPL";
+                else {
+                    try { sfile = std::filesystem::path(sfile).filename().string(); }
+                    catch (...) {}
+                }
+                oss << "  at [Line " << errLine << "] in " << sfile << "\n";
+            }
+            else {
+                oss << "  at [Line " << errLine << "] in " << fnName << "()\n";
+            }
         }
-        return 0;
+
+        // ★ 核心修复 2：在所有堆栈打印完毕后，最后加一个 RESET 以确保后续无污染
+        oss << col(Ansi::RESET);
+
+        return oss.str();
     }
 
     static bool vmValuesEqual(const Value& lhs, const Value& rhs) {
@@ -411,22 +456,6 @@ namespace jc {
         return run(0);
     }
 
-    void VM::throwError(const std::string& msg) {
-        if (!exceptionHandlers.empty()) {
-            auto handler = exceptionHandlers.back();
-            exceptionHandlers.pop_back();
-            while (static_cast<int>(frames.size()) > handler.frameIndex + 1)
-                frames.pop_back();
-            stack.resize(handler.stackSize);
-            push(Value(msg));
-            frame().ip = handler.ip;
-        }
-        else {
-            std::string sfile = frames.empty() ? "" : frame().function->sourceFile;
-            throw std::runtime_error(formatEscape(currentLine(), msg, sfile));
-        }
-    }
-
     Value VM::callVMFunction(int fnIdx, const std::vector<Value>& args,
         std::shared_ptr<std::vector<Value>> upvalues,
         Value boundSelf, Value boundClass) {
@@ -436,8 +465,6 @@ namespace jc {
         int savedTargetFrameDepth = currentTargetFrameDepth;
         auto savedRefWritebacks = pendingRefWritebacks;
         pendingRefWritebacks.clear();
-        int originalStackSize = static_cast<int>(stack.size());
-        int originalFramesSize = static_cast<int>(frames.size());
 
         for (const auto& arg : args)
             push(arg);
@@ -500,11 +527,14 @@ namespace jc {
         try {
             result = run(boundary);
         }
+        catch (const StackTracedException&) {
+            currentTargetFrameDepth = savedTargetFrameDepth;
+            pendingRefWritebacks = savedRefWritebacks;
+            throw;
+        }
         catch (...) {
             currentTargetFrameDepth = savedTargetFrameDepth;
             pendingRefWritebacks = savedRefWritebacks;
-            frames.resize(originalFramesSize);
-            stack.resize(originalStackSize);
             throw;
         }
         if (profileMode) {
@@ -525,10 +555,22 @@ namespace jc {
         return result;
     }
 
+    // =======================================================
+    // 返回当前执行帧指令对应的源码行号（仅用于断点调试显示）
+    // =======================================================
+    int VM::currentLine() {
+        if (frames.empty()) return 0;
+        int errorIp = frame().ip - 1;
+        if (errorIp < 0) errorIp = 0;
+        const auto& lines = currentChunk().lines;
+        for (int i = std::min(errorIp, static_cast<int>(lines.size()) - 1); i >= 0; --i) {
+            if (lines[i] > 0) return lines[i];
+        }
+        return 0;
+    }
+
     Value VM::run(int targetFrameDepth) {
         currentTargetFrameDepth = targetFrameDepth;
-
-		
 
         while (true) {
             
@@ -1284,30 +1326,8 @@ namespace jc {
                         std::ostringstream oss; oss << errVal;
                         msg = oss.str();
                     }
-
-                    if (!exceptionHandlers.empty() && exceptionHandlers.back().frameIndex >= currentTargetFrameDepth) {
-                        auto handler = exceptionHandlers.back();
-                        exceptionHandlers.pop_back();
-                        while (static_cast<int>(frames.size()) > handler.frameIndex + 1) frames.pop_back();
-                        stack.resize(handler.stackSize);
-
-                        // ★ 原地捕获也顺手清洗，保证极致干净
-                        if (msg.find("[Line ") == 0) {
-                            size_t c = msg.find("] ");
-                            if (c != std::string::npos) msg = msg.substr(c + 2);
-                        }
-                        push(Value(msg));
-                        frame().ip = handler.ip;
-                        continue; // 跳转到 catch 块
-                    }
-
-                    // ★ 逃出当前 run() 循环：立刻烙印最深处案发第一现场的真实行号！
-                    int errLine = currentLine();
-                    if (errLine > 0 && msg.find("[Line") == std::string::npos) {
-                        msg = "[Line " + std::to_string(errLine) + "] " + msg;
-                    }
-                    throw std::runtime_error(msg);
-                }
+                    throw ErrorSignal(msg);
+                } 
 
                 case OpCode::OP_BUILD_DICT: {
                     uint16_t count = readShort();
@@ -1772,63 +1792,26 @@ namespace jc {
 
             }
             // =======================================================
-            // ★ 异常捕获与行号处理区 (VM 内外边界防火墙)
+            // ★ 异常捕获与 Traceback 调用栈回溯 (Stack Tracing)
             // =======================================================
+            catch (const StackTracedException&) {
+                // 这个异常已经在更深处的 C++ 潜逃虚拟机层完成了全栈 Trace 抓拍，原样向外透传保护即可！
+                throw;
+            }
             catch (const ErrorSignal& sig) {
                 std::string msg = sig.message;
-                if (!exceptionHandlers.empty() && exceptionHandlers.back().frameIndex >= currentTargetFrameDepth) {
-                    auto handler = exceptionHandlers.back();
-                    exceptionHandlers.pop_back();
-                    while (static_cast<int>(frames.size()) > handler.frameIndex + 1) frames.pop_back();
-                    stack.resize(handler.stackSize);
-
-                    // 原地捕获也顺手清洗，保证极致干净
-                    if (msg.find("[") == 0) {
-                        size_t c = msg.find("] ");
-                        if (c != std::string::npos) msg = msg.substr(c + 2);
-                    }
-                    push(Value(msg));
-                    frame().ip = handler.ip;
-                    continue;
-                }
-
-                std::string sfile = frames.empty() ? "" : frame().function->sourceFile;
-                throw std::runtime_error(formatEscape(currentLine(), sig.message, sfile));
+                if (handleExceptionUnwind(msg)) continue;
+                throw StackTracedException(msg, buildStackTrace(msg));
             }
             catch (const std::exception& ex) {
                 std::string msg = ex.what();
-                if (!exceptionHandlers.empty() && exceptionHandlers.back().frameIndex >= currentTargetFrameDepth) {
-                    auto handler = exceptionHandlers.back();
-                    exceptionHandlers.pop_back();
-                    while (static_cast<int>(frames.size()) > handler.frameIndex + 1) frames.pop_back();
-                    stack.resize(handler.stackSize);
-
-                    if (msg.find("[") == 0) {
-                        size_t c = msg.find("] ");
-                        if (c != std::string::npos) msg = msg.substr(c + 2);
-                    }
-                    push(Value(msg));
-                    frame().ip = handler.ip;
-                    continue;
-                }
-
-                std::string sfile = frames.empty() ? "" : frame().function->sourceFile;
-                throw std::runtime_error(formatEscape(currentLine(), ex.what(), sfile));
+                if (handleExceptionUnwind(msg)) continue;
+                throw StackTracedException(msg, buildStackTrace(msg));
             }
             catch (...) {
                 std::string msg = "Unknown VM Error";
-                if (!exceptionHandlers.empty() && exceptionHandlers.back().frameIndex >= currentTargetFrameDepth) {
-                    auto handler = exceptionHandlers.back();
-                    exceptionHandlers.pop_back();
-                    while (static_cast<int>(frames.size()) > handler.frameIndex + 1) frames.pop_back();
-                    stack.resize(handler.stackSize);
-                    push(Value(msg));
-                    frame().ip = handler.ip;
-                    continue;
-                }
-
-                std::string sfile = frames.empty() ? "" : frame().function->sourceFile;
-                throw std::runtime_error(formatEscape(currentLine(), "Unknown VM Error", sfile));
+                if (handleExceptionUnwind(msg)) continue;
+                throw StackTracedException(msg, buildStackTrace(msg));
             }
         }
     }
@@ -2467,7 +2450,84 @@ namespace jc {
                 return;
             }
 
-            int i = static_cast<int>(std::round(idx.asDouble()));
+            // ── Instance (__getitem__) ──
+            if (std::holds_alternative<std::shared_ptr<Instance>>(obj.data)) {
+                auto inst = std::get<std::shared_ptr<Instance>>(obj.data);
+                auto c = inst->classDef;
+                std::shared_ptr<FunctionClosure> getitemMethod;
+                while (c) {
+                    auto it = c->methods.find("__getitem__");
+                    if (it != c->methods.end()) {
+                        getitemMethod = it->second;
+                        break;
+                    }
+                    c = c->parent;
+                }
+                if (getitemMethod) {
+                    if (getitemMethod->isBytecode()) {
+                        auto& fnDef = compiledFunctions[getitemMethod->compiledFnIndex];
+                        push(idx);
+                        int padCount = fnDef->maxArity - 1;
+                        for (int j = 0; j < padCount; ++j) push(Value::none());
+                        int reserveCount = fnDef->localCount - fnDef->maxArity;
+                        for (int j = 0; j < reserveCount; ++j) push(Value::none());
+
+                        CallFrame newFrame;
+                        newFrame.function = fnDef.get();
+                        newFrame.ip = 0;
+                        newFrame.stackBase = static_cast<int>(stack.size()) - fnDef->localCount;
+
+                        if (getitemMethod->hasCaptures()) {
+                            newFrame.upvalues = std::any_cast<std::shared_ptr<std::vector<Value>>>(getitemMethod->capturedEnv);
+                        }
+                        newFrame.selfContext = Value(inst);
+                        newFrame.classContext = Value(inst->classDef);
+                        frames.push_back(newFrame);
+                        return; // ★ 绝对返回防线
+                    }
+                    else if (getitemMethod->isNative()) {
+                        helpers::nativeSelfStack.push_back(Value(inst));
+                        helpers::nativeClassStack.push_back(Value(inst->classDef));
+                        Value result;
+                        try {
+                            auto& fn = std::any_cast<NativeCallable&>(getitemMethod->nativeFn);
+                            result = fn({ idx });
+                        }
+                        catch (...) {
+                            helpers::nativeSelfStack.pop_back(); helpers::nativeClassStack.pop_back();
+                            throw;
+                        }
+                        helpers::nativeSelfStack.pop_back(); helpers::nativeClassStack.pop_back();
+                        push(result);
+                        return; // ★ 绝对返回防线
+                    }
+                    else {
+                        throw std::runtime_error("VM Error: __getitem__ has no callable implementation.");
+                    }
+                }
+                else {
+                    throw std::runtime_error("VM Error: Cannot index this instance (no __getitem__).");
+                }
+            }
+
+            // ==========================================================
+            // ★ 高级容器阻断防线 (放在 Instance 检查下面！)
+            // ==========================================================
+            if (!std::holds_alternative<RealMatrix>(obj.data) &&
+                !std::holds_alternative<ComplexMatrix>(obj.data) &&
+                !std::holds_alternative<StringMatrix>(obj.data) &&
+                !std::holds_alternative<List>(obj.data) &&
+                !std::holds_alternative<std::string>(obj.data)) {
+                throw std::runtime_error("TypeError: Cannot index into a value of type '" + getTypeName(obj) + "'.");
+            }
+
+            int i = 0;
+            try {
+                i = static_cast<int>(std::round(idx.asDouble()));
+            }
+            catch (...) {
+                throw std::runtime_error("TypeError: Array or List index must be a number, got '" + getTypeName(idx) + "'.");
+            }
 
             if (std::holds_alternative<RealMatrix>(obj.data)) {
                 const auto& m = std::get<RealMatrix>(obj.data);
@@ -2524,78 +2584,6 @@ namespace jc {
                     throw std::runtime_error("VM Error: String index out of bounds.");
                 push(Value(std::string(1, s[i])));
             }
-            // ── Instance (__getitem__) ──
-            else if (std::holds_alternative<std::shared_ptr<Instance>>(obj.data)) {
-                auto inst = std::get<std::shared_ptr<Instance>>(obj.data);
-                auto c = inst->classDef;
-                std::shared_ptr<FunctionClosure> getitemMethod;
-                while (c) {
-                    auto it = c->methods.find("__getitem__");
-                    if (it != c->methods.end()) {
-                        getitemMethod = it->second;
-                        break;
-                    }
-                    c = c->parent;
-                }
-                if (getitemMethod) {
-                    // ★ 不再使用 globals["self"] = Value(inst); 
-                    if (getitemMethod->isBytecode()) {
-                        auto& fnDef = compiledFunctions[getitemMethod->compiledFnIndex];
-
-                        push(idx); // 将参数重新压回栈
-
-                        // ★ 补齐缺省的默认参数
-                        int padCount = fnDef->maxArity - 1;
-                        for (int j = 0; j < padCount; ++j) push(Value::none());
-
-                        // ★ 为该方法的 Auto-local 预留局部变量栈槽
-                        int reserveCount = fnDef->localCount - fnDef->maxArity;
-                        for (int j = 0; j < reserveCount; ++j) push(Value::none());
-
-                        CallFrame newFrame;
-                        newFrame.function = fnDef.get();
-                        newFrame.ip = 0;
-                        // 基址对齐至参数(idx)起始处
-                        newFrame.stackBase = static_cast<int>(stack.size()) - fnDef->localCount;
-
-                        if (getitemMethod->hasCaptures()) {
-                            newFrame.upvalues = std::any_cast<std::shared_ptr<std::vector<Value>>>(getitemMethod->capturedEnv);
-                        }
-
-                        // ★ NEW：直接注入专属上下文帧！
-                        newFrame.selfContext = Value(inst);
-                        newFrame.classContext = Value(inst->classDef);
-
-                        frames.push_back(newFrame);
-                        return;
-                    }
-                    else if (getitemMethod->isNative()) {
-                        // ★ NEW：如果是 C++ 层，压入原生保护栈
-                        helpers::nativeSelfStack.push_back(Value(inst));
-                        helpers::nativeClassStack.push_back(Value(inst->classDef));
-                        Value result;
-                        try {
-                            auto& fn = std::any_cast<NativeCallable&>(getitemMethod->nativeFn);
-                            result = fn({ idx });
-                        }
-                        catch (...) {
-                            helpers::nativeSelfStack.pop_back(); helpers::nativeClassStack.pop_back();
-                            throw;
-                        }
-                        helpers::nativeSelfStack.pop_back(); helpers::nativeClassStack.pop_back();
-                        push(result);
-                    }
-                    else {
-                        throw std::runtime_error("VM Error: __getitem__ has no callable implementation.");
-                    }
-                }
-                else {
-                    throw std::runtime_error("VM Error: Cannot index this instance (no __getitem__).");
-                }
-            }
-            else {
-                throw std::runtime_error("VM Error: Cannot index this type.");
-            }
         }
         else if (dims == 2) {
             Value col = pop();
@@ -2629,7 +2617,6 @@ namespace jc {
         else {
             throw std::runtime_error("VM Error: Unsupported index dimensionality.");
         }
-        return;
     }
 
     void VM::execIndexSet(uint8_t dims) {
@@ -2651,7 +2638,69 @@ namespace jc {
                 return;
             }
 
-            int i = static_cast<int>(std::round(idx.asDouble()));
+            // ── Instance (__setitem__) ──
+            if (std::holds_alternative<std::shared_ptr<Instance>>(obj.data)) {
+                auto inst = std::get<std::shared_ptr<Instance>>(obj.data);
+                auto c = inst->classDef;
+                std::shared_ptr<FunctionClosure> setitemMethod;
+                while (c) {
+                    auto it = c->methods.find("__setitem__");
+                    if (it != c->methods.end()) {
+                        setitemMethod = it->second;
+                        break;
+                    }
+                    c = c->parent;
+                }
+                if (setitemMethod) {
+                    if (setitemMethod->isBytecode()) {
+                        std::shared_ptr<std::vector<Value>> captures = nullptr;
+                        if (setitemMethod->hasCaptures())
+                            captures = std::any_cast<std::shared_ptr<std::vector<Value>>>(setitemMethod->capturedEnv);
+
+                        callVMFunction(setitemMethod->compiledFnIndex, { idx, val }, captures, Value(inst), Value(inst->classDef));
+                        return; // ★ 绝对返回防线！
+                    }
+                    else if (setitemMethod->isNative()) {
+                        helpers::nativeSelfStack.push_back(Value(inst));
+                        helpers::nativeClassStack.push_back(Value(inst->classDef));
+                        try {
+                            auto& fn = std::any_cast<NativeCallable&>(setitemMethod->nativeFn);
+                            fn({ idx, val });
+                        }
+                        catch (...) {
+                            helpers::nativeSelfStack.pop_back(); helpers::nativeClassStack.pop_back();
+                            throw;
+                        }
+                        helpers::nativeSelfStack.pop_back(); helpers::nativeClassStack.pop_back();
+                        return; // ★ 绝对返回防线！
+                    }
+                    else {
+                        throw std::runtime_error("VM Error: __setitem__ has no callable implementation.");
+                    }
+                }
+                else {
+                    throw std::runtime_error("VM Error: Cannot assign index on this instance (no __setitem__).");
+                }
+            }
+
+            // ==========================================================
+            // ★ 高级容器阻断防线 (放在 Instance 检查下面！)
+            // ==========================================================
+            if (!std::holds_alternative<RealMatrix>(obj.data) &&
+                !std::holds_alternative<ComplexMatrix>(obj.data) &&
+                !std::holds_alternative<StringMatrix>(obj.data) &&
+                !std::holds_alternative<List>(obj.data) &&
+                !std::holds_alternative<std::string>(obj.data)) {
+                throw std::runtime_error("TypeError: Cannot index into a value of type '" + getTypeName(obj) + "'.");
+            }
+
+            int i = 0;
+            try {
+                i = static_cast<int>(std::round(idx.asDouble()));
+            }
+            catch (...) {
+                throw std::runtime_error("TypeError: Array or List index must be a number, got '" + getTypeName(idx) + "'.");
+            }
 
             if (std::holds_alternative<RealMatrix>(obj.data)) {
                 auto& m = std::get<RealMatrix>(obj.data);
@@ -2690,7 +2739,7 @@ namespace jc {
                         m(i, 0) = val.asDouble();
                     }
                     else {
-                        // ★ 2D 矩阵整行赋值 / 广播
+                        // 2D 矩阵整行赋值 / 广播
                         if (i < 0) i = m.getRows() + i;
                         if (i < 0 || i >= m.getRows()) throw std::out_of_range("VM Error: Row index out of bounds.");
                         if (std::holds_alternative<RealMatrix>(val.data)) {
@@ -2718,23 +2767,19 @@ namespace jc {
                     m(i, 0) = val.asComplex();
                 }
                 else {
-                    // ★ 2D 复数矩阵整行赋值 / 广播
                     if (i < 0) i = m.getRows() + i;
                     if (i < 0 || i >= m.getRows()) throw std::out_of_range("VM Error: Row index out of bounds.");
-
                     if (std::holds_alternative<ComplexMatrix>(val.data)) {
                         auto srcFlat = std::get<ComplexMatrix>(val.data).rawData();
                         if (static_cast<int>(srcFlat.size()) != m.getCols()) throw std::runtime_error("VM Error: Row assignment size mismatch.");
                         for (int j = 0; j < m.getCols(); ++j) m(i, j) = srcFlat[j];
                     }
-                    // ★ 补足支持对复数矩阵写入实值行向量：
                     else if (std::holds_alternative<RealMatrix>(val.data)) {
                         auto srcFlat = std::get<RealMatrix>(val.data).rawData();
                         if (static_cast<int>(srcFlat.size()) != m.getCols()) throw std::runtime_error("VM Error: Row assignment size mismatch.");
                         for (int j = 0; j < m.getCols(); ++j) m(i, j) = Complex(srcFlat[j], 0.0);
                     }
                     else {
-                        // 标量广播
                         Complex cv = val.asComplex();
                         for (int j = 0; j < m.getCols(); ++j) m(i, j) = cv;
                     }
@@ -2742,7 +2787,6 @@ namespace jc {
             }
             else if (std::holds_alternative<StringMatrix>(obj.data)) {
                 auto& m = std::get<StringMatrix>(obj.data);
-
                 if (m.getRows() == 1) {
                     if (i < 0) i = m.getCols() + i;
                     if (std::holds_alternative<std::string>(val.data)) m(0, i) = std::get<std::string>(val.data);
@@ -2754,29 +2798,24 @@ namespace jc {
                     else { std::ostringstream oss; oss << val; m(i, 0) = oss.str(); }
                 }
                 else {
-                    // ★ 2D 字符串矩阵整行赋值 / 广播
                     if (i < 0) i = m.getRows() + i;
                     if (i < 0 || i >= m.getRows()) throw std::out_of_range("VM Error: Row index out of bounds.");
-
                     if (std::holds_alternative<StringMatrix>(val.data)) {
                         auto srcFlat = std::get<StringMatrix>(val.data).rawData();
                         if (static_cast<int>(srcFlat.size()) != m.getCols()) throw std::runtime_error("VM Error: Row assignment size mismatch.");
                         for (int j = 0; j < m.getCols(); ++j) m(i, j) = srcFlat[j];
                     }
-                    // ★ 将任何实数矩阵映射到字符串行中
                     else if (std::holds_alternative<RealMatrix>(val.data)) {
                         auto srcFlat = std::get<RealMatrix>(val.data).rawData();
                         if (static_cast<int>(srcFlat.size()) != m.getCols()) throw std::runtime_error("VM Error: Row assignment size mismatch.");
                         for (int j = 0; j < m.getCols(); ++j) { std::ostringstream oss; oss << Value(srcFlat[j]); m(i, j) = oss.str(); }
                     }
-                    // ★ 将任何复数矩阵映射到字符串行中
                     else if (std::holds_alternative<ComplexMatrix>(val.data)) {
                         auto srcFlat = std::get<ComplexMatrix>(val.data).rawData();
                         if (static_cast<int>(srcFlat.size()) != m.getCols()) throw std::runtime_error("VM Error: Row assignment size mismatch.");
                         for (int j = 0; j < m.getCols(); ++j) { std::ostringstream oss; oss << Value(srcFlat[j]); m(i, j) = oss.str(); }
                     }
                     else {
-                        // 标量广播
                         std::string s;
                         if (std::holds_alternative<std::string>(val.data)) s = std::get<std::string>(val.data);
                         else { std::ostringstream oss; oss << val; s = oss.str(); }
@@ -2796,50 +2835,6 @@ namespace jc {
                     std::get<std::string>(val.data).size() != 1)
                     throw std::runtime_error("VM Error: String element assignment requires a single character.");
                 s[i] = std::get<std::string>(val.data)[0];
-            }
-            // ── Instance (__setitem__) ──
-            else if (std::holds_alternative<std::shared_ptr<Instance>>(obj.data)) {
-                auto inst = std::get<std::shared_ptr<Instance>>(obj.data);
-                auto c = inst->classDef;
-                std::shared_ptr<FunctionClosure> setitemMethod;
-                while (c) {
-                    auto it = c->methods.find("__setitem__");
-                    if (it != c->methods.end()) {
-                        setitemMethod = it->second;
-                        break;
-                    }
-                    c = c->parent;
-                }
-                if (setitemMethod) {
-                    // ★ 不再使用 globals["self"] = Value(inst); 
-                    if (setitemMethod->isBytecode()) {
-                        std::shared_ptr<std::vector<Value>> captures = nullptr;
-                        if (setitemMethod->hasCaptures())
-                            captures = std::any_cast<std::shared_ptr<std::vector<Value>>>(setitemMethod->capturedEnv);
-
-                        // ★ NEW：向 callVMFunction 直接投喂 boundSelf 和 boundClass！
-                        callVMFunction(setitemMethod->compiledFnIndex, { idx, val }, captures, Value(inst), Value(inst->classDef));
-                    }
-                    else if (setitemMethod->isNative()) {
-                        helpers::nativeSelfStack.push_back(Value(inst));
-                        helpers::nativeClassStack.push_back(Value(inst->classDef));
-                        try {
-                            auto& fn = std::any_cast<NativeCallable&>(setitemMethod->nativeFn);
-                            fn({ idx, val });
-                        }
-                        catch (...) {
-                            helpers::nativeSelfStack.pop_back(); helpers::nativeClassStack.pop_back();
-                            throw;
-                        }
-                        helpers::nativeSelfStack.pop_back(); helpers::nativeClassStack.pop_back();
-                    }
-                    else {
-                        throw std::runtime_error("VM Error: __setitem__ has no callable implementation.");
-                    }
-                }
-                else {
-                    throw std::runtime_error("VM Error: Cannot assign index on this instance (no __setitem__).");
-                }
             }
         }
         else if (dims == 2) {
@@ -2885,10 +2880,6 @@ namespace jc {
                 throw std::runtime_error("VM Error: 2D index assignment requires a matrix.");
             }
         }
-        else {
-            throw std::runtime_error("VM Error: Unsupported index dimensionality for assignment.");
-        }
-        return;
     }
 
     void VM::execSliceGet(uint8_t dims) {
