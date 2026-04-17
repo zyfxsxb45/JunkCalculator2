@@ -160,6 +160,7 @@ namespace jc {
     ^                   Power             2^10 → 1024 (NOT bitwise XOR!)
     %                   Truncated modulo  (-7) % 3 → -1
     =                   Assignment        x = 42
+
   Set & Bitwise Operators
   ──────────────────────
     |                   Set Union / Base-2 Bitwise OR
@@ -175,6 +176,20 @@ namespace jc {
     x /= expr           x %= expr           x ^= expr
     x &= expr           x |= expr
     Also works on indexed elements: A[i, j] += 1, d.flag |= Set("X")
+
+  Comma Sequence (Serial Evaluation)
+  ──────────────────────
+    expr1, expr2, expr3
+    Evaluates each expression from left to right, discarding the results 
+    of all but the last. The entire sequence returns the final expression.
+    
+      a = 1, b = 2, c = 3           // Sequential execution without braces
+      
+    ★ Priority Warning: The comma (,) has the LOWEST operator priority. 
+    To capture the return value of a sequence or use it in a lambda body, 
+    you MUST wrap it in parentheses to protect its boundaries:
+      val = (a = 10, b = 20, 30)    // val becomes 30
+      f = (x) => (t = x*2, t+1)     // Lambda series
 
    Destructuring Assignment (Arrays & Dicts)
   ──────────────────────
@@ -224,28 +239,29 @@ namespace jc {
 
     Returns a row vector if all elements are real numbers, otherwise a List.
 
-  Pipe Operator (|>)
+  Pipe Operator (|>) & Multi-line Rules
   ──────────────────────
     expr |> function                 Passes expr as the argument to function.
-    Equivalent to function(expr), but reads left-to-right.
+    Reads left-to-right. Equivalent to function(expr).
 
     Chaining:
       [3,1,4,1,5] |> sort |> unique |> reverse
-      // Equivalent to: reverse(unique(sort([3,1,4,1,5])))
 
-    With lambdas:
-      [1,2,3,4,5]
-        |> (v) => filter((x) => x > 2, v)
-        |> (v) => map((x) => x^2, v)
-        |> sum
-      // → 50 (= 9 + 16 + 25)
+    ★ Multi-line Rules:
+    Because JC2 uses newlines to end statements, to split a pipe chain across 
+    multiple lines, you MUST either wrap the entire chain in parentheses `(...)` 
+    OR place the `|>` operator at the very end of the previous line:
 
-    Multi-line pipes: place |> at the END of the line. JC2 will 
-    automatically read the next line as a continuation:
-      data |>
-        sort |>
-        unique |>
-        reverse
+      // Method 1: Wrap in parentheses (Recommended for leading pipes)
+      result = ( [1,2,3,4,5]
+          |> filter((x) => x > 2, _)
+          |> map((x) => x^2, _)
+          |> sum )
+          
+      // Method 2: Trailing pipes
+      result = data |>
+          sort |>
+          reverse
 
   Default Parameter Values
   ──────────────────────
@@ -403,7 +419,7 @@ namespace jc {
     sqrt(-1)             Automatic promotion → 1i
 
     z = complex(3, 4)    Constructor form → 3+4i
-    z = complex(1.5)     Real → Complex with imag=0 → 1.5
+    z = complex(1.5)     Real → Complex with imag=0 → 1.5+0i
     z = complex(3+4i)    Pass-through (already complex)
 
     The 'i' suffix is a lexical literal — it cannot be accidentally
@@ -1113,7 +1129,7 @@ namespace jc {
     After import, module functions are indistinguishable from built-ins.
 )HELP" },
 
-        {"control", R"HELP(
+        { "control", R"HELP(
 ═══ Control Flow ═══
 
   Truthiness
@@ -1129,12 +1145,19 @@ namespace jc {
   If / Else
   ──────────────────────
     if (cond) { body } else if (c2) { body } else { body }
-    Returns the value of the final evaluated expression in the block.
+    
+    ★ Single-line Shorthand: Braces {} are OPTIONAL for single statements!
+      if (HP <= 0) die() else play_hit_sound()
+      
+    Returns the value of the final evaluated expression in the selected branch.
 
   For / While Loops
   ──────────────────────
     while (cond) { body }
     for (init; cond; update) { body }
+    
+    ★ Single-line Shorthand:
+      while (i < 10) i += 1
 
   For-In Loop
   ──────────────────────
@@ -1143,8 +1166,7 @@ namespace jc {
 
     Destructured For-In:
       for ([var1, var2] in iterable) { body }
-      for ([key, val] in dict("a", 1)) { ... }
-      for ([num, letter] in zip(list1, list2)) { ... }
+      for ([key, val] in dict("a", 1)) print(key)   // No braces needed!
 
   Switch
   ──────────────────────
@@ -1154,12 +1176,16 @@ namespace jc {
     }
     Expression returns the matched branch value. No fall-through.
 
-  Control Statements
+  Control Statements & Scope Safety
   ──────────────────────
     break              Exit innermost loop
     continue           Skip to next iteration
     return expr        Exit function returning the evaluated expr
-)HELP"},
+    
+    *Note: Single-line statements (without braces) are inherently wrapped in 
+     implicit blocks. Any auto-local variable initialized inside a single-line 
+     statement remains securely isolated and will NOT pollute the outer scope!
+)HELP" },
 
         { "scope", R"HELP(
 ═══ Variable Scoping & Protection Rules ═══
@@ -1174,12 +1200,22 @@ namespace jc {
     All *newly assigned* variables inside a function or a method are 
     automatically local to that function's execution scope.
 
-  Global Declaration
+    Global Declaration (Variable Lifting)
   ──────────────────────
     To read and *modify* an outer/global variable from inside a function,
-    declare it via `global` FIRST:
+    declare it via `global` so it doesn't get shadowed as a new local:
       counter = 0
-      bump() = { global counter; counter += 1 }
+
+    ★ Inline Shorthand (Recommended):
+      bump() = global counter += 1      // Modifies outer 'counter' instantly!
+      reset() = global counter = 0      // Force assignment to outer scope.
+    
+    ★ Multi-declaration:
+      bump(x) = { 
+          global counter, last_add      // Declare multiple
+          counter += x
+          last_add = x
+      }
 
   Closures (Automatic Environment Capture)
   ──────────────────────
@@ -1768,25 +1804,14 @@ namespace jc {
   ──────────────────────
     a = Set(1, 2, 3)
     b = Set(2, 3, 4)
+
     a | b                           → Set{1, 2, 3, 4}
     a & b                           → Set{2, 3}
     a - b                           → Set{1}
     a * Set("x", "y")               → Set{[1, "x"], [1, "y"], ... [3, "y"]}
     setPow(Set(1, 2))               → Set{Set{}, Set{1}, Set{2}, Set{1, 2}}
-    chars = toSet("abracadabra")    → Set{"a", "b", "r", "c", "d"}
 
-  Examples
-  ──────────────────────
-    a = Set(1, 2, 3)
-    b = Set(2, 3, 4)
-
-    setUnion(a, b)                  → Set{1, 2, 3, 4}
-    setIntersect(a, b)              → Set{2, 3}
-    setSymDiff(a, b)                → Set{1, 4}
-    a * Set("x", "y")               → Set{[1, "x"], [1, "y"], ... [3, "y"]}
-    setPow(Set(1, 2))               → Set{Set{}, Set{1}, Set{2}, Set{1, 2}}
-
-    chars = toSet("abracadabra")    → Set{"a", "b", "r", "c", "d"}
+    chars = toSet("abracadabra")    → Set{"a", "b", "c", "d", "r"}
     3 in a                          → 1
     9 in a                          → 0
     isSubset(Set(1, 2), a)          → 1

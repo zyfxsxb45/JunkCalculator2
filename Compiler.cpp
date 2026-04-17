@@ -1568,4 +1568,17 @@ namespace jc {
         return {};
     }
 
+    std::any Compiler::visitSequenceExpr(SequenceExpr* expr) {
+        for (size_t i = 0; i < expr->expressions.size(); ++i) {
+            compileNode(expr->expressions[i].get());
+
+            // 除了最后一个表达式，其余的执行完后都要清理栈（丢弃结果）
+            if (i < expr->expressions.size() - 1) {
+                emit(OpCode::OP_POP, lastLine);
+            }
+        }
+        // 最后一个表达式的结果自然留在栈顶供上层读取
+        return {};
+    }
+
 }

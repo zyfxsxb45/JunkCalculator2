@@ -51,6 +51,7 @@ namespace jc {
     struct DictLiteral;        // ★
     struct SliceExpr;        // ★ 新增
     struct DictDestructAssign;
+    struct SequenceExpr;
 
     class ExprVisitor {
     public:
@@ -95,6 +96,7 @@ namespace jc {
         virtual std::any visitDictLiteral(DictLiteral* expr) = 0;  // ★
         virtual std::any visitSliceExpr(SliceExpr* expr) = 0;  // ★ 新增
         virtual std::any visitDictDestructAssign(DictDestructAssign* expr) = 0;
+        virtual std::any visitSequenceExpr(SequenceExpr* expr) = 0;
     };
 
     struct Expr {
@@ -562,6 +564,15 @@ namespace jc {
             : targets(std::move(targets)), value(std::move(value)) {
         }
         std::any accept(ExprVisitor& visitor) override { return visitor.visitDictDestructAssign(this); }
+    };
+
+    // ★ 逗号表达式序列 (expr1, expr2, expr3) -> 返回 expr3 的值
+    struct SequenceExpr : public Expr {
+        std::vector<std::unique_ptr<Expr>> expressions;
+        explicit SequenceExpr(std::vector<std::unique_ptr<Expr>> expressions)
+            : expressions(std::move(expressions)) {
+        }
+        std::any accept(ExprVisitor& visitor) override { return visitor.visitSequenceExpr(this); }
     };
 
 } // namespace jc

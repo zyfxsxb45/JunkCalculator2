@@ -5,7 +5,7 @@
 namespace jc {
 
     std::unique_ptr<Expr> Parser::expression() {
-        return assignment();
+        return sequence();
     }
 
     std::unique_ptr<Expr> Parser::pipe() {
@@ -114,6 +114,20 @@ namespace jc {
         return expr;
     }
 
+    std::unique_ptr<Expr> Parser::sequence() {
+        auto expr = assignment();
+        if (match({ TokenType::COMMA })) {
+            std::vector<std::unique_ptr<Expr>> exprs;
+            exprs.push_back(std::move(expr));
+            do {
+                while (match({ TokenType::NEWLINE })) {} // 容忍逗号后的换行
+                exprs.push_back(assignment());
+            } while (match({ TokenType::COMMA }));
+            return std::make_unique<SequenceExpr>(std::move(exprs));
+        }
+        return expr;
+    }
+
     std::unique_ptr<Expr> Parser::assignment() {
         auto expr = ternary();
 
@@ -121,9 +135,9 @@ namespace jc {
         if (match({ TokenType::PLUS_ASSIGN, TokenType::MINUS_ASSIGN,
                     TokenType::STAR_ASSIGN, TokenType::SLASH_ASSIGN,
                     TokenType::PERCENT_ASSIGN, TokenType::CARET_ASSIGN,
-                    TokenType::BIT_AND_ASSIGN, TokenType::BIT_OR_ASSIGN })) { // ★
+                    TokenType::BIT_AND_ASSIGN, TokenType::BIT_OR_ASSIGN })) {
             Token compOp = previous();
-            // 映射到基础运算符
+
             TokenType baseOp;
             switch (compOp.type) {
             case TokenType::PLUS_ASSIGN:    baseOp = TokenType::PLUS; break;
@@ -132,20 +146,44 @@ namespace jc {
             case TokenType::SLASH_ASSIGN:   baseOp = TokenType::SLASH; break;
             case TokenType::PERCENT_ASSIGN: baseOp = TokenType::PERCENT; break;
             case TokenType::CARET_ASSIGN:   baseOp = TokenType::CARET; break;
-            case TokenType::BIT_AND_ASSIGN: baseOp = TokenType::BIT_AND; break; // ★
-            case TokenType::BIT_OR_ASSIGN:  baseOp = TokenType::BIT_OR; break;  // ★
+            case TokenType::BIT_AND_ASSIGN: baseOp = TokenType::BIT_AND; break;
+            case TokenType::BIT_OR_ASSIGN:  baseOp = TokenType::BIT_OR; break;
             default: baseOp = TokenType::PLUS; break;
             }
+
             auto value = assignment();
+
+            // ★ 拦截 global 复合赋值，将其脱糖隐式合并为代码块！
+            if (auto* gdecl = dynamic_cast<GlobalDecl*>(expr.get())) {
+                if (gdecl->names.size() != 1) {
+                    throw std::runtime_error("Parser Error: Cannot use compound assignment on multiple global declarations.");
+                }
+                Token varTok = gdecl->names[0];
+                std::vector<std::unique_ptr<Expr>> stmts;
+                stmts.push_back(std::move(expr));  // 先插入单纯的 global 声明节点
+                stmts.push_back(std::make_unique<CompoundAssign>(
+                    std::make_unique<Variable>(varTok), baseOp, std::move(value))); // 再插入真正的修改动作
+                return std::make_unique<Block>(std::move(stmts));
+            }
             return std::make_unique<CompoundAssign>(std::move(expr), baseOp, std::move(value));
         }
-
+        // ── 处理标准赋值 (=) ──
         if (match({ TokenType::ASSIGN })) {
             Token equals = previous();
-
             int valueStartTokenIndex = current;
             auto value = assignment();
             int valueEndTokenIndex = current;
+            // ★ 拦截 global 标准赋值，将其脱糖隐式合并为代码块！
+            if (auto* gdecl = dynamic_cast<GlobalDecl*>(expr.get())) {
+                if (gdecl->names.size() != 1) {
+                    throw std::runtime_error("Parser Error: Cannot assign to multiple global declarations at once.");
+                }
+                Token varTok = gdecl->names[0];
+                std::vector<std::unique_ptr<Expr>> stmts;
+                stmts.push_back(std::move(expr)); // 声明穿透
+                stmts.push_back(std::make_unique<Assign>(varTok, std::move(value))); // 直接赋值给变量
+                return std::make_unique<Block>(std::move(stmts));
+            }
 
             if (auto* dotExpr = dynamic_cast<DotAccess*>(expr.get())) {
                 return std::make_unique<DotAssign>(
@@ -415,7 +453,7 @@ namespace jc {
                     if (!check(TokenType::RPAREN)) {
                         do {
                             while (match({ TokenType::NEWLINE })) {}
-                            args.push_back(assignment());
+                            args.push_back(assignment()); // ★ 降级调用，保护函数参数的逗号
                             while (match({ TokenType::NEWLINE })) {}
                         } while (match({ TokenType::COMMA }));
                     }
@@ -513,18 +551,18 @@ namespace jc {
                     while (match({ TokenType::NEWLINE })) {}
 
                     if (!check(TokenType::COLON) && !check(TokenType::COMMA) && !check(TokenType::RBRACKET)) {
-                        st = expression();
+                        st = assignment();
                     }
                     if (match({ TokenType::COLON })) {
                         isSl = true;
                         while (match({ TokenType::NEWLINE })) {}
                         if (!check(TokenType::COLON) && !check(TokenType::COMMA) && !check(TokenType::RBRACKET)) {
-                            en = expression();
+                            en = assignment();
                         }
                         if (match({ TokenType::COLON })) {
                             while (match({ TokenType::NEWLINE })) {}
                             if (!check(TokenType::COMMA) && !check(TokenType::RBRACKET)) {
-                                sp = expression();
+                                sp = assignment();
                             }
                         }
                     }
@@ -953,7 +991,7 @@ namespace jc {
                 consume(TokenType::ARROW, "Parser Error: Expect '=>' for lambda.");
 
                 int bodyStart = current;
-                auto body = check(TokenType::LBRACE) ? parseBlock() : expression();
+                auto body = check(TokenType::LBRACE) ? parseBlock() : assignment();
                 int bodyEnd = current;
 
                 std::string rawBody;
@@ -987,7 +1025,7 @@ namespace jc {
 
             if (!check(TokenType::RBRACKET)) {
                 // ★ 先解析第一个元素
-                currentRow.push_back(expression());
+                currentRow.push_back(assignment());
 
                 // ★ 检测列表推导式：[expr for x in ...]
                 if (check(TokenType::FOR)) {
@@ -999,7 +1037,7 @@ namespace jc {
                 if (match({ TokenType::COMMA })) {
                     do {
                         if (check(TokenType::SEMICOLON) || check(TokenType::RBRACKET)) break;
-                        currentRow.push_back(expression());
+                        currentRow.push_back(assignment());
                     } while (match({ TokenType::COMMA }));
                 }
 
@@ -1008,7 +1046,7 @@ namespace jc {
                     currentRow.clear();
                     while (!check(TokenType::RBRACKET) && !isAtEnd()) {
                         if (check(TokenType::SEMICOLON)) { advance(); continue; }
-                        currentRow.push_back(expression());
+                        currentRow.push_back(assignment());
                         if (match({ TokenType::COMMA })) continue;
                         else if (match({ TokenType::SEMICOLON })) {
                             matrixElements.push_back(std::move(currentRow));
@@ -1051,9 +1089,9 @@ namespace jc {
             if (check(TokenType::RBRACE)) break;
             if (match({ TokenType::CASE })) {
                 std::vector<std::unique_ptr<Expr>> values;
-                values.push_back(expression());
+                values.push_back(assignment()); 
                 while (match({ TokenType::COMMA })) {
-                    values.push_back(expression());
+                    values.push_back(assignment()); 
                 }
                 consume(TokenType::COLON, "Parser Error: Expect ':' after case value(s).");
                 auto body = parseBlock();
@@ -1146,7 +1184,7 @@ namespace jc {
                 "Parser Error: Expect '=' after method '" + methodName.lexeme + "' parameters.");
 
             int bodyStart = current;
-            auto body = check(TokenType::LBRACE) ? parseBlock() : expression();
+            auto body = check(TokenType::LBRACE) ? parseBlock() : assignment();
             int bodyEnd = current;
 
             std::string rawBody;

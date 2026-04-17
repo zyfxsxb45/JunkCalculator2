@@ -114,6 +114,7 @@ namespace jc {
         std::any visitDictLiteral(DictLiteral*) override;
         std::any visitSliceExpr(SliceExpr*) override;
         std::any visitDictDestructAssign(DictDestructAssign*) override;
+        std::any visitSequenceExpr(SequenceExpr* expr) override;
     };
 
 }
