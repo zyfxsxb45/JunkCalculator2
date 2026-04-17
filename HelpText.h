@@ -2468,14 +2468,16 @@ namespace jc {
         • Matrix:    [1, 2; 3, 4]   → "\begin{pmatrix} 1 & 2 \\ ... \end{pmatrix}"
         • List:      list(1, 2)     → "\left[ 1, 2 \right]"
 
-  Direct Evaluation (LaTeX → Number)
+  Direct Evaluation (LaTeX → Number or Complex)
   ──────────────────────
     eval_latex("formula")
         Parses and evaluates a constant LaTeX math string directly.
+        The underlying engine fully supports the Complex Plane.
         (Tip: Use r-strings `r"..."` so you don't have to double-escape backslashes!)
         
         eval_latex(r"\frac{1+\sqrt{5}}{2}")       → 1.618033
-        eval_latex(r"\sin(\pi / 2) + e^0")        → 2.0
+        eval_latex(r"\frac{1+i}{2}")              → 0.5 + 0.5i
+        eval_latex(r"e^{i \pi} + 1")              → 0 + 0i  (Euler's Identity!)
 
   JIT Compilation to JC2 Closures (LaTeX → JC2 Function)
   ──────────────────────
@@ -2487,10 +2489,10 @@ namespace jc {
         // 1. Compile the LaTeX math into a native callable function f(x, \theta)
         f = compile_latex(r"\frac{\sin(\theta)}{x^2}", ["x", r"\theta"])
         
-        // 2. Call it interactively with lightning speed!
+        // 2. Call it interactively! (Supports real and complex arguments)
         f(2.0, PI/2)                 → 0.25
         
-        // 3. It works with all higher-order and calculus functions!
+        // 3. Works seamlessly with all higher-order and calculus functions!
         table(f, [1, 2, 3], fill(PI/2, 3)|>trans)    → Tabulates results over a vector
         diff(f(_, PI/2), 2.0)        → Derivative w.r.t 'x' at x=2.0
 
@@ -2500,13 +2502,13 @@ namespace jc {
     • Grouping:     { }, ( ), [ ]
     • Fractions:    \frac{numerator}{denominator}
     • Functions:    \sin, \cos, \tan, \sqrt, \ln, \log, \exp, \abs
-    • Constants:    \pi, e
+    • Constants:    \pi, e, i, j   (i and j are intrinsically parsed as 0+1i)
     
     ★ Advanced Feature: Implicit Multiplication
       The recursive descent parser fully understands implicit mathematical 
       multiplication just like a human reading a paper. 
-      Expressions like "2x", "xy", and "2 \sin(x)" act identically to 
-      "2*x", "x*y", and "2 * \sin(x)".
+      Expressions like "2i", "xy", and "2 \sin(x)" act identically to 
+      "2*i", "x*y", and "2 * \sin(x)".
 )HELP" },
     };
 

@@ -6,12 +6,15 @@
 #include <iomanip>
 #include <cctype>
 #include <cmath>
+#include <complex>    // ★ 引入 C++ 标准复数库
 #include <memory>
 #include <unordered_map>
 #include <stdexcept>
 
 namespace jc_latex {
     using namespace jc;
+    // ★ 定义底层的运算基核为复数
+    using cplx = std::complex<double>;
 
     // ====================================================================
     // 1. [序列化引擎] Object -> LaTeX
@@ -65,11 +68,12 @@ namespace jc_latex {
     }
 
     // ====================================================================
-    // 2. [底层抽象语法树 AST] 承载编译后的 LaTeX 极速数学逻辑
+    // 2. [底层抽象语法树 AST] 承载编译后的 LaTeX 极速数学逻辑 (全复平面支持)
     // ====================================================================
     class ExprNode {
     public:
-        virtual double eval(const std::unordered_map<std::string, double>& env) const = 0;
+        // ★ 将原本的 double 返回值升级为 std::complex<double>
+        virtual cplx eval(const std::unordered_map<std::string, cplx>& env) const = 0;
         virtual ~ExprNode() = default;
     };
     using ExprPtr = std::shared_ptr<ExprNode>;
@@ -78,16 +82,19 @@ namespace jc_latex {
         double val;
     public:
         NumNode(double v) : val(v) {}
-        double eval(const std::unordered_map<std::string, double>&) const override { return val; }
+        cplx eval(const std::unordered_map<std::string, cplx>&) const override { return cplx(val, 0.0); }
     };
 
     class VarNode : public ExprNode {
         std::string name;
     public:
         VarNode(std::string n) : name(n) {}
-        double eval(const std::unordered_map<std::string, double>& env) const override {
-            if (name == "\\pi") return 3.1415926535897932;
-            if (name == "e") return 2.718281828459045;
+        cplx eval(const std::unordered_map<std::string, cplx>& env) const override {
+            if (name == "\\pi" || name == "pi") return cplx(3.1415926535897932, 0.0);
+            if (name == "e") return cplx(2.718281828459045, 0.0);
+            // ★ 神来之笔：原生支持复数单位 i 和 j
+            if (name == "i" || name == "j") return cplx(0.0, 1.0);
+
             auto it = env.find(name);
             if (it == env.end()) throw std::runtime_error("LaTeX Math Error: Unknown variable '" + name + "'");
             return it->second;
@@ -98,13 +105,14 @@ namespace jc_latex {
         char op; ExprPtr left, right;
     public:
         BinOpNode(char o, ExprPtr l, ExprPtr r) : op(o), left(l), right(r) {}
-        double eval(const std::unordered_map<std::string, double>& env) const override {
-            double l = left->eval(env), r = right->eval(env);
+        cplx eval(const std::unordered_map<std::string, cplx>& env) const override {
+            cplx l = left->eval(env), r = right->eval(env);
+            // ★ \complex 完全支持基础算术与复数次幂！
             switch (op) {
             case '+': return l + r; case '-': return l - r;
             case '*': return l * r; case '/': return l / r;
             case '^': return std::pow(l, r);
-            default: return 0;
+            default: return cplx(0, 0);
             }
         }
     };
@@ -113,12 +121,14 @@ namespace jc_latex {
         std::string func; ExprPtr arg;
     public:
         FuncNode(std::string f, ExprPtr a) : func(f), arg(a) {}
-        double eval(const std::unordered_map<std::string, double>& env) const override {
-            double a = arg->eval(env);
+        cplx eval(const std::unordered_map<std::string, cplx>& env) const override {
+            cplx a = arg->eval(env);
+            // ★ cmath 全部拥有复数同名方法重载，天然平替！
             if (func == "\\sin") return std::sin(a); if (func == "\\cos") return std::cos(a);
             if (func == "\\tan") return std::tan(a); if (func == "\\sqrt") return std::sqrt(a);
-            if (func == "\\ln") return std::log(a);  if (func == "\\log") return std::log10(a);
-            if (func == "\\exp") return std::exp(a); if (func == "\\abs") return std::abs(a);
+            if (func == "\\ln") return std::log(a);  if (func == "\\log") return std::log10(a); // log10 兼容降级
+            if (func == "\\exp") return std::exp(a);
+            if (func == "\\abs") return cplx(std::abs(a), 0); // abs 返回模长
             throw std::runtime_error("LaTeX Math Error: Unsupported function '" + func + "'");
         }
     };
@@ -149,7 +159,6 @@ namespace jc_latex {
 
         ExprPtr parseFactor() {
             skipSpace();
-            // \frac{A}{B}
             if (matchCmd("\\frac")) {
                 if (!match('{')) throw std::runtime_error("Expected '{' after \\frac");
                 auto num = parseExpr();
@@ -160,7 +169,6 @@ namespace jc_latex {
                 return std::make_shared<BinOpNode>('/', num, den);
             }
 
-            // Math Functions: \sin, \cos, \sqrt
             std::string cmd = peekCmd();
             if (cmd == "\\sin" || cmd == "\\cos" || cmd == "\\tan" || cmd == "\\sqrt" ||
                 cmd == "\\ln" || cmd == "\\log" || cmd == "\\exp" || cmd == "\\abs") {
@@ -169,19 +177,19 @@ namespace jc_latex {
 
                 ExprPtr arg;
                 if (match('(')) {
-                    arg = parseExpr(); // ★ 遇到括号，解析完整表达式！能吃掉所有加减乘除
+                    arg = parseExpr();
                     if (!match(')')) throw std::runtime_error("Missing ')' for " + cmd);
                 }
                 else if (match('{')) {
-                    arg = parseExpr(); // ★ LaTeX 标准花括号包围
+                    arg = parseExpr();
                     if (!match('}')) throw std::runtime_error("Missing '}' for " + cmd);
                 }
                 else {
-                    arg = parsePower(); // 隐式乘法 (如 \sin x)，只吃一小块
+                    arg = parsePower();
                 }
                 return std::make_shared<FuncNode>(cmd, arg);
             }
-            // Parentheses (单独处理分组)
+
             if (match('(')) {
                 auto expr = parseExpr();
                 if (!match(')')) throw std::runtime_error("Missing closing ')'");
@@ -198,12 +206,10 @@ namespace jc_latex {
                 return expr;
             }
 
-            // Numbers
             size_t start = pos;
             while (pos < src.size() && (std::isdigit(src[pos]) || src[pos] == '.')) pos++;
             if (pos > start) return std::make_shared<NumNode>(std::stod(src.substr(start, pos - start)));
 
-            // Variables (e, \pi, \theta, x, y...)
             if (cmd != "") {
                 pos += cmd.size();
                 return std::make_shared<VarNode>(cmd);
@@ -237,7 +243,6 @@ namespace jc_latex {
                     left = std::make_shared<BinOpNode>('/', left, parsePower());
                 }
                 else {
-                    // ★ 神级特性：隐式乘法 (e.g. "2x", "xy", "2 \sin(x)")
                     if (pos < src.size() && (src[pos] == '(' || src[pos] == '\\' || std::isalpha(src[pos]))) {
                         left = std::make_shared<BinOpNode>('*', left, parsePower());
                     }
@@ -275,15 +280,14 @@ namespace jc_latex {
 } // namespace jc_latex
 
 // ====================================================================
-// 4. 将模块注册暴露给 JC2
+// 4. 将模块注册暴露给 JC2 桥接
 // ====================================================================
 JC2_MODULE(latex) {
     using namespace jc_latex;
     jc::ModuleReg R(env, builtins, arity);
-    // ★ 升级了的包装器：动态向 VM 申报这究竟是几个参数的函数！
+
     auto makeNativeFn = std::make_shared<std::function<Value(const std::string&, int, NativeCallable)>>(
         [](const std::string& name, int argCount, NativeCallable fn) -> Value {
-            // 通过填入虚假的参数名，强行告知 VM 正确的 Arity！
             std::vector<std::string> pNames(argCount, "_");
             std::vector<bool> pRefs(argCount, false);
             auto cls = std::make_shared<FunctionClosure>(pNames, pRefs, name, nullptr);
@@ -292,27 +296,31 @@ JC2_MODULE(latex) {
             return Value(cls);
         }
     );
-    // 1. to_latex(obj)
+
     R.set("to_latex", (*makeNativeFn)("to_latex", 1, [](const std::vector<Value>& args) -> Value {
         if (args.empty()) throw std::runtime_error("to_latex() requires 1 argument.");
         return Value(valueToLatex(args[0]));
         }));
-    // 2. eval_latex(string)
+
     R.set("eval_latex", (*makeNativeFn)("eval_latex", 1, [](const std::vector<Value>& args) -> Value {
         if (args.empty() || !std::holds_alternative<std::string>(args[0].data))
             throw std::runtime_error("eval_latex() requires a LaTeX string.");
         LatexParser parser;
         auto ast = parser.compile(std::get<std::string>(args[0].data));
-        return Value(ast->eval({}));
+
+        // ★ 核心收尾：C++ 的 complex 落回到 JC2 的类型系统中
+        cplx res = ast->eval({});
+        if (Tol::isEq(res.imag(), 0.0)) return Value(res.real()); // 纯虚部为 0 降级为 double
+        return Value(Complex(res.real(), res.imag()));           // 否则以复数形式返还！
         }));
-    // 3. compile_latex(string, List | StringMatrix)
+
     R.set("compile_latex", (*makeNativeFn)("compile_latex", 2, [makeNativeFn](const std::vector<Value>& args) -> Value {
         if (args.size() < 2 || !std::holds_alternative<std::string>(args[0].data))
             throw std::runtime_error("compile_latex(string, vars): Requires formula and variable names.");
 
         std::string latex_str = std::get<std::string>(args[0].data);
         std::vector<std::string> varNames;
-        // ★ 智能多态识别：容忍用户输入 ["x", "y"] (矩阵) 或 list("x", "y") (列表)！
+
         if (std::holds_alternative<List>(args[1].data)) {
             for (const auto& anyVar : std::get<List>(args[1].data).raw()) {
                 Value v = std::any_cast<Value>(anyVar);
@@ -325,23 +333,31 @@ JC2_MODULE(latex) {
                 varNames.push_back(s);
             }
         }
-        else {
-            throw std::runtime_error("compile_latex(): 2nd argument must be a List or Matrix of variable strings.");
-        }
-        // 编译为 AST
+        else throw std::runtime_error("compile_latex(): 2nd argument must be a List or Matrix of variable strings.");
+
         LatexParser parser;
         ExprPtr ast = parser.compile(latex_str);
+
         auto jc_caller = [ast, varNames, latex_str](const std::vector<Value>& call_args) -> Value {
             if (call_args.size() != varNames.size())
                 throw std::runtime_error("LaTeX Func '" + latex_str + "' expects " + std::to_string(varNames.size()) + " arguments.");
 
-            std::unordered_map<std::string, double> env;
+            // ★ 新的参数拆包逻辑：兼容用户传入 JC2_Complex 或者 JC2_Double
+            std::unordered_map<std::string, cplx> env;
             for (size_t i = 0; i < varNames.size(); ++i) {
-                env[varNames[i]] = call_args[i].asDouble();
+                if (std::holds_alternative<Complex>(call_args[i].data)) {
+                    auto c = std::get<Complex>(call_args[i].data);
+                    env[varNames[i]] = cplx(c.real, c.imag);
+                }
+                else {
+                    env[varNames[i]] = cplx(call_args[i].asDouble(), 0.0);
+                }
             }
-            return Value(ast->eval(env));
+
+            cplx res = ast->eval(env);
+            if (Tol::isEq(res.imag(), 0.0)) return Value(res.real());
+            return Value(Complex(res.real(), res.imag()));
             };
-        // ★ 告诉 VM，返回的这个 JIT 函数 exactement 拥有 varNames.size() 个参数
         return (*makeNativeFn)("latex_lambda", static_cast<int>(varNames.size()), jc_caller);
         }));
 }
