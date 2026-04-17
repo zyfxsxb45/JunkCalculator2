@@ -88,6 +88,8 @@ namespace jc {
     discrete    Discrete math utilities standard library (import "discrete")
     buffer      High-level binary buffer and cursor API (import "buffer")
     net         High-level TCP socket OOP wrapper (import "net")
+    http        Modern HTTP/1.1 Client with JSON support (import "http")
+    engine      Object-Oriented Game & GUI Framework (import "engine")
 
   Quick-Start Cheatsheet
   ────────────────────────────────────────────────────────────────────
