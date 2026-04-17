@@ -1,0 +1,76 @@
+import "buffer"
+
+print("=============================================")
+print("  JC2 Synthesizer: True Idiomatic Edition    ")
+print("=============================================")
+
+SAMPLE_RATE = 44100
+BPM = 120
+BEAT_TIME = 60.0 / BPM
+
+freq(note) = 440.0 * (2.0 ^ ((note - 69.0) / 12.0))
+
+// 1. [Flawless Matrix Construction]
+// Instantly generates a pure 4x4 RealMatrix using ';' for vertical concatenation.
+chords = [
+    57, 60, 64, 69 ;
+    53, 57, 60, 65 ;
+    60, 64, 67, 72 ;
+    55, 59, 62, 67
+]
+
+total_beats = 8 * 4
+notes_per_beat = 4
+time_per_note = BEAT_TIME / notes_per_beat
+samples_per_note = int(SAMPLE_RATE * time_per_note)
+
+data_size = total_beats * notes_per_beat * samples_per_note * 2 
+file_size = 44 + data_size
+
+buf = Buffer.alloc(file_size)
+
+// Method Chaining (Fluent API)
+buf.writeStr("RIFF")
+   .writeI32(36 + data_size)
+   .writeStr("WAVE")
+   .writeStr("fmt ")
+   .writeI32(16).writeI16(1).writeI16(1)
+   .writeI32(SAMPLE_RATE).writeI32(SAMPLE_RATE * 2)
+   .writeI16(2).writeI16(16)
+   .writeStr("data")
+   .writeI32(data_size)
+
+print("Synthesizing...")
+
+for (measure in range(8)) {
+    for (beat in range(4)) {
+        chord_row = measure % 4
+        
+        for (step in range(notes_per_beat)) {
+            note_col = (step * 3) % 4 
+            if (measure > 3 && step == 3) { note_col = 3 }
+            
+            // 2. [Absolute Native 2D Indexing]
+            target_note = chords[chord_row, note_col]
+            f = freq(target_note)
+            
+            note_wave = [
+                sgn(sin(2.0 * PI * f * (i / SAMPLE_RATE))) * exp(-6.0 * (i / SAMPLE_RATE)) * 0.4
+                for i in range(samples_per_note)
+            ]
+            
+            note_wave = toMatrix(note_wave)
+            
+            // 3. [Zero-Overhead Memory Transfer]
+            // Force-feed the pure RealMatrix directly into the underlying C++ volumetric pointers.
+            buf.writePcmArray(note_wave)
+        }
+    }
+    // 4. [Modern Language Hallmark - f-string interpolation]
+    print(f"  -> Rendered measure {measure + 1}/8 ...")
+}
+
+buf.save("epic_rhapsody.wav")
+print("=============================================")
+print(f"  Success! File written to: epic_rhapsody.wav")
+print("=============================================")

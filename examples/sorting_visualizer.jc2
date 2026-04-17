@@ -1,0 +1,214 @@
+import "image"
+import "window"
+import "socket"
+
+print("══════════════════════════════════════════════════")
+print("  JC2 Ultimate Sorting Visualizer (Bomb-Proof Edition)  ")
+print("══════════════════════════════════════════════════")
+
+HEX_CHARS = "0123456789ABCDEF"
+to_hex(v) = {
+    iv = if (v < 0) { 0 } else if (v > 255) { 255 } else { int(v) }
+    return HEX_CHARS[int(iv / 16)] + HEX_CHARS[iv % 16]
+}
+
+val_to_rgb(val, max_val) = {
+    ratio = double(val) / double(max_val)
+    r = 255 * ratio; g = 60; b = 255 * (1.0 - ratio)
+    return "#" + to_hex(r) + to_hex(g) + to_hex(b)
+}
+
+// --- Core Dispatch & Rendering Engine ---
+class VisualSorter {
+    init(N, W = 800, H = 600) = {
+        self.N = N
+        self.W = W
+        self.H = H
+        self.bar_w = double(W) / N
+        self.data = list()
+        self.im = img(W, H, "#111118")
+        self.win = none()
+        self.stream_sock = none()
+        self.frame_count = 0
+        self.active_indices = Set() 
+    }
+
+    shuffle() = {
+        self.data = [x for x in range(1, self.N + 1)] |> toList
+        for (i = self.N - 1; i > 0; i -= 1) {
+            j = randint(0, i)
+            tmp = self.data[i]; self.data[i] = self.data[j]; self.data[j] = tmp
+        }
+    }
+
+    connect(port) = {
+        try {
+            self.stream_sock = net_tcp_connect("127.0.0.1", port)
+        } catch (e) {
+            print(f"  [Warning] FFmpeg stream on port {port} not found. Skipping video export.")
+            self.stream_sock = none()
+        }
+    }
+
+    disconnect() = {
+        if (self.stream_sock != none()) {
+            net_close(self.stream_sock)
+            self.stream_sock = none()
+        }
+        try { deleteFile("stream_buffer.bmp") } catch(e) {}
+    }
+
+    // Abstracted rendering layer (invoked directly by algorithms)
+    render_frame() = {
+        if (self.win != none() && !self.win.isOpen()) { return false }
+        self.im.clear("#111118")
+        for (k in range(self.N)) {
+            val = self.data[k]
+            bar_h = int(val * (self.H / double(self.N)))
+            color = (double(k) in self.active_indices) ? "#FFFFFF" : val_to_rgb(val, self.N)
+            self.im.fillRect(int(k * self.bar_w), self.H - bar_h, int(self.bar_w), bar_h, color)
+        }
+        if (self.win != none()) { self.win.show(self.im) }
+        if (self.stream_sock != none()) {
+            // ★ Defense Net: Silently ignore I/O locking errors caused by FFmpeg stream pulling.
+            // This guarantees the GUI remains 100% responsive even if the disk lags behind.
+            try {
+                self.im.save("stream_buffer.bmp")
+                frame_bytes = imgReadBytes("stream_buffer.bmp")
+                net_send(self.stream_sock, frame_bytes)
+            } catch(e) {}
+            self.frame_count += 1
+        }
+        return true
+    }
+
+    run(algo_func, name, port) = {
+        self.shuffle()
+        self.connect(port)
+        self.win = Window(f"JC2 Live: {name}", self.W, self.H)
+        self.frame_count = 0
+
+        print(f"[{clock()::.3f}] > Started {name}...")
+        t_start = clock()
+        
+        // Plug in and execute the higher-order sorting algorithm
+        algo_func(self)
+        
+        // Final sweep animation (skip if user forcibly closed the window)
+        if (self.win.isOpen()) {
+            for (i = 0; i < self.N; i += 1) {
+                self.active_indices = Set(double(i))
+                if (self.N <= 100 || i % 2 == 0) { self.render_frame() }
+            }
+        }
+
+        t_end = clock()
+        self.disconnect()
+        print(f"  ✓ {name} finished in {t_end - t_start::.3f}s. Frames: {self.frame_count}")
+        
+        while (self.win.isOpen()) { sleep(0.1) } // Block until window is manually closed
+    }
+}
+
+// --- Algorithm Library (Decoupled Macro-level Rendering) ---
+
+// 1. Insertion Sort (Render heavily at the outer loop)
+insertion_sort(vis) = {
+    for (i = 1; i < vis.N; i += 1) {
+        if (!vis.win.isOpen()) { break }
+        key = vis.data[i]
+        j = i - 1
+        while (j >= 0 && vis.data[j] > key) {
+            vis.data[j + 1] = vis.data[j] 
+            j -= 1
+        }
+        vis.data[j + 1] = key
+        
+        vis.active_indices = Set(double(j + 1), double(i))
+        if(i % 2 == 0) {vis.render_frame()}  // Insertion sort is slow; render every 2 operations
+    }
+}
+
+// 2. Quick Sort (Render after partition swap)
+quick_sort(vis) = {
+    qs(low, high) = {
+        if (low < high) {
+            if (!vis.win.isOpen()) { return none() }
+            pivot = vis.data[high]
+            i = low - 1
+            for (j = low; j < high; j += 1) {
+                if (vis.data[j] < pivot) {
+                    i += 1
+                    tmp = vis.data[i]; vis.data[i] = vis.data[j]; vis.data[j] = tmp
+                }
+            }
+            tmp = vis.data[i + 1]; vis.data[i + 1] = vis.data[high]; vis.data[high] = tmp
+            pi = i + 1
+            
+            // ★ Sync active indices as doubles for the Set container
+            vis.active_indices = Set(double(pi))
+            vis.render_frame()
+            
+            qs(low, pi - 1)
+            qs(pi + 1, high)
+        }
+    }
+    qs(0, vis.N - 1)
+}
+
+// 3. Merge Sort (Render during merging phase)
+merge_sort(vis) = {
+    merge(l, m, r) = {
+        n1 = m - l + 1
+        n2 = r - m
+        L = list(); R = list()
+        
+        // ★ Functional Array API: push(List, val) instead of OOP L.push()
+        for (i = 0; i < n1; i += 1) { push(L, vis.data[l + i]) }
+        for (j = 0; j < n2; j += 1) { push(R, vis.data[m + 1 + j]) }
+        
+        i = 0; j = 0; k = l
+        while (i < n1 && j < n2) {
+             if (!vis.win.isOpen()) { return none() }
+             if (L[i] <= R[j]) {
+                 vis.data[k] = L[i]
+                 i += 1
+             } else {
+                 vis.data[k] = R[j]
+                 j += 1
+             }
+             k += 1
+        }
+        while (i < n1) { vis.data[k] = L[i]; i += 1; k += 1 }
+        while (j < n2) { vis.data[k] = R[j]; j += 1; k += 1 }
+        
+        vis.active_indices = Set(double(l), double(r))
+        vis.render_frame()
+    }
+    
+    ms(l, r) = {
+        if (l < r) {
+            if (!vis.win.isOpen()) { return none() }
+            m = l + int((r - l) / 2)
+            ms(l, m)
+            ms(m + 1, r)
+            merge(l, m, r)
+        }
+    }
+    ms(0, vis.N - 1)
+}
+
+// --- Engine Boot ---
+N_ELEMENTS = 300   // Optimal element count for clarity and render speed
+vis = VisualSorter(N_ELEMENTS)
+
+// Run these commands in separate background terminals to export TCP video streams:
+// ffmpeg -y -f image2pipe -vcodec bmp -framerate 60 -i tcp://127.0.0.1:8081?listen -c:v libx264 -pix_fmt yuv420p insert_sort.mp4
+// ffmpeg -y -f image2pipe -vcodec bmp -framerate 30 -i tcp://127.0.0.1:8082?listen -c:v libx264 -pix_fmt yuv420p quick_sort.mp4
+// ffmpeg -y -f image2pipe -vcodec bmp -framerate 30 -i tcp://127.0.0.1:8083?listen -c:v libx264 -pix_fmt yuv420p merge_sort.mp4
+
+vis.run(insertion_sort, "Insertion Sort", 8081)
+vis.run(quick_sort, "Quick Sort", 8082)
+vis.run(merge_sort, "Merge Sort", 8083)
+
+print("\n> All visualizations complete!")

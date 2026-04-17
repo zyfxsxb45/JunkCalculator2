@@ -1,0 +1,113 @@
+// Import the standard Object-Oriented Game and UI Framework
+import "engine"
+
+// Inherit from the GameEngine class
+class LifeGame extends GameEngine {
+    
+    // Constructor: Initialize our game
+    init(rows = 60, cols = 80, cell_size = 10) = {
+        // 1. Call the underlying native engine constructor
+        super.init("Conway's Game of Life [OOP Framework]", cols * cell_size, rows * cell_size, 60)
+        
+        self.ROWS = rows
+        self.COLS = cols
+        self.CELL_SIZE = cell_size
+        
+        self.setBackground("#111111")
+        self.color_alive = "#00FF7F"
+        
+        // 2. Setup game-specific states
+        self.universe = zeros(self.ROWS, self.COLS)
+        self.is_paused = false
+        self.speeds = [0.5, 0.2, 0.08, 0.03, 0.0]
+        self.speed_idx = 2
+        
+        self.time_acc = 0.0     // Physics evolution time accumulator
+        self.is_dragging = false
+    }
+
+    // --- Algorithm Core ---
+    update_grid() = {
+        next_grid = zeros(self.ROWS, self.COLS)
+        R = self.ROWS; C = self.COLS; g = self.universe
+        for (i in range(R)) {
+            for (j in range(C)) {
+                // Torus Topology boundary wrapping
+                u = (i - 1 + R) % R; d = (i + 1) % R
+                l = (j - 1 + C) % C; r = (j + 1) % C
+                
+                n = g[u, l] + g[u, j] + g[u, r] +
+                    g[i, l] +           g[i, r] +
+                    g[d, l] + g[d, j] + g[d, r]
+                
+                alive = g[i, j]
+                if (alive == 1 && (n == 2 || n == 3)) { next_grid[i, j] = 1 } 
+                else if (alive == 0 && n == 3)        { next_grid[i, j] = 1 }
+            }
+        }
+        return next_grid
+    }
+
+    // --- 🎮 Event Overrides ---
+    onKeyDown(key) = {
+        if (key == "SPACE") { self.is_paused = !self.is_paused }
+        if (key == "1") { self.speed_idx = 0 }
+        if (key == "2") { self.speed_idx = 1 }
+        if (key == "3") { self.speed_idx = 2 }
+        if (key == "4") { self.speed_idx = 3 }
+        if (key == "5") { self.speed_idx = 4 }
+        if (key == "C") { self.universe = zeros(self.ROWS, self.COLS) }
+        if (key == "ESC") { self.quit() }
+    }
+
+    onMouseDown(x, y, btn) = {
+        self.is_dragging = true
+        r = int(y / self.CELL_SIZE); c = int(x / self.CELL_SIZE)
+        if (r >= 0 && r < self.ROWS && c >= 0 && c < self.COLS) {
+            self.universe[r, c] = self.universe[r, c] == 1 ? 0 : 1
+        }
+    }
+
+    onMouseUp(x, y, btn) = { self.is_dragging = false }
+
+    onMouseMove(x, y) = {
+        if (self.is_dragging) {
+            r = int(y / self.CELL_SIZE); c = int(x / self.CELL_SIZE)
+            if (r >= 0 && r < self.ROWS && c >= 0 && c < self.COLS) {
+                self.universe[r, c] = 1
+            }
+        }
+    }
+
+    // --- ⚙️ Game Logic Tick (dt = delta time in seconds) ---
+    update(dt) = {
+        if (!self.is_paused) {
+            // Use the real-time dt provided by the engine to control evolution speed
+            self.time_acc += dt
+            delay = self.speeds[self.speed_idx]
+            
+            if (self.time_acc >= delay) {
+                self.universe = self.update_grid()
+                self.time_acc = 0.0 // Reset accumulator
+            }
+        }
+    }
+
+    // --- 🎨 Game Render Tick ---
+    draw(im) = {
+        for (i in range(self.ROWS)) {
+            for (j in range(self.COLS)) {
+                if (self.universe[i, j] == 1) {
+                    im.fillRect(j * self.CELL_SIZE, i * self.CELL_SIZE, 
+                                self.CELL_SIZE - 1, self.CELL_SIZE - 1, self.color_alive)
+                }
+            }
+        }
+    }
+}
+
+// ==========================================
+// 🚀 Launch the Application!
+// ==========================================
+game = LifeGame()
+game.run()   // Fire up the engine!
