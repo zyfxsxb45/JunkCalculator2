@@ -1,0 +1,139 @@
+// ═══════════════════════════════════════════════════════════════
+// engine.jc2 — Object-Oriented Game Framework for JC2
+// ═══════════════════════════════════════════════════════════════
+import "image"
+import "window"
+
+class GameEngine {
+    // 框架初始化
+    init(title = "JC2 Game", width = 800, height = 600, fps = 60) = {
+        self.width = width
+        self.height = height
+        self.fps = fps
+        self.frame_time = 1.0 / fps   // 每帧目标耗时 (秒)
+        
+        self.im = img(width, height)
+        self.win = Window(title, width, height)
+        self.running = true
+        self.bg_color = "#000000"
+    }
+
+    // ─── 供子类覆写的生命周期方法 (Virtual Methods) ───
+    update(dt) = {}                 // 物理与逻辑更新 (dt 为两帧间的时间差)
+    draw(im)   = {}                 // 画面渲染
+
+    // ─── 供子类覆写的事件回调 (Event Callbacks) ───
+    onKeyDown(key) = {}
+    onKeyUp(key)   = {}
+    onMouseDown(x, y, btn) = {}
+    onMouseUp(x, y, btn)   = {}
+    onMouseMove(x, y)      = {}
+
+    // ─── 实用工具 API (Utilities) ───
+    isKeyDown(key)       = return self.win.isKeyDown(key)
+    quit()               = { self.running = false }
+    setBackground(color) = { self.bg_color = color }
+
+    // ─── 核心驱动引擎 (The Heartbeat) ───
+    run() = {
+        last_time = clock()
+        
+        while (self.win.isOpen() && self.running) {
+            // 1. 消耗并分发所有系统事件
+            while (true) {
+                ev = self.win.pollEvent()
+                if (isnone(ev)) { break }
+                
+                if (ev.type == "keydown")   { self.onKeyDown(ev.key) }
+                if (ev.type == "keyup")     { self.onKeyUp(ev.key) }
+                if (ev.type == "mousedown") { self.onMouseDown(ev.x, ev.y, ev.button) }
+                if (ev.type == "mouseup")   { self.onMouseUp(ev.x, ev.y, ev.button) }
+                if (ev.type == "mousemove") { self.onMouseMove(ev.x, ev.y) }
+                if (ev.type == "close")     { self.quit() }
+            }
+
+            // 2. 计算真实帧间隔 Delta Time (完美物理引擎的基础)
+            current_time = clock()
+            dt = current_time - last_time
+            last_time = current_time
+
+            // 3. 执行玩家逻辑更新
+            self.update(dt)
+
+            // 4. 清理双缓冲并唤起玩家渲染逻辑
+            self.im.clear(self.bg_color)
+            self.draw(self.im)
+            
+            // 5. 提交画面到显存
+            self.win.show(self.im)
+
+            // 6. 精准帧率截流器 (Frame Pacing)
+            work_time = clock() - current_time
+            sleep_time = self.frame_time - work_time
+            if (sleep_time > 0) {
+                sleep(sleep_time)
+            }
+        }
+    }
+}
+
+// ─── Dynamic Help Registry ────────────────────────────────────
+
+__register_help("engine", r"DOC(
+═══ Game Engine Framework (Standard Library) ═══
+
+  Requires: import "engine"
+
+  A fully Object-Oriented, Pygame-like framework for rapid interactive 
+  application and game development in JC2. It manages the boilerplate of 
+  frame-pacing, double-buffering, delta-time calculation, and event routing.
+
+  Getting Started (Inheritance)
+  ──────────────────────
+    To create a game, extend the `GameEngine` class and override its 
+    lifecycle and event methods.
+    
+    class MyGame extends GameEngine {
+        init() = {
+            // Must call super.init(title, width, height, target_fps)
+            super.init("My Awesome Game", 800, 600, 60)
+            self.x = 100
+        }
+        
+        // Override lifecycle:
+        update(dt) = { self.x += 50 * dt }
+        draw(im)   = { im.circle(int(self.x), 300, 20, "red") }
+    }
+    
+    game = MyGame()
+    game.run()   // Starts the engine heartbeat loop
+
+  Virtual Lifecycle Methods (Override these)
+  ──────────────────────
+    update(dt)                 Called every frame. `dt` is the fractional 
+                               seconds elapsed since the last frame (Delta Time).
+                               Use this for physics and movement.
+    draw(im)                   Called every frame. Render your state to `im`.
+                               The engine invokes `im.clear()` automatically.
+
+  Virtual Event Callbacks (Override these)
+  ──────────────────────
+    onKeyDown(key)             Triggered once when a key is pressed.
+    onKeyUp(key)               Triggered once when a key is released.
+                               (`key` is a string like "W", "SPACE", "LEFT")
+                               
+    onMouseDown(x, y, btn)     btn: 0 (Left), 1 (Right)
+    onMouseUp(x, y, btn)
+    onMouseMove(x, y)
+
+  Engine Utilities
+  ──────────────────────
+    self.isKeyDown(key)        Instantaneous boolean check (0 or 1).
+    self.setBackground(color)  Sets the auto-clear background color.
+    self.quit()                Safely terminates the game loop.
+    
+    self.im                    Direct access to the rendering Image object.
+    self.win                   Direct access to the NativeWindow object.
+)DOC")
+
+print("[System] engine.jc2 loaded successfully. (Game Framework Ready)")

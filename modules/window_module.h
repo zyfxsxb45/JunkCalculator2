@@ -9,12 +9,23 @@
 #include <thread>
 #include <mutex>
 #include <atomic>
+#include <deque>
+#include <algorithm>
 #endif
 
 namespace jc_window {
     using namespace jc;
 
 #ifdef _WIN32
+    // 操作系统事件封包
+    struct WinEvent {
+        std::string type;
+        int x = 0;
+        int y = 0;
+        int key = 0;
+        int button = 0; // 0: Left, 1: Right
+    };
+
     class NativeWindow {
     private:
         HWND hwnd = NULL;
@@ -25,32 +36,41 @@ namespace jc_window {
         std::vector<uint8_t> displayBuffer;
         std::mutex bufMutex;
 
-        // 窗口的独立守护线程
+        // 线程安全事件队列
+        std::deque<WinEvent> eventQueue;
+        std::mutex eventMutex;
+
+        void pushEvent(const WinEvent& ev) {
+            std::lock_guard<std::mutex> lock(eventMutex);
+            eventQueue.push_back(ev);
+            // 限制队列上限，防止脚本不读取导致内存溢出
+            if (eventQueue.size() > 256) eventQueue.pop_front();
+        }
+
         void threadFunc(std::string title) {
             WNDCLASS wc = { 0 };
             wc.lpfnWndProc = staticWndProc;
             wc.hInstance = GetModuleHandle(NULL);
             wc.lpszClassName = "JC2WindowMT";
-            // 确保窗口类只被注册一次
-            RegisterClass(&wc);
+            RegisterClass(&wc); // 忽略重复注册错误
             RECT rect = { 0, 0, width, height };
             AdjustWindowRect(&rect, WS_OVERLAPPEDWINDOW, FALSE);
-            // ★ 修改点：直接使用类成员 this->hwnd，避免任何局部声明隐藏
+
             this->hwnd = CreateWindow("JC2WindowMT", title.c_str(),
                 WS_OVERLAPPEDWINDOW | WS_VISIBLE, CW_USEDEFAULT, CW_USEDEFAULT,
                 rect.right - rect.left, rect.bottom - rect.top,
                 NULL, NULL, GetModuleHandle(NULL), this);
+
             if (!this->hwnd) { running = false; return; }
-            // 完美的 Windows 标准消息循环 (阻塞等待，极低 CPU 占用)
+
             MSG msg;
             while (GetMessage(&msg, NULL, 0, 0) > 0) {
                 TranslateMessage(&msg);
                 DispatchMessage(&msg);
             }
-            running = false; // 窗口被关闭
+            running = false;
         }
 
-        // 静态分发器，将 Win32 C API 路由到 C++ 对象
         static LRESULT CALLBACK staticWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             NativeWindow* win = NULL;
             if (msg == WM_NCCREATE) {
@@ -65,23 +85,21 @@ namespace jc_window {
             return DefWindowProc(hWnd, msg, wParam, lParam);
         }
 
-        // 真正的面向对象消息处理器
         LRESULT wndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             if (msg == WM_CLOSE) {
-                PostQuitMessage(0); // 干净地终结独立线程的消息循环
+                pushEvent({ "close", 0, 0, 0, 0 });
+                PostQuitMessage(0);
                 return 0;
             }
             if (msg == WM_PAINT) {
                 PAINTSTRUCT ps;
                 HDC hdc = BeginPaint(hWnd, &ps);
-
-                // 线程安全：锁定缓冲区并高速刷入画面
                 std::lock_guard<std::mutex> lock(bufMutex);
                 if (!displayBuffer.empty()) {
                     BITMAPINFO bmi = { 0 };
                     bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
                     bmi.bmiHeader.biWidth = width;
-                    bmi.bmiHeader.biHeight = -height; // Top-Down 渲染
+                    bmi.bmiHeader.biHeight = -height;
                     bmi.bmiHeader.biPlanes = 1;
                     bmi.bmiHeader.biBitCount = 24;
                     bmi.bmiHeader.biCompression = BI_RGB;
@@ -91,35 +109,45 @@ namespace jc_window {
                 EndPaint(hWnd, &ps);
                 return 0;
             }
+
+            // ─── 拦截交互事件 ───
+            if (msg == WM_KEYDOWN) { pushEvent({ "keydown", 0, 0, (int)wParam, 0 }); }
+            else if (msg == WM_KEYUP) { pushEvent({ "keyup", 0, 0, (int)wParam, 0 }); }
+            else if (msg == WM_MOUSEMOVE) { pushEvent({ "mousemove", (short)LOWORD(lParam), (short)HIWORD(lParam), 0, 0 }); }
+            else if (msg == WM_LBUTTONDOWN) { pushEvent({ "mousedown", (short)LOWORD(lParam), (short)HIWORD(lParam), 0, 0 }); }
+            else if (msg == WM_LBUTTONUP) { pushEvent({ "mouseup", (short)LOWORD(lParam), (short)HIWORD(lParam), 0, 0 }); }
+            else if (msg == WM_RBUTTONDOWN) { pushEvent({ "mousedown", (short)LOWORD(lParam), (short)HIWORD(lParam), 0, 1 }); }
+            else if (msg == WM_RBUTTONUP) { pushEvent({ "mouseup", (short)LOWORD(lParam), (short)HIWORD(lParam), 0, 1 }); }
+
             return DefWindowProc(hWnd, msg, wParam, lParam);
         }
 
     public:
         NativeWindow(const std::string& title, int w, int h) : width(w), height(h) {
-            displayBuffer.resize(w * h * 3, 0); // 黑色初始化背景
-            // 剥离 OS 线程
+            displayBuffer.resize(w * h * 3, 0);
             winThread = std::thread(&NativeWindow::threadFunc, this, title);
-
-            // 等待 OS 线程将窗口句柄初始化完毕
             while (running && hwnd == NULL) std::this_thread::yield();
         }
 
         ~NativeWindow() {
-            if (running && hwnd) {
-                // 安全释放：向子线程投递关闭消息
-                PostMessage(hwnd, WM_CLOSE, 0, 0);
-            }
+            if (running && hwnd) PostMessage(hwnd, WM_CLOSE, 0, 0);
             if (winThread.joinable()) winThread.join();
         }
 
         bool isOpen() const { return running; }
 
+        bool pollEvent(WinEvent& outEv) {
+            std::lock_guard<std::mutex> lock(eventMutex);
+            if (eventQueue.empty()) return false;
+            outEv = eventQueue.front();
+            eventQueue.pop_front();
+            return true;
+        }
+
         void show(const std::shared_ptr<Image>& img) {
             if (!running || !hwnd) return;
             const auto& src = img->getRawPixels();
-
             {
-                // 上锁保证不和 WM_PAINT 绘制过程冲突
                 std::lock_guard<std::mutex> lock(bufMutex);
                 for (size_t i = 0; i < src.size(); i += 3) {
                     displayBuffer[i] = src[i + 2]; // B
@@ -127,15 +155,17 @@ namespace jc_window {
                     displayBuffer[i + 2] = src[i];     // R
                 }
             }
-            // 核心魔法：异步通知 Win32 线程“可以开始下一帧重绘了”
             InvalidateRect(hwnd, NULL, FALSE);
         }
     };
 #else
+    // Linux/macOS 兼容占位
+    struct WinEvent { std::string type; int x = 0, y = 0, key = 0, button = 0; };
     class NativeWindow {
     public:
         NativeWindow(const std::string&, int, int) { throw std::runtime_error("Window module is strictly Win32 currently."); }
         bool isOpen() { return false; }
+        bool pollEvent(WinEvent&) { return false; }
         void show(const std::shared_ptr<Image>&) {}
     };
 #endif
@@ -149,7 +179,6 @@ JC2_MODULE(window) {
 
     windowClass = std::make_shared<jc::ClassDefinition>();
     windowClass->name = "Window";
-    // ★ 注册为唯一的类名，不再有命名冲突！
     R.set("Window", jc::Value(windowClass));
 
     auto addWinMethod = [&](const std::string& name, jc::NativeCallable fn) {
@@ -159,27 +188,122 @@ JC2_MODULE(window) {
         };
 
     addWinMethod("init", [](const std::vector<jc::Value>& args) -> jc::Value {
-        if (args.size() != 3) {
-            throw std::runtime_error("TypeError: Window() constructor takes exactly 3 arguments (title, width, height).");
-        }
+        if (args.size() != 3) { throw std::runtime_error("TypeError: Window takes exactly 3 arguments (title, width, height)."); }
         std::string title = std::get<std::string>(args[0].data);
-        int w = static_cast<int>(std::round(args[1].asDouble()));
-        int h = static_cast<int>(std::round(args[2].asDouble()));
+        int w = static_cast<int>(args[1].asDouble());
+        int h = static_cast<int>(args[2].asDouble());
 
-        // 获取 VM 自动分配的空 Instance (即 self)
         auto selfVal = jc::helpers::getGlobalCallback("self");
         auto inst = std::get<std::shared_ptr<Instance>>(selfVal.data);
-
-        // 实例化 C++ 底层视窗，并注入 nativeData
         inst->nativeData = std::make_shared<NativeWindow>(title, w, h);
-
-        return jc::Value::none(); // init 规范：无需返回值
+        return jc::Value::none();
         });
 
     addWinMethod("isOpen", [](const std::vector<jc::Value>&) -> jc::Value {
         auto inst = std::get<std::shared_ptr<Instance>>(jc::helpers::getGlobalCallback("self").data);
         auto win = std::any_cast<std::shared_ptr<NativeWindow>&>(inst->nativeData);
         return jc::Value(win->isOpen() ? 1.0 : 0.0);
+        });
+
+    // ─── 暴露 pollEvent：无阻塞抓取单次键鼠事件（带智能字符串按键！） ───
+    addWinMethod("pollEvent", [](const std::vector<jc::Value>&) -> jc::Value {
+        auto inst = std::get<std::shared_ptr<Instance>>(jc::helpers::getGlobalCallback("self").data);
+        auto win = std::any_cast<std::shared_ptr<NativeWindow>&>(inst->nativeData);
+
+        WinEvent ev;
+        if (win->pollEvent(ev)) {
+            jc::Dict d;
+            d.set("type", jc::Value(ev.type));
+
+            // 处理鼠标移动与点击
+            if (ev.type == "mousemove" || ev.type == "mousedown" || ev.type == "mouseup") {
+                d.set("x", jc::Value((double)ev.x));
+                d.set("y", jc::Value((double)ev.y));
+                if (ev.type != "mousemove") d.set("button", jc::Value((double)ev.button));
+            }
+
+            // 处理键盘按键
+            if (ev.type == "keydown" || ev.type == "keyup") {
+                std::string keyStr;
+#ifdef _WIN32
+                if (ev.key >= 'A' && ev.key <= 'Z') keyStr = std::string(1, static_cast<char>(ev.key));
+                else if (ev.key >= '0' && ev.key <= '9') keyStr = std::string(1, static_cast<char>(ev.key));
+                else {
+                    switch (ev.key) {
+                    case VK_SPACE:   keyStr = "SPACE"; break;
+                    case VK_RETURN:  keyStr = "ENTER"; break;
+                    case VK_ESCAPE:  keyStr = "ESC"; break;
+                    case VK_LEFT:    keyStr = "LEFT"; break;
+                    case VK_UP:      keyStr = "UP"; break;
+                    case VK_RIGHT:   keyStr = "RIGHT"; break;
+                    case VK_DOWN:    keyStr = "DOWN"; break;
+                    case VK_SHIFT:   keyStr = "SHIFT"; break;
+                    case VK_CONTROL: keyStr = "CTRL"; break;
+                    case VK_MENU:    keyStr = "ALT"; break;
+                    case VK_TAB:     keyStr = "TAB"; break;
+                    case VK_BACK:    keyStr = "BACKSPACE"; break;
+                    default:         keyStr = "UNKNOWN"; break;
+                    }
+                }
+#endif
+                d.set("key", jc::Value(keyStr));              // 人类可读的直观字符串!
+                d.set("keycode", jc::Value((double)ev.key));  // 依然保留底层硬核数字供骨灰级玩家查阅
+            }
+            return jc::Value(d);
+        }
+        return jc::Value::none();
+        });
+
+    // ─── 暴露 isKeyDown：支持智能字符串映射 ───
+    addWinMethod("isKeyDown", [](const std::vector<jc::Value>& args) -> jc::Value {
+#ifdef _WIN32
+        int key = 0;
+
+        // 智能解析：如果传入的是字符串
+        if (std::holds_alternative<std::string>(args[0].data)) {
+            std::string s = std::get<std::string>(args[0].data);
+
+            // 强行大写化，显式转换为 char 消除警告
+            std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) -> char {
+                return static_cast<char>(std::toupper(c));
+                });
+
+            if (s.length() == 1) {
+                char c = s[0];
+                if ((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')) {
+                    key = static_cast<int>(c); // 直接对应 ASCII 码
+                }
+            }
+            else {
+                // 常用控制键字典映射
+                if (s == "UP")         key = VK_UP;
+                else if (s == "DOWN")  key = VK_DOWN;
+                else if (s == "LEFT")  key = VK_LEFT;
+                else if (s == "RIGHT") key = VK_RIGHT;
+                else if (s == "SPACE") key = VK_SPACE;
+                else if (s == "ENTER" || s == "RETURN") key = VK_RETURN;
+                else if (s == "ESC" || s == "ESCAPE")   key = VK_ESCAPE;
+                else if (s == "SHIFT") key = VK_SHIFT;
+                else if (s == "CTRL" || s == "CONTROL") key = VK_CONTROL;
+                else if (s == "ALT")   key = VK_MENU;
+                else if (s == "TAB")   key = VK_TAB;
+                else if (s == "BACKSPACE" || s == "BACK") key = VK_BACK;
+            }
+        }
+        // 兼容降级：保留直接传入数字键码的能力
+        else {
+            try { key = static_cast<int>(args[0].asDouble()); }
+            catch (...) {}
+        }
+
+        if (key == 0) return jc::Value(0.0);
+
+        // 0x8000 表示最高位为1（正在按下）
+        bool isDown = (GetAsyncKeyState(key) & 0x8000) != 0;
+        return jc::Value(isDown ? 1.0 : 0.0);
+#else
+        return jc::Value(0.0);
+#endif
         });
 
     addWinMethod("show", [](const std::vector<jc::Value>& args) -> jc::Value {

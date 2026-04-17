@@ -2360,44 +2360,48 @@ namespace jc {
   (Note: Currently restricted to Win32 architectures. Requires User32 / Gdi32)
 
   The `window` module pierces the OS layer to spawn a hardware-accelerated 
-  GUI window. It couples natively with the `image` module to enable real-time 
-  rendering and interactive visual applications.
+  GUI window, complete with an asynchronous, thread-safe Event Queue for 
+  zero-latency keyboard and mouse polling.
 
-  Spawning a Window
+  Spawning a Window & Basic State
   ──────────────────────
     win = Window(title, width, height)
         Requests the OS to create an overlapped tracking window.
-        Returns a NativeWindow Object. 
-        Example: win = Window("JC2 Live View", 800, 600)
-
-  Methods (Object-Oriented API)
-  ──────────────────────
     win.isOpen()
-        Polls the OS message pump. Returns 1 if the window is alive, 
-        or 0 if the user has clicked the close (X) button.
-
+        Returns 1 if the window is alive, 0 if closed by the user.
     win.show(image_obj)
         Bit-block transfers (Blits) a JC2 `Image` object's memory buffer 
         directly onto the window's device context (HDC) instantly.
 
-  The Main Rendering Loop
+  Real-Time Input Polling
   ──────────────────────
-    import "image"
-    import "window"
+    win.isKeyDown(key)
+        Provides instantaneous, zero-latency physical key state.
+        Accepts human-readable strings (case-insensitive):
+          "W", "A", "S", "D", "0"-"9"
+          "UP", "DOWN", "LEFT", "RIGHT"
+          "SPACE", "ENTER", "ESC", "SHIFT", "CTRL", "ALT", "TAB"
+        Returns 1.0 if currently pressed, 0.0 otherwise.
 
-    im = img(800, 600)
-    win = Window("Real-Time Render", 800, 600)
+  Event Queue (win.pollEvent)
+  ──────────────────────
+    ev = win.pollEvent()
+        Non-blocking pop from the OS message queue. Returns `none` if empty.
+        If an event exists, returns a Dict with a "type" string:
 
-    t = 0.0
-    while (win.isOpen()) {
-        im.clear("black")
+        • "keydown" / "keyup"
+           ev.key       → String ("W", "SPACE", "LEFT", etc.)
+           ev.keycode   → Number (Underlying Win32 Virtual-Key code)
         
-        // ... Call im.circle() / im.line() based on time 't' here ...
+        • "mousedown" / "mouseup"
+           ev.x, ev.y   → Number (Mouse cursor coordinates)
+           ev.button    → Number (0 = Left Click, 1 = Right Click)
         
-        win.show(im)          // Blit pixels to display
-        t = (t + 0.01) % 1.0  // Advance time step
-        sleep(0.016)          // Yield to OS (target ~60 FPS)
-    }
+        • "mousemove"
+           ev.x, ev.y   → Number (Current coordinates)
+        
+        • "close"
+           The user clicked the 'X' button on the window.
 )HELP" },
 
         { "latex", R"HELP(
