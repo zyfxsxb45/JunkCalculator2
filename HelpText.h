@@ -419,7 +419,7 @@ namespace jc {
     sqrt(-1)             Automatic promotion → 1i
 
     z = complex(3, 4)    Constructor form → 3+4i
-    z = complex(1.5)     Real → Complex with imag=0 → 1.5+0i
+    z = complex(1.5)     Real → Complex with imag=0 → 1.5  (type becomes Complex)
     z = complex(3+4i)    Pass-through (already complex)
 
     The 'i' suffix is a lexical literal — it cannot be accidentally
