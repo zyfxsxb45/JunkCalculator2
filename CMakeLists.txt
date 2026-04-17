@@ -1,5 +1,5 @@
 ﻿# ==============================================================================
-# Junk Calculator 2.2.1 - Ultimate CMake Build Script
+# Junk Calculator 2.2.2 - Ultimate CMake Build Script
 # ==============================================================================
 cmake_minimum_required(VERSION 3.15)
 
@@ -8,7 +8,7 @@ cmake_policy(SET CMP0091 NEW)
 # ★ 优雅地强制所有模式静态链接，彻底告别 VCRUNTIME.dll 丢失与 D9025 警告！
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
-project(JunkCalculator2 VERSION 2.2.1 LANGUAGES CXX)
+project(JunkCalculator2 VERSION 2.2.2 LANGUAGES CXX)
 
 # 要求 C++20 标准
 set(CMAKE_CXX_STANDARD 20)
@@ -101,7 +101,7 @@ endif()
 
 set(CPACK_GENERATOR "ZIP")
 set(CPACK_PACKAGE_NAME "JunkCalculator2")
-set(CPACK_PACKAGE_VERSION "2.2.1")
+set(CPACK_PACKAGE_VERSION "2.2.2")
 set(CPACK_PACKAGE_VENDOR "Yu Liangyang")
 set(CPACK_PACKAGE_FILE_NAME "${CPACK_PACKAGE_NAME}-${CPACK_PACKAGE_VERSION}-Windows-x64")
 include(CPack)
