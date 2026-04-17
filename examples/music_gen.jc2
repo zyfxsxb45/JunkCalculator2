@@ -30,7 +30,7 @@ file_size = 44 + data_size
 buf = Buffer.alloc(file_size)
 
 // Method Chaining (Fluent API)
-buf.writeStr("RIFF")
+(buf.writeStr("RIFF")
    .writeI32(36 + data_size)
    .writeStr("WAVE")
    .writeStr("fmt ")
@@ -38,7 +38,7 @@ buf.writeStr("RIFF")
    .writeI32(SAMPLE_RATE).writeI32(SAMPLE_RATE * 2)
    .writeI16(2).writeI16(16)
    .writeStr("data")
-   .writeI32(data_size)
+   .writeI32(data_size))
 
 print("Synthesizing...")
 

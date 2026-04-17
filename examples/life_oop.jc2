@@ -50,6 +50,7 @@ class LifeGame extends GameEngine {
 
     // --- 🎮 Event Overrides ---
     onKeyDown(key) = {
+        print(f"[Debug] Received keystroke: {key}") 
         if (key == "SPACE") { self.is_paused = !self.is_paused }
         if (key == "1") { self.speed_idx = 0 }
         if (key == "2") { self.speed_idx = 1 }

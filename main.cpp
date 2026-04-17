@@ -287,7 +287,7 @@ int main(int argc, char* argv[]) {
 
     std::cout << jc::col(jc::Ansi::BRIGHT_CYAN)
         << "=================================================\n"
-        << "   Junk Calculator 2.2.1\n"
+        << "   Junk Calculator 2.2.2\n"
         << "   Developed by Yu Liangyang, Tsinghua University\n"
         << "=================================================\n" << jc::col(jc::Ansi::RESET)
         << "Type " << jc::col(jc::Ansi::BRIGHT_YELLOW) << "'help'" << jc::col(jc::Ansi::RESET) << " for a list of commands." << std::endl;

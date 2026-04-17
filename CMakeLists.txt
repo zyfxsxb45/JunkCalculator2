@@ -43,7 +43,7 @@ target_include_directories(JunkCalculator2 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
 # ★ 核心修复：如果是 Windows 系统，必须链接 WinSock2 网络库！
 if(WIN32)
-    target_link_libraries(JunkCalculator2 PRIVATE ws2_32 User32 Gdi32)
+    target_link_libraries(JunkCalculator2 PRIVATE ws2_32 User32 Gdi32 imm32)
 endif()
 
 # ==============================================================================

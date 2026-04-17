@@ -6,6 +6,7 @@
 
 #ifdef _WIN32
 #include <windows.h>
+#include <imm.h>
 #include <thread>
 #include <mutex>
 #include <atomic>
@@ -29,6 +30,7 @@ namespace jc_window {
     class NativeWindow {
     private:
         HWND hwnd = NULL;
+        HIMC defaultImc = NULL;
         std::atomic<bool> running{ true };
         std::thread winThread;
 
@@ -62,6 +64,7 @@ namespace jc_window {
                 NULL, NULL, GetModuleHandle(NULL), this);
 
             if (!this->hwnd) { running = false; return; }
+            ImmAssociateContext(this->hwnd, NULL);
 
             MSG msg;
             while (GetMessage(&msg, NULL, 0, 0) > 0) {
@@ -132,6 +135,25 @@ namespace jc_window {
         ~NativeWindow() {
             if (running && hwnd) PostMessage(hwnd, WM_CLOSE, 0, 0);
             if (winThread.joinable()) winThread.join();
+        }
+
+        void setImeEnabled(bool enabled) {
+            if (!hwnd) return;
+            if (enabled) {
+                // 恢复被冷藏的输入法
+                if (defaultImc) {
+                    ImmAssociateContext(hwnd, defaultImc);
+                    defaultImc = NULL;
+                }
+            }
+            else {
+                // 剥夺当前输入法并冷藏起来
+                HIMC currentImc = ImmGetContext(hwnd);
+                if (currentImc) {
+                    defaultImc = ImmAssociateContext(hwnd, NULL);
+                    ImmReleaseContext(hwnd, currentImc);
+                }
+            }
         }
 
         bool isOpen() const { return running; }
@@ -311,6 +333,16 @@ JC2_MODULE(window) {
         auto win = std::any_cast<std::shared_ptr<NativeWindow>&>(inst->nativeData);
         auto im = jc_image::getImg(args[0]);
         win->show(im);
+        return jc::Value::none();
+        });
+
+    addWinMethod("setImeEnabled", [](const std::vector<jc::Value>& args) -> jc::Value {
+        if (args.empty()) return jc::Value::none();
+        auto inst = std::get<std::shared_ptr<Instance>>(jc::helpers::getGlobalCallback("self").data);
+        auto win = std::any_cast<std::shared_ptr<NativeWindow>&>(inst->nativeData);
+
+        bool enable = args[0].asDouble() != 0.0;
+        win->setImeEnabled(enable);
         return jc::Value::none();
         });
 }

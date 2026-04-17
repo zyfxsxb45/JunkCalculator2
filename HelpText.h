@@ -9,7 +9,7 @@ namespace jc {
 
     const std::map<std::string, std::string> BuiltinHelp = {
         {"main", R"HELP(
-=================== Junk Calculator 2.2.1 — Help ===================
+=================== Junk Calculator 2.2.2 — Help ===================
 
   Session Commands
   ────────────────────────────────────────────────────────────────────
@@ -128,7 +128,9 @@ namespace jc {
     3 > 2 && !false                comparison + logic
     x > 0 ? x : -x                 ternary operator
     format("x={:.2f}", PI)         string formatting → "x=3.14"
+    s = 'Say "Hi!"'                alternating single/double quotes
     f"x = {x}, pi = {PI::.2f}"     string interpolation (f-string)
+    func( (a=1, 2) )               pass sequence as function argument
     switch (x) { case 1: {...} }   pattern matching
     for ([k, v] in d) { ... }      destructured for-in
     [x^2 for x in range(10)]       list comprehension
@@ -185,11 +187,14 @@ namespace jc {
     
       a = 1, b = 2, c = 3           // Sequential execution without braces
       
-    ★ Priority Warning: The comma (,) has the LOWEST operator priority. 
-    To capture the return value of a sequence or use it in a lambda body, 
-    you MUST wrap it in parentheses to protect its boundaries:
+    ★ Strict Boundary Warning:
+    The comma (,) has the LOWEST operator priority. To use a sequence inside 
+    a lambda body, an assignment, or as a FUNCTION ARGUMENT, you MUST wrap 
+    it explicitly in parentheses to prevent parsing ambiguity:
+    
       val = (a = 10, b = 20, 30)    // val becomes 30
       f = (x) => (t = x*2, t+1)     // Lambda series
+      print( (a=1, b=2) )           // Mandatory for function arguments!
 
    Destructuring Assignment (Arrays & Dicts)
   ──────────────────────
@@ -348,7 +353,7 @@ namespace jc {
                           complex(3, 4)     → 3+4i
     matrix(r, c, ...)   Construct matrix from dimensions + elements
                           matrix(2, 2, 1, 2, 3, 4)       → RealMatrix
-                          matrix(2, 2, 1+1i, 2, 3, 4)    → ComplexMatrix
+                          matrix(2, 2, 1+1i, 2, 3, 4-2i)    → ComplexMatrix
                           matrix(2, 2, "a", "b", "c", "d") → StringMatrix
                           matrix(3, 3)                    → 3×3 zero matrix
 
@@ -1286,10 +1291,15 @@ namespace jc {
     * Only with a different parameter count
 )HELP" },
 
-{ "string", R"HELP(
+        { "string", R"HELP(
 ═══ String Functions ═══
 
-  Strings are created with double quotes:  s = "hello world"
+  Strings are created with either double quotes ("") or single quotes (''). 
+  This alternating mechanism allows you to embed quotes effortlessly without 
+  needing backslash escapes:
+    s1 = "hello world"
+    s2 = 'He said "Hello!"'
+    s3 = "It's perfectly fine."  
 
   Conversion
   ──────────────────────
@@ -1301,7 +1311,7 @@ namespace jc {
 
   Escape Sequences
   ──────────────────────
-    \n  \t  \\  \"  \r  \0
+    \n  \t  \\  \"  \'  \r  \0
 
   Length & Indexing (0-based, negative safely wraps)
   ──────────────────────
@@ -1348,7 +1358,7 @@ namespace jc {
 
   String Interpolation (f-strings)
   ──────────────────────
-    f"text {expr} text"              Embed any expression
+    f"text {expr} text"             Embed any expression
     f"Hello, {name}!"               Variable interpolation
     f"area = {PI * r^2::.2f}"       With format spec (:: separator)
 
@@ -1364,7 +1374,7 @@ namespace jc {
   StringMatrix — Tabular String Data
   ──────────────────────
     ["hello", "world"]            Creates a StringMatrix (1×2)
-    ["a", "b"; "c", "d"]         Creates a StringMatrix (2×2)
+    ["a", "b"; "c", "d"]          Creates a StringMatrix (2×2)
 
     ★ UNIVERSAL COMPATIBILITY:
     StringMatrix now supports ALL array manipulation functions:
@@ -1374,7 +1384,7 @@ namespace jc {
     
     Examples:
       push(["a","b"], "c")                    → ["a","b","c"]
-      sort(["banana","apple","cherry"])        → ["apple","banana","cherry"]
+      sort(["banana","apple","cherry"])       → ["apple","banana","cherry"]
       map((s) => upper(s), ["hello","world"]) → ["HELLO","WORLD"]
       filter((s) => len(s) > 3, ["hi","hello"]) → ["hello"]
       join(["x","y","z"], "-")                → "x-y-z"
@@ -1382,8 +1392,8 @@ namespace jc {
 
     Conversion:
       toStrMat(A)                         Convert any matrix → StringMatrix
-      toList(["a","b"])                    StringMatrix → List
-      matrix(2, 2, "a", "b", "c", "d")   StringMatrix via constructor
+      toList(["a","b"])                   StringMatrix → List
+      matrix(2, 2, "a", "b", "c", "d")    StringMatrix via constructor
 )HELP" },
 
 { "array", R"HELP(
@@ -2384,7 +2394,7 @@ namespace jc {
 ═══ Native Window Engine — Native Module ═══
 
   Requires: import "window"
-  (Note: Currently restricted to Win32 architectures. Requires User32 / Gdi32)
+  (Note: Currently restricted to Win32 architectures. Requires User32 / Gdi32 / imm32)
 
   The `window` module pierces the OS layer to spawn a hardware-accelerated 
   GUI window, complete with an asynchronous, thread-safe Event Queue for 
@@ -2399,6 +2409,14 @@ namespace jc {
     win.show(image_obj)
         Bit-block transfers (Blits) a JC2 `Image` object's memory buffer 
         directly onto the window's device context (HDC) instantly.
+
+  IME (Input Method Editor) Control
+  ──────────────────────
+    win.setImeEnabled(boolean)
+        Dynamically enables or disables the OS Input Method (e.g., Chinese Pinyin).
+        • Pass `false` (or 0) for action games. This prevents the IME from 
+          intercepting physical keys like WASD or 1-5 as text input.
+        • Pass `true` (or 1) when the user clicks a text box and needs to type.
 
   Real-Time Input Polling
   ──────────────────────
