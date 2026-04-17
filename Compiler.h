@@ -24,6 +24,7 @@ namespace jc {
             int maxLocals = 0;                  // ★ 新增：跟踪该函数所使用的最大局部变量数
             std::set<std::string> globalNames;
             int tryDepth = 0;
+            std::string expectedReturnType = "";
         };
         struct LoopInfo {
             int loopStart;

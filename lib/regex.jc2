@@ -1,30 +1,30 @@
 // ═══════════════════════════════════════════════════════════════
-// regex.jc2 — Regular Expression Standard Library v2.1
-// Pure JC2 2.2.1 Implementation (Backtracking NFA)
+// regex.jc2 — Regular Expression Standard Library
+// Pure JC2 2.2.2 Implementation (Backtracking NFA)
 // ═══════════════════════════════════════════════════════════════
 
 const _RE_SHORTHANDS = Set("d", "D", "w", "W", "s", "S")
 
-_re_shorthand(kind, c) = {
-    if (kind == "d") { return isdigit(c) }
-    if (kind == "D") { return !isdigit(c) }
-    if (kind == "w") { return isalnum(c) || c == "_" }
-    if (kind == "W") { return !(isalnum(c) || c == "_") }
-    if (kind == "s") { return isspace(c) }
-    if (kind == "S") { return !isspace(c) }
+_re_shorthand(kind: string, c: string) -> bool = {
+    if (kind == "d") return isdigit(c)
+    if (kind == "D") return !isdigit(c)
+    if (kind == "w") return isalnum(c) || c == "_"
+    if (kind == "W") return !(isalnum(c) || c == "_")
+    if (kind == "s") return isspace(c)
+    if (kind == "S") return !isspace(c)
     return false
 }
 
-_to_int(s) = {
+_to_int(s: string) -> int = {
     res = 0
-    for (i in range(len(s))) { res = res * 10 + (ord(charAt(s, i)) - 48) }
+    for (i in range(len(s))) { res = res * 10 + (ord(s[i]) - 48) }
     return res
 }
 
 // ─── Match Object ─────────────────────────────────────────────
 
 class ReMatch {
-    init(matched, start, end, groups) = {
+    init(matched: string, start: int, end: int, groups: list) = {
         self.matched = matched
         self.start = start
         self.end = end
@@ -36,16 +36,22 @@ class ReMatch {
 // ─── Parser State ─────────────────────────────────────────────
 
 class _RePS {
-    init(pat) = {
+    init(pat: string) = {
         self.s = pat; self.p = 0; self.n = len(pat); self.gc = 0
     }
-    pk() = self.p < self.n ? charAt(self.s, self.p) : ""
-    nx() = { c = self.pk(); self.p += 1; return c }
-    ok() = self.p < self.n
+    pk() -> string = return self.p < self.n ? self.s[self.p] : ""
+    
+    nx() -> string = { 
+        c = self.pk()
+        self.p += 1
+        return c 
+    }
+    
+    ok() -> bool = return self.p < self.n
 
     parse() = {
         nodes = self.alt()
-        if (self.ok()) { throw f"Regex Error: Unexpected '{self.pk()}' at position {self.p}" }
+        if (self.ok()) throw f"Regex Error: Unexpected '{self.pk()}' at position {self.p}"
         return nodes
     }
 
@@ -53,14 +59,16 @@ class _RePS {
         left = self.seq()
         if (self.ok() && self.pk() == "|") {
             self.nx()
-            return list({type: "alt", a: left, b: self.alt()})
+            return {type: "alt", a: left, b: self.alt()}
         }
         return left
     }
 
-    seq() = {
+    seq() -> list = {
         nodes = list()
-        while (self.ok() && self.pk() != ")" && self.pk() != "|") { add(nodes, self.quant()) }
+        while (self.ok() && self.pk() != ")" && self.pk() != "|") { 
+            push(nodes, self.quant()) 
+        }
         return nodes
     }
 
@@ -75,82 +83,96 @@ class _RePS {
                 saved_p = self.p; self.nx() 
                 min_str = ""
                 while (self.ok() && isdigit(self.pk())) { min_str += self.nx() }
-                has_comma = false; max_str = ""
+                
+                has_comma = false
+                max_str = ""
                 if (self.ok() && self.pk() == ",") {
                     has_comma = true; self.nx() 
                     while (self.ok() && isdigit(self.pk())) { max_str += self.nx() }
                 }
+                
                 if (self.ok() && self.pk() == "}") {
                     self.nx()
                     min_val = len(min_str) > 0 ? _to_int(min_str) : 0
                     max_val = -1
-                    // ★ 修复：加回严格的大括号
                     if (has_comma) { 
-                        if (len(max_str) > 0) { max_val = _to_int(max_str) } 
+                        if (len(max_str) > 0) max_val = _to_int(max_str)
                     } else { 
                         max_val = len(min_str) > 0 ? min_val : 0 
                     }
                     return {type: "bound", inner: node, min: min_val, max: max_val}
-                } else { self.p = saved_p }
+                } else { 
+                    self.p = saved_p 
+                }
             }
         }
         return node
     }
 
     atom() = {
-        if (!self.ok()) { throw "Regex Error: Unexpected end of pattern" }
+        if (!self.ok()) throw "Regex Error: Unexpected end of pattern"
         c = self.pk()
         if (c == "(") {
-            self.nx(); self.gc += 1; idx = self.gc
+            self.nx()
+            self.gc += 1
+            idx = self.gc
             inner = self.alt()
-            if (!self.ok() || self.pk() != ")") { throw "Regex Error: Unmatched '('" }
-            self.nx(); return {type: "group", inner: inner, idx: idx}
+            if (!self.ok() || self.pk() != ")") throw "Regex Error: Unmatched '('"
+            self.nx()
+            return {type: "group", inner: inner, idx: idx}
         }
-        if (c == "[") { return self.cls() }
+        if (c == "[") return self.cls()
         if (c == ".") { self.nx(); return {type: "dot"} }
         if (c == "^") { self.nx(); return {type: "start"} }
         if (c == "$") { self.nx(); return {type: "end"} }
         if (c == "\\") {
             self.nx()
-            if (!self.ok()) { throw "Regex Error: Trailing backslash" }
+            if (!self.ok()) throw "Regex Error: Trailing backslash"
             e = self.nx()
-            if (e in _RE_SHORTHANDS) { return {type: "esc", kind: e} }
+            if (e in _RE_SHORTHANDS) return {type: "esc", kind: e}
             return {type: "lit", ch: e}
         }
-        if (c in ")*+?") { throw f"Regex Error: Unexpected '{c}' at pos {self.p}" }
-        self.nx(); return {type: "lit", ch: c}
+        if (c in ")*+?") throw f"Regex Error: Unexpected '{c}' at pos {self.p}"
+        self.nx()
+        return {type: "lit", ch: c}
     }
 
     cls() = {
-        self.nx(); neg = false
+        self.nx()
+        neg = false
         if (self.ok() && self.pk() == "^") { neg = true; self.nx() }
         specs = list()
-        if (self.ok() && self.pk() == "]") { add(specs, {t: "c", v: "]"}); self.nx() }
+        if (self.ok() && self.pk() == "]") { push(specs, {t: "c", v: "]"}); self.nx() }
+        
         while (self.ok() && self.pk() != "]") {
             c = self.nx()
             if (c == "\\" && self.ok()) {
                 e = self.nx()
-                if (e in _RE_SHORTHANDS) { add(specs, {t: "sh", v: e}) }
-                else { add(specs, {t: "c", v: e}) }
+                if (e in _RE_SHORTHANDS) push(specs, {t: "sh", v: e})
+                else push(specs, {t: "c", v: e})
             } else if (self.ok() && self.pk() == "-") {
                 self.nx()
-                if (self.ok() && self.pk() != "]") { add(specs, {t: "r", lo: c, hi: self.nx()}) } 
-                else { add(specs, {t: "c", v: c}); add(specs, {t: "c", v: "-"}) }
-            } else { add(specs, {t: "c", v: c}) }
+                if (self.ok() && self.pk() != "]") push(specs, {t: "r", lo: c, hi: self.nx()})
+                else { push(specs, {t: "c", v: c}); push(specs, {t: "c", v: "-"}) }
+            } else { push(specs, {t: "c", v: c}) }
         }
-        if (!self.ok()) { throw "Regex Error: Unmatched '['" }
-        self.nx(); return {type: "class", specs: specs, neg: neg}
+        if (!self.ok()) throw "Regex Error: Unmatched '['"
+        self.nx()
+        return {type: "class", specs: specs, neg: neg}
     }
 }
 
 class _ReCaps {
-    init(numGroups) = { self.data = list(); for (_ in range(numGroups + 1)) { add(self.data, [-1,-1]) } }
-    set(idx, s, e) = { self.data[idx] = [s, e] }
-    getStart(idx)  = self.data[idx][0]
-    getEnd(idx)    = self.data[idx][1]
+    init(numGroups: int) = { 
+        self.data = list() 
+        for (_ in range(numGroups + 1)) { push(self.data, [-1, -1]) } 
+    }
+    set(idx: int, s: int, e: int) = { self.data[idx] = [s, e] }
+    getStart(idx: int) -> int = return self.data[idx][0]
+    getEnd(idx: int) -> int   = return self.data[idx][1]
 }
 
-_re_in_class(node, ch) = {
+_re_in_class(node: dict, ch: string) -> bool = {
     found = false
     for (spec in node.specs) {
         if (spec.t == "c" && ch == spec.v) { found = true; break }
@@ -160,60 +182,65 @@ _re_in_class(node, ch) = {
     return node.neg ? !found : found
 }
 
-_rm_one(node, text, pos, tl) = {
+_rm_one(node: dict, text: string, pos: int, tl: int) -> int = {
     tp = node.type
-    if (tp == "lit") { return (pos < tl && charAt(text, pos) == node.ch) ? pos + 1 : -1 }
-    if (tp == "dot") { return (pos < tl && charAt(text, pos) != "\n") ? pos + 1 : -1 }
-    if (tp == "esc") { return (pos < tl && _re_shorthand(node.kind, charAt(text, pos))) ? pos + 1 : -1 }
-    if (tp == "class"){ return (pos < tl && _re_in_class(node, charAt(text, pos))) ? pos + 1 : -1 }
+    if (tp == "lit") return (pos < tl && text[pos] == node.ch) ? pos + 1 : -1
+    if (tp == "dot") return (pos < tl && text[pos] != "\n") ? pos + 1 : -1
+    if (tp == "esc") return (pos < tl && _re_shorthand(node.kind, text[pos])) ? pos + 1 : -1
+    if (tp == "class") return (pos < tl && _re_in_class(node, text[pos])) ? pos + 1 : -1
     return -1
 }
 
-_rm_single(node, text, pos, tl, caps) = {
+_rm_single(node: dict, text: string, pos: int, tl: int, caps: _ReCaps) -> int = {
     tp = node.type
-    if (tp == "lit" || tp == "dot" || tp == "esc" || tp == "class") { return _rm_one(node, text, pos, tl) }
+    if (tp == "lit" || tp == "dot" || tp == "esc" || tp == "class") return _rm_one(node, text, pos, tl)
     if (tp == "group") {
         r = _rm(node.inner, 0, text, pos, tl, caps)
-        if (r >= 0) { caps.set(node.idx, pos, r) }
+        if (r >= 0) caps.set(node.idx, pos, r)
         return r
     }
     if (tp == "alt") {
         ra = _rm(node.a, 0, text, pos, tl, caps)
-        if (ra >= 0) { return ra }
+        if (ra >= 0) return ra
         return _rm(node.b, 0, text, pos, tl, caps)
     }
     return _rm_one(node, text, pos, tl)
 }
 
-_rm(nodes, idx, text, pos, tl, caps) = {
-    if (idx >= len(nodes)) { return pos }
-    node = nodes[idx]; tp = node.type
+_rm(nodes: list, idx: int, text: string, pos: int, tl: int, caps: _ReCaps) -> int = {
+    if (idx >= len(nodes)) return pos
+    node = nodes[idx]
+    tp = node.type
 
     if (tp == "_cs") { caps.set(node.idx, pos, -1); return _rm(nodes, idx + 1, text, pos, tl, caps) }
     if (tp == "_ce") { caps.set(node.idx, caps.getStart(node.idx), pos); return _rm(nodes, idx + 1, text, pos, tl, caps) }
+    
     if (tp == "lit" || tp == "dot" || tp == "esc" || tp == "class") {
         np = _rm_one(node, text, pos, tl)
         return (np >= 0) ? _rm(nodes, idx + 1, text, np, tl, caps) : -1
     }
-    if (tp == "start") { return pos == 0 ? _rm(nodes, idx + 1, text, pos, tl, caps) : -1 }
-    if (tp == "end") { return pos == tl ? _rm(nodes, idx + 1, text, pos, tl, caps) : -1 }
+    
+    if (tp == "start") return pos == 0 ? _rm(nodes, idx + 1, text, pos, tl, caps) : -1
+    if (tp == "end") return pos == tl ? _rm(nodes, idx + 1, text, pos, tl, caps) : -1
     
     if (tp == "group") {
         comb = list({type: "_cs", idx: node.idx})
-        for (n in node.inner) { add(comb, n) }
-        add(comb, {type: "_ce", idx: node.idx})
-        for (k in range(idx + 1, len(nodes))) { add(comb, nodes[k]) }
+        for (n in node.inner) push(comb, n)
+        push(comb, {type: "_ce", idx: node.idx})
+        for (k in range(idx + 1, len(nodes))) push(comb, nodes[k])
         return _rm(comb, 0, text, pos, tl, caps)
     }
+    
     if (tp == "alt") {
         ra = _rm(node.a, 0, text, pos, tl, caps)
         if (ra >= 0) {
             rest = _rm(nodes, idx + 1, text, ra, tl, caps)
-            if (rest >= 0) { return rest }
+            if (rest >= 0) return rest
         }
         rb = _rm(node.b, 0, text, pos, tl, caps)
         return (rb >= 0) ? _rm(nodes, idx + 1, text, rb, tl, caps) : -1
     }
+    
     if (tp == "bound" || tp == "star" || tp == "plus" || tp == "opt") {
         min_v = 0; max_v = -1
         if (tp == "bound") { min_v = node.min; max_v = node.max }
@@ -223,12 +250,14 @@ _rm(nodes, idx, text, pos, tl, caps) = {
         positions = list(pos); cur = pos; count = 0
         while (max_v < 0 || count < max_v) {
             np = _rm_single(node.inner, text, cur, tl, caps)
-            if (np < 0 || np == cur) { break }
-            add(positions, np); cur = np; count += 1
+            if (np < 0 || np == cur) break
+            push(positions, np)
+            cur = np
+            count += 1
         }
         for (k in range(len(positions) - 1, min_v - 1, -1)) {
             rest = _rm(nodes, idx + 1, text, positions[k], tl, caps)
-            if (rest >= 0) { return rest }
+            if (rest >= 0) return rest
         }
         return -1
     }
@@ -238,63 +267,70 @@ _rm(nodes, idx, text, pos, tl, caps) = {
 // ─── Regex Object (Compiled Pattern) ──────────────────────────
 
 class Regex {
-    init(pattern) = {
+    init(pattern: string) = {
         self.pattern = pattern
         st = _RePS(pattern)
         self.nodes = st.parse()
         self.groups = st.gc
     }
 
-    _run(text, startPos) = {
-        tl = len(text); caps = _ReCaps(self.groups)
+    _run(text: string, startPos: int) = {
+        tl = len(text)
+        caps = _ReCaps(self.groups)
         endPos = _rm(self.nodes, 0, text, startPos, tl, caps)
-        if (endPos < 0) { return 0 }
+        if (endPos < 0) return 0
         
-        matched = substr(text, startPos, endPos - startPos)
+        matched = text[startPos : endPos]
         groups = list()
         for (gi in range(1, self.groups + 1)) {
-            gs = caps.getStart(gi); ge = caps.getEnd(gi)
-            add(groups, (gs >= 0 && ge >= 0) ? substr(text, gs, ge - gs) : "")
+            gs = caps.getStart(gi)
+            ge = caps.getEnd(gi)
+            push(groups, (gs >= 0 && ge >= 0) ? text[gs : ge] : "")
         }
         return ReMatch(matched, startPos, endPos, groups)
     }
 
-    test(text) = {
+    test(text: string) -> bool = {
         tl = len(text)
-        for (i in range(tl + 1)) { if (_rm(self.nodes, 0, text, i, tl, _ReCaps(self.groups)) >= 0) { return 1 } }
+        for (i in range(tl + 1)) { 
+            if (_rm(self.nodes, 0, text, i, tl, _ReCaps(self.groups)) >= 0) return true 
+        }
+        return false
+    }
+
+    match(text: string)  = return self._run(text, 0)
+    
+    search(text: string) = {
+        tl = len(text)
+        for (i in range(tl + 1)) { 
+            r = self._run(text, i)
+            if (r != 0) return r 
+        }
         return 0
     }
 
-    match(text)  = self._run(text, 0)
-
-    search(text) = {
-        tl = len(text)
-        for (i in range(tl + 1)) { r = self._run(text, i); if (r != 0) { return r } }
-        return 0
-    }
-
-    findall(text) = {
+    findall(text: string) -> list = {
         tl = len(text); res = list(); i = 0
         while (i <= tl) {
             r = self._run(text, i)
             if (r != 0) {
-                add(res, r.matched)
+                push(res, r.matched)
                 i = r.end == r.start ? r.end + 1 : r.end
             } else { i += 1 }
         }
         return res
     }
 
-    replace(text, repl) = {
+    replace(text: string, repl: string) -> string = {
         tl = len(text); res = ""; i = 0
         while (i <= tl) {
             m = self._run(text, i)
             if (m != 0) {
                 r = ""; j = 0; rl = len(repl)
                 while (j < rl) {
-                    ch = charAt(repl, j)
+                    ch = repl[j]
                     if (ch == "$" && j + 1 < rl) {
-                        nc = charAt(repl, j + 1)
+                        nc = repl[j + 1]
                         if (isdigit(nc)) {
                             gi = ord(nc) - 48
                             if (gi >= 1 && gi <= len(m.groups)) { r += m.groups[gi - 1] }
@@ -306,26 +342,26 @@ class Regex {
                 }
                 res += r
                 i = m.end == m.start ? m.end + 1 : m.end
-                if (m.end == m.start && i - 1 < tl) { res += charAt(text, i - 1) }
+                if (m.end == m.start && i - 1 < tl) { res += text[i - 1] }
             } else {
-                if (i < tl) { res += charAt(text, i) }
+                if (i < tl) { res += text[i] }
                 i += 1
             }
         }
         return res
     }
 
-    split(text) = {
+    split(text: string) -> list = {
         tl = len(text); res = list(); lastEnd = 0; i = 0
         while (i <= tl) {
             m = self._run(text, i)
             if (m != 0 && m.end > lastEnd) {
-                add(res, substr(text, lastEnd, m.start - lastEnd))
+                push(res, text[lastEnd : m.start])
                 lastEnd = m.end
                 i = m.end == m.start ? m.end + 1 : m.end
             } else { i += 1 }
         }
-        add(res, substr(text, lastEnd))
+        push(res, text[lastEnd : ])
         return res
     }
 
@@ -334,30 +370,31 @@ class Regex {
 
 // ─── Legacy Global API (Auto-Compiles or uses cached Regex) ───
 
-re_compile(pat)               = Regex(pat)
-_re_ensure(pat)               = isinstance(pat, Regex) ? pat : Regex(pat)
+re_compile(pat: string) -> Regex                  = return Regex(pat)
+_re_ensure(pat: any) -> Regex                     = return isinstance(pat, Regex) ? pat : Regex(str(pat))
 
-re_test(pat, text)            = _re_ensure(pat).test(text)
-re_match(pat, text)           = _re_ensure(pat).match(text)
-re_search(pat, text)          = _re_ensure(pat).search(text)
-re_findall(pat, text)         = _re_ensure(pat).findall(text)
-re_replace(pat, text, repl)   = _re_ensure(pat).replace(text, repl)
-re_split(pat, text)           = _re_ensure(pat).split(text)
+re_test(pat: any, text: string) -> bool           = return _re_ensure(pat).test(text)
+re_match(pat: any, text: string)                  = return _re_ensure(pat).match(text)
+re_search(pat: any, text: string)                 = return _re_ensure(pat).search(text)
+re_findall(pat: any, text: string) -> list        = return _re_ensure(pat).findall(text)
+re_replace(pat: any, text: string, rep: string) -> string = return _re_ensure(pat).replace(text, rep)
+re_split(pat: any, text: string) -> list          = return _re_ensure(pat).split(text)
 
 // ─── Dynamic Help Registry ────────────────────────────────────
 
-__register_help("regex", r"DOC(
+if (isfunction(__register_help)) {
+    __register_help("regex", r"DOC(
 ═══ Regular Expressions (Standard Library v2.1) ═══
 
   Requires: import "regex"
 
-  JC2 includes a pure-JC2 Regex engine based on a recursive backtracking NFA. 
-  It supports full capture groups, alternation, character classes, and greedy quantifiers.
+  A pure-JC2 Regex engine based on a recursive backtracking NFA. 
+  Supports capture groups, alternation, character classes, and greedy quantifiers.
 
   Pattern Compilation (Object-Oriented API)
   ──────────────────────
-    Creating a Regex object is highly recommended when using the same 
-    pattern multiple times, as it caches the compiled syntax tree.
+    It is highly recommended to instantiate a Regex object when reusing patterns, 
+    as it caches the compiled syntax tree.
     
     r = Regex(r"(\w+) (\d+)")      // Instantiate Regex object
     r.test("Alice 30")             // → 1
@@ -370,12 +407,12 @@ __register_help("regex", r"DOC(
     r.replace("A 1", "$2-$1")      // → "1-A"
     r.split("A 1, B 2")            // Splits by match
 
-  Global Functional API (Backward Compatible)
+  Global Functional API
   ──────────────────────
     re_compile(pat)            Returns a Regex object.
     re_test(pat, text)         Returns 1 if pattern matches anywhere, else 0.
-    re_match(pat, text)        Matches exactly at the START of text.
-    re_search(pat, text)       Searches for first match ANYWHERE. Returns ReMatch or 0.
+    re_match(pat, text)        Matches exactly at the start of text.
+    re_search(pat, text)       Searches for first match anywhere. Returns ReMatch or 0.
     re_findall(pat, text)      Returns a List of all matched substrings.
     re_split(pat, text)        Splits text by pattern, returns a List.
     re_replace(pat, text, rep) Replaces matches with `rep` (supports $1, $2, &).
@@ -393,5 +430,6 @@ __register_help("regex", r"DOC(
     (...)         Capturing group
     |             Alternation (OR)
 )DOC")
+}
 
-print("[System] regex.jc2 loaded successfully (v2.1).")
+print("[System] regex.jc2 loaded successfully.")

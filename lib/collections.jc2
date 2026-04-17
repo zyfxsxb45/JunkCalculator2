@@ -1,0 +1,318 @@
+// ═══════════════════════════════════════════════════════════════
+// collections.jc2 — Advanced Data Structures Standard Library
+// Pure JC2 Implementation (Stacks, Queues, Heaps, Trees)
+// ═══════════════════════════════════════════════════════════════
+
+
+// ─── Stack (LIFO) ─────────────────────────────────────────────
+
+class Stack {
+    init() = {
+        self.data = list()
+    }
+    
+    push(item: any) = {
+        push(self.data, item)
+        return self
+    }
+    
+    pop() = {
+        if (self.isEmpty()) throw "IndexError: pop from empty Stack"
+        return pop(self.data)
+    }
+    
+    peek() = {
+        if (self.isEmpty()) throw "IndexError: peek from empty Stack"
+        return self.data[-1]
+    }
+    
+    isEmpty() -> bool = return len(self.data) == 0
+    size() -> int     = return len(self.data)
+    clear()           = clear(self.data)
+}
+
+
+// ─── Queue (FIFO) ─────────────────────────────────────────────
+
+class Queue {
+    init() = {
+        self.data = list()
+    }
+    
+    enqueue(item: any) = {
+        push(self.data, item)
+        return self
+    }
+    
+    dequeue() = {
+        if (self.isEmpty()) throw "IndexError: dequeue from empty Queue"
+        return shift(self.data)
+    }
+    
+    peek() = {
+        if (self.isEmpty()) throw "IndexError: peek from empty Queue"
+        return self.data[0]
+    }
+    
+    isEmpty() -> bool = return len(self.data) == 0
+    size() -> int     = return len(self.data)
+    clear()           = clear(self.data)
+}
+
+
+// ─── Deque (Double-Ended Queue) ───────────────────────────────
+
+class Deque {
+    init() = {
+        self.data = list()
+    }
+    
+    pushRight(item: any) = { push(self.data, item); return self }
+    pushLeft(item: any)  = { prepend(self.data, item); return self }
+    
+    popRight() = {
+        if (self.isEmpty()) throw "IndexError: popRight from empty Deque"
+        return pop(self.data)
+    }
+    
+    popLeft() = {
+        if (self.isEmpty()) throw "IndexError: popLeft from empty Deque"
+        return shift(self.data)
+    }
+    
+    isEmpty() -> bool = return len(self.data) == 0
+    size() -> int     = return len(self.data)
+    clear()           = clear(self.data)
+}
+
+
+// ─── DefaultDict ──────────────────────────────────────────────
+
+class DefaultDict {
+    init(defaultFactory: func) = {
+        self.data = dict()
+        self.factory = defaultFactory
+    }
+    
+    __getitem__(key: any) = {
+        k = str(key)
+        if (!hasKey(self.data, k)) {
+            self.data[k] = self.factory()
+        }
+        return self.data[k]
+    }
+    
+    __setitem__(key: any, val: any) = { self.data[str(key)] = val }
+    __contains__(key: any) -> bool  = return hasKey(self.data, str(key))
+    
+    keys() -> list   = return keys(self.data)
+    values() -> list = return values(self.data)
+}
+
+
+// ─── Counter (Frequency Hash Map) ─────────────────────────────
+
+class Counter {
+    init(iterable: any = none) = {
+        self.data = dict()
+        if (iterable != none) self.update(iterable)
+    }
+    
+    update(iterable: any) = {
+        for (item in iterable) {
+            k = str(item)
+            if (hasKey(self.data, k)) { self.data[k] += 1 } 
+            else { self.data[k] = 1 }
+        }
+        return self
+    }
+    
+    get(key: any) -> int = {
+        k = str(key)
+        return hasKey(self.data, k) ? self.data[k] : 0
+    }
+    
+    mostCommon(n: int = 1) -> list = {
+        L = list()
+        for ([k, v] in self.data) push(L, [k, v])
+        sorted = sort(L, (a, b) => a[1] > b[1])
+        return slice(sorted, 0, n)
+    }
+}
+
+
+// ─── PriorityQueue (Binary Heap) ──────────────────────────────
+
+class PriorityQueue {
+    init(cmp: func = (a, b) => a < b) = {
+        self.data = list()
+        self.cmp = cmp   
+    }
+    
+    push(item: any) = {
+        push(self.data, item)
+        self._siftUp(len(self.data) - 1)
+        return self
+    }
+    
+    pop() = {
+        n = len(self.data)
+        if (n == 0) throw "IndexError: pop from empty PriorityQueue"
+        
+        result = self.data[0]
+        last = pop(self.data)
+        
+        if (n > 1) {
+            self.data[0] = last
+            self._siftDown(0)
+        }
+        return result
+    }
+    
+    peek() = {
+        if (self.isEmpty()) throw "IndexError: peek from empty PriorityQueue"
+        return self.data[0]
+    }
+    
+    isEmpty() -> bool = return len(self.data) == 0
+    size() -> int     = return len(self.data)
+
+    _siftUp(idx: int) = {
+        while (idx > 0) {
+            parent = int((idx - 1) / 2)
+            if (self.cmp(self.data[idx], self.data[parent])) {
+                tmp = self.data[idx]
+                self.data[idx] = self.data[parent]
+                self.data[parent] = tmp
+                idx = parent
+            } else { break }
+        }
+    }
+    
+    _siftDown(idx: int) = {
+        n = len(self.data)
+        while (true) {
+            left = 2 * idx + 1
+            right = 2 * idx + 2
+            best = idx
+            
+            if (left < n && self.cmp(self.data[left], self.data[best])) best = left
+            if (right < n && self.cmp(self.data[right], self.data[best])) best = right
+            
+            if (best != idx) {
+                tmp = self.data[idx]
+                self.data[idx] = self.data[best]
+                self.data[best] = tmp
+                idx = best
+            } else { break }
+        }
+    }
+}
+
+
+// ─── TreeNode & Binary Search Tree (BST) ──────────────────────
+
+class TreeNode {
+    init(val: any) = {
+        self.val = val
+        self.left = none
+        self.right = none
+    }
+}
+
+class BST {
+    init() = {
+        self.root = none
+        self._size = 0
+    }
+    
+    insert(val: any) = {
+        if (self.root == none) {
+            self.root = TreeNode(val)
+            self._size += 1
+        } else {
+            self._insertNode(self.root, val)
+        }
+        return self
+    }
+    
+    _insertNode(node: TreeNode, val: any) = {
+        if (val < node.val) {
+            if (node.left == none) { node.left = TreeNode(val); self._size += 1 } 
+            else { self._insertNode(node.left, val) }
+        } else if (val > node.val) {
+            if (node.right == none) { node.right = TreeNode(val); self._size += 1 } 
+            else { self._insertNode(node.right, val) }
+        }
+    }
+    
+    contains(val: any) -> bool = {
+        curr = self.root
+        while (curr != none) {
+            if (val == curr.val) return true
+            if (val < curr.val) curr = curr.left
+            else curr = curr.right
+        }
+        return false
+    }
+    
+    size() -> int = return self._size
+    
+    inorder() -> list = {
+        result = list()
+        self._inorderTraversal(self.root, result)
+        return result
+    }
+    
+    _inorderTraversal(node: any, res: list) = {
+        if (node != none) {
+            self._inorderTraversal(node.left, res)
+            push(res, node.val)
+            self._inorderTraversal(node.right, res)
+        }
+    }
+}
+
+
+// ─── Dynamic Help Registry ────────────────────────────────────
+
+if (isfunction(__register_help)) {
+    __register_help("collections", r"DOC(
+═══ Collections (Standard Library) ═══
+
+  Requires: import "collections"
+
+  High-performance, OOP-based data structures backed by JC2 native lists 
+  and hash dictionaries.
+
+  Linear Structures
+  ──────────────────────
+    Stack()                   LIFO constraint.
+                              Methods: push(x), pop(), peek(), isEmpty(), size()
+
+    Queue()                   FIFO constraint.
+                              Methods: enqueue(x), dequeue(), peek(), isEmpty(), size()
+
+    Deque()                   Double-ended queue.
+                              Methods: pushRight(x), pushLeft(x), popRight(), popLeft()
+
+  Hash Structures
+  ──────────────────────
+    DefaultDict(factory)      Dict that generates default values for missing keys.
+                              Usage: d = DefaultDict(() => list())
+
+    Counter(iterable)         Frequency map for counting occurrences.
+                              Methods: update(iter), get(key), mostCommon(n)
+
+  Tree & Heap Structures
+  ──────────────────────
+    PriorityQueue([cmp])      Binary heap. Min-heap by default.
+                              For Max-heap: PriorityQueue((a, b) => a > b)
+                              Methods: push(x), pop(), peek(), isEmpty(), size()
+
+    BST()                     Binary Search Tree. (Ignores duplicates).
+                              Methods: insert(x), contains(x), size(), inorder()
+)DOC")
+}
+
+print("[System] collections.jc2 loaded successfully.")

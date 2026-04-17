@@ -134,6 +134,9 @@ namespace jc {
         OP_SLICE_GET,       // 切片索引读取
         OP_SLICE_SET,
         OP_REF_WRITEBACK,
+
+        OP_ASSERT_PARAM_TYPE,   // 参数断言：[type_idx:16bit, name_idx:16bit]
+        OP_ASSERT_RETURN_TYPE,  // 返回值断言：[type_idx:16bit]
     };
 
     // =================================================================
@@ -212,6 +215,8 @@ namespace jc {
         case OpCode::OP_REF_WRITEBACK: return "OP_REF_WRITEBACK";
         case OpCode::OP_BIT_AND: return "OP_BIT_AND";
         case OpCode::OP_BIT_OR: return "OP_BIT_OR";
+        case OpCode::OP_ASSERT_PARAM_TYPE: return "OP_ASSERT_PARAM_TYPE";
+        case OpCode::OP_ASSERT_RETURN_TYPE: return "OP_ASSERT_RETURN_TYPE";
         default: return "UNKNOWN_OP";
         }
     }
@@ -371,7 +376,8 @@ namespace jc {
             case OpCode::OP_METHOD:
             case OpCode::OP_GET_PROPERTY:
             case OpCode::OP_SET_PROPERTY:
-            case OpCode::OP_GET_SUPER: {
+            case OpCode::OP_GET_SUPER: 
+            case OpCode::OP_ASSERT_RETURN_TYPE: {
                 uint16_t idx = read16(offset + 1);
                 std::cout << idx << " (";
                 if (idx < constants.size()) {
@@ -453,6 +459,12 @@ namespace jc {
                 if (nameIdx < constants.size() && std::holds_alternative<std::string>(constants[nameIdx].data))
                     std::cout << " (var: " << std::get<std::string>(constants[nameIdx].data) << ")";
                 std::cout << std::endl;
+                return offset + 5;
+            }
+            case OpCode::OP_ASSERT_PARAM_TYPE: {      // ★ 新增一整块
+                uint16_t typeIdx = read16(offset + 1);
+                uint16_t nameIdx = read16(offset + 3);
+                std::cout << "typeConst: " << typeIdx << ", nameConst: " << nameIdx << std::endl;
                 return offset + 5;
             }
 

@@ -69,6 +69,13 @@ namespace jc {
         Value callDunder(const Value& obj, const std::string& name,
             const std::vector<Value>& args);
 
+        // ★ 类型检查冷路径：让繁重的字符串操作离开核心循环
+        [[noreturn]] void triggerParamTypeError(const Value& val, uint16_t typeIdx, uint16_t nameIdx);
+        [[noreturn]] void triggerReturnTypeError(const Value& val, uint16_t typeIdx);
+
+        std::string getTypeName(const Value& val);
+        bool checkValueType(const Value& val, const std::string& typeStr);
+
         std::map<std::string, std::set<int>> builtinArity;  // ★ 新增
         std::set<std::string> importedModules;               // ★ 防重复导入
 
@@ -112,6 +119,8 @@ namespace jc {
         Value execReturn(bool& shouldExit);
         void execInvoke(uint16_t nameIdx, uint8_t argc);
         void execSuperInvoke(uint16_t nameIdx, uint8_t argc);
+        void execAssertParamType(const Value& val, uint16_t typeIdx, uint16_t nameIdx);
+        void execAssertReturnType(const Value& val, uint16_t typeIdx);
 
     public:
         VM();

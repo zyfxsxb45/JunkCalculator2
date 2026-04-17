@@ -14,7 +14,9 @@ namespace jc {
         PLUS, MINUS, STAR, SLASH, CARET, BACKSLASH, PERCENT,
 
         // --- 比较与赋值运算符 ---
-        ASSIGN, EQUAL, BANG_EQUAL, GREATER, GREATER_EQUAL, LESS, LESS_EQUAL, ARROW, PIPE,
+        ASSIGN, EQUAL, BANG_EQUAL, GREATER, GREATER_EQUAL, LESS, LESS_EQUAL, 
+        
+        ARROW, PIPE, RIGHT_ARROW,
 
         // --- 复合赋值运算符 ---     // ★ 新增
         PLUS_ASSIGN,         // ★ +=
@@ -91,6 +93,7 @@ namespace jc {
         case TokenType::ASSIGN:        return "ASSIGN(=)";
         case TokenType::EQUAL:         return "EQUAL(==)";
         case TokenType::ARROW:         return "ARROW(=>)";
+        case TokenType::RIGHT_ARROW:   return "RIGHT_ARROW(->)";
         case TokenType::PIPE:          return "PIPE(|>)";
         case TokenType::BANG_EQUAL:    return "BANG_EQUAL(!=)";
         case TokenType::PLUS_ASSIGN:    return "PLUS_ASSIGN(+=)";

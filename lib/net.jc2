@@ -1,20 +1,20 @@
 // ═══════════════════════════════════════════════════════════════
-// net.jc2 — TCP Native Networking Standard Library v2.0
+// net.jc2 — TCP Native Networking Standard Library
 // Pure, Zero-Dependency Socket Engine (Client & Server)
 // ═══════════════════════════════════════════════════════════════
 
-import "socket" // Bridge to the low-level C++ bindings
+import "socket"
 
 // ─── Socket Object (Client) ───────────────────────────────────
 
 class TcpSocket {
-    init(host, port) = {
+    init(host: string, port: int) = {
         self.host = host
         self.port = port
         self.sock = none()
     }
 
-    connect() = {
+    connect() -> TcpSocket = {
         self.sock = net_tcp_connect(self.host, self.port)
         return self
     }
@@ -26,36 +26,36 @@ class TcpSocket {
         }
     }
 
-    send(text) = {
-        if (isnone(self.sock)) { throw "Network Error: Socket is not connected!" }
+    send(text: string) -> TcpSocket = {
+        if (isnone(self.sock)) throw "Network Error: Socket is not connected!"
         net_send(self.sock, text)
         return self
     }
 
-    recv(max_bytes = 4096) = {
-        if (isnone(self.sock)) { throw "Network Error: Socket is not connected!" }
+    recv(max_bytes: int = 4096) -> string = {
+        if (isnone(self.sock)) throw "Network Error: Socket is not connected!"
         return net_recv(self.sock, max_bytes)
     }
 
-    __str__() = f"<TcpSocket host=\"{self.host}\" port={self.port} connected={!isnone(self.sock)}>"
+    __str__() -> string = return f"<TcpSocket host=\"{self.host}\" port={self.port} connected={!isnone(self.sock)}>"
 }
 
 // ─── Server Object (Daemon) ───────────────────────────────────
 
 class TcpServer {
-    init(host, port) = {
+    init(host: string, port: int) = {
         self.host = host
         self.port = port
         self.sock = none()
     }
 
-    bind() = {
+    bind() -> TcpServer = {
         self.sock = net_tcp_server(self.host, self.port)
         return self
     }
 
-    accept() = {
-        if (isnone(self.sock)) { throw "TCP Server is not bound to a port!" }
+    accept() -> TcpSocket = {
+        if (isnone(self.sock)) throw "Network Error: TCP Server is not bound to a port!"
         native_client = net_tcp_accept(self.sock)
         
         client = TcpSocket(self.host, self.port)
@@ -73,8 +73,9 @@ class TcpServer {
 
 // ─── Dynamic Help Registry ────────────────────────────────────
 
-__register_help("net", r"DOC(
-═══ Network (Standard Library v2.0) ═══
+if (isfunction(__register_help)) {
+    __register_help("net", r"DOC(
+═══ Network (Standard Library) ═══
 
   Requires: import "net"
 
@@ -92,7 +93,6 @@ __register_help("net", r"DOC(
   ──────────────────────
     server = TcpServer("127.0.0.1", 8080).bind()
     
-    // Server Event Loop:
     while (true) {
         client = server.accept()     // Blocks until a browser/client connects
         req = client.recv(1024)      // Read incoming HTTP request
@@ -109,5 +109,6 @@ __register_help("net", r"DOC(
         Blocks and waits until data is received. Returns an EMPTY STRING ("") 
         if the remote server closed the connection.
 )DOC")
+}
 
-print("[System] net.jc2 loaded successfully (v2.0).")
+print("[System] net.jc2 loaded successfully.")

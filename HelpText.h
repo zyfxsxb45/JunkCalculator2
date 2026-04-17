@@ -2010,12 +2010,34 @@ namespace jc {
 )HELP"},
 
         { "typecheck", R"HELP(
-═══ Type Predicates & Value Tests ═══
+═══ Type Hinting & Predicates ═══
 
-  All type-check functions accept exactly 1 argument and return
-  1 (true) or 0 (false). They never throw errors.
+  Gradual Typing (Type Contracts)
+  ──────────────────────
+    JC2 optionally enforces parameter and return types at runtime during 
+    function execution. Unannotated parameters accept any type.
 
-  Numeric Type Checks
+    Syntax:
+      func_name(param1: type, param2: type) -> return_type = { body }
+
+    Examples:
+      process(data: matrix, scale: double) -> matrix = data * scale
+      connect(host: string, port: int = 8080) = { ... }
+    
+    If an incompatible type is passed, the VM throws a TypeError:
+      process([1,2], "fast")
+      ✗ TypeError: Parameter 'scale' expected type 'double', got 'string'.
+
+    Supported Base Types: 
+      int, double (or float/real/number), string, list, dict, set, 
+      matrix, complex, fraction, func, bool, any
+    
+    Class / OOP Types:
+      Any capitalized type name is evaluated as a class instance constraint.
+      Inheritance is strictly respected (passing a subclass is valid).
+      Example: collide(a: RigidBody, b: RigidBody) -> bool = ...
+
+  Numeric Type Checks (Functions)
   ──────────────────────
     isint(x)            Integer? (BigInt, integer-valued double, 
                         or Fraction with denominator = 1)
@@ -2084,24 +2106,11 @@ namespace jc {
     isinstance(x)       Is x an instance of any class? (1 arg)
     isinstance(x, C)    Is x an instance of class C or its subclass? (2 args)
 
-    Examples:
-      isfunction(sin)         → 1
-      isfunction((x) => x)    → 1
-      isclass(Point)          → 1   (after class Point {...})
-      isinstance(Point(1,2))  → 1
-      isinstance(42)          → 0
-
   Floating-Point Checks
   ──────────────────────
     isnan(x)            Is x NaN? (only for double type)
     isinf(x)            Is x ±Infinity? (only for double type)
     isfinite(x)         Is x a finite number? (BigInt/Fraction → always 1)
-
-    Examples:
-      isnan(0.0 / 0.0)       → 1
-      isinf(1.0 / 0.0)       → 1
-      isfinite(42)            → 1
-      isfinite(1.0 / 0.0)    → 0
 
   Numeric Value Predicates
   ──────────────────────
@@ -2112,16 +2121,6 @@ namespace jc {
     iseven(n)           Is n an even integer?
     isodd(n)            Is n an odd integer?
     isprime(n)          Is n a prime number? (Miller-Rabin test)
-
-    Examples:
-      iszero(0)               → 1
-      iszero(0.0)             → 1
-      iszero(0+0i)            → 1
-      ispositive(-3)          → 0
-      iseven(4)               → 1
-      isodd(7)                → 1
-      isprime(97)             → 1
-      isprime(100)            → 0
 
   Type Constructors (see also: help basic)
   ──────────────────────

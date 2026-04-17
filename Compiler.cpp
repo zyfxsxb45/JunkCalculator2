@@ -660,7 +660,30 @@ namespace jc {
 
         emitDefaultPreamble(expr->defaultExprs, fn->maxArity);
 
+        // ★ 幽灵注入：参数类型检查
+        for (size_t i = 0; i < expr->params.size(); ++i) {
+            if (i < expr->paramTypes.size() && !expr->paramTypes[i].empty()) {
+                int slot = resolveLocal(expr->params[i].lexeme);
+                emit(OpCode::OP_GET_LOCAL, lastLine);
+                emit16(static_cast<uint16_t>(slot), lastLine);
+
+                uint16_t typeIdx = identifierConstant(expr->paramTypes[i]);
+                uint16_t nameIdx = identifierConstant(expr->params[i].lexeme);
+                emit(OpCode::OP_ASSERT_PARAM_TYPE, lastLine);
+                emit16(typeIdx, lastLine);
+                emit16(nameIdx, lastLine);
+            }
+        }
+        current().expectedReturnType = expr->returnType; // 记录期盼的类型
         compileNode(expr->body.get());
+
+        // ★ 幽灵注入：隐式返回值的类型检查
+        if (!expr->returnType.empty()) {
+            uint16_t typeIdx = identifierConstant(expr->returnType);
+            emit(OpCode::OP_ASSERT_RETURN_TYPE, lastLine);
+            emit16(typeIdx, lastLine);
+        }
+
         emit(OpCode::OP_RETURN, lastLine);
         fn->localCount = current().maxLocals;
         endScope();
@@ -723,7 +746,25 @@ namespace jc {
         }
         emitDefaultPreamble(expr->defaultExprs, fn->maxArity);
 
+
+        for (size_t i = 0; i < expr->params.size(); ++i) {
+            if (i < expr->paramTypes.size() && !expr->paramTypes[i].empty()) {
+                int slot = resolveLocal(expr->params[i].lexeme);
+                emit(OpCode::OP_GET_LOCAL, lastLine); emit16(static_cast<uint16_t>(slot), lastLine);
+
+                uint16_t typeIdx = identifierConstant(expr->paramTypes[i]);
+                uint16_t nameIdx = identifierConstant(expr->params[i].lexeme);
+                emit(OpCode::OP_ASSERT_PARAM_TYPE, lastLine);
+                emit16(typeIdx, lastLine); emit16(nameIdx, lastLine);
+            }
+        }
+        current().expectedReturnType = expr->returnType;
         compileNode(expr->body.get());
+        if (!expr->returnType.empty()) {
+            uint16_t typeIdx = identifierConstant(expr->returnType);
+            emit(OpCode::OP_ASSERT_RETURN_TYPE, lastLine);
+            emit16(typeIdx, lastLine);
+        }
         emit(OpCode::OP_RETURN, lastLine);
 
         // ★ 修改：提取峰值
@@ -771,14 +812,16 @@ namespace jc {
     }
 
     std::any Compiler::visitReturnExpr(ReturnExpr* expr) {
-        if (expr->value) {
-            compileNode(expr->value.get());
-        }
-        else {
-            emit(OpCode::OP_NONE, lastLine);
+        if (expr->value) compileNode(expr->value.get());
+        else emit(OpCode::OP_NONE, lastLine);
+
+        // ★ 幽灵注入：手工书写的返回值检查
+        if (!current().expectedReturnType.empty()) {
+            uint16_t typeIdx = identifierConstant(current().expectedReturnType);
+            emit(OpCode::OP_ASSERT_RETURN_TYPE, lastLine);
+            emit16(typeIdx, lastLine);
         }
 
-        // ★ 如果此 return 身处一个巨大的 try 块内，将其强制截断抛弃
         for (int i = 0; i < current().tryDepth; ++i) emit(OpCode::OP_TRY_END, lastLine);
         emit(OpCode::OP_RETURN, lastLine);
         return {};
@@ -1434,8 +1477,30 @@ namespace jc {
             fn->paramIsRef = md.paramIsRef;
 
             emitDefaultPreamble(md.defaultExprs, fn->maxArity);
+
+            // ★ 幽灵注入：参数类型检查 (换用专属变量名防遮蔽)
+            for (size_t i = 0; i < md.params.size(); ++i) {
+                if (i < md.paramTypes.size() && !md.paramTypes[i].empty()) {
+                    int paramSlot = resolveLocal(md.params[i].lexeme);
+                    emit(OpCode::OP_GET_LOCAL, lastLine);
+                    emit16(static_cast<uint16_t>(paramSlot), lastLine);
+
+                    uint16_t paramTypeIdx = identifierConstant(md.paramTypes[i]);
+                    uint16_t paramNameIdx = identifierConstant(md.params[i].lexeme);
+                    emit(OpCode::OP_ASSERT_PARAM_TYPE, lastLine);
+                    emit16(paramTypeIdx, lastLine);
+                    emit16(paramNameIdx, lastLine);
+                }
+            }
+            current().expectedReturnType = md.returnType;
             compileNode(md.body.get());
-            emit(OpCode::OP_RETURN, lastLine);
+            if (!md.returnType.empty()) {
+                uint16_t retTypeIdx = identifierConstant(md.returnType);
+                emit(OpCode::OP_ASSERT_RETURN_TYPE, lastLine);
+                emit16(retTypeIdx, lastLine);
+            }
+            emit(OpCode::OP_RETURN, lastLine); // (不用动)
+
             fn->localCount = current().maxLocals;
             endScope();
             stateStack.pop_back();

@@ -129,9 +129,154 @@ namespace jc {
     }
 
     std::unique_ptr<Expr> Parser::assignment() {
+
+        // ★ 特权推测解析：精准捕获带类型注解的函数定义 f(x: int) -> int = ...
+        if (check(TokenType::IDENTIFIER) &&
+            current + 1 < static_cast<int>(tokens.size()) &&
+            tokens[current + 1].type == TokenType::LPAREN) {
+
+            int peekPos = current + 2;
+            int depth = 1;
+            // 快速前扫，跨过括号
+            while (peekPos < static_cast<int>(tokens.size()) && depth > 0) {
+                if (tokens[peekPos].type == TokenType::LPAREN) depth++;
+                else if (tokens[peekPos].type == TokenType::RPAREN) depth--;
+                else if (tokens[peekPos].type == TokenType::LBRACE) depth++;
+                else if (tokens[peekPos].type == TokenType::RBRACE) depth--;
+                else if (tokens[peekPos].type == TokenType::LBRACKET) depth++;
+                else if (tokens[peekPos].type == TokenType::RBRACKET) depth--;
+                peekPos++;
+            }
+
+            if (depth == 0) {
+                while (peekPos < static_cast<int>(tokens.size()) && tokens[peekPos].type == TokenType::NEWLINE) peekPos++;
+                // 试探是否带有 -> 返回类型
+                if (peekPos < static_cast<int>(tokens.size()) && tokens[peekPos].type == TokenType::RIGHT_ARROW) {
+                    peekPos++;
+                    if (peekPos < static_cast<int>(tokens.size()) && tokens[peekPos].type == TokenType::IDENTIFIER) peekPos++;
+                }
+                while (peekPos < static_cast<int>(tokens.size()) && tokens[peekPos].type == TokenType::NEWLINE) peekPos++;
+
+                // 如果结尾是等号，那它 100% 就是一个正经的函数定义！
+                if (peekPos < static_cast<int>(tokens.size()) && tokens[peekPos].type == TokenType::ASSIGN) {
+                    Token funcName = advance(); // 吞掉函数名
+                    consume(TokenType::LPAREN, "");
+
+                    std::vector<Token> params;
+                    std::vector<bool> paramIsRef;
+                    std::vector<std::shared_ptr<Expr>> defaultExprs;
+                    std::vector<std::string> paramTypes;  // ★
+                    bool hasRestParam = false;
+
+                    std::vector<std::unique_ptr<Expr>> destructStmts;
+                    int destructCounter = 0;
+
+                    if (!check(TokenType::RPAREN)) {
+                        do {
+                            while (match({ TokenType::NEWLINE })) {}
+                            if (hasRestParam) throw std::runtime_error("Parser Error: Rest parameter must be last.");
+
+                            bool isRef = match({ TokenType::REF });
+
+                            // 1. 变长参数 ...args
+                            if (match({ TokenType::ELLIPSIS })) {
+                                if (isRef) throw std::runtime_error("Parser Error: Rest parameter cannot be ref.");
+                                params.push_back(consume(TokenType::IDENTIFIER, "Expect parameter name."));
+                                paramIsRef.push_back(false);
+                                paramTypes.push_back(""); // 变长暂不强校验类型
+                                defaultExprs.push_back(nullptr);
+                                hasRestParam = true;
+                                continue;
+                            }
+
+                            // 2. 字典解构参数 {a, b}
+                            if (check(TokenType::LBRACE)) {
+                                if (isRef) throw std::runtime_error("Destructured dict cannot be ref.");
+                                auto dictNode = parseDictLiteral();
+
+                                std::string phName = "__param_dict_" + std::to_string(destructCounter++);
+                                Token phTok(TokenType::IDENTIFIER, phName, funcName.line);
+                                params.push_back(phTok);
+                                paramIsRef.push_back(false);
+                                paramTypes.push_back("dict"); // ★ 自动加上硬性字典类型约束！
+                                defaultExprs.push_back(nullptr);
+
+                                auto* dl = dynamic_cast<DictLiteral*>(dictNode.get());
+                                std::vector<std::pair<std::string, Token>> targets;
+                                for (auto& entry : dl->entries) {
+                                    auto* litKey = dynamic_cast<Literal*>(entry.first.get());
+                                    auto* varVal = dynamic_cast<Variable*>(entry.second.get());
+                                    if (litKey && varVal) targets.push_back({ litKey->value, varVal->name });
+                                    else throw std::runtime_error("Invalid dict destructuring format.");
+                                }
+                                auto rhs = std::make_unique<Variable>(phTok);
+                                destructStmts.push_back(std::make_unique<DictDestructAssign>(std::move(targets), std::move(rhs)));
+                                continue;
+                            }
+
+                            // 3. 通规变量参数 x : int = 10
+                            Token paramName = consume(TokenType::IDENTIFIER, "Parser Error: Expect parameter name.");
+                            params.push_back(paramName);
+                            paramIsRef.push_back(isRef);
+
+                            std::string pType = "";
+                            if (match({ TokenType::COLON })) {
+                                pType = consume(TokenType::IDENTIFIER, "Parser Error: Expect type after ':'.").lexeme;
+                            }
+                            paramTypes.push_back(pType); // ★ 存入参数的类型
+
+                            if (match({ TokenType::ASSIGN })) {
+                                defaultExprs.push_back(std::shared_ptr<Expr>(ternary().release()));
+                            }
+                            else {
+                                defaultExprs.push_back(nullptr);
+                            }
+                        } while (match({ TokenType::COMMA }));
+                    }
+                    consume(TokenType::RPAREN, "Parser Error: Expect ')' after parameters.");
+
+                    // ★ 解析返回类型 -> int
+                    std::string retType = "";
+                    while (match({ TokenType::NEWLINE })) {}
+                    if (match({ TokenType::RIGHT_ARROW })) {
+                        retType = consume(TokenType::IDENTIFIER, "Parser Error: Expect return type after '->'.").lexeme;
+                    }
+
+                    while (match({ TokenType::NEWLINE })) {}
+                    consume(TokenType::ASSIGN, "Parser Error: Expect '=' after function signature.");
+
+                    // 解析函数体
+                    int bodyStart = current;
+                    auto rawB = check(TokenType::LBRACE) ? parseBlock() : assignment();
+                    int bodyEnd = current;
+
+                    std::string rawBodyStr = "";
+                    for (int i = bodyStart; i < bodyEnd; ++i) {
+                        if (tokens[i].type == TokenType::STRING) rawBodyStr += "\"" + tokens[i].lexeme + "\"";
+                        else rawBodyStr += tokens[i].lexeme;
+                        if (i < bodyEnd - 1) rawBodyStr += " ";
+                    }
+
+                    std::shared_ptr<Expr> finalBody;
+                    if (!destructStmts.empty()) {
+                        destructStmts.push_back(std::move(rawB));
+                        finalBody = std::make_shared<Block>(std::move(destructStmts));
+                    }
+                    else {
+                        finalBody = std::shared_ptr<Expr>(rawB.release());
+                    }
+
+                    return std::make_unique<FunctionDef>(
+                        funcName, params, paramIsRef, defaultExprs, hasRestParam,
+                        paramTypes, retType, rawBodyStr, std::move(finalBody)
+                    );
+                }
+            }
+        }
+
         auto expr = ternary();
 
-        // ★ 将原本的 match 列表中加入 BIT_AND_ASSIGN 和 BIT_OR_ASSIGN
+        // 处理复合赋值 +=, -= 等...
         if (match({ TokenType::PLUS_ASSIGN, TokenType::MINUS_ASSIGN,
                     TokenType::STAR_ASSIGN, TokenType::SLASH_ASSIGN,
                     TokenType::PERCENT_ASSIGN, TokenType::CARET_ASSIGN,
@@ -153,48 +298,39 @@ namespace jc {
 
             auto value = assignment();
 
-            // ★ 拦截 global 复合赋值，将其脱糖隐式合并为代码块！
             if (auto* gdecl = dynamic_cast<GlobalDecl*>(expr.get())) {
                 if (gdecl->names.size() != 1) {
                     throw std::runtime_error("Parser Error: Cannot use compound assignment on multiple global declarations.");
                 }
                 Token varTok = gdecl->names[0];
                 std::vector<std::unique_ptr<Expr>> stmts;
-                stmts.push_back(std::move(expr));  // 先插入单纯的 global 声明节点
+                stmts.push_back(std::move(expr));
                 stmts.push_back(std::make_unique<CompoundAssign>(
-                    std::make_unique<Variable>(varTok), baseOp, std::move(value))); // 再插入真正的修改动作
+                    std::make_unique<Variable>(varTok), baseOp, std::move(value)));
                 return std::make_unique<Block>(std::move(stmts));
             }
             return std::make_unique<CompoundAssign>(std::move(expr), baseOp, std::move(value));
         }
+
         // ── 处理标准赋值 (=) ──
         if (match({ TokenType::ASSIGN })) {
             Token equals = previous();
-            int valueStartTokenIndex = current;
-            auto value = assignment();
-            int valueEndTokenIndex = current;
-            // ★ 拦截 global 标准赋值，将其脱糖隐式合并为代码块！
+            auto value = assignment();  // ★ 直接读取右值即可，把上下两行记录 index 的删掉
+
             if (auto* gdecl = dynamic_cast<GlobalDecl*>(expr.get())) {
-                if (gdecl->names.size() != 1) {
-                    throw std::runtime_error("Parser Error: Cannot assign to multiple global declarations at once.");
-                }
+                if (gdecl->names.size() != 1) throw std::runtime_error("Parser Error: Cannot assign to multiple global declarations at once.");
                 Token varTok = gdecl->names[0];
                 std::vector<std::unique_ptr<Expr>> stmts;
-                stmts.push_back(std::move(expr)); // 声明穿透
-                stmts.push_back(std::make_unique<Assign>(varTok, std::move(value))); // 直接赋值给变量
+                stmts.push_back(std::move(expr));
+                stmts.push_back(std::make_unique<Assign>(varTok, std::move(value)));
                 return std::make_unique<Block>(std::move(stmts));
             }
 
             if (auto* dotExpr = dynamic_cast<DotAccess*>(expr.get())) {
-                return std::make_unique<DotAssign>(
-                    std::move(dotExpr->object),
-                    std::move(dotExpr->field),
-                    std::move(value));
+                return std::make_unique<DotAssign>(std::move(dotExpr->object), std::move(dotExpr->field), std::move(value));
             }
 
-            // ★ 索引赋值：A[i] = v  或  A[i][j] = v  (任意深度)
             if (auto* indexExpr = dynamic_cast<IndexAccess*>(expr.get())) {
-                // 递归展开 IndexAccess 链
                 std::vector<std::vector<std::unique_ptr<Expr>>> chain;
                 IndexAccess* currentIA = indexExpr;
                 chain.push_back(std::move(currentIA->indices));
@@ -202,186 +338,58 @@ namespace jc {
                     chain.push_back(std::move(inner->indices));
                     currentIA = inner;
                 }
-                // currentIA->object 现在是链的根（Variable 或 DotAccess 等）
                 std::reverse(chain.begin(), chain.end());
                 auto* varExpr = dynamic_cast<Variable*>(currentIA->object.get());
                 if (varExpr) {
-                    // ★ 原路径：根是变量
-                    return std::make_unique<IndexAssign>(
-                        varExpr->name, std::move(chain), std::move(value));
+                    return std::make_unique<IndexAssign>(varExpr->name, std::move(chain), std::move(value));
                 }
                 else {
-                    // ★ 新路径：根是表达式（如 self.data, d.list 等）
-                    return std::make_unique<IndexAssign>(
-                        std::move(currentIA->object), std::move(chain), std::move(value));
+                    return std::make_unique<IndexAssign>(std::move(currentIA->object), std::move(chain), std::move(value));
                 }
             }
 
-            // ★ 完美解构赋值: [a, b; c, d] = expr
             if (auto* matNode = dynamic_cast<MatrixNode*>(expr.get())) {
                 std::vector<Token> names;
                 bool validDestruct = true;
 
-                // ★ 改为：遍历矩阵结构里的所有行和所有列，把里面的变量统统抓出来变成一维解析顺位
-                // 因为在右边的 VM 层面，多维矩阵的底层 rawData 也是一个铺平的 1D 数组！
                 for (auto& row : matNode->elements) {
                     for (auto& elem : row) {
-                        if (auto* v = dynamic_cast<Variable*>(elem.get())) {
-                            names.push_back(v->name);
-                        }
-                        else {
-                            validDestruct = false;
-                            break;
-                        }
+                        if (auto* v = dynamic_cast<Variable*>(elem.get())) names.push_back(v->name);
+                        else { validDestruct = false; break; }
                     }
                     if (!validDestruct) break;
                 }
 
                 if (validDestruct && !names.empty()) {
-                    return std::make_unique<DestructAssign>(
-                        std::move(names), std::move(value));
+                    return std::make_unique<DestructAssign>(std::move(names), std::move(value));
                 }
             }
 
-            // ★ 字典解构赋值: { name, age: a } = expr
             if (auto* dictNode = dynamic_cast<DictLiteral*>(expr.get())) {
                 std::vector<std::pair<std::string, Token>> targets;
                 bool validDestruct = true;
                 for (auto& entry : dictNode->entries) {
                     auto* litKey = dynamic_cast<Literal*>(entry.first.get());
                     auto* varVal = dynamic_cast<Variable*>(entry.second.get());
-                    // 确保映射的键是字符串常数，值是单纯的变量标识符
                     if (litKey && litKey->isString && varVal) {
                         targets.push_back({ litKey->value, varVal->name });
                     }
-                    else {
-                        validDestruct = false; break;
-                    }
+                    else { validDestruct = false; break; }
                 }
                 if (validDestruct && !targets.empty()) {
-                    return std::make_unique<DictDestructAssign>(
-                        std::move(targets), std::move(value));
+                    return std::make_unique<DictDestructAssign>(std::move(targets), std::move(value));
                 }
                 else {
                     throw std::runtime_error("Parser Error: Invalid dictionary destructuring target.");
                 }
             }
 
-            // 情况 1: 普通的变量赋值
             if (auto* varExpr = dynamic_cast<Variable*>(expr.get())) {
                 return std::make_unique<Assign>(varExpr->name, std::move(value));
             }
-            // 情况 2: 函数定义
-            if (auto* callExpr = dynamic_cast<Call*>(expr.get())) {
-                std::vector<Token> params;
-                std::vector<bool> paramIsRef;
-                std::vector<std::shared_ptr<Expr>> defaultExprs;
 
-                // ★ 新增：变长参数标志
-                bool hasRestParam = false;
+            // ★ （旧的 Call 拦截已经被上面顶端安全取代，这里删去原来的 Call if 分支即可！）
 
-                // ★ 解构拦截器
-                std::vector<std::unique_ptr<Expr>> destructStmts;
-                int destructCounter = 0;
-
-                for (auto& argExpr : callExpr->arguments) {
-                    if (hasRestParam) {
-                        throw std::runtime_error("Parser Error: Rest parameter '...' must be the last parameter in function definition.");
-                    }
-
-                    // 1. 拦截 ref 引用参数
-                    if (auto* refParam = dynamic_cast<RefParam*>(argExpr.get())) {
-                        params.push_back(refParam->name);
-                        paramIsRef.push_back(true);
-                        defaultExprs.push_back(nullptr);
-                    }
-                    // 2. 拦截默认值参数 a = 1
-                    else if (auto* assignExpr = dynamic_cast<Assign*>(argExpr.get())) {
-                        params.push_back(assignExpr->name);
-                        paramIsRef.push_back(false);
-                        defaultExprs.push_back(std::shared_ptr<Expr>(assignExpr->value.release()));
-                    }
-                    // 3. 拦截普通变量 a
-                    else if (auto* varExpr = dynamic_cast<Variable*>(argExpr.get())) {
-                        params.push_back(varExpr->name);
-                        paramIsRef.push_back(false);
-                        defaultExprs.push_back(nullptr);
-                    }
-                    // 4. ★ 新增：拦截变长参数 ...args
-                    else if (auto* unaryExpr = dynamic_cast<Unary*>(argExpr.get())) {
-                        if (unaryExpr->op.type == TokenType::ELLIPSIS) {
-                            if (auto* varTarget = dynamic_cast<Variable*>(unaryExpr->right.get())) {
-                                params.push_back(varTarget->name);
-                                paramIsRef.push_back(false);
-                                defaultExprs.push_back(nullptr);
-                                hasRestParam = true; // 标记已出现变长参数
-                                continue;
-                            }
-                        }
-                        throw std::runtime_error("Parser Error: Invalid rest parameter syntax. Expected '...name'.");
-                    }
-                    // 5. 拦截字典解构参数 {x, y}
-                    else if (auto* dictNode = dynamic_cast<DictLiteral*>(argExpr.get())) {
-                        std::string phName = "__param_dict_" + std::to_string(destructCounter++);
-                        Token phTok(TokenType::IDENTIFIER, phName, callExpr->callee.line);
-
-                        params.push_back(phTok);
-                        paramIsRef.push_back(false);
-                        defaultExprs.push_back(nullptr);
-
-                        std::vector<std::pair<std::string, Token>> targets;
-                        bool validDestruct = true;
-
-                        for (auto& entry : dictNode->entries) {
-                            auto* litKey = dynamic_cast<Literal*>(entry.first.get());
-                            auto* varVal = dynamic_cast<Variable*>(entry.second.get());
-                            if (litKey && litKey->isString && varVal) {
-                                targets.push_back({ litKey->value, varVal->name });
-                            }
-                            else {
-                                validDestruct = false; break;
-                            }
-                        }
-
-                        if (!validDestruct || targets.empty()) {
-                            throw std::runtime_error("Parser Error: Invalid dictionary parameter in function signature.");
-                        }
-
-                        auto rhs = std::make_unique<Variable>(phTok);
-                        auto dda = std::make_unique<DictDestructAssign>(std::move(targets), std::move(rhs));
-                        destructStmts.push_back(std::move(dda));
-                    }
-                    else {
-                        throw std::runtime_error("Parser Error: Function parameters must be simple variable names, default assignments, rest parameter '...', or destructured dictionaries '{ }'.");
-                    }
-                }
-
-                std::string rawBodyStr = "";
-                for (int i = valueStartTokenIndex; i < valueEndTokenIndex; ++i) {
-                    if (tokens[i].type == TokenType::STRING) rawBodyStr += "\"" + tokens[i].lexeme + "\"";
-                    else rawBodyStr += tokens[i].lexeme;
-                    if (i < valueEndTokenIndex - 1) rawBodyStr += " ";
-                }
-
-                std::shared_ptr<Expr> finalBody;
-                if (!destructStmts.empty()) {
-                    destructStmts.push_back(std::move(value));
-                    finalBody = std::make_shared<Block>(std::move(destructStmts));
-                }
-                else {
-                    finalBody = std::shared_ptr<Expr>(value.release());
-                }
-
-                return std::make_unique<FunctionDef>(
-                    callExpr->callee,
-                    params,
-                    paramIsRef,
-                    defaultExprs,
-                    hasRestParam,     // ★ 将标志传给 AST 节点
-                    rawBodyStr,
-                    std::move(finalBody)
-                );
-            }
             throw std::runtime_error("Parser Error: Invalid assignment target at '" + equals.lexeme + "'.");
         }
         return expr;
@@ -481,6 +489,7 @@ namespace jc {
                     if (isPartial) {
                         expr = std::make_unique<LambdaExpr>(
                             std::move(phParams), std::move(phDefaults), false,
+                            std::vector<std::string>(phParams.size(), ""), "",  // ★★★ 补上: 空参数类型数组，空返回类型
                             "<partial_method>", std::shared_ptr<Expr>(methodNode.release())
                         );
                     }
@@ -532,6 +541,7 @@ namespace jc {
                 if (isPartial) {
                     expr = std::make_unique<LambdaExpr>(
                         std::move(phParams), std::move(phDefaults), false,
+                        std::vector<std::string>(phParams.size(), ""), "", // ★★★ 补上: 空参数类型数组，空返回类型
                         "<partial_apply>", std::shared_ptr<Expr>(callNode.release())
                     );
                 }
@@ -888,25 +898,23 @@ namespace jc {
         }
 
         if (match({ TokenType::LPAREN })) {
-            // ★ 推测性 lambda 解析：(params) => body
+            // ★ 推测性 lambda 解析：(params) => body  [兼容了类型签名侦测]
             int savedPos = current;
             std::vector<Token> lambdaParams;
             bool validParams = true;
 
-            // --- 推测阶段：跳过标识符和可选的 = defaultExpr ---
-            auto skipDefault = [&]() {
-                if (current < static_cast<int>(tokens.size()) &&
-                    tokens[current].type == TokenType::ASSIGN) {
+            auto skipTypeAndDefault = [&]() {
+                if (current < static_cast<int>(tokens.size()) && tokens[current].type == TokenType::COLON) {
+                    current++; // skip :
+                    if (current < static_cast<int>(tokens.size()) && tokens[current].type == TokenType::IDENTIFIER) current++; // skip type
+                }
+                if (current < static_cast<int>(tokens.size()) && tokens[current].type == TokenType::ASSIGN) {
                     current++; // skip =
                     int depth = 0;
                     while (current < static_cast<int>(tokens.size())) {
                         auto tt = tokens[current].type;
-                        if (tt == TokenType::LPAREN || tt == TokenType::LBRACKET ||
-                            tt == TokenType::LBRACE) {
-                            depth++; current++;
-                        }
-                        else if (tt == TokenType::RPAREN || tt == TokenType::RBRACKET ||
-                            tt == TokenType::RBRACE) {
+                        if (tt == TokenType::LPAREN || tt == TokenType::LBRACKET || tt == TokenType::LBRACE) { depth++; current++; }
+                        else if (tt == TokenType::RPAREN || tt == TokenType::RBRACKET || tt == TokenType::RBRACE) {
                             if (depth == 0) break;
                             depth--; current++;
                         }
@@ -916,78 +924,82 @@ namespace jc {
                 }
                 };
 
-            if (check(TokenType::RPAREN)) {
-                // () => expr — zero params
-            }
+            if (check(TokenType::RPAREN)) { /* () => expr */ }
             else if (check(TokenType::IDENTIFIER)) {
                 lambdaParams.push_back(tokens[current]); current++;
-                skipDefault();  // ★
-                while (current < static_cast<int>(tokens.size()) &&
-                    tokens[current].type == TokenType::COMMA) {
-                    current++; // skip comma
-                    if (current >= static_cast<int>(tokens.size()) ||
-                        tokens[current].type != TokenType::IDENTIFIER) {
-                        validParams = false;
-                        break;
+                skipTypeAndDefault();
+                while (current < static_cast<int>(tokens.size()) && tokens[current].type == TokenType::COMMA) {
+                    current++;
+                    if (current >= static_cast<int>(tokens.size()) || tokens[current].type != TokenType::IDENTIFIER) {
+                        validParams = false; break;
                     }
                     lambdaParams.push_back(tokens[current]); current++;
-                    skipDefault();  // ★
+                    skipTypeAndDefault();
                 }
             }
-            else {
-                validParams = false;
-            }
+            else validParams = false;
 
-            // 检查 ) =>
             bool isLambda = false;
-            if (validParams &&
-                current < static_cast<int>(tokens.size()) &&
-                tokens[current].type == TokenType::RPAREN) {
+            if (validParams && current < static_cast<int>(tokens.size()) && tokens[current].type == TokenType::RPAREN) {
                 current++; // skip )
-                if (current < static_cast<int>(tokens.size()) &&
-                    tokens[current].type == TokenType::ARROW) {
+                while (current < static_cast<int>(tokens.size()) && tokens[current].type == TokenType::NEWLINE) current++;
+
+                // ★ 嗅探返回类型 ->
+                if (current < static_cast<int>(tokens.size()) && tokens[current].type == TokenType::RIGHT_ARROW) {
+                    current++;
+                    if (current < static_cast<int>(tokens.size()) && tokens[current].type == TokenType::IDENTIFIER) current++;
+                }
+                while (current < static_cast<int>(tokens.size()) && tokens[current].type == TokenType::NEWLINE) current++;
+
+                if (current < static_cast<int>(tokens.size()) && tokens[current].type == TokenType::ARROW) {
                     current++; // skip =>
                     isLambda = true;
                 }
             }
 
             if (isLambda) {
-                // ★ 回溯并用完整解析器重新解析参数
-                current = savedPos;
+                current = savedPos; // 回退，开启真正无坚不摧的 Lambda 解析！
                 lambdaParams.clear();
                 std::vector<std::shared_ptr<Expr>> lambdaDefaults;
-                bool hasRestParam = false; // ★ 新增变长标志
+                std::vector<std::string> paramTypes; // ★
+                bool hasRestParam = false;
 
                 if (!check(TokenType::RPAREN)) {
                     do {
-                        if (hasRestParam) {
-                            throw std::runtime_error("Parser Error: Rest parameter '...' must be the last parameter in lambda.");
-                        }
+                        if (hasRestParam) throw std::runtime_error("Parser Error: Rest parameter must be last.");
 
-                        // ★ 拦截 ...args
                         if (match({ TokenType::ELLIPSIS })) {
                             Token param = consume(TokenType::IDENTIFIER, "Parser Error: Expect parameter name after '...'.");
                             lambdaParams.push_back(param);
+                            paramTypes.push_back("");
                             lambdaDefaults.push_back(nullptr);
                             hasRestParam = true;
                             continue;
                         }
 
-                        Token param = consume(TokenType::IDENTIFIER,
-                            "Parser Error: Expect parameter name in lambda.");
+                        Token param = consume(TokenType::IDENTIFIER, "Parser Error: Expect parameter name.");
                         lambdaParams.push_back(param);
+
+                        std::string pType = "";
+                        if (match({ TokenType::COLON })) pType = consume(TokenType::IDENTIFIER, "Expect type after ':'.").lexeme;
+                        paramTypes.push_back(pType);
 
                         if (match({ TokenType::ASSIGN })) {
                             auto defExpr = ternary();
                             lambdaDefaults.push_back(std::shared_ptr<Expr>(defExpr.release()));
                         }
-                        else {
-                            lambdaDefaults.push_back(nullptr);
-                        }
+                        else lambdaDefaults.push_back(nullptr);
                     } while (match({ TokenType::COMMA }));
                 }
 
                 consume(TokenType::RPAREN, "Parser Error: Expect ')' after lambda parameters.");
+
+                // ★ 捕获返回值
+                std::string retType = "";
+                while (match({ TokenType::NEWLINE })) {}
+                if (match({ TokenType::RIGHT_ARROW })) retType = consume(TokenType::IDENTIFIER, "Parser Error: Expect return type.").lexeme;
+                while (match({ TokenType::NEWLINE })) {}
+
                 consume(TokenType::ARROW, "Parser Error: Expect '=>' for lambda.");
 
                 int bodyStart = current;
@@ -1004,7 +1016,8 @@ namespace jc {
                 return std::make_unique<LambdaExpr>(
                     std::move(lambdaParams),
                     std::move(lambdaDefaults),
-                    hasRestParam,  // ★ 传入构造函数
+                    hasRestParam,
+                    paramTypes, retType,  // ★
                     rawBody,
                     std::shared_ptr<Expr>(body.release()));
             }
@@ -1111,77 +1124,79 @@ namespace jc {
         consume(TokenType::RBRACE, "Parser Error: Expect '}' to close switch body.");
         return std::make_unique<SwitchExpr>(std::move(subject), std::move(cases), std::move(defaultBody));
     }
-    // ★ 新增：整个方法
+
     std::unique_ptr<Expr> Parser::classDefExpr() {
         Token name = consume(TokenType::IDENTIFIER, "Parser Error: Expect class name after 'class'.");
 
-        // ★ 跳过 class Name 和 extends 之间可能的换行
         while (match({ TokenType::NEWLINE })) {}
 
         std::string superClassName;
         if (check(TokenType::IDENTIFIER) && peek().lexeme == "extends") {
             advance();
-            Token superToken = consume(TokenType::IDENTIFIER,
-                "Parser Error: Expect parent class name after 'extends'.");
+            Token superToken = consume(TokenType::IDENTIFIER, "Parser Error: Expect parent class name after 'extends'.");
             superClassName = superToken.lexeme;
         }
 
-        while (match({ TokenType::NEWLINE })) {}  // ★
+        while (match({ TokenType::NEWLINE })) {}
         consume(TokenType::LBRACE, "Parser Error: Expect '{' after class name.");
 
         std::vector<ClassDefExpr::MethodDef> methods;
 
         while (!check(TokenType::RBRACE) && !isAtEnd()) {
-            while (match({ TokenType::SEMICOLON, TokenType::NEWLINE })) {}  // ★
+            while (match({ TokenType::SEMICOLON, TokenType::NEWLINE })) {}
             if (check(TokenType::RBRACE)) break;
 
-            Token methodName = consume(TokenType::IDENTIFIER,
-                "Parser Error: Expect method name inside class.");
-            consume(TokenType::LPAREN,
-                "Parser Error: Expect '(' after method name '" + methodName.lexeme + "'.");
+            Token methodName = consume(TokenType::IDENTIFIER, "Parser Error: Expect method name.");
+            consume(TokenType::LPAREN, "Parser Error: Expect '(' after method name.");
 
             std::vector<Token> params;
             std::vector<bool> paramIsRef;
             std::vector<std::shared_ptr<Expr>> defaultExprs;
-            bool hasRestParam = false; // ★ 新增变长标志
+            std::vector<std::string> paramTypes; // ★
+            bool hasRestParam = false;
 
             if (!check(TokenType::RPAREN)) {
                 do {
-                    if (hasRestParam) {
-                        throw std::runtime_error("Parser Error: Rest parameter '...' must be the last parameter in class method.");
-                    }
-
+                    if (hasRestParam) throw std::runtime_error("Parser Error: Rest parameter must be last.");
                     bool isRef = false;
                     if (match({ TokenType::REF })) isRef = true;
 
-                    // ★ 拦截 ...args
                     if (match({ TokenType::ELLIPSIS })) {
-                        if (isRef) throw std::runtime_error("Parser Error: Rest parameter cannot be passed by reference.");
-                        Token param = consume(TokenType::IDENTIFIER, "Parser Error: Expect parameter name after '...'.");
-                        params.push_back(param);
+                        if (isRef) throw std::runtime_error("Parser Error: Rest parameter cannot be passed by ref.");
+                        params.push_back(consume(TokenType::IDENTIFIER, "Expect parameter name."));
                         paramIsRef.push_back(false);
+                        paramTypes.push_back("");
                         defaultExprs.push_back(nullptr);
                         hasRestParam = true;
                         continue;
                     }
 
-                    Token param = consume(TokenType::IDENTIFIER,
-                        "Parser Error: Expect parameter name.");
+                    Token param = consume(TokenType::IDENTIFIER, "Parser Error: Expect parameter name.");
                     params.push_back(param);
                     paramIsRef.push_back(isRef);
+
+                    std::string pType = "";
+                    if (match({ TokenType::COLON })) pType = consume(TokenType::IDENTIFIER, "Expect type.").lexeme;
+                    paramTypes.push_back(pType);
+
                     if (match({ TokenType::ASSIGN })) {
                         auto defExpr = ternary();
                         defaultExprs.push_back(std::shared_ptr<Expr>(defExpr.release()));
                     }
-                    else {
-                        defaultExprs.push_back(nullptr);
-                    }
+                    else defaultExprs.push_back(nullptr);
                 } while (match({ TokenType::COMMA }));
             }
-            consume(TokenType::RPAREN,
-                "Parser Error: Expect ')' after method parameters.");
-            consume(TokenType::ASSIGN,
-                "Parser Error: Expect '=' after method '" + methodName.lexeme + "' parameters.");
+            consume(TokenType::RPAREN, "Parser Error: Expect ')' after method parameters.");
+
+            // ★ 解析方法返回类型
+            std::string retType = "";
+            while (match({ TokenType::NEWLINE })) {}
+            if (match({ TokenType::RIGHT_ARROW })) {
+                retType = consume(TokenType::IDENTIFIER, "Parser Error: Expect return type after '->'.").lexeme;
+            }
+            while (match({ TokenType::NEWLINE })) {}
+
+            consume(TokenType::ASSIGN, "Parser Error: Expect '=' after method signature.");
 
             int bodyStart = current;
             auto body = check(TokenType::LBRACE) ? parseBlock() : assignment();
@@ -1190,10 +1205,8 @@ namespace jc {
             std::string rawBody;
             for (int i = bodyStart; i < bodyEnd; ++i) {
                 if (tokens[i].type == TokenType::NEWLINE) continue;
-                if (tokens[i].type == TokenType::STRING)
-                    rawBody += "\"" + tokens[i].lexeme + "\"";
-                else
-                    rawBody += tokens[i].lexeme;
+                if (tokens[i].type == TokenType::STRING) rawBody += "\"" + tokens[i].lexeme + "\"";
+                else rawBody += tokens[i].lexeme;
                 if (i < bodyEnd - 1 && tokens[i + 1].type != TokenType::NEWLINE) rawBody += " ";
             }
 
@@ -1202,14 +1215,14 @@ namespace jc {
                 std::move(params),
                 std::move(paramIsRef),
                 std::move(defaultExprs),
-                hasRestParam,  // ★ 传递给结构体
+                hasRestParam,
+                paramTypes, retType, // ★ 加载进入结构体
                 std::move(rawBody),
                 std::shared_ptr<Expr>(body.release())
                 });
 
-            while (match({ TokenType::SEMICOLON, TokenType::NEWLINE })) {}  // ★
+            while (match({ TokenType::SEMICOLON, TokenType::NEWLINE })) {}
         }
-
         consume(TokenType::RBRACE, "Parser Error: Expect '}' after class body.");
         return std::make_unique<ClassDefExpr>(name, std::move(superClassName), std::move(methods));
     }

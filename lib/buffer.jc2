@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════
-// buffer.jc2 — Advanced Binary Buffer Standard Library v1.0
+// buffer.jc2 — Advanced Binary Buffer Standard Library
 // Object-Oriented Memory Driver (Powered by Native 'bytes' module)
 // ═══════════════════════════════════════════════════════════════
 
@@ -8,47 +8,49 @@ import "bytes"
 // ─── Byte Buffer Object ───────────────────────────────────────
 
 class ByteBuffer {
-    init(native_buf) = {
+    init(native_buf: any) = {
         self.buf = native_buf
         self.size = b_len(native_buf)
         self.pos = 0
     }
 
-    __str__() = f"<ByteBuffer size={self.size} pos={self.pos}>"
+    __str__() -> string = return f"<ByteBuffer size={self.size} pos={self.pos}>"
 
     // ─── Cursor & State Control ───
 
-    seek(p)  = { self.pos = p }
-    skip(n)  = { self.pos = self.pos + n }
-    isEnd()  = return self.pos >= self.size
-    tell()   = return self.pos
-    length() = return self.size
+    seek(p: int)         = { self.pos = p }
+    skip(n: int)         = { self.pos = self.pos + n }
+    isEnd() -> bool      = return self.pos >= self.size
+    tell() -> int        = return self.pos
+    length() -> int      = return self.size
 
     // ─── Chainable Writers (Auto-advancing cursor) ───
 
-    writeStr(s) = {
+    writeStr(s: string) -> ByteBuffer = {
         b_set(self.buf, self.pos, s, "str")
         self.pos = self.pos + len(s)
         return self
     }
 
-    writeU8(v) = { 
+    writeU8(v: int) -> ByteBuffer = { 
         b_set(self.buf, self.pos, v, "u8")
-        self.pos = self.pos + 1; return self 
+        self.pos = self.pos + 1
+        return self 
     }
 
-    writeI16(v) = { 
+    writeI16(v: int) -> ByteBuffer = { 
         b_set(self.buf, self.pos, v, "i16")
-        self.pos = self.pos + 2; return self 
+        self.pos = self.pos + 2
+        return self 
     }
 
-    writeI32(v) = { 
+    writeI32(v: int) -> ByteBuffer = { 
         b_set(self.buf, self.pos, v, "i32")
-        self.pos = self.pos + 4; return self 
+        self.pos = self.pos + 4
+        return self 
     }
     
-    // High-performance bulk array writing (C++ Native Speed)
-    writePcmArray(arr) = {
+    writePcmArray(arr: any) -> ByteBuffer = {
         b_write_arr(self.buf, self.pos, arr, "i16")
         self.pos = self.pos + len(arr) * 2
         return self
@@ -56,52 +58,55 @@ class ByteBuffer {
 
     // ─── Sequential Readers (Auto-advancing cursor) ───
 
-    readStr(n) = {
+    readStr(n: int) -> string = {
         s = b_get(self.buf, self.pos, "str", n)
         self.pos = self.pos + n
         return s
     }
 
-    readU8() = { 
+    readU8() -> int = { 
         v = b_get(self.buf, self.pos, "u8")
-        self.pos = self.pos + 1; return v 
+        self.pos = self.pos + 1
+        return v 
     }
 
-    readI16() = { 
+    readI16() -> int = { 
         v = b_get(self.buf, self.pos, "i16")
-        self.pos = self.pos + 2; return v 
+        self.pos = self.pos + 2
+        return v 
     }
 
-    readI32() = { 
+    readI32() -> int = { 
         v = b_get(self.buf, self.pos, "i32")
-        self.pos = self.pos + 4; return v 
+        self.pos = self.pos + 4
+        return v 
     }
 
     // ─── I/O Operations ───
 
-    save(path) = writeFileBytes(path, self.buf)
+    save(path: string) = writeFileBytes(path, self.buf)
 }
 
-// ─── Global Factory API (Refactored to Class Instance) ────────
+// ─── Global Factory API (Singleton Class) ─────────────────────
 
 class BufferFactory {
-    alloc(size) = ByteBuffer(b_alloc(size))
-    fromFile(path) = ByteBuffer(readFileBytes(path))
+    alloc(size: int) -> ByteBuffer        = return ByteBuffer(b_alloc(size))
+    fromFile(path: string) -> ByteBuffer  = return ByteBuffer(readFileBytes(path))
 }
 
-// 实例化为单例，这样就可以完美使用 Buffer.alloc() 的方法调用语法了
 Buffer = BufferFactory()
 
 // ─── Dynamic Help Registry ────────────────────────────────────
 
-__register_help("buffer", r"DOC(
-═══ Binary Buffer (Standard Library v1.0) ═══
+if (isfunction(__register_help)) {
+    __register_help("buffer", r"DOC(
+═══ Binary Buffer (Standard Library) ═══
 
   Requires: import "buffer"
 
-  The `buffer` module provides a high-level, object-oriented API for 
-  manipulating raw binary memory. It wraps the low-level C++ 'bytes' 
-  module to provide automatic layout management and cursor tracking.
+  A high-level, object-oriented API for manipulating raw binary memory. It 
+  wraps the low-level C++ 'bytes' module to provide automatic layout management 
+  and cursor tracking.
 
   Buffer Initialization
   ──────────────────────
@@ -113,16 +118,16 @@ __register_help("buffer", r"DOC(
     buf.tell()           Returns current cursor position.
     buf.seek(pos)        Moves cursor to the absolute byte offset `pos`.
     buf.skip(n)          Moves cursor forward by `n` bytes.
-    buf.isEnd()          Returns 1 if cursor has reached the end.
+    buf.isEnd()          Returns 1 if cursor reached the end.
     buf.length()         Returns total buffer size.
 
   Chainable Writers (Cursor Auto-Advances)
   ──────────────────────
-    buf.writeStr("RIFF")               Writes text bytes.
+    (buf.writeStr("RIFF")              Writes text bytes.
        .writeI32(1024)                 Writes 32-bit integer (4 bytes).
        .writeI16(-2)                   Writes 16-bit integer (2 bytes).
        .writeU8(255)                   Writes 8-bit unsigned integer (1 byte).
-       .writePcmArray(waveform)        Bulk-writes an entire mapped Array 
+       .writePcmArray(waveform))       Bulk-writes an entire mapped Array 
                                        instantly using C++ native bindings.
 
   Readers (Cursor Auto-Advances)
@@ -132,13 +137,8 @@ __register_help("buffer", r"DOC(
 
   File I/O
   ──────────────────────
-    buf.save("out.bin")                Flushes the entire binary buffer to disk.
-
-  Example: Crafting a Binary Header
-  ──────────────────────
-    b = Buffer.alloc(12)
-    b.writeStr("GAME").writeI32(1).writeI32(0xFF)
-    b.save("save_state.dat")
+    buf.save("out.bin")                Flushes binary buffer to disk.
 )DOC")
+}
 
-print("[System] buffer.jc2 loaded successfully (v1.0).")
+print("[System] buffer.jc2 loaded successfully.")

@@ -170,6 +170,86 @@ namespace jc {
         catch (...) { return false; }
     }
 
+    std::string VM::getTypeName(const Value& val) {
+        if (std::holds_alternative<std::monostate>(val.data)) return "none";
+        if (std::holds_alternative<double>(val.data)) return "double";
+        if (std::holds_alternative<BigInt>(val.data)) return "BigInt";
+        if (std::holds_alternative<Fraction>(val.data)) return "Fraction";
+        if (std::holds_alternative<Complex>(val.data)) return "Complex";
+        if (std::holds_alternative<std::string>(val.data)) return "string";
+        if (std::holds_alternative<List>(val.data)) return "list";
+        if (std::holds_alternative<Dict>(val.data)) return "dict";
+        if (std::holds_alternative<Set>(val.data)) return "set";
+        if (std::holds_alternative<RealMatrix>(val.data)) return "RealMatrix";
+        if (std::holds_alternative<ComplexMatrix>(val.data)) return "ComplexMatrix";
+        if (std::holds_alternative<StringMatrix>(val.data)) return "StringMatrix";
+        if (std::holds_alternative<std::shared_ptr<FunctionClosure>>(val.data)) return "func";
+        if (std::holds_alternative<std::shared_ptr<Instance>>(val.data)) {
+            auto inst = std::get<std::shared_ptr<Instance>>(val.data);
+            return inst->classDef ? inst->classDef->name : "instance";
+        }
+        if (std::holds_alternative<std::shared_ptr<ClassDefinition>>(val.data)) return "class";
+        return "unknown";
+    }
+
+    void VM::triggerParamTypeError(const Value& val, uint16_t typeIdx, uint16_t nameIdx) {
+        const std::string& expectedType = std::get<std::string>(currentChunk().constants[typeIdx].data);
+        const std::string& paramName = std::get<std::string>(currentChunk().constants[nameIdx].data);
+        throw std::runtime_error("TypeError: Parameter '" + paramName +
+            "' expected type '" + expectedType +
+            "', got '" + getTypeName(val) + "'.");
+    }
+    void VM::triggerReturnTypeError(const Value& val, uint16_t typeIdx) {
+        const std::string& expectedType = std::get<std::string>(currentChunk().constants[typeIdx].data);
+        throw std::runtime_error("TypeError: Function '" + frame().function->name +
+            "' expected to return '" + expectedType +
+            "', but returned '" + getTypeName(val) + "'.");
+    }
+
+    bool VM::checkValueType(const Value& val, const std::string& typeStr) {
+        if (typeStr == "any" || typeStr.empty()) return true;
+
+        if (typeStr == "int") {
+            if (std::holds_alternative<BigInt>(val.data)) return true;
+            if (std::holds_alternative<double>(val.data)) {
+                double d = std::get<double>(val.data);
+                return std::round(d) == d;
+            }
+            return false;
+        }
+        if (typeStr == "double" || typeStr == "float" || typeStr == "real" || typeStr == "number")
+            return std::holds_alternative<double>(val.data);
+        if (typeStr == "string") return std::holds_alternative<std::string>(val.data);
+        if (typeStr == "matrix") return std::holds_alternative<RealMatrix>(val.data) || std::holds_alternative<ComplexMatrix>(val.data) || std::holds_alternative<StringMatrix>(val.data);
+        if (typeStr == "list") return std::holds_alternative<List>(val.data);
+        if (typeStr == "dict") return std::holds_alternative<Dict>(val.data);
+        if (typeStr == "set") return std::holds_alternative<Set>(val.data);
+        if (typeStr == "bool") {
+            if (std::holds_alternative<double>(val.data)) {
+                double d = std::get<double>(val.data);
+                return d == 0.0 || d == 1.0;
+            }
+            return false;
+        }
+        if (typeStr == "func" || typeStr == "function")
+            return std::holds_alternative<std::shared_ptr<FunctionClosure>>(val.data) ||
+            std::holds_alternative<std::string>(val.data);
+        if (typeStr == "complex") return std::holds_alternative<Complex>(val.data);
+        if (typeStr == "fraction") return std::holds_alternative<Fraction>(val.data);
+        if (typeStr == "class") return std::holds_alternative<std::shared_ptr<ClassDefinition>>(val.data);
+
+
+        if (std::holds_alternative<std::shared_ptr<Instance>>(val.data)) {
+            auto inst = std::get<std::shared_ptr<Instance>>(val.data);
+            auto c = inst->classDef;
+            while (c) {
+                if (c->name == typeStr) return true;
+                c = c->parent;
+            }
+        }
+        return false;
+    }
+
     static std::shared_ptr<FunctionClosure> findDunder(
         const Value& val, const std::string& name)
     {
@@ -667,6 +747,20 @@ namespace jc {
                         double da = a.asDouble(), db = b.asDouble();
                         push(Value((da > db || Tol::isEq(da, db)) ? 1.0 : 0.0));
                     }
+                    break;
+                }
+
+                case OpCode::OP_ASSERT_PARAM_TYPE: {
+                    uint16_t typeIdx = readShort();
+                    uint16_t nameIdx = readShort();
+                    Value val = pop();
+                    execAssertParamType(val, typeIdx, nameIdx);
+                    break;
+                }
+
+                case OpCode::OP_ASSERT_RETURN_TYPE: {
+                    uint16_t typeIdx = readShort();
+                    execAssertReturnType(peek(0), typeIdx);
                     break;
                 }
 
@@ -3911,6 +4005,27 @@ namespace jc {
 
         throw std::runtime_error("VM Error: Parent method '" + methodName +
             "' has no callable implementation.");
+    }
+
+    void VM::execAssertParamType(const Value& val, uint16_t typeIdx, uint16_t nameIdx) {
+        const std::string& expectedType = std::get<std::string>(currentChunk().constants[typeIdx].data);
+
+        if (!checkValueType(val, expectedType)) {
+            const std::string& paramName = std::get<std::string>(currentChunk().constants[nameIdx].data);
+            throw std::runtime_error("TypeError: Parameter '" + paramName +
+                "' expected type '" + expectedType +
+                "', got '" + getTypeName(val) + "'.");
+        }
+    }
+
+    void VM::execAssertReturnType(const Value& val, uint16_t typeIdx) {
+        const std::string& expectedType = std::get<std::string>(currentChunk().constants[typeIdx].data);
+
+        if (!checkValueType(val, expectedType)) {
+            throw std::runtime_error("TypeError: Function '" + frame().function->name +
+                "' expected to return '" + expectedType +
+                "', but returned '" + getTypeName(val) + "'.");
+        }
     }
 
 } // namespace jc

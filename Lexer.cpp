@@ -52,7 +52,7 @@ namespace jc {
         case TokenType::AND_AND: case TokenType::OR_OR:
         case TokenType::BIT_AND: case TokenType::BIT_OR:
             // 管道与箭头
-        case TokenType::PIPE: case TokenType::ARROW:
+        case TokenType::PIPE: case TokenType::ARROW: case TokenType::RIGHT_ARROW:
             // 标点
         case TokenType::COMMA: case TokenType::DOT:
         case TokenType::COLON: case TokenType::QUESTION:
@@ -126,7 +126,15 @@ namespace jc {
             addToken(match('=') ? TokenType::PLUS_ASSIGN : TokenType::PLUS);
             break;
         case '-':
-            addToken(match('=') ? TokenType::MINUS_ASSIGN : TokenType::MINUS);
+            if (match('>')) {
+                addToken(TokenType::RIGHT_ARROW);           // ★ 匹配 ->
+            }
+            else if (match('=')) {
+                addToken(TokenType::MINUS_ASSIGN);          // 匹配 -=
+            }
+            else {
+                addToken(TokenType::MINUS);                 // 纯减号
+            }
             break;
         case '*':
             addToken(match('=') ? TokenType::STAR_ASSIGN : TokenType::STAR);
