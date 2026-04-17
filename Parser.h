@@ -33,6 +33,7 @@ namespace jc {
 
         // ★ 新增：控制流解析
         std::unique_ptr<Expr> parseBlock();
+        std::unique_ptr<Expr> parseStatementOrBlock();
         std::unique_ptr<Expr> ifExpr();
         std::unique_ptr<Expr> whileExpr();
         std::unique_ptr<Expr> forExpr();

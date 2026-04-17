@@ -569,39 +569,79 @@ namespace jc {
     }
 
     // =================================================================
-    // ★ 新增：if (cond) { ... } else { ... }
-    // =================================================================
+// ★ 升级版：支持单行语句并智能避开字典字面量陷阱
+// =================================================================
+    std::unique_ptr<Expr> Parser::parseStatementOrBlock() {
+        while (match({ TokenType::NEWLINE })) {}
+
+        if (check(TokenType::LBRACE)) {
+            // ★ 我们必须在这里进行智能探测！
+            int peekPos = current + 1;
+            while (peekPos < static_cast<int>(tokens.size()) &&
+                tokens[peekPos].type == TokenType::NEWLINE) {
+                peekPos++;
+            }
+
+            bool isDict = false;
+            if (peekPos + 1 < static_cast<int>(tokens.size())) {
+                TokenType first = tokens[peekPos].type;
+                TokenType second = tokens[peekPos + 1].type;
+
+                if (second == TokenType::COLON &&
+                    (first == TokenType::IDENTIFIER || first == TokenType::STRING ||
+                        first == TokenType::NUMBER || first == TokenType::FSTRING ||
+                        first == TokenType::RSTRING || first == TokenType::IMAGINARY)) {
+                    isDict = true;
+                }
+                else if (first == TokenType::IDENTIFIER && second == TokenType::COMMA) {
+                    isDict = true;
+                }
+            }
+
+            // 如果它是字典，必须让 expression() 层级去调用 primary() 将其当做右值解析！
+            if (!isDict) {
+                return parseBlock(); // 确定是普通代码块，安全进入！
+            }
+        }
+
+        // 走到这里说明它没有大括号，或者它是被识别为单行字典字面量的大括号
+        // 统统包装为安全的单句 Block 以封锁词法作用域
+        std::vector<std::unique_ptr<Expr>> stmts;
+        stmts.push_back(expression());
+        return std::make_unique<Block>(std::move(stmts));
+    }
+
     std::unique_ptr<Expr> Parser::ifExpr() {
         while (match({ TokenType::NEWLINE })) {}
         consume(TokenType::LPAREN, "Parser Error: Expect '(' after 'if'.");
         auto condition = expression();
         consume(TokenType::RPAREN, "Parser Error: Expect ')' after if condition.");
-        auto thenBranch = parseBlock();
 
+        auto thenBranch = parseStatementOrBlock();
+        // ★ 核心修复：允许单行语句后面跟着的分号或换行符被安全吃掉，为潜在的 else 扫清障碍
+        while (match({ TokenType::SEMICOLON, TokenType::NEWLINE })) {}
         std::unique_ptr<Expr> elseBranch = nullptr;
-        while (match({ TokenType::NEWLINE })) {}  // ★ 跳过 } 和 else 之间的换行
         if (match({ TokenType::ELSE })) {
-            while (match({ TokenType::NEWLINE })) {}  // ★ 跳过 else 后的换行
+            while (match({ TokenType::NEWLINE })) {}
             if (check(TokenType::IF)) {
                 advance();
                 elseBranch = ifExpr();
             }
             else {
-                elseBranch = parseBlock();
+                elseBranch = parseStatementOrBlock();
             }
         }
         return std::make_unique<IfExpr>(std::move(condition), std::move(thenBranch), std::move(elseBranch));
     }
 
-    // =================================================================
-    // ★ 新增：while (cond) { ... }
-    // =================================================================
     std::unique_ptr<Expr> Parser::whileExpr() {
         while (match({ TokenType::NEWLINE })) {}
         consume(TokenType::LPAREN, "Parser Error: Expect '(' after 'while'.");
         auto condition = expression();
         consume(TokenType::RPAREN, "Parser Error: Expect ')' after while condition.");
-        auto body = parseBlock();
+
+        auto body = parseStatementOrBlock(); // ★ 修改处
+
         return std::make_unique<WhileExpr>(std::move(condition), std::move(body));
     }
 
@@ -636,7 +676,7 @@ namespace jc {
                     auto iterable = expression();
                     consume(TokenType::RPAREN,
                         "Parser Error: Expect ')' after for-in iterable.");
-                    auto body = parseBlock();
+                    auto body = parseStatementOrBlock();
                     return std::make_unique<ForInExpr>(
                         std::move(names), std::move(iterable), std::move(body));
                 }
@@ -661,14 +701,14 @@ namespace jc {
         consume(TokenType::SEMICOLON, "Parser Error: Expect ';' after for-condition.");
         auto update = expression();
         consume(TokenType::RPAREN, "Parser Error: Expect ')' after for-clauses.");
-        auto body = parseBlock();
+        auto body = parseStatementOrBlock();
         return std::make_unique<ForExpr>(std::move(init), std::move(cond), std::move(update), std::move(body));
     }
 
     std::unique_ptr<Expr> Parser::forInExpr(Token varName) {
         auto iterable = expression();
         consume(TokenType::RPAREN, "Parser Error: Expect ')' after for-in iterable.");
-        auto body = parseBlock();
+        auto body = parseStatementOrBlock();
         return std::make_unique<ForInExpr>(std::move(varName), std::move(iterable), std::move(body));
     }
 
@@ -739,13 +779,13 @@ namespace jc {
             return std::make_unique<ThrowExpr>(std::move(value));
         }
         if (match({ TokenType::TRY })) {
-            auto tryBody = parseBlock();
+            auto tryBody = parseStatementOrBlock();
             while (match({ TokenType::NEWLINE })) {}  // ★ 跳过 } 和 catch 之间的换行
             consume(TokenType::CATCH, "Parser Error: Expect 'catch' after try block.");
             consume(TokenType::LPAREN, "Parser Error: Expect '(' after 'catch'.");
             Token catchName = consume(TokenType::IDENTIFIER, "Parser Error: Expect variable name in catch.");
             consume(TokenType::RPAREN, "Parser Error: Expect ')' after catch variable.");
-            auto catchBody = parseBlock();
+            auto catchBody = parseStatementOrBlock();
             return std::make_unique<TryCatchExpr>(std::move(tryBody), catchName, std::move(catchBody));
         }
         if (match({ TokenType::IMPORT })) {
