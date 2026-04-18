@@ -62,7 +62,7 @@ Standard libraries register their documentation dynamically via the `__register_
 
 ## What's New in v2.2.3.0
 
-### The "Game Engine & Strong Type" Update
+- **Full Stack Tracebacks:** Overhauled the VM error handler. Unhandled exceptions now unwind the call stack and print highly detailed, ANSI-colorized tracebacks, seamlessly navigating through closures and class dunder methods to pinpoint exact file and line origins.
 - **Gradual Type Checking:** Added strict runtime type contracts for function definitions. JC2 now enforces and validates parameter inputs and return types, throwing precise `TypeError`s to guarantee memory safety before C++ execution.
 - **Advanced Data Structures:** Officially introduced the `collections.jc2` standard library, featuring dynamic algorithm-driven containers (Stacks, Double-Ended Queues, Heaps).
 - **HD Graphics & Text Engine:** The `image` module natively supports hardware-grade SDF Alpha-blending for anti-aliased sub-pixel rendering. Added `.text()` for zero-dependency IBM VGA 8x8 ASCII font rendering.
