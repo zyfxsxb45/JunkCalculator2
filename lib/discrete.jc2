@@ -738,4 +738,4 @@ if (isfunction(__register_help)) {
 )DOC")
 }
 
-print("[System] discrete.jc2 loaded successfully (v2.2.2).")
+print("[System] discrete.jc2 loaded successfully.")

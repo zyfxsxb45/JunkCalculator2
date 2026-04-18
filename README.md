@@ -1,4 +1,4 @@
-# Junk Calculator 2.2.2
+# Junk Calculator 2.2.3.0
 
 A scripting language and scientific calculator implemented in C++20. It features a custom bytecode compiler and a stack-based virtual machine, requiring no third-party dependencies.
 
@@ -18,10 +18,11 @@ Developed by Yu Liangyang, Tsinghua University.
 - **Type System & Memory Management**: `std::variant`-backed dynamic typing supporting 17 internal types. 
   - *Value Types*: Scalars (double, BigInt, Complex) and Matrices (Real, Complex, String) use contiguous memory and pass-by-value semantics.
   - *Reference Types*: Containers (`List`, `Dict`, `Set`) and OOP `Instance`s use pass-by-reference semantics (backed by PIMPL architecture and `std::shared_ptr`).
+- **Gradual Typing**: Optional runtime type contracts for function parameters and return values (e.g., `func(a: double, b: matrix) -> bool = ...`). Supports base types, containers, and strict OOP class inheritance assertions.
 - **Garbage Collection (GC)**: Mark-and-Sweep Garbage Collector (`GcHeap`) running on top of the VM stack. It traces GC roots (Globals, Stack, Upvalues, and Contexts) to resolve cyclic references safely without stack overflows.
 - **Object-Oriented Programming**: Single inheritance (`extends`), `super` dispatching, and operator overloading via dunder methods (e.g., `__add__`, `__getitem__`). Instances support destructuring assignment.
 - **Control Flow**: `if/else`, `while`, `for`, `for-in`, `switch/case`, `break/continue/return`.
-- **Error Handling**: `try/catch/throw` block constructs and functional `pcall`.
+- **Error Handling**: `try/catch/throw` block constructs and functional `pcall` alongside ANSI-colorized full stack tracebacks.
 - **Functions**: Closures, lambdas `(x) => expr`, default parameters, variadic arguments (`...args`), and `ref` parameter binding.
 - **Generic Container API**: Array manipulation functions (`push`, `slice`, `map`, `filter`, `reduce`, `sort`, `join`, `zip`, etc.) operate across four container types: `RealMatrix`, `ComplexMatrix`, `StringMatrix`, and `List`, utilizing `std::visit` and `if constexpr`.
 - **Set Algebra**: `Set` type with O(1) membership testing (`in`). Supports operators for union (`|`), intersection (`&`), difference (`-`), and Cartesian product (`*`). Includes powerset generation (`setPow`) and relation predicates.
@@ -38,18 +39,19 @@ Developed by Yu Liangyang, Tsinghua University.
 
 ### Native Modules & Standard Library
 Native C++ extensions exposed to the execution context:
-- `image`: OOP-based 24-bit BMP generation, plotting functions, Bresenham line drawing, and binary file reading.
+- `image`: OOP-based BMP generation, drawing primitives with hardware-level SDF (Signed Distance Field) sub-pixel anti-aliasing, and native IBM VGA ASCII font rendering.
 - `prob`: OOP-based statistical distributions (PDF, CDF, Quantile via Newton iteration) and hypothesis tests.
 - `json`: Serialization and deserialization between JC2 data structures and JSON strings.
 - `socket`: Low-level TCP/IP networking stack (WinSock2/POSIX bindings) supporting client and server configurations.
 - `bytes`: Memory buffering and low-level binary I/O operations.
-- `window`: OS-level window spawning capabilities with direct memory-backed image buffer rendering (Win32).
-- `latex`: Bi-directional LaTeX engine. Serializes JC2 matrices/fractions to LaTeX strings, and dynamically compiles raw LaTeX mathematical strings into executable JC2 closures.
+- `window`: Real-time Native GUI window rendering engine. Supports infinite Mouse-Look FPS pointer capturing and independent IME toggling (Win32).
+- `latex`: Bi-directional LaTeX engine. Serializes JC2 objects to LaTeX, and dynamically compiles raw LaTeX mathematical strings (including complex numbers) into executable JC2 closures.
 
 JC2 standard libraries loaded via `import`:
+- `collections`: Advanced data structures including `Stack`, `Queue`, `Deque`, `PriorityQueue` (Heap), and Search Trees.
 - `regex`: Object-Oriented NFA regex engine with capture groups, alternation, bounded quantifiers (`{m,n}`), and backreference replacement.
 - `discrete`: Object-Oriented discrete mathematics toolkit covering combinatorics, binary relation analysis, graph traversal algorithms, and propositional logic.
-- `engine`: Standard library abstraction over the `window` module for game/app render loops and event state management.
+- `engine`: Game framework abstraction over the `window` module for precise 60-FPS render loops and event state management.
 - `net`: Object-Oriented wrapper for TCP streams (`TcpSocket` and `TcpServer`).
 - `http`: HTTP/1.1 client supporting URL parsing, header extraction, and GET/POST requests.
 - `buffer`: High-level binary manipulation API with cursor support.
@@ -58,22 +60,14 @@ Standard libraries register their documentation dynamically via the `__register_
 
 ---
 
-## What's New in v2.2.2
+## What's New in v2.2.3.0
 
-### Native Graphical & Math Engines
-- **Native Windowing (`window`)**: Implemented OS-level window spawning capabilities. Allows rendering and blitting of memory-backed image buffers directly to the screen display.
-- **Game/App Engine (`engine.jc2`)**: Added a standard library abstraction over the `window` module to handle render loops and event state management.
-- **LaTeX Compiler (`latex`)**: Added a native module bridging JC2 and LaTeX syntax. Supports serialization of JC2 matrices/fractions to LaTeX strings, and JIT compilation of raw LaTeX mathematical strings into executable JC2 function closures.
-
-### Syntax & Parsing Updates
-- **String Literals**: Implemented alternating single (`'`) and double (`"`) quote parsing, allowing nested quotes within string literals without explicit escaping.
-- **Expression Syntax**: Added feature support for `comma` sequences (`a, b, c`) and expanded the parsing capabilities of single-line statement blocks, increasing syntactic flexibility.
-- **Strict Boundaries**: Removed the "lookahead" design in the `call()` parser. Users must now explicitly wrap chained or comma-sequenced statements in parentheses `()` when passing them as function arguments to prevent parsing ambiguity.
-
-### Virtual Machine & OOP Refactoring
-- **Module APIs**: The `image` and `prob` native modules have been heavily refactored into Object-Oriented architectures, replacing legacy global functions with instance methods.
-- **Context Mapping**: Resolved a critical state leak where the `self` context could be incorrectly overwritten or misdirected during chained method dispatching or closure capture.
-- **GC Stability**: Fixed a bug where the Mark-and-Sweep Garbage Collector could trigger a VM stack overflow during the resolution of deeply nested cyclic references.
+### The "Game Engine & Strong Type" Update
+- **Gradual Type Checking:** Added strict runtime type contracts for function definitions. JC2 now enforces and validates parameter inputs and return types, throwing precise `TypeError`s to guarantee memory safety before C++ execution.
+- **Advanced Data Structures:** Officially introduced the `collections.jc2` standard library, featuring dynamic algorithm-driven containers (Stacks, Double-Ended Queues, Heaps).
+- **HD Graphics & Text Engine:** The `image` module natively supports hardware-grade SDF Alpha-blending for anti-aliased sub-pixel rendering. Added `.text()` for zero-dependency IBM VGA 8x8 ASCII font rendering.
+- **FPS Input Handling:** The `window` module now exposes system-level pointer authorities. Added `.showCursor()` to hide/unhide the OS cursor, `.setCursorPos()` to enforce infinite Mouse-Look capabilities for 3D simulations, and `.setImeEnabled()` to prevent input lockups during fast-paced WASD keystrokes.
+- **Bug Fixes:** Resolved a crucial index conversion vulnerability where addressing OOP instances via bracket notations could cause erratic `double` type coercion.
 
 ---
 
@@ -127,19 +121,21 @@ Requires a C++20 compliant compiler and CMake 3.15+.
     +-- GcHeap.h                    Mark-and-Sweep Garbage Collector
     +-- modules/
     |   +-- json_module.h           JSON encode/decode native module
-    |   +-- image_module.h          Image wrapper & binary I/O module
+    |   +-- image_module.h          SDF Graphics wrapper & HTTP/Bin I/O module
     |   +-- prob_module.h           Probability distribution native module
     |   +-- socket_module.h         TCP/IP network bindings module
     |   +-- bytes_module.h          Memory buffering & binary I/O module
-    |   +-- window_module.h         Native OS window and rendering module
+    |   +-- window_module.h         Native OS window & Input-Cap module
     |   +-- latex_module.h          LaTeX parser and compiler module
     +-- lib/
+    |   +-- collections.jc2         Standard library: Advanced Data Structures
     |   +-- regex.jc2               Standard library: NFA Regex engine
     |   +-- discrete.jc2            Standard library: Discrete Mathematics
     |   +-- net.jc2                 Standard library: OOP TCP Sockets
     |   +-- http.jc2                Standard library: HTTP/1.1 Client
     |   +-- buffer.jc2              Standard library: Binary buffer and cursor API
     |   +-- engine.jc2              Standard library: Game and UI Engine
+    +-- examples/                   Showcase scripts demonstrating JC2's engine, 3D graphics, and algorithm capabilities
     +-- jc2-language/               VS Code Language Support Extension
 
 ---

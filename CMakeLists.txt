@@ -1,22 +1,25 @@
 ﻿# ==============================================================================
-# Junk Calculator 2.2.2 - Ultimate CMake Build Script
+# Junk Calculator 2 - Ultimate CMake Build Script
+# Version: 2.2.3.0
 # ==============================================================================
 cmake_minimum_required(VERSION 3.15)
 
-# ★ 开启 CMake 3.15+ 的 MSVC 纯净运行库控制策略
+# ★ Enable CMake 3.15+ MSVC clean runtime control policy
 cmake_policy(SET CMP0091 NEW)
-# ★ 优雅地强制所有模式静态链接，彻底告别 VCRUNTIME.dll 丢失与 D9025 警告！
+
+# ★ Elegantly force static linking (MT/MTd) across all configs.
+# This permanently eliminates the "missing VCRUNTIME140.dll" error on target machines!
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
-project(JunkCalculator2 VERSION 2.2.2 LANGUAGES CXX)
+project(JunkCalculator2 VERSION 2.2.3.0 LANGUAGES CXX)
 
-# 要求 C++20 标准
+# Enforce C++ 20 Standard
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 # ==============================================================================
-# 核心源文件与头文件收集
+# Core Sources & Headers Collection
 # ==============================================================================
 set(JC2_HEADERS
     "Token.h" "Lexer.h" "Expr.h" "Parser.h" "Value.h"
@@ -41,18 +44,20 @@ set(JC2_SOURCES
 add_executable(JunkCalculator2 ${JC2_HEADERS} ${JC2_SOURCES})
 target_include_directories(JunkCalculator2 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
-# ★ 核心修复：如果是 Windows 系统，必须链接 WinSock2 网络库！
+# ★ Critical Linkage for Win32 OS:
+# ws2_32 (Networking), User32 & Gdi32 (Native GUI), imm32 (IME Focus Control)
 if(WIN32)
     target_link_libraries(JunkCalculator2 PRIVATE ws2_32 User32 Gdi32 imm32)
 endif()
 
 # ==============================================================================
-# 编译器极限优化与安全级别
+# Extreme Compiler Optimization & Safety Levels
 # ==============================================================================
 if(MSVC)
-    # /utf-8: 防止中文乱码 | /EHsc: C++ 异常处理模型
+    # /utf-8: Prevent encoding corruption | /EHsc: Standard C++ exception handling
     target_compile_options(JunkCalculator2 PRIVATE /W4 /WX /utf-8 /bigobj /EHsc)
-    # 开启 Release 模式下最高级别的全程序优化 (LTCG)
+    
+    # Enable Whole Program Optimization (LTCG) in Release mode for maximum speed
     set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /O2 /Oi /GL")
     set(CMAKE_EXE_LINKER_FLAGS_RELEASE "${CMAKE_EXE_LINKER_FLAGS_RELEASE} /LTCG")
 else()
@@ -60,7 +65,7 @@ else()
 endif()
 
 # ==============================================================================
-# 构建后自动复制环境资源
+# Post-Build Resource Injection (Auto-Copying directories)
 # ==============================================================================
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data")
     add_custom_command(TARGET JunkCalculator2 POST_BUILD
@@ -80,8 +85,18 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/lib")
     )
 endif()
 
+# ★ Added auto-copy for the showcase examples!
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/examples")
+    add_custom_command(TARGET JunkCalculator2 POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${CMAKE_CURRENT_SOURCE_DIR}/examples"
+        "$<TARGET_FILE_DIR:JunkCalculator2>/examples"
+        COMMENT "Copying examples/ to build output directory"
+    )
+endif()
+
 # ==============================================================================
-# CPack 安装与发布打包规则
+# CPack Installation & Release Packaging Rules
 # ==============================================================================
 install(TARGETS JunkCalculator2 DESTINATION bin)
 
@@ -90,6 +105,10 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data")
 endif()
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/lib")
     install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/lib" DESTINATION bin)
+endif()
+# ★ Make sure examples are included in the released ZIP!
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/examples")
+    install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/examples" DESTINATION bin)
 endif()
 
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/README.md")
@@ -101,7 +120,7 @@ endif()
 
 set(CPACK_GENERATOR "ZIP")
 set(CPACK_PACKAGE_NAME "JunkCalculator2")
-set(CPACK_PACKAGE_VERSION "2.2.2")
+set(CPACK_PACKAGE_VERSION "2.2.3.0")
 set(CPACK_PACKAGE_VENDOR "Yu Liangyang")
 set(CPACK_PACKAGE_FILE_NAME "${CPACK_PACKAGE_NAME}-${CPACK_PACKAGE_VERSION}-Windows-x64")
 include(CPack)
