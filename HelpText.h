@@ -2289,19 +2289,30 @@ namespace jc {
   ──────────────────────
     im = img(width, height [, background_color])
         Allocates a new image surface in RAM. Returns an Image object.
-        Colors are passed as hex strings (e.g., "#282C34") or standard
-        names (e.g., "red", "black", "white").
+        Colors are passed as hex strings (e.g., "#282C34") or standard names.
 
-  Image Methods (SDF Anti-Aliasing & Chainable)
+  SDF Anti-Aliasing (HD Graphics)
   ──────────────────────
-    Most drawing methods return `self`, allowing fluent method chaining.
-    All shape primitives natively support sub-pixel SDF (Signed Distance Field) 
-    Alpha-blending anti-aliasing and floating-point coordinates/thickness!
+    The JC2 drawing engine natively utilizes Signed Distance Fields (SDF) 
+    to provide GPU-grade, sub-pixel anti-aliasing entirely in software.
+    
+    To activate buttery-smooth edges, simply pass floating-point values 
+    for thickness or coordinates. The engine will automatically perform 
+    Alpha-blending on the sub-pixel boundaries!
+
+      im.line(10, 10, 90, 90, "red", 1.0)      // Crisp, aliased 1px line
+      im.line(10, 10, 90, 90, "red", 1.5)      // Smooth, anti-aliased 1.5px line!
+      im.circle(400, 300, 150, "blue", 5.8)    // HD Circle with feathered edges
+
+  Drawing Primitives (Chainable)
+  ──────────────────────
+    Most methods return `self` to allow fluent chaining.
 
     im.width()  /  im.height()
     im.clear(color)
     im.setPixel(x, y, color)
     im.getPixel(x, y)                Returns the color as a hex string "#RRGGBB"
+    
     im.line(x0, y0, x1, y1, color [, thick=1.0])
     im.rect(x, y, w, h, color [, thick=1.0])
     im.fillRect(x, y, w, h, color)
@@ -2327,8 +2338,7 @@ namespace jc {
         Encodes the memory surface and flushes it to a valid Windows BMP file.
     
     data = imgReadBytes("filepath.bmp")
-        (Global Function) Opens a binary file and reads its EXACT byte sequence 
-        into a JC2 String buffer.
+        (Global) Reads a binary file's EXACT byte sequence into a String buffer.
 )HELP" },
 
         { "bytes", R"HELP(
@@ -2427,20 +2437,31 @@ namespace jc {
   Spawning a Window & Basic State
   ──────────────────────
     win = Window(title, width, height)
-        Requests the OS to create an overlapped tracking window.
+        Requests the OS to create a fixed-size trackable window.
     win.isOpen()
         Returns 1 if the window is alive, 0 if closed by the user.
     win.show(image_obj)
         Bit-block transfers (Blits) a JC2 `Image` object's memory buffer 
         directly onto the window's device context (HDC) instantly.
 
+  Mouse & Cursor Control (3D/FPS Mechanics)
+  ──────────────────────
+    win.showCursor(boolean)
+        Dynamically hides (0.0) or shows (1.0) the Windows mouse pointer.
+        Essential for creating immersive games and custom UI crosshairs.
+        
+    win.setCursorPos(x, y)
+        Forcibly teleports the operating system's mouse pointer to the 
+        specified coordinates within the window. Used to create "infinite" 
+        mouse-look mechanics in 3D games by continually resetting the 
+        mouse to the center of the screen.
+
   IME (Input Method Editor) Control
   ──────────────────────
     win.setImeEnabled(boolean)
-        Dynamically enables or disables the OS Input Method (e.g., Chinese Pinyin).
-        • Pass `false` (or 0) for action games. This prevents the IME from 
-          intercepting physical keys like WASD or 1-5 as text input.
-        • Pass `true` (or 1) when the user clicks a text box and needs to type.
+        Dynamically enables or disables the OS Input Method (e.g., Pinyin).
+        • Pass `false` (0) for action games to prevent the IME from intercepting WASD.
+        • Pass `true`  (1) when expecting text input from the user.
 
   Real-Time Input Polling
   ──────────────────────
