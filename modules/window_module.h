@@ -32,6 +32,7 @@ namespace jc_window {
         HWND hwnd = NULL;
         HIMC defaultImc = NULL;
         std::atomic<bool> running{ true };
+        std::atomic<bool> cursorVisible{ true };
         std::thread winThread;
 
         int width, height;
@@ -55,11 +56,15 @@ namespace jc_window {
             wc.hInstance = GetModuleHandle(NULL);
             wc.lpszClassName = "JC2WindowMT";
             RegisterClass(&wc); // 忽略重复注册错误
+
+            // ★ 修复最大化乱码：使用定死样式的窗口，砍掉最大化和边缘调整大小功能！
+            DWORD style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
+
             RECT rect = { 0, 0, width, height };
-            AdjustWindowRect(&rect, WS_OVERLAPPEDWINDOW, FALSE);
+            AdjustWindowRect(&rect, style, FALSE);
 
             this->hwnd = CreateWindow("JC2WindowMT", title.c_str(),
-                WS_OVERLAPPEDWINDOW | WS_VISIBLE, CW_USEDEFAULT, CW_USEDEFAULT,
+                style | WS_VISIBLE, CW_USEDEFAULT, CW_USEDEFAULT,
                 rect.right - rect.left, rect.bottom - rect.top,
                 NULL, NULL, GetModuleHandle(NULL), this);
 
@@ -113,6 +118,18 @@ namespace jc_window {
                 return 0;
             }
 
+            if (msg == WM_SETCURSOR) {
+                if (!cursorVisible) {
+                    SetCursor(NULL); // 隐藏光标，设为空白
+                    return TRUE;     // 告诉系统已处理
+                }
+                else {
+                    // 当需要显示时，必须强制向系统申请标准的“白箭头”并重新绘制！
+                    SetCursor(LoadCursor(NULL, IDC_ARROW));
+                    return TRUE;
+                }
+            }
+
             // ─── 拦截交互事件 ───
             if (msg == WM_KEYDOWN) { pushEvent({ "keydown", 0, 0, (int)wParam, 0 }); }
             else if (msg == WM_KEYUP) { pushEvent({ "keyup", 0, 0, (int)wParam, 0 }); }
@@ -156,6 +173,18 @@ namespace jc_window {
             }
         }
 
+        void showCursor(bool show) {
+            cursorVisible = show;
+        }
+
+        // ★ 刺透系统限制：强行将操作系统的鼠标指针设定到窗口内的指定坐标
+        void setCursorPos(int x, int y) {
+            if (!hwnd) return;
+            POINT pt = { x, y };
+            ClientToScreen(hwnd, &pt); // 必须将客户区相对坐标转为屏幕绝对坐标！
+            SetCursorPos(pt.x, pt.y);
+        }
+
         bool isOpen() const { return running; }
 
         bool pollEvent(WinEvent& outEv) {
@@ -189,6 +218,9 @@ namespace jc_window {
         bool isOpen() { return false; }
         bool pollEvent(WinEvent&) { return false; }
         void show(const std::shared_ptr<Image>&) {}
+        void setImeEnabled(bool) {}
+        void showCursor(bool) {}
+        void setCursorPos(int, int) {}
     };
 #endif
 
@@ -343,6 +375,26 @@ JC2_MODULE(window) {
 
         bool enable = args[0].asDouble() != 0.0;
         win->setImeEnabled(enable);
+        return jc::Value::none();
+        });
+
+    // ★ 暴露强行接管鼠标渲染与位置权限的系统级 API
+    addWinMethod("showCursor", [](const std::vector<jc::Value>& args) -> jc::Value {
+        if (args.empty()) return jc::Value::none();
+        auto inst = std::get<std::shared_ptr<Instance>>(jc::helpers::getGlobalCallback("self").data);
+        auto win = std::any_cast<std::shared_ptr<NativeWindow>&>(inst->nativeData);
+        win->showCursor(args[0].asDouble() != 0.0);
+        return jc::Value::none();
+        });
+
+    addWinMethod("setCursorPos", [](const std::vector<jc::Value>& args) -> jc::Value {
+        if (args.size() < 2) return jc::Value::none();
+        auto inst = std::get<std::shared_ptr<Instance>>(jc::helpers::getGlobalCallback("self").data);
+        auto win = std::any_cast<std::shared_ptr<NativeWindow>&>(inst->nativeData);
+        win->setCursorPos(
+            static_cast<int>(args[0].asDouble()),
+            static_cast<int>(args[1].asDouble())
+        );
         return jc::Value::none();
         });
 }
