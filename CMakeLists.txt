@@ -1,6 +1,6 @@
 ﻿# ==============================================================================
 # Junk Calculator 2 - Ultimate CMake Build Script
-# Version: 2.2.3.0
+# Version: 2.3.0.0
 # ==============================================================================
 cmake_minimum_required(VERSION 3.15)
 
@@ -26,7 +26,7 @@ set(JC2_HEADERS
     "Complex.h" "Matrix.h" "BigInt.h" "Fraction.h" "Base.h"
     "Tolerance.h" "Image.h" "Probability.h" "Highlight.h"
     "HelpText.h" "Bytecode.h" "Compiler.h" "VM.h"
-    "Module.h" "GcHeap.h" "BuiltinRegistry.h"
+    "Module.h" "GcHeap.h" "BuiltinRegistry.h" "Symbolic.h"
     "modules/json_module.h"
     "modules/image_module.h"
     "modules/prob_module.h"
@@ -39,6 +39,7 @@ set(JC2_HEADERS
 set(JC2_SOURCES
     "Lexer.cpp" "Parser.cpp" "Compiler.cpp"
     "VM.cpp" "BuiltinRegistry.cpp" "main.cpp"
+    "Symbolic.cpp"
 )
 
 add_executable(JunkCalculator2 ${JC2_HEADERS} ${JC2_SOURCES})
@@ -120,7 +121,8 @@ endif()
 
 set(CPACK_GENERATOR "ZIP")
 set(CPACK_PACKAGE_NAME "JunkCalculator2")
-set(CPACK_PACKAGE_VERSION "2.2.3.0")
+set(CPACK_PACKAGE_VERSION "2.3.0.0")
 set(CPACK_PACKAGE_VENDOR "Yu Liangyang")
 set(CPACK_PACKAGE_FILE_NAME "${CPACK_PACKAGE_NAME}-${CPACK_PACKAGE_VERSION}-Windows-x64")
 include(CPack)
+

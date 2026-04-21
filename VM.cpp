@@ -81,160 +81,8 @@ namespace jc {
         return oss.str();
     }
 
-    static bool vmValuesEqual(const Value& lhs, const Value& rhs) {
-        static thread_local std::vector<std::pair<const void*, const void*>> comparingPairs;
-        if (lhs.data.index() == rhs.data.index()) {
-            if (std::holds_alternative<std::monostate>(lhs.data))
-                return true;
-            if (std::holds_alternative<double>(lhs.data))
-                return Tol::isEq(std::get<double>(lhs.data), std::get<double>(rhs.data));
-            if (std::holds_alternative<BigInt>(lhs.data))
-                return std::get<BigInt>(lhs.data) == std::get<BigInt>(rhs.data);
-            if (std::holds_alternative<Complex>(lhs.data))
-                return std::get<Complex>(lhs.data) == std::get<Complex>(rhs.data);
-            if (std::holds_alternative<Fraction>(lhs.data))
-                return std::get<Fraction>(lhs.data) == std::get<Fraction>(rhs.data);
-            if (std::holds_alternative<std::string>(lhs.data))
-                return std::get<std::string>(lhs.data) == std::get<std::string>(rhs.data);
-            if (std::holds_alternative<BaseNum>(lhs.data))
-                return std::get<BaseNum>(lhs.data).getValue() ==
-                std::get<BaseNum>(rhs.data).getValue();
-            if (std::holds_alternative<RealMatrix>(lhs.data)) {
-                const auto& a = std::get<RealMatrix>(lhs.data);
-                const auto& b = std::get<RealMatrix>(rhs.data);
-                if (a.getRows() != b.getRows() || a.getCols() != b.getCols()) return false;
-                for (int i = 0; i < a.getRows(); ++i)
-                    for (int j = 0; j < a.getCols(); ++j)
-                        if (!Tol::isEq(a(i, j), b(i, j))) return false;
-                return true;
-            }
-            if (std::holds_alternative<ComplexMatrix>(lhs.data)) {
-                const auto& a = std::get<ComplexMatrix>(lhs.data);
-                const auto& b = std::get<ComplexMatrix>(rhs.data);
-                if (a.getRows() != b.getRows() || a.getCols() != b.getCols()) return false;
-                for (int i = 0; i < a.getRows(); ++i)
-                    for (int j = 0; j < a.getCols(); ++j)
-                        if (!(a(i, j) == b(i, j))) return false;
-                return true;
-            }
-            if (std::holds_alternative<List>(lhs.data)) {
-                const auto& a = std::get<List>(lhs.data);
-                const auto& b = std::get<List>(rhs.data);
-
-                if (a.id() == b.id()) return true;
-                if (a.size() != b.size()) return false;
-                auto pair = a.id() < b.id() ? std::make_pair(a.id(), b.id()) : std::make_pair(b.id(), a.id());
-                if (std::find(comparingPairs.begin(), comparingPairs.end(), pair) != comparingPairs.end()) {
-                    return true; 
-                }
-                comparingPairs.push_back(pair);
-                bool eq = true;
-                for (size_t i = 0; i < a.size(); ++i) {
-                    try {
-                        Value va = std::any_cast<Value>(a.raw()[i]);
-                        Value vb = std::any_cast<Value>(b.raw()[i]);
-                        if (!vmValuesEqual(va, vb)) { eq = false; break; }
-                    }
-                    catch (...) { eq = false; break; }
-                }
-                comparingPairs.pop_back(); 
-                return eq;
-            }
-            if (std::holds_alternative<Dict>(lhs.data)) {
-                const auto& a = std::get<Dict>(lhs.data);
-                const auto& b = std::get<Dict>(rhs.data);
-                if (a.id() == b.id()) return true;
-                if (a.size() != b.size()) return false;
-                auto pair = a.id() < b.id() ? std::make_pair(a.id(), b.id()) : std::make_pair(b.id(), a.id());
-                if (std::find(comparingPairs.begin(), comparingPairs.end(), pair) != comparingPairs.end()) {
-                    return true; 
-                }
-                comparingPairs.push_back(pair);
-                bool eq = true;
-                for (const auto& [key, val] : a.getEntries()) {
-                    const auto* bval = b.get(key);
-                    if (!bval) { eq = false; break; }
-                    try {
-                        Value va = std::any_cast<Value>(val);
-                        Value vb = std::any_cast<Value>(*bval);
-                        if (!vmValuesEqual(va, vb)) { eq = false; break; }
-                    }
-                    catch (...) { eq = false; break; }
-                }
-                comparingPairs.pop_back();
-                return eq;
-            }
-            if (std::holds_alternative<Set>(lhs.data)) {
-                const auto& a = std::get<Set>(lhs.data);
-                const auto& b = std::get<Set>(rhs.data);
-                if (a.id() == b.id()) return true;
-                if (a.size() != b.size()) return false;
-                for (const auto& [key, val] : a.raw()) {
-                    if (!b.contains(key)) return false;
-                }
-                return true;
-            }
-            if (std::holds_alternative<StringMatrix>(lhs.data)) {
-                const auto& a = std::get<StringMatrix>(lhs.data);
-                const auto& b = std::get<StringMatrix>(rhs.data);
-                if (a.getRows() != b.getRows() || a.getCols() != b.getCols()) return false;
-                for (int i = 0; i < a.getRows(); ++i)
-                    for (int j = 0; j < a.getCols(); ++j)
-                        if (a(i, j) != b(i, j)) return false;
-                return true;
-            }
-            if (std::holds_alternative<std::shared_ptr<Instance>>(lhs.data))
-                return std::get<std::shared_ptr<Instance>>(lhs.data).get() ==
-                std::get<std::shared_ptr<Instance>>(rhs.data).get();
-            return false;
-        }
-
-        if (std::holds_alternative<BigInt>(lhs.data) && std::holds_alternative<Fraction>(rhs.data))
-            return Fraction(std::get<BigInt>(lhs.data)) == std::get<Fraction>(rhs.data);
-        if (std::holds_alternative<Fraction>(lhs.data) && std::holds_alternative<BigInt>(rhs.data))
-            return std::get<Fraction>(lhs.data) == Fraction(std::get<BigInt>(rhs.data));
-
-        if ((std::holds_alternative<RealMatrix>(lhs.data) && std::holds_alternative<ComplexMatrix>(rhs.data)) ||
-            (std::holds_alternative<ComplexMatrix>(lhs.data) && std::holds_alternative<RealMatrix>(rhs.data))) {
-            try {
-                ComplexMatrix a = lhs.asComplexMatrix(), b = rhs.asComplexMatrix();
-                if (a.getRows() != b.getRows() || a.getCols() != b.getCols()) return false;
-                for (int i = 0; i < a.getRows(); ++i)
-                    for (int j = 0; j < a.getCols(); ++j)
-                        if (!(a(i, j) == b(i, j))) return false;
-                return true;
-            }
-            catch (...) { return false; }
-        }
-
-        if (std::holds_alternative<std::monostate>(lhs.data) ||
-            std::holds_alternative<std::monostate>(rhs.data))
-            return false;
-
-        try { return lhs.asComplex() == rhs.asComplex(); }
-        catch (...) { return false; }
-    }
-
     std::string VM::getTypeName(const Value& val) {
-        if (std::holds_alternative<std::monostate>(val.data)) return "none";
-        if (std::holds_alternative<double>(val.data)) return "double";
-        if (std::holds_alternative<BigInt>(val.data)) return "BigInt";
-        if (std::holds_alternative<Fraction>(val.data)) return "Fraction";
-        if (std::holds_alternative<Complex>(val.data)) return "Complex";
-        if (std::holds_alternative<std::string>(val.data)) return "string";
-        if (std::holds_alternative<List>(val.data)) return "list";
-        if (std::holds_alternative<Dict>(val.data)) return "dict";
-        if (std::holds_alternative<Set>(val.data)) return "set";
-        if (std::holds_alternative<RealMatrix>(val.data)) return "RealMatrix";
-        if (std::holds_alternative<ComplexMatrix>(val.data)) return "ComplexMatrix";
-        if (std::holds_alternative<StringMatrix>(val.data)) return "StringMatrix";
-        if (std::holds_alternative<std::shared_ptr<FunctionClosure>>(val.data)) return "func";
-        if (std::holds_alternative<std::shared_ptr<Instance>>(val.data)) {
-            auto inst = std::get<std::shared_ptr<Instance>>(val.data);
-            return inst->classDef ? inst->classDef->name : "instance";
-        }
-        if (std::holds_alternative<std::shared_ptr<ClassDefinition>>(val.data)) return "class";
-        return "unknown";
+        return val.typeName();
     }
 
     void VM::triggerParamTypeError(const Value& val, uint16_t typeIdx, uint16_t nameIdx) {
@@ -282,7 +130,8 @@ namespace jc {
         if (typeStr == "complex") return std::holds_alternative<Complex>(val.data);
         if (typeStr == "fraction") return std::holds_alternative<Fraction>(val.data);
         if (typeStr == "class") return std::holds_alternative<std::shared_ptr<ClassDefinition>>(val.data);
-
+        if (typeStr == "instance") return std::holds_alternative<std::shared_ptr<Instance>>(val.data);
+        if (typeStr == "symbolic"|| typeStr == "symbol" || typeStr == "expr") return std::holds_alternative<SymExpr>(val.data);
 
         if (std::holds_alternative<std::shared_ptr<Instance>>(val.data)) {
             auto inst = std::get<std::shared_ptr<Instance>>(val.data);
@@ -430,14 +279,7 @@ namespace jc {
     OpCode VM::readOp() { return static_cast<OpCode>(readByte()); }
 
     bool VM::isTruthy(const Value& val) {
-        if (std::holds_alternative<std::monostate>(val.data)) return false;
-        if (std::holds_alternative<double>(val.data))
-            return !Tol::isEq(std::get<double>(val.data), 0.0);
-        if (std::holds_alternative<BigInt>(val.data))
-            return !std::get<BigInt>(val.data).isZero();
-        if (std::holds_alternative<std::string>(val.data))
-            return !std::get<std::string>(val.data).empty();
-        return true;
+        return val.truthy();
     }
 
     Value VM::execute(const Chunk& c) {
@@ -711,7 +553,7 @@ namespace jc {
                     Value b = pop(), a = pop();
                     auto d = findDunder(a, "__eq__");
                     if (d) { push(Value(isTruthy(callDunder(a, "__eq__", { b })) ? 1.0 : 0.0)); break; }
-                    push(Value(vmValuesEqual(a, b) ? 1.0 : 0.0));
+                    push(Value(Value::equals(a, b) ? 1.0 : 0.0));
                     break;
                 }
                 case OpCode::OP_NOT_EQUAL: {
@@ -720,7 +562,7 @@ namespace jc {
                     if (d) { push(Value(isTruthy(callDunder(a, "__neq__", { b })) ? 1.0 : 0.0)); break; }
                     d = findDunder(a, "__eq__");
                     if (d) { push(Value(isTruthy(callDunder(a, "__eq__", { b })) ? 0.0 : 1.0)); break; }
-                    push(Value(vmValuesEqual(a, b) ? 0.0 : 1.0));
+                    push(Value(Value::equals(a, b) ? 0.0 : 1.0));
                     break;
                 }
                 case OpCode::OP_LESS: {
@@ -831,6 +673,22 @@ namespace jc {
                             nullptr
                         );
                         closure->nativeFn = std::make_any<NativeCallable>(nativeBuiltins[name]);
+
+                        // ★ 补上参数元数据，让 map/filter/reduce 等高阶函数能正确识别
+                        auto ait = builtinArity.find(name);
+                        if (ait != builtinArity.end() && !ait->second.empty()) {
+                            int maxA = *ait->second.rbegin();
+                            int minA = *ait->second.begin();
+                            for (int j = 0; j < maxA; ++j) {
+                                closure->paramNames.push_back("_" + std::to_string(j));
+                                closure->isRef.push_back(false);
+                            }
+                            // 超出最小参数数量的部分视为有默认值
+                            for (int j = minA; j < maxA; ++j) {
+                                closure->defaultValues.push_back(Value::none());
+                            }
+                        }
+
                         push(Value(closure));
                     }
                     else {
@@ -1794,8 +1652,9 @@ namespace jc {
             // =======================================================
             // ★ 异常捕获与 Traceback 调用栈回溯 (Stack Tracing)
             // =======================================================
-            catch (const StackTracedException&) {
-                // 这个异常已经在更深处的 C++ 潜逃虚拟机层完成了全栈 Trace 抓拍，原样向外透传保护即可！
+            catch (const StackTracedException& ex) {
+                std::string msg = ex.rawMessage;
+                if (handleExceptionUnwind(msg)) continue;
                 throw;
             }
             catch (const ErrorSignal& sig) {
@@ -3654,7 +3513,7 @@ namespace jc {
             for (const auto& e : L.raw()) {
                 try {
                     Value elem = std::any_cast<Value>(e);
-                    if (vmValuesEqual(needle, elem)) {
+                    if (Value::equals(needle, elem)) {
                         push(Value(1.0));
                         return;
                     }

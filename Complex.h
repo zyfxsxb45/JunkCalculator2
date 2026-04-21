@@ -13,7 +13,7 @@ namespace jc {
         double real;
         double imag;
 
-        // --- 极客常量 ---
+        // --- 常量 ---
         static constexpr double PI = 3.14159265358979323846;
         static constexpr double E = 2.71828182845904523536;
 

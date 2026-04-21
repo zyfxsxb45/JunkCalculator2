@@ -137,6 +137,7 @@ namespace jc {
         Value callVMFunction(int fnIdx, const std::vector<Value>& args,
             std::shared_ptr<std::vector<Value>> upvalues = nullptr,
             Value boundSelf = Value::none(), Value boundClass = Value::none());
+        const std::map<std::string, NativeCallable>& getNativeBuiltins() const { return nativeBuiltins; }
 
 
         Value execute(const Chunk& mainChunk);

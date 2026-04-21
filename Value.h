@@ -29,6 +29,7 @@
 #include "Image.h"
 #include "Probability.h"
 #include "GcHeap.h"
+#include "Symbolic.h" 
 
 namespace jc {
     class Value;
@@ -252,7 +253,7 @@ namespace jc {
         std::shared_ptr<FunctionClosure>,
         std::shared_ptr<ClassDefinition>,
         std::shared_ptr<Instance>,
-        SuperProxyPtr
+        SuperProxyPtr, SymExpr
     >;
 
     template<typename> struct always_false : std::false_type {};
@@ -260,6 +261,60 @@ namespace jc {
     class Value {
     private:
         Value(std::monostate) : data(std::monostate{}) {}
+
+        static std::pair<bool, BigInt> getExactIntRoot(const BigInt& base, int64_t n) {
+            if (n <= 0) return { false, BigInt(0) };
+            if (n == 1) return { true, base };
+            bool isNeg = base.isNegative();
+            if (isNeg && n % 2 == 0) return { false, BigInt(0) };
+            BigInt absBase = base.abs();
+            if (absBase.isZero()) return { true, BigInt(0) };
+            if (absBase == BigInt(1)) return { true, isNeg ? (BigInt(0) - BigInt(1)) : BigInt(1) };
+            // 用位数估算上界，极大缩小搜索空间
+            std::string s = absBase.toString();
+            size_t rootLen = s.length() / static_cast<size_t>(n) + 1;
+            std::string upperStr = "1";
+            upperStr.append(rootLen, '0');
+            BigInt lower(1), upper(upperStr);
+            while (!(upper < lower)) {
+                BigInt mid = (lower + upper) / BigInt(2);
+                BigInt midPow = mid.pow(BigInt(n));
+                if (midPow == absBase) {
+                    return { true, isNeg ? (BigInt(0) - mid) : mid };
+                }
+                else if (midPow < absBase) {
+                    lower = mid + BigInt(1);
+                }
+                else {
+                    upper = mid - BigInt(1);
+                }
+            }
+            return { false, BigInt(0) };
+        }
+        // ========================================================
+        // 有理数精确有理数次幂
+        // (num/den) ^ (p/q) → 分子分母分别开 q 次根，再求 p 次幂
+        // 返回 {是否成功, Value 结果}
+        // ========================================================
+        static std::pair<bool, Value> tryExactRationalPow(
+            const BigInt& num, const BigInt& den, int64_t p, int64_t q)
+        {
+            if (q <= 0) return { false, Value() };
+            auto [numOk, numRoot] = getExactIntRoot(num, q);
+            if (!numOk) return { false, Value() };
+            auto [denOk, denRoot] = getExactIntRoot(den, q);
+            if (!denOk) return { false, Value() };
+            // 开根成功，求 p 次幂
+            if (p >= 0) {
+                Fraction result = Fraction(numRoot, denRoot).pow(p);
+                return { true, Value::fromFraction(result) };
+            }
+            else {
+                // 负指数：先取倒数再求正幂
+                Fraction result = Fraction(denRoot, numRoot).pow(-p);
+                return { true, Value::fromFraction(result) };
+            }
+        }
     public:
         ValueVariant data;
 
@@ -278,11 +333,50 @@ namespace jc {
         Value(Dict val) : data(std::move(val)) {}
         Value(List val) : data(std::move(val)) {}
         Value(Set val) : data(std::move(val)) {}
+        Value(SymExpr val) {
+            if (val.ptr && val.ptr->getType() == SymType::NUM) {
+                auto numNode = std::static_pointer_cast<SymNum>(val.ptr);
+                // 拆包 CASVal (std::variant<double, BigInt, Fraction, Complex>)
+                std::visit([this](auto&& arg) {
+                    using T = std::decay_t<decltype(arg)>;
+                    if constexpr (std::is_same_v<T, Fraction>) {
+                        // 连同分母为 1 的 Fraction 也顺手击碎为 BigInt！
+                        if (arg.getDen() == BigInt(1)) {
+                            this->data = arg.getNum();
+                        }
+                        else {
+                            this->data = arg;
+                        }
+                    }
+                    else {
+                        // BigInt, double, Complex 直接降维接收
+                        this->data = arg;
+                    }
+                    }, numNode->value);
+            }
+            else {
+                // 若仍含有变量或算不尽的根式，则保留其符号表达式的高维形态
+                this->data = std::move(val);
+            }
+        }
         Value(std::shared_ptr<ClassDefinition> val) : data(std::move(val)) {}
         Value(std::shared_ptr<Instance> val) : data(std::move(val)) {}
 
         bool isInstance() const { return std::holds_alternative<std::shared_ptr<Instance>>(data); }
         bool isClass() const { return std::holds_alternative<std::shared_ptr<ClassDefinition>>(data); }
+        bool isComplex() const { return std::holds_alternative<Complex>(data);}
+        
+        bool isSymbolic() const { return std::holds_alternative<SymExpr>(data); }
+        SymExpr asSymbolic() const {
+            if (std::holds_alternative<SymExpr>(data)) return std::get<SymExpr>(data);
+            // 包容万象，随时准备将普通数字强行拔高为符号节点！
+            if (std::holds_alternative<double>(data))  return SymExpr(std::get<double>(data));
+            if (std::holds_alternative<BigInt>(data))  return SymExpr(std::get<BigInt>(data));
+            if (std::holds_alternative<Fraction>(data))return SymExpr(std::get<Fraction>(data));
+            if (std::holds_alternative<Complex>(data)) return SymExpr(std::get<Complex>(data));
+            throw std::runtime_error("TypeError: Expected a symbolic expression or exact number.");
+        }
+
         std::shared_ptr<Instance> asInstance() const {
             if (!isInstance()) throw std::runtime_error("Type Error: Expected an instance.");
             return std::get<std::shared_ptr<Instance>>(data);
@@ -393,6 +487,199 @@ namespace jc {
                 return ComplexMatrix(m.getRows(), m.getCols(), flat);
             }
             throw std::runtime_error("Type Error: Expected a matrix.");
+        }
+
+        // ==========================================
+// 统一真值判定 (The One and Only Truthiness)
+// ==========================================
+        bool truthy() const {
+            if (std::holds_alternative<std::monostate>(data)) return false;
+            if (std::holds_alternative<double>(data)) {
+                double d = std::get<double>(data);
+                return !Tol::isEq(d, 0.0) && !std::isnan(d);
+            }
+            if (std::holds_alternative<BigInt>(data))
+                return !std::get<BigInt>(data).isZero();
+            if (std::holds_alternative<Complex>(data))
+                return !Tol::isEq(std::get<Complex>(data).modulus(), 0.0);
+            if (std::holds_alternative<Fraction>(data))
+                return !std::get<Fraction>(data).getNum().isZero();
+            if (std::holds_alternative<BaseNum>(data))
+                return !std::get<BaseNum>(data).getValue().isZero();
+            if (std::holds_alternative<std::string>(data))
+                return !std::get<std::string>(data).empty();
+            if (std::holds_alternative<List>(data))
+                return !std::get<List>(data).empty();
+            if (std::holds_alternative<Dict>(data))
+                return !std::get<Dict>(data).empty();
+            if (std::holds_alternative<Set>(data))
+                return !std::get<Set>(data).empty();
+            if (std::holds_alternative<SymExpr>(data))
+                return !std::get<SymExpr>(data).isZero();
+            return true;
+        }
+
+        // ==========================================
+        // 统一相等判定 (The One and Only Equality)
+        // ==========================================
+        static bool equals(const Value& lhs, const Value& rhs) {
+            // 防循环递归锁
+            static thread_local std::vector<std::pair<const void*, const void*>> comparingPairs;
+
+            // 同类型快速通道
+            if (lhs.data.index() == rhs.data.index()) {
+                if (std::holds_alternative<std::monostate>(lhs.data)) return true;
+                if (std::holds_alternative<double>(lhs.data))
+                    return Tol::isEq(std::get<double>(lhs.data), std::get<double>(rhs.data));
+                if (std::holds_alternative<BigInt>(lhs.data))
+                    return std::get<BigInt>(lhs.data) == std::get<BigInt>(rhs.data);
+                if (std::holds_alternative<Complex>(lhs.data))
+                    return std::get<Complex>(lhs.data) == std::get<Complex>(rhs.data);
+                if (std::holds_alternative<Fraction>(lhs.data))
+                    return std::get<Fraction>(lhs.data) == std::get<Fraction>(rhs.data);
+                if (std::holds_alternative<std::string>(lhs.data))
+                    return std::get<std::string>(lhs.data) == std::get<std::string>(rhs.data);
+                if (std::holds_alternative<BaseNum>(lhs.data))
+                    return std::get<BaseNum>(lhs.data).getValue() == std::get<BaseNum>(rhs.data).getValue();
+                if (std::holds_alternative<SymExpr>(lhs.data))
+                    return std::get<SymExpr>(lhs.data).toString() == std::get<SymExpr>(rhs.data).toString();
+
+                if (std::holds_alternative<RealMatrix>(lhs.data)) {
+                    const auto& a = std::get<RealMatrix>(lhs.data);
+                    const auto& b = std::get<RealMatrix>(rhs.data);
+                    if (a.getRows() != b.getRows() || a.getCols() != b.getCols()) return false;
+                    for (int i = 0; i < a.getRows(); ++i)
+                        for (int j = 0; j < a.getCols(); ++j)
+                            if (!Tol::isEq(a(i, j), b(i, j))) return false;
+                    return true;
+                }
+                if (std::holds_alternative<ComplexMatrix>(lhs.data)) {
+                    const auto& a = std::get<ComplexMatrix>(lhs.data);
+                    const auto& b = std::get<ComplexMatrix>(rhs.data);
+                    if (a.getRows() != b.getRows() || a.getCols() != b.getCols()) return false;
+                    for (int i = 0; i < a.getRows(); ++i)
+                        for (int j = 0; j < a.getCols(); ++j)
+                            if (!(a(i, j) == b(i, j))) return false;
+                    return true;
+                }
+                if (std::holds_alternative<StringMatrix>(lhs.data)) {
+                    const auto& a = std::get<StringMatrix>(lhs.data);
+                    const auto& b = std::get<StringMatrix>(rhs.data);
+                    if (a.getRows() != b.getRows() || a.getCols() != b.getCols()) return false;
+                    for (int i = 0; i < a.getRows(); ++i)
+                        for (int j = 0; j < a.getCols(); ++j)
+                            if (a(i, j) != b(i, j)) return false;
+                    return true;
+                }
+                if (std::holds_alternative<List>(lhs.data)) {
+                    const auto& a = std::get<List>(lhs.data);
+                    const auto& b = std::get<List>(rhs.data);
+                    if (a.id() == b.id()) return true;
+                    if (a.size() != b.size()) return false;
+                    auto pair = a.id() < b.id() ? std::make_pair(a.id(), b.id()) : std::make_pair(b.id(), a.id());
+                    if (std::find(comparingPairs.begin(), comparingPairs.end(), pair) != comparingPairs.end()) return true;
+                    comparingPairs.push_back(pair);
+                    bool eq = true;
+                    for (size_t i = 0; i < a.size(); ++i) {
+                        try {
+                            Value va = std::any_cast<Value>(a.raw()[i]);
+                            Value vb = std::any_cast<Value>(b.raw()[i]);
+                            if (!equals(va, vb)) { eq = false; break; }
+                        }
+                        catch (...) { eq = false; break; }
+                    }
+                    comparingPairs.pop_back();
+                    return eq;
+                }
+                if (std::holds_alternative<Dict>(lhs.data)) {
+                    const auto& a = std::get<Dict>(lhs.data);
+                    const auto& b = std::get<Dict>(rhs.data);
+                    if (a.id() == b.id()) return true;
+                    if (a.size() != b.size()) return false;
+                    auto pair = a.id() < b.id() ? std::make_pair(a.id(), b.id()) : std::make_pair(b.id(), a.id());
+                    if (std::find(comparingPairs.begin(), comparingPairs.end(), pair) != comparingPairs.end()) return true;
+                    comparingPairs.push_back(pair);
+                    bool eq = true;
+                    for (const auto& [key, val] : a.getEntries()) {
+                        const auto* bval = b.get(key);
+                        if (!bval) { eq = false; break; }
+                        try {
+                            Value va = std::any_cast<Value>(val);
+                            Value vb = std::any_cast<Value>(*bval);
+                            if (!equals(va, vb)) { eq = false; break; }
+                        }
+                        catch (...) { eq = false; break; }
+                    }
+                    comparingPairs.pop_back();
+                    return eq;
+                }
+                if (std::holds_alternative<Set>(lhs.data)) {
+                    const auto& a = std::get<Set>(lhs.data);
+                    const auto& b = std::get<Set>(rhs.data);
+                    if (a.id() == b.id()) return true;
+                    if (a.size() != b.size()) return false;
+                    for (const auto& [key, val] : a.raw()) {
+                        if (!b.contains(key)) return false;
+                    }
+                    return true;
+                }
+                if (std::holds_alternative<std::shared_ptr<Instance>>(lhs.data))
+                    return std::get<std::shared_ptr<Instance>>(lhs.data).get() ==
+                    std::get<std::shared_ptr<Instance>>(rhs.data).get();
+                return false;
+            }
+
+            // 跨类型兼容比较
+            if (std::holds_alternative<BigInt>(lhs.data) && std::holds_alternative<Fraction>(rhs.data))
+                return Fraction(std::get<BigInt>(lhs.data)) == std::get<Fraction>(rhs.data);
+            if (std::holds_alternative<Fraction>(lhs.data) && std::holds_alternative<BigInt>(rhs.data))
+                return std::get<Fraction>(lhs.data) == Fraction(std::get<BigInt>(rhs.data));
+
+            if ((std::holds_alternative<RealMatrix>(lhs.data) && std::holds_alternative<ComplexMatrix>(rhs.data)) ||
+                (std::holds_alternative<ComplexMatrix>(lhs.data) && std::holds_alternative<RealMatrix>(rhs.data))) {
+                try {
+                    ComplexMatrix a = lhs.asComplexMatrix(), b = rhs.asComplexMatrix();
+                    if (a.getRows() != b.getRows() || a.getCols() != b.getCols()) return false;
+                    for (int i = 0; i < a.getRows(); ++i)
+                        for (int j = 0; j < a.getCols(); ++j)
+                            if (!(a(i, j) == b(i, j))) return false;
+                    return true;
+                }
+                catch (...) { return false; }
+            }
+
+            if (std::holds_alternative<std::monostate>(lhs.data) ||
+                std::holds_alternative<std::monostate>(rhs.data))
+                return false;
+
+            try { return lhs.asComplex() == rhs.asComplex(); }
+            catch (...) { return false; }
+        }
+
+        // Value.h 的 class Value 内部
+        std::string typeName() const {
+            if (std::holds_alternative<std::monostate>(data)) return "none";
+            if (std::holds_alternative<double>(data)) return "double";
+            if (std::holds_alternative<BigInt>(data)) return "BigInt";
+            if (std::holds_alternative<Fraction>(data)) return "Fraction";
+            if (std::holds_alternative<Complex>(data)) return "Complex";
+            if (std::holds_alternative<std::string>(data)) return "string";
+            if (std::holds_alternative<List>(data)) return "list";
+            if (std::holds_alternative<Dict>(data)) return "dict";
+            if (std::holds_alternative<Set>(data)) return "set";
+            if (std::holds_alternative<RealMatrix>(data)) return "RealMatrix";
+            if (std::holds_alternative<ComplexMatrix>(data)) return "ComplexMatrix";
+            if (std::holds_alternative<StringMatrix>(data)) return "StringMatrix";
+            if (std::holds_alternative<std::shared_ptr<FunctionClosure>>(data)) return "function";
+            if (std::holds_alternative<std::shared_ptr<Instance>>(data)) {
+                auto inst = std::get<std::shared_ptr<Instance>>(data);
+                return inst->classDef ? inst->classDef->name : "instance";
+            }
+            if (std::holds_alternative<std::shared_ptr<ClassDefinition>>(data)) return "class";
+            if (std::holds_alternative<BaseNum>(data)) return "BaseNum";
+            if (std::holds_alternative<SuperProxyPtr>(data)) return "super";
+            if (std::holds_alternative<SymExpr>(data)) return "symbolic";
+            return "unknown";
         }
 
         Value operator-() const {
@@ -641,6 +928,8 @@ namespace jc {
         }
 
         friend Value operator^(const Value& lhs, const Value& rhs) {
+            if (lhs.isSymbolic() || rhs.isSymbolic())
+                return Value(lhs.asSymbolic() ^ rhs.asSymbolic());
             return std::visit([&](auto&& a, auto&& b) -> Value {
                 using T1 = std::decay_t<decltype(a)>;
                 using T2 = std::decay_t<decltype(b)>;
@@ -689,45 +978,108 @@ namespace jc {
                     else base_val = a;
                     return Value((rhs.asComplexMatrix() * log(base_val)).matExp());
                 }
+                // ==============================================================
+// 精确整数幂：BigInt ^ BigInt
+// ==============================================================
                 else if constexpr (std::is_same_v<T1, BigInt> && std::is_same_v<T2, BigInt>) {
                     if (b.isNegative()) {
-                        Fraction res = Fraction(BigInt(1), a).pow(static_cast<int64_t>(b.abs().toDouble()));
+                        Fraction res = Fraction(BigInt(1), a).pow(
+                            static_cast<int64_t>(b.abs().toDouble()));
                         return Value::fromFraction(res);
                     }
                     return Value(a.pow(b));
                 }
+                // ==============================================================
+                // 精确分数幂：Fraction ^ BigInt
+                // ==============================================================
                 else if constexpr (std::is_same_v<T1, Fraction> && std::is_same_v<T2, BigInt>) {
                     Fraction res = a.pow(static_cast<int64_t>(b.toDouble()));
                     return Value::fromFraction(res);
                 }
+                // ==============================================================
+                // ★ BigInt ^ Fraction：尝试精确开根 + 指数自动规范化
+                // ==============================================================
                 else if constexpr (std::is_same_v<T1, BigInt> && std::is_same_v<T2, Fraction>) {
-                    int64_t p = static_cast<int64_t>(b.getNum().toDouble());
-                    int64_t q = static_cast<int64_t>(b.getDen().toDouble());
+                    if (b.getDen() == BigInt(1))
+                        return lhs ^ Value(b.getNum());
 
-                    if (a.isNegative()) {
-                        return Value::negativePow(a.toDouble(), p, q);
+                    int64_t p = 0, q = 0;
+                    try {
+                        p = static_cast<int64_t>(b.getNum().toDouble());
+                        q = static_cast<int64_t>(b.getDen().toDouble());
+                        if (q < 0) { p = -p; q = -q; }
+
+                        // 尝试彻底算尽（如 8^(1/3) -> 2）
+                        auto [ok, val] = Value::tryExactRationalPow(a, BigInt(1), p, q);
+                        if (ok) return val;
                     }
-                    if (a.isZero() && p <= 0) throw std::runtime_error("Math Error: Base 0 requires positive exponent.");
-                    return Value(std::pow(a.toDouble(), static_cast<double>(p) / static_cast<double>(q)));
+                    catch (...) {}
+
+                    // ★ 算不尽时的自动化简：欧几里得带余除法 p = k*q + r (其中 0 <= r < q)
+                    if (q > 0) {
+                        int64_t k = p / q;
+                        int64_t r = p % q;
+                        if (r < 0) { r += q; k -= 1; }
+
+                        // 如果能提炼出整数部分 k，则计算 base^k 再乘上剩余根式
+                        if (k != 0 && r != 0) {
+                            Value exactPart = lhs ^ Value(BigInt(k));
+                            Value symPart = Value(SymExpr(a) ^ SymExpr(Fraction(BigInt(r), BigInt(q))));
+                            return exactPart * symPart;
+                        }
+                    }
+
+                    // 完全无法化简，保留最简符号形式
+                    return Value(SymExpr(a) ^ SymExpr(b));
                 }
+                // ==============================================================
+                // ★ Fraction ^ Fraction：尝试精确开根 + 指数自动规范化
+                // ==============================================================
                 else if constexpr (std::is_same_v<T1, Fraction> && std::is_same_v<T2, Fraction>) {
-                    double base = a.toDouble();
-                    int64_t p = static_cast<int64_t>(b.getNum().toDouble());
-                    int64_t q = static_cast<int64_t>(b.getDen().toDouble());
+                    if (b.getDen() == BigInt(1))
+                        return lhs ^ Value(b.getNum());
 
-                    if (base < 0) {
-                        return Value::negativePow(base, p, q);
+                    int64_t p = 0, q = 0;
+                    try {
+                        p = static_cast<int64_t>(b.getNum().toDouble());
+                        q = static_cast<int64_t>(b.getDen().toDouble());
+                        if (q < 0) { p = -p; q = -q; }
+
+                        auto [ok, val] = Value::tryExactRationalPow(a.getNum(), a.getDen(), p, q);
+                        if (ok) return val;
                     }
-                    return Value(std::pow(base, static_cast<double>(p) / static_cast<double>(q)));
+                    catch (...) {}
+
+                    // ★ 同理提取带余除法
+                    if (q > 0) {
+                        int64_t k = p / q;
+                        int64_t r = p % q;
+                        if (r < 0) { r += q; k -= 1; }
+
+                        if (k != 0 && r != 0) {
+                            Value exactPart = lhs ^ Value(BigInt(k));
+                            Value symPart = Value(SymExpr(a) ^ SymExpr(Fraction(BigInt(r), BigInt(q))));
+                            return exactPart * symPart;
+                        }
+                    }
+
+                    // 完全无法化简，保留最简符号形式
+                    return Value(SymExpr(a) ^ SymExpr(b));
                 }
+                // ==============================================================
+                // double 参与：走普通浮点科学计算
+                // ==============================================================
                 else if constexpr (std::is_same_v<T1, double> && std::is_same_v<T2, Fraction>) {
                     int64_t p = static_cast<int64_t>(b.getNum().toDouble());
                     int64_t q = static_cast<int64_t>(b.getDen().toDouble());
-
-                    if (a < 0) {
-                        return Value::negativePow(a, p, q);
-                    }
+                    if (a < 0) return Value::negativePow(a, p, q);
                     return Value(std::pow(a, static_cast<double>(p) / static_cast<double>(q)));
+                }
+                else if constexpr (std::is_same_v<T1, BigInt> && std::is_same_v<T2, double>) {
+                    return Value(a.toDouble()) ^ rhs;
+                }
+                else if constexpr (std::is_same_v<T1, Fraction> && std::is_same_v<T2, double>) {
+                    return Value(a.toDouble()) ^ rhs;
                 }
                 else if constexpr (std::is_same_v<T1, BaseNum> && std::is_same_v<T2, BaseNum>) {
                     return Value(a ^ b);
@@ -917,6 +1269,9 @@ namespace jc {
                 else if constexpr (std::is_same_v<T, SuperProxyPtr>) {
                     os << "<super>";
                 }
+                else if constexpr (std::is_same_v<T, SymExpr>) {
+                    os << arg.toString();
+                }
                 else static_assert(always_false<T>::value, "Unsupported type for ostream <<");
                 }, val.data);
             return os;
@@ -1063,6 +1418,9 @@ namespace jc {
                 }
                 else if constexpr (std::is_same_v<T, SuperProxyPtr>) {
                     return "\"<super>\"";
+                }
+                else if constexpr (std::is_same_v<T, SymExpr>) {
+                    return "sym(" + arg.toString() + ")";
                 }
                 else { return "none()"; }
                 }, data);

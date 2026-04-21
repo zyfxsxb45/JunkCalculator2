@@ -28,28 +28,7 @@ namespace helpers {
     }
 
     inline bool isTruthy(const Value& v) {
-        if (std::holds_alternative<std::monostate>(v.data)) return false;
-        if (std::holds_alternative<double>(v.data)) {
-            double d = std::get<double>(v.data);
-            return !Tol::isEq(d, 0.0) && !std::isnan(d);
-        }
-        if (std::holds_alternative<BigInt>(v.data))
-            return !std::get<BigInt>(v.data).isZero();
-        if (std::holds_alternative<Complex>(v.data))
-            return !Tol::isEq(std::get<Complex>(v.data).modulus(), 0.0);
-        if (std::holds_alternative<Fraction>(v.data))
-            return !std::get<Fraction>(v.data).getNum().isZero();
-        if (std::holds_alternative<BaseNum>(v.data))
-            return !std::get<BaseNum>(v.data).getValue().isZero();
-        if (std::holds_alternative<std::string>(v.data))
-            return !std::get<std::string>(v.data).empty();
-        if (std::holds_alternative<Dict>(v.data))
-            return !std::get<Dict>(v.data).empty();
-        if (std::holds_alternative<List>(v.data))
-            return !std::get<List>(v.data).empty();
-        if (std::holds_alternative<Set>(v.data))
-            return !std::get<Set>(v.data).empty();
-        return true;
+        return v.truthy();
     }
 
     inline std::vector<double> extractDS(const Value& v, const std::string& f) {
@@ -255,6 +234,10 @@ namespace helpers {
             Fraction b = std::holds_alternative<Fraction>(rhs.data) ? std::get<Fraction>(rhs.data) : Fraction(std::get<BigInt>(rhs.data));
             return a < b;
         }
+
+        // ★ 新增：符号表达式不支持数值大小比较
+        if (std::holds_alternative<SymExpr>(lhs.data) || std::holds_alternative<SymExpr>(rhs.data))
+            throw std::runtime_error("Type Error: Cannot compare symbolic expressions with '<' or '>'.");
 
         double a = lhs.asDouble(), b = rhs.asDouble();
         return (a < b && !Tol::isEq(a, b));

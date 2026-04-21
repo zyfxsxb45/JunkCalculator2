@@ -1,4 +1,5 @@
 #include "BuiltinRegistry.h"
+#include "SymEval.h"
 #include "Highlight.h"          // ★ highlightCode(), colorsEnabled
 #include "Module.h"
 #include "VM.h"
@@ -28,6 +29,90 @@ namespace jc {
     static std::string g_cwd() {
         if (!helpers::g_scriptDirStack.empty()) return helpers::g_scriptDirStack.back();
         return std::filesystem::current_path().string();
+    }
+
+    // =================================================================
+// 符号函数坍缩器：递归求值所有参数已为纯数字的 SymFunc 节点
+// sin(0) → 0,  cos(PI) → -1,  etc.
+// =================================================================
+    static Value casValToValue(const CASVal& v) {
+        return std::visit([](auto&& arg) -> Value { return Value(arg); }, v);
+    }
+
+    template<typename MapType>
+    static SymExpr collapseSymFuncs(const SymExpr& expr, const MapType& fns) {
+        if (!expr.ptr) return expr;
+
+        switch (expr.ptr->getType()) {
+        case SymType::NUM:
+        case SymType::VAR:
+            return expr;
+
+        case SymType::ADD: {
+            auto add = std::static_pointer_cast<SymAdd>(expr.ptr);
+            SymExpr result(BigInt(0));
+            for (auto& arg : add->args)
+                result = result + collapseSymFuncs(SymExpr(arg), fns);
+            return result;
+        }
+
+        case SymType::MUL: {
+            auto mul = std::static_pointer_cast<SymMul>(expr.ptr);
+            SymExpr result(BigInt(1));
+            for (auto& arg : mul->args)
+                result = result * collapseSymFuncs(SymExpr(arg), fns);
+            return result;
+        }
+
+        case SymType::POW: {
+            auto pow = std::static_pointer_cast<SymPow>(expr.ptr);
+            return collapseSymFuncs(SymExpr(pow->base), fns) ^
+                collapseSymFuncs(SymExpr(pow->exp), fns);
+        }
+
+        case SymType::FUNC: {
+            auto func = std::static_pointer_cast<SymFunc>(expr.ptr);
+            std::vector<SymExpr> newArgs;
+            bool allNumeric = true;
+            for (auto& arg : func->args) {
+                SymExpr collapsed = collapseSymFuncs(SymExpr(arg), fns);
+                newArgs.push_back(collapsed);
+                if (collapsed.ptr->getType() != SymType::NUM)
+                    allNumeric = false;
+            }
+
+            // 所有参数都是纯数字 → 尝试调用实际函数求值
+            if (allNumeric) {
+                auto it = fns.find(func->name);
+                if (it != fns.end()) {
+                    std::vector<Value> vals;
+                    for (auto& a : newArgs) {
+                        auto num = std::static_pointer_cast<SymNum>(a.ptr);
+                        vals.push_back(casValToValue(num->value));
+                    }
+                    try {
+                        Value result = it->second(vals);
+                        return result.asSymbolic();
+                    }
+                    catch (const std::runtime_error& e) {
+                        std::string msg = e.what();
+                        // 数学错误：传播给用户
+                        if (msg.find("Math Error") != std::string::npos)
+                            throw;
+                        if (msg.find("CAS Error") != std::string::npos)
+                            throw;
+                        // 类型不兼容：保留符号形式
+                    }
+                }
+            }
+
+            // 无法求值，保留为符号函数节点
+            std::vector<std::shared_ptr<SymNode>> ptrs;
+            for (auto& a : newArgs) ptrs.push_back(a.ptr);
+            return SymExpr(std::make_shared<SymFunc>(func->name, std::move(ptrs)));
+        }
+        }
+        return expr;
     }
 
 using namespace helpers;
@@ -67,6 +152,27 @@ void BuiltinRegistry::registerAll() {
 // [1] 基础数学函数
 // =================================================================
 void BuiltinRegistry::registerMath() {
+
+    auto regMath = [&](const std::string& name, std::set<int> arities, NativeCallable fn) {
+        reg(name, std::move(arities), [name, fn](const std::vector<Value>& args) -> Value {
+            // 扫描：是否有任何参数是符号表达式？
+            bool hasSymbolic = false;
+            for (const auto& a : args) {
+                if (a.isSymbolic()) { hasSymbolic = true; break; }
+            }
+            // 如果有，将所有参数统一提升为 SymExpr，打包成 SymFunc 节点
+            if (hasSymbolic) {
+                std::vector<std::shared_ptr<SymNode>> symArgs;
+                symArgs.reserve(args.size());
+                for (const auto& a : args) {
+                    symArgs.push_back(a.asSymbolic().ptr);
+                }
+                return Value(SymExpr(std::make_shared<SymFunc>(name, std::move(symArgs))));
+            }
+            // 否则正常执行数值计算
+            return fn(args);
+            });
+        };
 
     // 我们在此插入您要求的常量工厂和泛类型构造：
     reg("pi", { 0 }, [](const std::vector<Value>&) -> Value { return Value(3.14159265358979323846); });
@@ -186,50 +292,239 @@ void BuiltinRegistry::registerMath() {
         return Value(RealMatrix(r, c, flat));
         });
 
-    reg("sin", { 1 }, [](const std::vector<Value>& args) -> Value {
+    // ========== 符号计算入口 ==========
+    reg("sym", { 1 }, [](const std::vector<Value>& args) -> Value {
+        if (!std::holds_alternative<std::string>(args[0].data))
+            throw std::runtime_error("TypeError: sym() expects a string name.");
+        return Value(SymExpr::makeVar(std::get<std::string>(args[0].data)));
+        });
+
+    reg("expand", { 1 }, [](const std::vector<Value>& args) -> Value {
+        if (!args[0].isSymbolic())
+            throw std::runtime_error("TypeError: expand() expects a symbolic expression.");
+        return Value(expand(args[0].asSymbolic()));
+        });
+
+    reg("simplify", { 1 }, [](const std::vector<Value>& args) -> Value {
+        if (!args[0].isSymbolic()) return args[0];
+        return Value(simplify(args[0].asSymbolic()));
+        });
+
+    reg("contract", { 1 }, [](const std::vector<Value>& args) -> Value {
+        if (!args[0].isSymbolic()) return args[0];
+        return Value(contract(args[0].asSymbolic()));
+        });
+
+    reg("trigsimp", { 1 }, [](const std::vector<Value>& args) -> Value {
+        if (!args[0].isSymbolic()) return args[0];
+        return Value(trigsimp(args[0].asSymbolic()));
+        });
+
+    auto* fnsPtr = &builtins;
+    reg("subs", { 3 }, [fnsPtr](const std::vector<Value>& args) -> Value {
+        if (!args[0].isSymbolic())
+            throw std::runtime_error("TypeError: subs() expects a symbolic expression.");
+
+        SymExpr result = std::get<SymExpr>(args[0].data);
+
+        // ================================================
+        // 统一提取变量名列表和值列表
+        // ================================================
+        std::vector<std::string> vars;
+        std::vector<SymExpr> vals;
+
+        // ---------- 提取变量名 ----------
+        if (std::holds_alternative<std::string>(args[1].data)) {
+            vars.push_back(std::get<std::string>(args[1].data));
+        }
+        else if (std::holds_alternative<StringMatrix>(args[1].data)) {
+            const auto& sm = std::get<StringMatrix>(args[1].data);
+            for (int i = 0; i < sm.getRows(); ++i)
+                for (int j = 0; j < sm.getCols(); ++j)
+                    vars.push_back(sm(i, j));
+        }
+        else if (std::holds_alternative<List>(args[1].data)) {
+            const auto& lst = std::get<List>(args[1].data);
+            for (size_t i = 0; i < lst.size(); ++i) {
+                Value v = std::any_cast<Value>(lst.raw()[i]);
+                if (!std::holds_alternative<std::string>(v.data))
+                    throw std::runtime_error("TypeError: subs() variable list must contain strings.");
+                vars.push_back(std::get<std::string>(v.data));
+            }
+        }
+        else {
+            throw std::runtime_error("TypeError: subs() second argument must be a string, string matrix, or list of strings.");
+        }
+
+        // ---------- 提取替换值 ----------
+        if (vars.size() == 1) {
+            // 单变量：第三个参数直接作为值
+            vals.push_back(args[2].asSymbolic());
+        }
+        else if (std::holds_alternative<RealMatrix>(args[2].data)) {
+            const auto& rm = std::get<RealMatrix>(args[2].data);
+            for (int i = 0; i < rm.getRows(); ++i)
+                for (int j = 0; j < rm.getCols(); ++j)
+                    vals.push_back(SymExpr(rm(i, j)));
+        }
+        else if (std::holds_alternative<ComplexMatrix>(args[2].data)) {
+            const auto& cm = std::get<ComplexMatrix>(args[2].data);
+            for (int i = 0; i < cm.getRows(); ++i)
+                for (int j = 0; j < cm.getCols(); ++j)
+                    vals.push_back(SymExpr(cm(i, j)));
+        }
+        else if (std::holds_alternative<List>(args[2].data)) {
+            const auto& lst = std::get<List>(args[2].data);
+            for (size_t i = 0; i < lst.size(); ++i) {
+                Value v = std::any_cast<Value>(lst.raw()[i]);
+                vals.push_back(v.asSymbolic());
+            }
+        }
+        else {
+            throw std::runtime_error("TypeError: subs() third argument must be a value, matrix, or list.");
+        }
+
+        if (vars.size() != vals.size())
+            throw std::runtime_error("TypeError: subs() variable count (" + std::to_string(vars.size()) +
+                ") and value count (" + std::to_string(vals.size()) + ") must match.");
+
+        for (size_t i = 0; i < vars.size(); ++i)
+            result = subs(result, vars[i], vals[i]);
+
+        // 坍缩所有可求值的函数节点
+        result = collapseSymFuncs(result, *fnsPtr);
+
+        // 如果最终结果是纯数字，解包为原生 Value
+        if (result.ptr->getType() == SymType::NUM) {
+            auto num = std::static_pointer_cast<SymNum>(result.ptr);
+            return casValToValue(num->value);
+        }
+        return Value(result);
+        });
+
+    reg("toFunc", { 2 }, [](const std::vector<Value>& args) -> Value {
+        if (!args[0].isSymbolic()) {
+            throw std::runtime_error("toFunc(expr, vars): 1st argument must be a symbolic expression.");
+        }
+        jc::SymExpr ast = args[0].asSymbolic();
+        std::vector<std::string> varNames;
+        // 1. 支持 List 数组
+        if (std::holds_alternative<jc::List>(args[1].data)) {
+            for (const auto& anyVar : std::get<jc::List>(args[1].data).raw()) {
+                jc::Value v = std::any_cast<jc::Value>(anyVar);
+                if (!std::holds_alternative<std::string>(v.data))
+                    throw std::runtime_error("toFunc: Variable names must be strings.");
+                varNames.push_back(std::get<std::string>(v.data));
+            }
+        }
+        // 2. 支持 StringMatrix 矩阵
+        else if (std::holds_alternative<jc::StringMatrix>(args[1].data)) {
+            for (const auto& s : std::get<jc::StringMatrix>(args[1].data).rawData()) {
+                varNames.push_back(s);
+            }
+        }
+        // 3. 支持单变量字符串简写
+        else if (std::holds_alternative<std::string>(args[1].data)) {
+            varNames.push_back(std::get<std::string>(args[1].data));
+        }
+        else {
+            throw std::runtime_error("toFunc(): 2nd argument must be a string, List, or StringMatrix of variable names.");
+        }
+        int argCount = static_cast<int>(varNames.size());
+        std::vector<bool> pRefs(argCount, false);
+
+        // ★ 标签修改：冷峻且符合规范的内部名 <sym_to_func>
+        auto cls = std::make_shared<jc::FunctionClosure>(
+            varNames, pRefs, "<sym_to_func>", nullptr
+        );
+        cls->defaultValues.resize(argCount, jc::Value::none());
+        // ★ 依赖注入回调（向 VM nativeBuiltins 查表求值）
+        jc::SymbolicFuncResolver resolver = [](const std::string& name, const std::vector<jc::Value>& fnArgs) -> jc::Value {
+            if (!jc::VM::activeVM) throw std::runtime_error("toFunc error: VM context lost.");
+
+            const auto& builtins = jc::VM::activeVM->getNativeBuiltins();
+            auto it = builtins.find(name);
+            if (it != builtins.end()) {
+                return it->second(fnArgs);
+            }
+            throw std::runtime_error("toFunc error: Math function '" + name + "' not found in BuiltinRegistry.");
+            };
+        // ★ C++ Native Lambda 多态派发闭包
+        auto jc_caller = [ast, varNames, resolver](const std::vector<jc::Value>& call_args) -> jc::Value {
+            if (call_args.size() != varNames.size()) {
+                throw std::runtime_error("Compiled function expects " + std::to_string(varNames.size()) + " arguments.");
+            }
+            // 嗅探是否有复数/矩阵入侵
+            bool isPureReal = true;
+            for (const auto& arg : call_args) {
+                if (arg.isComplex() || std::holds_alternative<jc::RealMatrix>(arg.data) ||
+                    std::holds_alternative<jc::ComplexMatrix>(arg.data) ||
+                    std::holds_alternative<jc::StringMatrix>(arg.data)) {
+                    isPureReal = false;
+                    break;
+                }
+            }
+            // [极速双精度通道]
+            if (isPureReal) {
+                std::map<std::string, double> env;
+                for (size_t i = 0; i < varNames.size(); ++i) env[varNames[i]] = call_args[i].asDouble();
+                return jc::Value(jc::fastEval(ast.ptr, env, resolver));
+            }
+
+            // [高维万能投射通道]
+            std::map<std::string, jc::Value> valEnv;
+            for (size_t i = 0; i < varNames.size(); ++i) valEnv[varNames[i]] = call_args[i];
+
+            return jc::evalUniversal(ast.ptr, valEnv, resolver);
+            };
+        cls->nativeFn = std::make_any<jc::NativeCallable>(std::move(jc_caller));
+        return jc::Value(cls);
+        });
+
+    regMath("sin", { 1 }, [](const std::vector<Value>& args) -> Value {
         if (std::holds_alternative<RealMatrix>(args[0].data)) return Value(std::get<RealMatrix>(args[0].data).matSin());
         if (std::holds_alternative<ComplexMatrix>(args[0].data)) return Value(std::get<ComplexMatrix>(args[0].data).matSin());
         if (std::holds_alternative<Complex>(args[0].data)) return Value(sin(std::get<Complex>(args[0].data)));
         return Value(std::sin(args[0].asDouble()));
     });
-    reg("cos", { 1 }, [](const std::vector<Value>& args) -> Value {
+    regMath("cos", { 1 }, [](const std::vector<Value>& args) -> Value {
         if (std::holds_alternative<RealMatrix>(args[0].data)) return Value(std::get<RealMatrix>(args[0].data).matCos());
         if (std::holds_alternative<ComplexMatrix>(args[0].data)) return Value(std::get<ComplexMatrix>(args[0].data).matCos());
         if (std::holds_alternative<Complex>(args[0].data)) return Value(cos(std::get<Complex>(args[0].data)));
         return Value(std::cos(args[0].asDouble()));
     });
-    reg("tan", { 1 }, [](const std::vector<Value>& args) -> Value {
+    regMath("tan", { 1 }, [](const std::vector<Value>& args) -> Value {
         if (std::holds_alternative<RealMatrix>(args[0].data)) return Value(std::get<RealMatrix>(args[0].data).matTan());
         if (std::holds_alternative<ComplexMatrix>(args[0].data)) return Value(std::get<ComplexMatrix>(args[0].data).matTan());
         if (std::holds_alternative<Complex>(args[0].data)) return Value(tan(std::get<Complex>(args[0].data)));
         return Value(std::tan(args[0].asDouble()));
     });
-    reg("exp", { 1 }, [](const std::vector<Value>& args) -> Value {
+    regMath("exp", { 1 }, [](const std::vector<Value>& args) -> Value {
         if (std::holds_alternative<RealMatrix>(args[0].data)) return Value(std::get<RealMatrix>(args[0].data).matExp());
         if (std::holds_alternative<ComplexMatrix>(args[0].data)) return Value(std::get<ComplexMatrix>(args[0].data).matExp());
         if (std::holds_alternative<Complex>(args[0].data)) return Value(exp(std::get<Complex>(args[0].data)));
         return Value(std::exp(args[0].asDouble()));
     });
-    reg("sinh", { 1 }, [](const std::vector<Value>& args) -> Value {
+    regMath("sinh", { 1 }, [](const std::vector<Value>& args) -> Value {
         if (std::holds_alternative<RealMatrix>(args[0].data)) return Value(std::get<RealMatrix>(args[0].data).matSinh());
         if (std::holds_alternative<ComplexMatrix>(args[0].data)) return Value(std::get<ComplexMatrix>(args[0].data).matSinh());
         if (std::holds_alternative<Complex>(args[0].data)) return Value(sinh(std::get<Complex>(args[0].data)));
         return Value(std::sinh(args[0].asDouble()));
     });
-    reg("cosh", { 1 }, [](const std::vector<Value>& args) -> Value {
+    regMath("cosh", { 1 }, [](const std::vector<Value>& args) -> Value {
         if (std::holds_alternative<RealMatrix>(args[0].data)) return Value(std::get<RealMatrix>(args[0].data).matCosh());
         if (std::holds_alternative<ComplexMatrix>(args[0].data)) return Value(std::get<ComplexMatrix>(args[0].data).matCosh());
         if (std::holds_alternative<Complex>(args[0].data)) return Value(cosh(std::get<Complex>(args[0].data)));
         return Value(std::cosh(args[0].asDouble()));
     });
-    reg("tanh", { 1 }, [](const std::vector<Value>& args) -> Value {
+    regMath("tanh", { 1 }, [](const std::vector<Value>& args) -> Value {
         if (std::holds_alternative<RealMatrix>(args[0].data)) return Value(std::get<RealMatrix>(args[0].data).matTanh());
         if (std::holds_alternative<ComplexMatrix>(args[0].data)) return Value(std::get<ComplexMatrix>(args[0].data).matTanh());
         if (std::holds_alternative<Complex>(args[0].data)) return Value(tanh(std::get<Complex>(args[0].data)));
         return Value(std::tanh(args[0].asDouble()));
     });
 
-    reg("log", { 1, 2 }, [](const std::vector<Value>& args) -> Value {
+    regMath("log", { 1, 2 }, [](const std::vector<Value>& args) -> Value {
         if (args.size() == 1) {
             if (std::holds_alternative<RealMatrix>(args[0].data)) return Value(matLog(std::get<RealMatrix>(args[0].data)));
             if (std::holds_alternative<ComplexMatrix>(args[0].data)) return Value(matLog(std::get<ComplexMatrix>(args[0].data)));
@@ -242,10 +537,18 @@ void BuiltinRegistry::registerMath() {
         Complex base = args[0].asComplex(), x = args[1].asComplex();
         return Value(log(x) / log(base));
     });
-    builtins["ln"] = builtins["log"];
-    builtinArity["ln"] = builtinArity["log"];
 
-    reg("sqrt", { 1 }, [](const std::vector<Value>& args) -> Value {
+    regMath("ln", { 1 }, [](const std::vector<Value>& args) -> Value {
+        if (std::holds_alternative<RealMatrix>(args[0].data)) return Value(matLog(std::get<RealMatrix>(args[0].data)));
+        if (std::holds_alternative<ComplexMatrix>(args[0].data)) return Value(matLog(std::get<ComplexMatrix>(args[0].data)));
+        if (std::holds_alternative<Complex>(args[0].data)) return Value(log(std::get<Complex>(args[0].data)));
+        double x = args[0].asDouble();
+        if (x == 0) throw std::runtime_error("Math Error: Logarithm of zero.");
+        if (x < 0) return Value(log(Complex(x, 0.0)));
+        return Value(std::log(x));
+    });
+
+    regMath("sqrt", { 1 }, [](const std::vector<Value>& args) -> Value {
         if (std::holds_alternative<RealMatrix>(args[0].data)) return Value(matSqrt(std::get<RealMatrix>(args[0].data)));
         if (std::holds_alternative<ComplexMatrix>(args[0].data)) return Value(matSqrt(std::get<ComplexMatrix>(args[0].data)));
         if (std::holds_alternative<Complex>(args[0].data)) return Value(sqrt(std::get<Complex>(args[0].data)));
@@ -254,28 +557,46 @@ void BuiltinRegistry::registerMath() {
         return Value(std::sqrt(x));
     });
 
+    regMath("cbrt", { 1 }, [](const std::vector<Value>& args) -> Value {
+        // 1. 矩阵直接使用底层的数值算符重载 (Matrix 的运算没有符号逃逸风险)
+        if (std::holds_alternative<RealMatrix>(args[0].data) ||
+            std::holds_alternative<ComplexMatrix>(args[0].data)) {
+            return args[0] ^ Value(1.0 / 3.0);
+        }
+        // 2. 复数使用底层的复数类重载
+        if (std::holds_alternative<Complex>(args[0].data)) {
+            return Value(std::get<Complex>(args[0].data) ^ Complex(1.0 / 3.0, 0.0));
+        }
+        // 3. 标量严格强制转双精度，彻底封死 BigInt/Fraction 向 SymExpr 逃逸的退路！
+        double x = args[0].asDouble();
+        return Value(std::cbrt(x));
+        });
+
     reg("matpow", { 2 }, [](const std::vector<Value>& args) -> Value {
         return Value(matPow(args[0].asComplexMatrix(), args[1].asComplexMatrix()));
     });
 
-    reg("asin", { 1 }, [](const std::vector<Value>& args) -> Value {
+    regMath("asin", { 1 }, [](const std::vector<Value>& args) -> Value {
         if (std::holds_alternative<Complex>(args[0].data)) return Value(asin(std::get<Complex>(args[0].data)));
         double x = args[0].asDouble();
         if (x < -1.0 || x > 1.0) return Value(asin(Complex(x, 0.0)));
         return Value(std::asin(x));
     });
-    reg("acos", { 1 }, [](const std::vector<Value>& args) -> Value {
+    regMath("acos", { 1 }, [](const std::vector<Value>& args) -> Value {
         if (std::holds_alternative<Complex>(args[0].data)) return Value(acos(std::get<Complex>(args[0].data)));
         double x = args[0].asDouble();
         if (x < -1.0 || x > 1.0) return Value(acos(Complex(x, 0.0)));
         return Value(std::acos(x));
     });
-    reg("atan", { 1 }, [](const std::vector<Value>& args) -> Value {
+    regMath("atan", { 1 }, [](const std::vector<Value>& args) -> Value {
         if (std::holds_alternative<Complex>(args[0].data)) return Value(atan(std::get<Complex>(args[0].data)));
         return Value(std::atan(args[0].asDouble()));
     });
+    regMath("atan2", { 2 }, [](const std::vector<Value>& args) -> Value {
+        return Value(std::atan2(args[0].asDouble(), args[1].asDouble()));
+        });
 
-    reg("abs", { 1 }, [](const std::vector<Value>& args) -> Value {
+    regMath("abs", { 1 }, [](const std::vector<Value>& args) -> Value {
         // ★ Dunder 钩子: __abs__
         if (std::holds_alternative<std::shared_ptr<Instance>>(args[0].data)) {
             auto inst = std::get<std::shared_ptr<Instance>>(args[0].data);
@@ -287,7 +608,38 @@ void BuiltinRegistry::registerMath() {
         if (std::holds_alternative<Fraction>(args[0].data)) return Value(std::get<Fraction>(args[0].data).abs());
         return Value(std::abs(args[0].asDouble()));
         });
-    reg("pow", { 2 }, [](const std::vector<Value>& args) -> Value { return args[0] ^ args[1]; });
+
+    regMath("pow", { 2 }, [](const std::vector<Value>& args) -> Value {
+        Value x = args[0];
+        Value y = args[1];
+
+        // 强制把指数降为 double 或 complex，彻底切断精确方根逻辑
+        Value numY = y.isComplex() ? Value(y.asComplex()) : Value(y.asDouble());
+
+        // 把降维后的指数扔给底层的 operator^
+        return x ^ numY;
+        });
+
+    regMath("root", { 2 }, [](const std::vector<Value>& args) -> Value {
+        Value x = args[0];
+        Value y = args[1];
+        Value numY;
+
+        if (y.isComplex()) {
+            Complex cy = y.asComplex();
+            if (Tol::isEq(cy.modulus(), 0.0))
+                throw std::runtime_error("Math Error: Root degree cannot be zero.");
+            numY = Value(Complex(1.0, 0.0) / cy);
+        }
+        else {
+            double dy = y.asDouble();
+            if (Tol::isEq(dy, 0.0))
+                throw std::runtime_error("Math Error: Root degree cannot be zero.");
+            numY = Value(1.0 / dy);
+        }
+
+        return x ^ numY;
+        });
 
     // 通用取整分发器
     auto roundDispatch = [](const std::vector<Value>& args, const std::string& name,
@@ -331,15 +683,55 @@ void BuiltinRegistry::registerMath() {
             return Value(result);
         };
 
-    reg("round", { 1, 2 }, [roundDispatch](const std::vector<Value>& args) -> Value { return roundDispatch(args, "round", [](double x) { return std::round(x); }); });
-    reg("floor", { 1, 2 }, [roundDispatch](const std::vector<Value>& args) -> Value { return roundDispatch(args, "floor", [](double x) { return std::floor(x); }); });
-    reg("ceil", { 1, 2 }, [roundDispatch](const std::vector<Value>& args) -> Value { return roundDispatch(args, "ceil", [](double x) { return std::ceil(x); }); });
-    reg("trunc", { 1, 2 }, [roundDispatch](const std::vector<Value>& args) -> Value { return roundDispatch(args, "trunc", [](double x) { return std::trunc(x); }); });
+    regMath("round", { 1, 2 }, [roundDispatch](const std::vector<Value>& args) -> Value { return roundDispatch(args, "round", [](double x) { return std::round(x); }); });
+    regMath("floor", { 1, 2 }, [roundDispatch](const std::vector<Value>& args) -> Value { return roundDispatch(args, "floor", [](double x) { return std::floor(x); }); });
+    regMath("ceil", { 1, 2 }, [roundDispatch](const std::vector<Value>& args) -> Value { return roundDispatch(args, "ceil", [](double x) { return std::ceil(x); }); });
+    regMath("trunc", { 1, 2 }, [roundDispatch](const std::vector<Value>& args) -> Value { return roundDispatch(args, "trunc", [](double x) { return std::trunc(x); }); });
 
-    reg("sgn", { 1 }, [](const std::vector<Value>& args) -> Value { double x = args[0].asDouble(); return Value(x > 0 ? 1.0 : (x < 0 ? -1.0 : 0.0)); });
-    reg("deg", { 1 }, [](const std::vector<Value>& args) -> Value { return Value(args[0].asDouble() / Complex::PI * 180.0); });
-    reg("rad", { 1 }, [](const std::vector<Value>& args) -> Value { return Value(args[0].asDouble() / 180.0 * Complex::PI); });
-    reg("evalf", { 1 }, [](const std::vector<Value>& args) -> Value { return Value(args[0].asDouble()); });
+    regMath("sgn", { 1 }, [](const std::vector<Value>& args) -> Value { double x = args[0].asDouble(); return Value(x > 0 ? 1.0 : (x < 0 ? -1.0 : 0.0)); });
+    regMath("deg", { 1 }, [](const std::vector<Value>& args) -> Value { return Value(args[0].asDouble() / Complex::PI * 180.0); });
+    regMath("rad", { 1 }, [](const std::vector<Value>& args) -> Value { return Value(args[0].asDouble() / 180.0 * Complex::PI); });
+    
+    auto* fnsPtr2 = &builtins;
+
+    // evalf: 强制转 double
+    reg("evalf", { 1 }, [fnsPtr2](const std::vector<Value>& args) -> Value {
+        if (!args[0].isSymbolic())
+            return Value(args[0].asDouble());
+
+        SymExpr expr = std::get<SymExpr>(args[0].data);
+        expr = evalFloat(expr);
+        expr = collapseSymFuncs(expr, *fnsPtr2);
+
+        if (expr.ptr->getType() == SymType::NUM) {
+            auto num = std::static_pointer_cast<SymNum>(expr.ptr);
+            return Value(casValToValue(num->value).asDouble());
+        }
+        return Value(expr);
+        });
+
+    // evalv: 保留完整类型（BigInt, Fraction, Complex 都不丢失）
+    reg("evalv", { 1 }, [fnsPtr2](const std::vector<Value>& args) -> Value {
+        if (!args[0].isSymbolic())
+            return args[0];
+
+        SymExpr expr = std::get<SymExpr>(args[0].data);
+        expr = evalValue(expr);
+        expr = collapseSymFuncs(expr, *fnsPtr2);
+
+        if (expr.ptr->getType() == SymType::NUM) {
+            auto num = std::static_pointer_cast<SymNum>(expr.ptr);
+            Value result = casValToValue(num->value);
+            // Complex 虚部为零时退化为 double
+            if (std::holds_alternative<Complex>(result.data)) {
+                Complex c = std::get<Complex>(result.data);
+                if (Tol::isEq(c.getImage(), 0.0))
+                    return Value(c.getReal());
+            }
+            return result;
+        }
+        return Value(expr);
+        });
 
     reg("idiv", { 2 }, [](const std::vector<Value>& args) -> Value {
         if (args[0].isBigInt() && args[1].isBigInt()) {
@@ -380,6 +772,15 @@ void BuiltinRegistry::registerFraction() {
 // [4] 多项式求解
 // =================================================================
 void BuiltinRegistry::registerPolySolver() {
+    reg("solveEq", { 2 }, [](const std::vector<Value>& args) -> Value {
+        if (!args[0].isSymbolic() || !std::holds_alternative<std::string>(args[1].data))
+            throw std::runtime_error("TypeError: solveEq() expects a symbolic expression and a variable name.");
+        auto roots = jc::solveEq(args[0].asSymbolic(), std::get<std::string>(args[1].data));
+        List L;
+        for (const auto& r : roots) L.push_back(valToAny(Value(r)));
+        return Value(L);
+    });
+
     reg("solve", { 2, 3, 4, 5 }, [](const std::vector<Value>& args) -> Value {
         std::vector<Complex> roots;
         if (args.size() == 2) roots = Complex::solveDegreeOne(args[0].asComplex(), args[1].asComplex());
@@ -598,7 +999,30 @@ void BuiltinRegistry::registerNumberTheory() {
     reg("nextPrime", { 1 }, [toBigInt](const std::vector<Value>& args) -> Value { return Value(toBigInt(args[0]).nextPrime()); });
     reg("nthPrime", { 1 }, [](const std::vector<Value>& args) -> Value { return Value(BigInt::nthPrime(static_cast<int64_t>(std::round(args[0].asDouble())))); });
     reg("primePi", { 1 }, [toBigInt](const std::vector<Value>& args) -> Value { return Value(BigInt(toBigInt(args[0]).primePi())); });
-    reg("factor", { 1 }, [toBigInt](const std::vector<Value>& args) -> Value { auto factors = toBigInt(args[0]).factorize(); int r = static_cast<int>(factors.size()); std::vector<double> flat; for (const auto& f : factors) { flat.push_back(f.first.toDouble()); flat.push_back(static_cast<double>(f.second)); } return Value(RealMatrix(r, 2, flat)); });
+    reg("factor", { 1 }, [toBigInt](const std::vector<Value>& args) -> Value {
+        // ==============================================================
+        // 模式 1: 符号多项式因式分解 (Algebraic Polynomial Factorization)
+        // 嗅探条件：参数为 SymExpr
+        // ==============================================================
+        if (args[0].isSymbolic()) {
+            return Value(jc::factor(args[0].asSymbolic()));
+        }
+
+        // ==============================================================
+        // 模式 2: 原有整数质因数分解 (Integer Prime Factorization)
+        // 返回 N 行 2 列的矩阵 [质因子, 幂次]
+        // ==============================================================
+        auto factors = toBigInt(args[0]).factorize();
+        int r = static_cast<int>(factors.size());
+        std::vector<double> flat;
+
+        for (const auto& f : factors) {
+            flat.push_back(f.first.toDouble());
+            flat.push_back(static_cast<double>(f.second));
+        }
+
+        return Value(RealMatrix(r, 2, flat));
+        });
     reg("phi", { 1 }, [toBigInt](const std::vector<Value>& args) -> Value { return Value(toBigInt(args[0]).eulerPhi()); });
     reg("divisors", { 1 }, [toBigInt](const std::vector<Value>& args) -> Value { return Value(toBigInt(args[0]).divisorCount()); });
     reg("sigma", { 1, 2 }, [toBigInt](const std::vector<Value>& args) -> Value { int64_t k = (args.size()==2) ? static_cast<int64_t>(std::round(args[1].asDouble())) : 1; return Value(toBigInt(args[0]).divisorSum(k)); });
@@ -1801,27 +2225,7 @@ void BuiltinRegistry::registerFormatType() {
         });
 
     reg("type", { 1 }, [](const std::vector<Value>& args) -> Value {
-        return std::visit([](auto&& a) -> Value {
-            using T = std::decay_t<decltype(a)>;
-            if constexpr (std::is_same_v<T, std::monostate>) return Value(std::string("none"));
-            else if constexpr (std::is_same_v<T, double>) return Value(std::string("double"));
-            else if constexpr (std::is_same_v<T, BigInt>) return Value(std::string("BigInt"));
-            else if constexpr (std::is_same_v<T, Fraction>) return Value(std::string("Fraction"));
-            else if constexpr (std::is_same_v<T, Complex>) return Value(std::string("Complex"));
-            else if constexpr (std::is_same_v<T, std::string>) return Value(std::string("String"));
-            else if constexpr (std::is_same_v<T, RealMatrix>) return Value(std::string("RealMatrix"));
-            else if constexpr (std::is_same_v<T, ComplexMatrix>) return Value(std::string("ComplexMatrix"));
-            else if constexpr (std::is_same_v<T, BaseNum>) return Value(std::string("BaseNum"));
-            else if constexpr (std::is_same_v<T, StringMatrix>) return Value(std::string("StringMatrix"));
-            else if constexpr (std::is_same_v<T, Dict>) return Value(std::string("Dict"));
-            else if constexpr (std::is_same_v<T, List>) return Value(std::string("List"));
-            else if constexpr (std::is_same_v<T, Set>) return Value(std::string("Set"));
-            else if constexpr (std::is_same_v<T, std::shared_ptr<FunctionClosure>>) return Value(std::string("Function"));
-            else if constexpr (std::is_same_v<T, std::shared_ptr<ClassDefinition>>) return Value(std::string("Class"));
-            else if constexpr (std::is_same_v<T, std::shared_ptr<Instance>>) return Value(a->classDef->name);
-            else if constexpr (std::is_same_v<T, SuperProxyPtr>) return Value(std::string("super"));
-            else return Value(std::string("unknown"));
-            }, args[0].data);
+        return Value(args[0].typeName());
         });
 }
 
@@ -2061,14 +2465,103 @@ void BuiltinRegistry::registerCalculus() {
         return safeCallFunction(cl, { Value(x) }).asDouble();
         };
 
+    reg("taylor", { 3, 4 }, [](const std::vector<Value>& args) -> Value {
+        if (!args[0].isSymbolic()) return args[0];
+        if (!std::holds_alternative<std::string>(args[1].data))
+            throw std::runtime_error("TypeError: taylor() expects variable name as second argument.");
+        int order = 5;
+        if (args.size() == 4) order = static_cast<int>(std::round(args[3].asDouble()));
+        return Value(jc::taylor(args[0].asSymbolic(), std::get<std::string>(args[1].data), args[2].asSymbolic(), order));
+    });
+
+    reg("limit", { 2, 3 }, [evalFunc](const std::vector<Value>& args) -> Value {
+        if (args[0].isSymbolic() || (args.size() == 3 && std::holds_alternative<std::string>(args[1].data))) {
+            if (args.size() != 3) throw std::runtime_error("TypeError: Symbolic limit expects 3 arguments: expr, var, val.");
+            if (!std::holds_alternative<std::string>(args[1].data))
+                throw std::runtime_error("TypeError: limit() expects variable name as second argument.");
+            return Value(jc::limit(args[0].asSymbolic(), std::get<std::string>(args[1].data), args[2].asSymbolic()));
+        }
+
+        auto cl = args[0].asFunction();
+        double x0 = args[1].asDouble();
+        double h = 1e-7;
+        
+        auto safeEval = [&](double x) -> double {
+            try { return evalFunc(cl, x); }
+            catch (...) { return std::numeric_limits<double>::quiet_NaN(); }
+        };
+
+        if (args.size() == 3) {
+            double dir = args[2].asDouble();
+            if (dir > 0) {
+                double v = safeEval(x0 + h);
+                if (std::isnan(v)) throw std::runtime_error("Math Error: Right limit does not exist.");
+                return Value(v);
+            }
+            if (dir < 0) {
+                double v = safeEval(x0 - h);
+                if (std::isnan(v)) throw std::runtime_error("Math Error: Left limit does not exist.");
+                return Value(v);
+            }
+        }
+        
+        // 数值求极限：计算左右极限
+        double left = safeEval(x0 - h);
+        double right = safeEval(x0 + h);
+        
+        // 如果左右极限接近，则认为极限存在
+        if (!std::isnan(left) && !std::isnan(right) && std::abs(left - right) < 1e-4) {
+            return Value((left + right) / 2.0);
+        } else if (std::isnan(left) && !std::isnan(right)) {
+            return Value(right); // 仅右侧有定义
+        } else if (std::isnan(right) && !std::isnan(left)) {
+            return Value(left);  // 仅左侧有定义
+        }
+        
+        throw std::runtime_error("Math Error: Limit does not exist (left and right limits differ significantly or are undefined).");
+    });
+
     reg("diff", { 2 }, [evalFunc](const std::vector<Value>& args) -> Value {
-        auto cl = args[0].asFunction(); double x = args[1].asDouble(); double h = 1e-4;
+        if (args[0].isSymbolic() || std::holds_alternative<std::string>(args[1].data)) {
+            if (!std::holds_alternative<std::string>(args[1].data)) {
+                throw std::runtime_error("Type Error: Symbolic differentiation expects the second argument to be a variable name (string).");
+            }
+            // 自动提升：即使 args[0] 是纯原生常数，asSymbolic() 也会自动帮我们套上壳
+            SymExpr expr = args[0].asSymbolic();
+            std::string var = std::get<std::string>(args[1].data);
+
+            // 移交微积分推导引擎（存在于 Symbolic.cpp 中）
+            return Value(jc::diff(expr, var));
+        }
+
+        auto cl = args[0].asFunction();
+        double x = args[1].asDouble();
+        double h = 1e-4;
+
+        // 五点中心差分法，精度O(h^4)
         double d = (-evalFunc(cl, x + 2 * h) + 8 * evalFunc(cl, x + h)
             - 8 * evalFunc(cl, x - h) + evalFunc(cl, x - 2 * h)) / (12 * h);
         return Value(d);
         });
 
-    reg("integ", { 3, 4 }, [evalFunc](const std::vector<Value>& args) -> Value {
+    reg("integ", { 2, 3, 4 }, [evalFunc](const std::vector<Value>& args) -> Value {
+        if (args[0].isSymbolic() || (args.size() >= 2 && std::holds_alternative<std::string>(args[1].data))) {
+            if (!std::holds_alternative<std::string>(args[1].data))
+                throw std::runtime_error("TypeError: Symbolic integration expects variable name as second argument.");
+            SymExpr expr = args[0].asSymbolic();
+            std::string var = std::get<std::string>(args[1].data);
+            SymExpr integral = jc::integrate(expr, var);
+            
+            if (args.size() == 4) {
+                // 定积分: 牛顿-莱布尼茨公式 ∫_a^b f(x)dx = F(b) - F(a)
+                SymExpr a = args[2].asSymbolic();
+                SymExpr b = args[3].asSymbolic();
+                return Value(simplify(subs(integral, var, b) - subs(integral, var, a)));
+            }
+            // 不定积分
+            return Value(integral);
+        }
+
         auto cl = args[0].asFunction();
         double a = args[1].asDouble(), b = args[2].asDouble();
         int n = (args.size() == 4) ? static_cast<int>(std::round(args[3].asDouble())) : 100000;

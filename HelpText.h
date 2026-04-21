@@ -9,7 +9,7 @@ namespace jc {
 
     const std::map<std::string, std::string> BuiltinHelp = {
         {"main", R"HELP(
-=================== Junk Calculator 2.2.3.0 — Help ===================
+=================== Junk Calculator 2.3.0.0 — Help ===================
 
   Session Commands
   ────────────────────────────────────────────────────────────────────
@@ -52,6 +52,7 @@ namespace jc {
     matfunc     Matrix-level exp, sin, cos, log, sqrt, matpow
     vector      Dot, cross, projection, angle, parallelism tests
     poly        Closed-form polynomial solver (degree 1–4)
+    cas         Computer Algebra System (Symbolic math, limits, integrals)
     calculus    User functions (single & multi-var), diff, integ, table
     stat        Descriptive statistics, percentiles, regression
     bigint      Arbitrary-precision integers & number-theoretic functions
@@ -330,10 +331,15 @@ namespace jc {
   ──────────────────────
     abs(x)              Absolute value
     sqrt(x)             Square root     sqrt(−4) → 2i
+    cbrt(x)             Cube root
+    root(x, y)          y-th root of x
     exp(x)              e^x
     log(x) / ln(x)      Natural logarithm  log(−1) → πi
     log(base, x)        Custom-base logarithm
     pow(x, y)           Same as x^y
+    idiv(a, b)          Integer division (truncates toward zero)
+    deg(x)              Radians to degrees
+    rad(x)              Degrees to radians
     len(x)              Length / element count
 
   Type Conversion Functions
@@ -360,7 +366,7 @@ namespace jc {
 
   Trigonometric & Hyperbolic  (also accept Complex & Matrix)
   ──────────────────────
-    sin  cos  tan       asin  acos  atan
+    sin  cos  tan       asin  acos  atan  atan2(y, x)
     sinh  cosh  tanh
 
   Rounding & Sign  (scalar / Complex / Matrix)
@@ -645,6 +651,7 @@ namespace jc {
     tr(A)               Trace
     norm(A)             Frobenius norm  ‖A‖_F
     cond(A)             Condition number  ‖A‖·‖A⁻¹‖
+    perm(A)             Permanent
 
   Operations & Cofactors
   ──────────────────────
@@ -761,12 +768,74 @@ namespace jc {
     solve(a, b, c)               ax² + bx + c = 0       (quadratic)
     solve(a, b, c, d)            ax³ + … = 0            (Cardano)
     solve(a, b, c, d, e)         ax⁴ + … = 0            (Ferrari)
+    solveEq(expr, "x")           Exact symbolic solver (see: help cas)
     
   Examples
   ──────────────────────
     solve(1, 0, −1)              x² = 1   → [1; −1]
     solve(1, 0, 0, −1)           x³ = 1   → cube roots of unity
     solve(i, −2, 4*i, 3, −1)     Complex coefficients work perfectly!
+)HELP"},
+
+        {"cas", R"HELP(
+═══ Computer Algebra System (CAS) ═══
+  JC2 features a powerful, exact Computer Algebra System for symbolic mathematics.
+
+  ★ The Boundary: Numerical vs. Symbolic Computation
+  ──────────────────────
+    JC2 strictly separates Numerical and Symbolic domains:
+    • Numerical (Default): Variables hold values (x = 5). Expressions evaluate 
+      immediately to numbers, matrices, or fractions.
+    • Symbolic (CAS): Variables hold AST nodes (x = sym("x")). Expressions 
+      build algebraic trees instead of evaluating.
+      
+    You cross from Numerical → Symbolic by using `sym("x")` or string variables.
+    You cross from Symbolic → Numerical by using `evalf()`, `subs()`, or `toFunc()`.
+
+  ★ Automatic Symbolic Promotion
+  ──────────────────────
+    • Fractional Powers: Exact integers or fractions raised to fractional powers 
+      (e.g., 2^(1/2)) no longer degrade to floating-point `double`. If they cannot 
+      be evaluated exactly, they automatically promote to a Symbolic expression.
+    • Function Nodes: Only standard built-in math functions (sin, cos, exp, log, 
+      sqrt, etc.) can be captured as symbolic nodes (`SymFunc`). Passing a symbolic 
+      variable to a user-defined function or an incompatible built-in will either 
+      evaluate it immediately or throw a TypeError.
+
+  Symbolic Variables & Expressions
+  ──────────────────────
+    x = sym("x")                 Create a symbolic variable
+    expr = x^2 + 2*x + 1         Build exact symbolic expressions
+    subs(expr, "x", 5)           Substitute x with 5 → 36
+    subs(x + y, ["x", "y"], [1, 2]) Multiple substitution
+
+  Algebraic Manipulation
+  ──────────────────────
+    expand((x+1)^3)              → x^3 + 3*x^2 + 3*x + 1
+    factor(x^2 - 4)              → (x - 2) * (x + 2)
+    simplify(expr)               Smart heuristic simplification
+    contract(2*log(x) + log(y))  → log(x^2 * y)
+    trigsimp(sin(x)^2 + cos(x)^2)→ 1
+
+  Calculus (Exact Symbolic)
+  ──────────────────────
+    diff(sin(x^2), "x")          → 2 * x * cos(x^2)
+    integ(x^2, "x")              → 1/3 * x^3
+    integ(x^2, "x", 0, 1)        → 1/3 (Definite integral)
+    limit(sin(x)/x, "x", 0)      → 1 (L'Hôpital's rule supported)
+    taylor(sin(x), "x", 0, 5)    → x - 1/6 * x^3 + 1/120 * x^5
+
+  Equation Solving
+  ──────────────────────
+    solveEq(x^2 - 2, "x")        → [sqrt(2), -sqrt(2)] (Exact roots!)
+    solveEq(x^3 - 1, "x")        → [1, (-1)^(2/3), (-1)^(4/3)]
+
+  Compilation & Evaluation
+  ──────────────────────
+    evalf(expr)                  Force evaluate to floating point
+    evalv(expr)                  Evaluate preserving exact types (Fraction/Complex)
+    f = toFunc(x^2 + y, ["x", "y"])  Compile AST to blazing-fast VM closure
+    f(3, 4)                      → 13
 )HELP"},
 
         { "calculus", R"HELP(
@@ -791,12 +860,22 @@ namespace jc {
     When calling, built-in functions always take priority if the argument
     count matches a built-in signature.
 
-  Numerical Calculus (single-variable)
+  Calculus (Symbolic & Numerical)
   ──────────────────────
-    diff(f, x0)          Derivative f′(x₀)  (5-point central difference)
-    integ(f, a, b)       Definite integral   (Simpson's 1/3, 100000 slices)
-    integ(f, a, b, n)    Custom slice count n
-    solveE(f, x0)        Find a root of f(x) = 0 near x₀  (Newton-Raphson)
+    JC2 supports both exact symbolic calculus (via the CAS engine) and 
+    high-performance numerical approximations.
+
+    Symbolic (Exact):
+      diff(x^2, "x")       → 2 * x
+      integ(x^2, "x")      → 1/3 * x^3
+      limit(sin(x)/x, "x", 0) → 1
+      (See `help cas` for full symbolic features)
+
+    Numerical (Approximation):
+      diff(f, x0)          Derivative f′(x₀)  (5-point central difference)
+      integ(f, a, b)       Definite integral   (Simpson's 1/3, 100000 slices)
+      integ(f, a, b, n)    Custom slice count n
+      solveE(f, x0)        Find a root of f(x) = 0 near x₀  (Newton-Raphson)
 
   Tabulation (multivariate supported)
   ──────────────────────
@@ -1030,6 +1109,7 @@ namespace jc {
   Interactive Debugger & Profiler
   ──────────────────────
     breakpoint()          Suspends VM execution and opens the debug console.
+    debugger()            Alias for breakpoint().
                           Type `help` inside `(jc2-dbg)` to see commands 
                           like `step`, `continue`, `stack`, and `p <var>`.
                           
@@ -1326,6 +1406,7 @@ namespace jc {
   ──────────────────────
     len(s)              String length                  
     s[i] / s[-1]        Character at index   
+    charAt(s, i)        Function form of s[i]
     s[start : end]      Slice [start, end)
     s[start:end:step]   Slice with stepping
                           "hello"[::-1] → "olleh" (String reversal!)
@@ -1399,10 +1480,17 @@ namespace jc {
       join(["x","y","z"], "-")                → "x-y-z"
       reverse(["a","b","c"])                  → ["c","b","a"]
 
-    Conversion:
+    Conversion & Utilities:
       toStrMat(A)                         Convert any matrix → StringMatrix
       toList(["a","b"])                   StringMatrix → List
       matrix(2, 2, "a", "b", "c", "d")    StringMatrix via constructor
+      strmat(r, c, ...)                   Construct StringMatrix
+      strvec(...)                         Construct column StringMatrix
+      strrow(...)                         Construct row StringMatrix
+      strfill(str, n)                     Create 1xN StringMatrix filled with str
+      strfind(mat, str)                   Find string in StringMatrix
+      strjoin(mat, delim)                 Join StringMatrix elements
+      strsort(mat)                        Sort StringMatrix elements
 )HELP" },
 
 { "array", R"HELP(
@@ -1515,6 +1603,8 @@ namespace jc {
 
   Accumulation
   ──────────────────────
+    sum(v)              Sum of all elements
+    prod(v)             Product of all elements
     cumsum(v)           Cumulative sum     [1,2,3] → [1,3,6]
     cumprod(v)          Cumulative product  [1,2,3] → [1,2,6]
     diffs(v)            Adjacent differences [10,20,35] → [10,15]
@@ -1526,6 +1616,7 @@ namespace jc {
                           join([1,2,3], "-")             → "1-2-3"
                           join(["a","b","c"], ", ")       → "a, b, c"
     zip(a, b)           Pair-wise merge → N×2 matrix or list of pairs
+    toStrVec(v)         Convert List/StringMatrix to column StringMatrix
 
   Pipe Operator
   ──────────────────────
@@ -1653,6 +1744,7 @@ namespace jc {
     toMatrix(L)             List → Matrix (auto-detects type)
                               list(1,2,3) → [1, 2, 3]  (row vector)
                               list(list(1,2), list(3,4)) → [1,2; 3,4]
+    toStrVec(L)             List → Column StringMatrix
 
   When to use List vs Array?
   ──────────────────────
@@ -1986,6 +2078,12 @@ namespace jc {
 
       status = pcall(riskyFunc)
       isError(status)       → 1 if error, 0 if success
+
+  Assertions
+  ──────────────────────
+    assert(cond)                  Throws if cond is falsy
+    assert(cond, "msg")           Throws custom message if falsy
+    assert("name", got, expected) Throws detailed mismatch error if got != expected
 )HELP" },
 
         {"fileio", R"HELP(
