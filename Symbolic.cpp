@@ -602,8 +602,12 @@ namespace jc {
 
         switch (expr.ptr->getType()) {
         case SymType::NUM:
-        case SymType::VAR:
+        case SymType::VAR: {
+            auto v = std::static_pointer_cast<SymVar>(expr.ptr);
+            if (v->name == "PI") return SymExpr(3.14159265358979323846);
+            if (v->name == "E") return SymExpr(2.71828182845904523536);
             return expr;
+        }
 
         case SymType::ADD: {
             SymExpr result(BigInt(0));
@@ -886,8 +890,12 @@ namespace jc {
             return SymExpr(casValToValue(num->value).asDouble());
         }
 
-        case SymType::VAR:
+        case SymType::VAR: {
+            auto v = std::static_pointer_cast<SymVar>(expr.ptr);
+            if (v->name == "PI") return SymExpr(3.14159265358979323846);
+            if (v->name == "E") return SymExpr(2.71828182845904523536);
             return expr;
+        }
 
         case SymType::ADD: {
             auto add = std::static_pointer_cast<SymAdd>(expr.ptr);
@@ -2011,7 +2019,11 @@ namespace jc {
                             if (k == 0) {
                                 roots.push_back(principal);
                             } else {
-                                SymExpr unity = SymExpr(BigInt(-1)) ^ SymExpr(Fraction(BigInt(2 * k), BigInt(degree)));
+                                SymExpr E = SymExpr::makeVar("E");
+                                SymExpr PI = SymExpr::makeVar("PI");
+                                SymExpr I(Complex(0.0, 1.0));
+                                SymExpr exponent = SymExpr(Fraction(BigInt(2 * k), BigInt(degree))) * PI * I;
+                                SymExpr unity = E ^ exponent;
                                 roots.push_back(simplify(principal * unity));
                             }
                         }
@@ -2354,6 +2366,8 @@ namespace jc {
             auto varName = std::static_pointer_cast<SymVar>(node)->name;
             auto it = env.find(varName);
             if (it != env.end()) return it->second;
+            if (varName == "PI") return 3.14159265358979323846;
+            if (varName == "E") return 2.71828182845904523536;
             return 0.0;
         }
         case SymType::ADD: {
@@ -2402,6 +2416,8 @@ namespace jc {
             auto varName = std::static_pointer_cast<SymVar>(node)->name;
             auto it = env.find(varName);
             if (it != env.end()) return it->second;
+            if (varName == "PI") return Value(3.14159265358979323846);
+            if (varName == "E") return Value(2.71828182845904523536);
             return Value(0.0);
         }
         case SymType::ADD: {
