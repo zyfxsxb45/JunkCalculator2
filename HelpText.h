@@ -828,7 +828,16 @@ namespace jc {
   Equation Solving
   ──────────────────────
     solveEq(x^2 - 2, "x")        → [sqrt(2), -sqrt(2)] (Exact roots!)
-    solveEq(x^3 - 1, "x")        → [1, (-1)^(2/3), (-1)^(4/3)]
+    solveEq(x^3 - 1, "x")        → [1, E^(2/3 * PI * i), E^(4/3 * PI * i)] (All complex roots!)
+
+    ★ Constants & Limitations:
+    • PI and E are now parsed as exact symbolic constants in the CAS engine 
+      to prevent premature floating-point evaluation.
+    • solveEq now exactly solves high-degree binomial equations (ax^n + b = 0), 
+      returning all complex roots using Euler's formula (E and PI).
+    • Warning: solveEq currently cannot solve general polynomials of 
+      degree > 2 (non-binomials) or transcendental equations. For robust 
+      numerical root-finding, use `solveE`.
 
   Compilation & Evaluation
   ──────────────────────
