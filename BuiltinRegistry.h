@@ -292,6 +292,7 @@ private:
     void registerFormatType();
     void registerHigherOrder();
     void registerCalculus();        // ★ Phase 2
+    void registerCAS();             // ★ CAS
     void registerFileIO();          // ★ Phase 2
     void registerErrorHandling();   // ★ Phase 2
     void registerSystemShell();

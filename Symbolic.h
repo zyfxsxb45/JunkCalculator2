@@ -12,6 +12,7 @@
 #include <variant>
 #include <functional>
 #include <type_traits>
+#include <tuple>
 
 namespace jc {
     class Value;
@@ -57,6 +58,7 @@ namespace jc {
         SymExpr(const BigInt& v);
         SymExpr(const Fraction& v);
         SymExpr(const Complex& v);
+        SymExpr(const CASVal& v);
 
         static SymExpr makeVar(const std::string& name);
 
@@ -104,11 +106,17 @@ namespace jc {
 
     // 因式分解
     SymExpr factor(const SymExpr& expr, int depth = 0);
+    // 实数域完全因式分解
+    SymExpr factorReal(const SymExpr& expr);
 
+    // 获取多项式最高次幂
+    int getDegree(const SymExpr& expr, const std::string& var);
     // 多项式带余除法：返回 {商 (Quotient), 余数 (Remainder)}
     std::pair<SymExpr, SymExpr> polyDiv(const SymExpr& dividend, const SymExpr& divisor, const std::string& var);
     // 多项式最大公约数 (基于欧几里得算法)
     SymExpr polyGCD(const SymExpr& a, const SymExpr& b, const std::string& var);
+    // 多项式扩展欧几里得算法 (EEA)
+    std::tuple<SymExpr, SymExpr, SymExpr> polyEGCD(const SymExpr& a, const SymExpr& b, const std::string& var);
 
     // 代数重写引擎 (Pattern Matching Engine)
     SymExpr applyRule(const SymExpr& expr, const SymExpr& pattern, const SymExpr& target);
