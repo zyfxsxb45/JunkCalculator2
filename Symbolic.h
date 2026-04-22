@@ -105,6 +105,11 @@ namespace jc {
     // 因式分解
     SymExpr factor(const SymExpr& expr, int depth = 0);
 
+    // 多项式带余除法：返回 {商 (Quotient), 余数 (Remainder)}
+    std::pair<SymExpr, SymExpr> polyDiv(const SymExpr& dividend, const SymExpr& divisor, const std::string& var);
+    // 多项式最大公约数 (基于欧几里得算法)
+    SymExpr polyGCD(const SymExpr& a, const SymExpr& b, const std::string& var);
+
     // 代数重写引擎 (Pattern Matching Engine)
     SymExpr applyRule(const SymExpr& expr, const SymExpr& pattern, const SymExpr& target);
 

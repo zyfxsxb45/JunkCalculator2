@@ -2,6 +2,7 @@
 #include "Symbolic.h"
 #include "Value.h"          // ★ 新增：统一走 Value 运算
 #include "SymEval.h"
+#include "SymRules.h"
 #include <sstream>
 #include <cmath>
 #include <algorithm>
@@ -640,15 +641,22 @@ namespace jc {
             case SymType::POW: {
                 auto pNode = std::static_pointer_cast<SymPow>(node);
                 auto pPat = std::static_pointer_cast<SymPow>(pat);
-                return matchAST(pNode->base, pPat->base, captures) && matchAST(pNode->exp, pPat->exp, captures);
+                std::map<std::string, SymExpr> tempCaptures = captures;
+                if (matchAST(pNode->base, pPat->base, tempCaptures) && matchAST(pNode->exp, pPat->exp, tempCaptures)) {
+                    captures = tempCaptures;
+                    return true;
+                }
+                return false;
             }
             case SymType::FUNC: {
                 auto fNode = std::static_pointer_cast<SymFunc>(node);
                 auto fPat = std::static_pointer_cast<SymFunc>(pat);
                 if (fNode->name != fPat->name || fNode->args.size() != fPat->args.size()) return false;
+                std::map<std::string, SymExpr> tempCaptures = captures;
                 for (size_t i = 0; i < fNode->args.size(); ++i) {
-                    if (!matchAST(fNode->args[i], fPat->args[i], captures)) return false;
+                    if (!matchAST(fNode->args[i], fPat->args[i], tempCaptures)) return false;
                 }
+                captures = tempCaptures;
                 return true;
             }
             case SymType::ADD:
@@ -1806,6 +1814,68 @@ namespace jc {
     }
 
     // =================================================================
+    // 多项式代数底座 (Polynomial Algebra)
+    // =================================================================
+    static int getDegree(const SymExpr& expr, const std::string& var) {
+        auto coeffs = extractCoeffs(expr, var);
+        if (coeffs.empty()) return -1;
+        return static_cast<int>(coeffs.size()) - 1;
+    }
+
+    std::pair<SymExpr, SymExpr> polyDiv(const SymExpr& dividend, const SymExpr& divisor, const std::string& var) {
+        SymExpr Q(BigInt(0));
+        SymExpr R = dividend;
+        
+        auto divCoeffs = extractCoeffs(divisor, var);
+        if (divCoeffs.empty()) throw std::runtime_error("Math Error: Divisor is not a polynomial in " + var);
+        int degDiv = static_cast<int>(divCoeffs.size()) - 1;
+        SymExpr leadDiv = divCoeffs.back();
+        if (leadDiv.isZero()) throw std::runtime_error("Math Error: Division by zero polynomial.");
+
+        SymExpr X = SymExpr::makeVar(var);
+
+        while (!R.isZero()) {
+            auto rCoeffs = extractCoeffs(R, var);
+            if (rCoeffs.empty()) break; // R 不是多项式，无法继续除
+            int degR = static_cast<int>(rCoeffs.size()) - 1;
+            if (degR < degDiv) break;
+
+            SymExpr leadR = rCoeffs.back();
+            SymExpr termCoeff = simplifyCore(leadR / leadDiv);
+            SymExpr term = termCoeff;
+            if (degR - degDiv > 0) {
+                term = term * (X ^ SymExpr(BigInt(degR - degDiv)));
+            }
+
+            Q = Q + term;
+            R = simplifyCore(expand(R - term * divisor, 500));
+        }
+
+        return { simplifyCore(Q), simplifyCore(R) };
+    }
+
+    SymExpr polyGCD(const SymExpr& a, const SymExpr& b, const std::string& var) {
+        SymExpr u = a;
+        SymExpr v = b;
+
+        while (!v.isZero()) {
+            auto [q, r] = polyDiv(u, v, var);
+            u = v;
+            v = r;
+        }
+
+        // 首一化 (Monic)
+        auto coeffs = extractCoeffs(u, var);
+        if (!coeffs.empty()) {
+            SymExpr lead = coeffs.back();
+            if (!lead.isZero() && !lead.isOne()) {
+                u = simplifyCore(expand(u / lead, 500));
+            }
+        }
+        return u;
+    }
+
+    // =================================================================
 // 尝试对表达式开精确平方根
 // 仅处理 NUM, POW(偶数幂), MUL(逐因子开根) 三类结构
 // 返回 {是否成功, 平方根表达式}
@@ -2104,6 +2174,58 @@ namespace jc {
     }
 
     // =================================================================
+    // 有理分式化简 (Rational Fraction Simplification)
+    // =================================================================
+    static SymExpr simplifyRational(const SymExpr& expr) {
+        if (!expr.ptr) return expr;
+        if (expr.ptr->getType() == SymType::MUL) {
+            auto mul = std::static_pointer_cast<SymMul>(expr.ptr);
+            SymExpr num(BigInt(1));
+            SymExpr den(BigInt(1));
+            for (auto& arg : mul->args) {
+                if (arg->getType() == SymType::POW) {
+                    auto powNode = std::static_pointer_cast<SymPow>(arg);
+                    if (powNode->exp->getType() == SymType::NUM) {
+                        auto [isInt, n] = extractExactInt(std::static_pointer_cast<SymNum>(powNode->exp)->value);
+                        if (isInt && n < 0) {
+                            den = den * (SymExpr(powNode->base) ^ SymExpr(BigInt(-n)));
+                            continue;
+                        }
+                    }
+                }
+                num = num * SymExpr(arg);
+            }
+            
+            if (!den.isOne()) {
+                std::set<std::string> vars;
+                collectAllVars(num.ptr, vars);
+                collectAllVars(den.ptr, vars);
+                
+                SymExpr currentNum = num;
+                SymExpr currentDen = den;
+                bool reduced = false;
+                
+                for (const std::string& var : vars) {
+                    SymExpr gcd = polyGCD(currentNum, currentDen, var);
+                    if (!gcd.isZero() && !gcd.isOne() && getDegree(gcd, var) > 0) {
+                        auto [qNum, rNum] = polyDiv(currentNum, gcd, var);
+                        auto [qDen, rDen] = polyDiv(currentDen, gcd, var);
+                        if (rNum.isZero() && rDen.isZero()) {
+                            currentNum = qNum;
+                            currentDen = qDen;
+                            reduced = true;
+                        }
+                    }
+                }
+                if (reduced) {
+                    return simplifyCore(currentNum / currentDen);
+                }
+            }
+        }
+        return expr;
+    }
+
+    // =================================================================
 // 智能启发式化简：多重宇宙博弈（含 factor 路线）
 // =================================================================
     SymExpr simplify(const SymExpr& expr) {
@@ -2119,8 +2241,12 @@ namespace jc {
         SymExpr c_trigsimp = current;
         SymExpr c_both = current;
         SymExpr c_factor_expand = current;
+        SymExpr c_rational = current;
 
         try { c_expand = expand(current, 30); }
+        catch (const std::runtime_error&) {}
+
+        try { c_rational = simplifyRational(current); }
         catch (const std::runtime_error&) {}
 
         try { c_contract = contract(current); }
@@ -2158,6 +2284,7 @@ namespace jc {
         tryCandidate(c_trigsimp);
         tryCandidate(c_both);
         tryCandidate(c_factor_expand);
+        tryCandidate(c_rational);
 
         return best;
     }
@@ -2436,17 +2563,9 @@ namespace jc {
         try { expanded = expand(expr, 1000); } catch (...) { expanded = expr; }
 
         SymExpr x = SymExpr::makeVar(var);
-        SymExpr _n = SymExpr::makeVar("_n");
 
-        // 积分规则字典表 (公式驱动)
-        std::vector<std::pair<SymExpr, SymExpr>> rules = {
-            { x ^ SymExpr(-1), SymExpr(std::make_shared<SymFunc>("log", std::vector<std::shared_ptr<SymNode>>{x.ptr})) },
-            { x ^ _n, (SymExpr(1) / (_n + SymExpr(1))) * (x ^ (_n + SymExpr(1))) },
-            { x, (SymExpr(1) / SymExpr(2)) * (x ^ SymExpr(2)) },
-            { SymExpr(std::make_shared<SymFunc>("sin", std::vector<std::shared_ptr<SymNode>>{x.ptr})), -SymExpr(std::make_shared<SymFunc>("cos", std::vector<std::shared_ptr<SymNode>>{x.ptr})) },
-            { SymExpr(std::make_shared<SymFunc>("cos", std::vector<std::shared_ptr<SymNode>>{x.ptr})), SymExpr(std::make_shared<SymFunc>("sin", std::vector<std::shared_ptr<SymNode>>{x.ptr})) },
-            { SymExpr(std::make_shared<SymFunc>("exp", std::vector<std::shared_ptr<SymNode>>{x.ptr})), SymExpr(std::make_shared<SymFunc>("exp", std::vector<std::shared_ptr<SymNode>>{x.ptr})) }
-        };
+        // 从规则库获取当前变量的积分规则
+        std::vector<std::pair<SymExpr, SymExpr>> rules = getIntegRules(var);
 
         std::function<SymExpr(const SymExpr&)> doInteg = [&](const SymExpr& e) -> SymExpr {
             if (!containsVar(e.ptr, var)) {
@@ -2477,13 +2596,13 @@ namespace jc {
                 throw std::runtime_error("Calculus Error: Integration by parts not fully supported yet.");
             }
 
-            // 使用 applyRule 尝试匹配 varPart
+            // 使用 matchAST 尝试在顶层匹配 varPart
             SymExpr integratedPart = varPart;
             bool matched = false;
             for (const auto& rule : rules) {
-                SymExpr res = applyRule(varPart, rule.first, rule.second);
-                if (res.ptr != varPart.ptr && res.toString() != varPart.toString()) {
-                    integratedPart = res;
+                std::map<std::string, SymExpr> captures;
+                if (matchAST(varPart.ptr, rule.first.ptr, captures)) {
+                    integratedPart = substituteCaptures(rule.second, captures);
                     matched = true;
                     break;
                 }
@@ -2505,16 +2624,8 @@ namespace jc {
     SymExpr trigsimp(const SymExpr& expr) {
         if (!expr.ptr) return expr;
 
-        SymExpr _x = SymExpr::makeVar("_x");
-        SymExpr _c = SymExpr::makeVar("_c");
-        SymExpr sin_x = SymExpr(std::make_shared<SymFunc>("sin", std::vector<std::shared_ptr<SymNode>>{_x.ptr}));
-        SymExpr cos_x = SymExpr(std::make_shared<SymFunc>("cos", std::vector<std::shared_ptr<SymNode>>{_x.ptr}));
-
-        // 三角化简规则字典表 (公式驱动)
-        std::vector<std::pair<SymExpr, SymExpr>> rules = {
-            { (sin_x ^ SymExpr(2)) + (cos_x ^ SymExpr(2)), SymExpr(1) },
-            { _c * (sin_x ^ SymExpr(2)) + _c * (cos_x ^ SymExpr(2)), _c }
-        };
+        // 从规则库获取三角化简规则
+        const std::vector<std::pair<SymExpr, SymExpr>>& rules = getTrigRules();
 
         SymExpr current = expr;
         bool changed = true;
@@ -2524,10 +2635,13 @@ namespace jc {
             changed = false;
             for (const auto& rule : rules) {
                 SymExpr next = applyRule(current, rule.first, rule.second);
-                if (next.ptr != current.ptr && next.toString() != current.toString()) {
-                    current = next;
-                    changed = true;
-                    break;
+                if (next.ptr != current.ptr) {
+                    SymExpr simplifiedNext = simplifyCore(next);
+                    if (simplifiedNext.toString() != current.toString()) {
+                        current = simplifiedNext;
+                        changed = true;
+                        break;
+                    }
                 }
             }
         }

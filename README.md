@@ -28,7 +28,7 @@ Developed by Yu Liangyang, Tsinghua University.
 - **Set Algebra**: `Set` type with O(1) membership testing (`in`). Supports operators for union (`|`), intersection (`&`), difference (`-`), and Cartesian product (`*`). Includes powerset generation (`setPow`) and relation predicates.
 
 ### Mathematics & CAS Engine
-- **Computer Algebra System (CAS)**: A native symbolic mathematics engine operating on ASTs. Features heuristic simplification (`simplify`, `expand`, `contract`, `factor`, `trigsimp`), symbolic calculus (`diff`, `integ`, `limit`, `taylor`), and exact analytic root finding (`solveEq`).
+- **Computer Algebra System (CAS) (Experimental)**: A native symbolic mathematics engine operating on ASTs. Features heuristic simplification (`simplify`, `expand`, `contract`, `factor`, `trigsimp`), symbolic calculus (`diff`, `integ`, `limit`, `taylor`), and exact analytic root finding (`solveEq`).
 - **AST Compilation**: The `toFunc()` architecture compiles unresolved symbolic ASTs into native VM closures for numerical evaluation across scalars and matrices.
 - **Arbitrary-Precision**: Base-10^9 compressed `BigInt` layout. Implements high-base division, GCD/LCM, and modular exponentiation.
 - **Exact Rationals & Promotion**: `Fraction` types recursively cross-reduce. Exact rational powers (e.g., `(1/2)^(1/2)`) that cannot be resolved numerically auto-promote into `SymExpr` CAS trees to prevent floating-point precision loss.

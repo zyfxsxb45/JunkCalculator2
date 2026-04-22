@@ -798,6 +798,22 @@ void BuiltinRegistry::registerPolySolver() {
         else roots = Complex::solveDegreeFour(args[0].asComplex(), args[1].asComplex(), args[2].asComplex(), args[3].asComplex(), args[4].asComplex());
         return Value(ComplexMatrix(static_cast<int>(roots.size()), 1, roots));
     });
+
+    reg("polyDiv", { 3 }, [](const std::vector<Value>& args) -> Value {
+        if (!args[0].isSymbolic() || !args[1].isSymbolic() || !std::holds_alternative<std::string>(args[2].data))
+            throw std::runtime_error("TypeError: polyDiv() expects two symbolic expressions and a variable name.");
+        auto [q, r] = jc::polyDiv(args[0].asSymbolic(), args[1].asSymbolic(), std::get<std::string>(args[2].data));
+        List L;
+        L.push_back(valToAny(Value(q)));
+        L.push_back(valToAny(Value(r)));
+        return Value(L);
+    });
+
+    reg("polyGCD", { 3 }, [](const std::vector<Value>& args) -> Value {
+        if (!args[0].isSymbolic() || !args[1].isSymbolic() || !std::holds_alternative<std::string>(args[2].data))
+            throw std::runtime_error("TypeError: polyGCD() expects two symbolic expressions and a variable name.");
+        return Value(jc::polyGCD(args[0].asSymbolic(), args[1].asSymbolic(), std::get<std::string>(args[2].data)));
+    });
 }
 
 // =================================================================
