@@ -743,6 +743,15 @@ void BuiltinRegistry::registerMath() {
         if (b == 0.0) throw std::runtime_error("Math Error: Division by zero.");
         return Value(std::trunc(a / b));
     });
+
+    reg("replaceRule", { 3 }, [](const std::vector<Value>& args) -> Value {
+        if (!args[0].isSymbolic() || !args[1].isSymbolic() || !args[2].isSymbolic())
+            throw std::runtime_error("TypeError: replaceRule() expects 3 symbolic expressions.");
+        SymExpr expr = args[0].asSymbolic();
+        SymExpr pattern = args[1].asSymbolic();
+        SymExpr target = args[2].asSymbolic();
+        return Value(jc::simplify(jc::applyRule(expr, pattern, target)));
+    });
 }
 
 // =================================================================

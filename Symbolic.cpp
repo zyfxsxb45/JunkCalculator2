@@ -7,6 +7,8 @@
 #include <algorithm>
 #include <functional>
 #include <set>
+#include <numeric>
+#include <map>
 
 namespace jc {
 
@@ -592,6 +594,236 @@ namespace jc {
 
     int getAstNodeCount(const SymExpr& expr) {
         return countNodes(expr.ptr);
+    }
+
+    // =================================================================
+    // 代数重写引擎 (Pattern Matching Engine)
+    // =================================================================
+    
+    // 检查节点是否为万能通配符
+    static bool isWildcard(const std::shared_ptr<SymNode>& node, std::string& outName) {
+        if (node && node->getType() == SymType::VAR) {
+            std::string name = std::static_pointer_cast<SymVar>(node)->name;
+            if (!name.empty() && name[0] == '_') {
+                outName = name;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // 精确匹配 AST 并记录捕获变量 (支持 ADD/MUL 的全排列交换律检测)
+    static bool matchAST(const std::shared_ptr<SymNode>& node, const std::shared_ptr<SymNode>& pat, std::map<std::string, SymExpr>& captures) {
+        if (!node || !pat) return false;
+        
+        std::string wcName;
+        // 1. 若 pat 是通配符
+        if (isWildcard(pat, wcName)) {
+            auto it = captures.find(wcName);
+            if (it != captures.end()) {
+                return it->second.toString() == node->toString();
+            } else {
+                captures[wcName] = SymExpr(node);
+                return true;
+            }
+        }
+        
+        // 2. 类型检查
+        if (node->getType() != pat->getType()) return false;
+        
+        // 3 & 4 & 5. 常规分支与交换律分支
+        switch (node->getType()) {
+            case SymType::NUM:
+                return node->toString() == pat->toString();
+            case SymType::VAR:
+                return std::static_pointer_cast<SymVar>(node)->name == std::static_pointer_cast<SymVar>(pat)->name;
+            case SymType::POW: {
+                auto pNode = std::static_pointer_cast<SymPow>(node);
+                auto pPat = std::static_pointer_cast<SymPow>(pat);
+                return matchAST(pNode->base, pPat->base, captures) && matchAST(pNode->exp, pPat->exp, captures);
+            }
+            case SymType::FUNC: {
+                auto fNode = std::static_pointer_cast<SymFunc>(node);
+                auto fPat = std::static_pointer_cast<SymFunc>(pat);
+                if (fNode->name != fPat->name || fNode->args.size() != fPat->args.size()) return false;
+                for (size_t i = 0; i < fNode->args.size(); ++i) {
+                    if (!matchAST(fNode->args[i], fPat->args[i], captures)) return false;
+                }
+                return true;
+            }
+            case SymType::ADD:
+            case SymType::MUL: {
+                const auto& nArgs = (node->getType() == SymType::ADD) ? std::static_pointer_cast<SymAdd>(node)->args : std::static_pointer_cast<SymMul>(node)->args;
+                const auto& pArgs = (pat->getType() == SymType::ADD) ? std::static_pointer_cast<SymAdd>(pat)->args : std::static_pointer_cast<SymMul>(pat)->args;
+                
+                if (nArgs.size() != pArgs.size()) return false;
+                
+                std::vector<size_t> indices(nArgs.size());
+                std::iota(indices.begin(), indices.end(), 0);
+                
+                do {
+                    std::map<std::string, SymExpr> tempCaptures = captures;
+                    bool allMatch = true;
+                    for (size_t i = 0; i < nArgs.size(); ++i) {
+                        if (!matchAST(nArgs[indices[i]], pArgs[i], tempCaptures)) {
+                            allMatch = false;
+                            break;
+                        }
+                    }
+                    if (allMatch) {
+                        captures = tempCaptures;
+                        return true;
+                    }
+                } while (std::next_permutation(indices.begin(), indices.end()));
+                
+                return false;
+            }
+        }
+        return false;
+    }
+
+    // 将捕获的 AST 塞回目标模板中
+    static SymExpr substituteCaptures(const SymExpr& target, const std::map<std::string, SymExpr>& captures) {
+        if (!target.ptr) return target;
+        
+        std::string wcName;
+        if (isWildcard(target.ptr, wcName)) {
+            auto it = captures.find(wcName);
+            if (it != captures.end()) return it->second;
+            return target;
+        }
+        
+        switch (target.ptr->getType()) {
+            case SymType::NUM:
+            case SymType::VAR:
+                return target;
+            case SymType::ADD: {
+                auto add = std::static_pointer_cast<SymAdd>(target.ptr);
+                SymExpr res(BigInt(0));
+                for (auto& arg : add->args) res = res + substituteCaptures(SymExpr(arg), captures);
+                return res;
+            }
+            case SymType::MUL: {
+                auto mul = std::static_pointer_cast<SymMul>(target.ptr);
+                SymExpr res(BigInt(1));
+                for (auto& arg : mul->args) res = res * substituteCaptures(SymExpr(arg), captures);
+                return res;
+            }
+            case SymType::POW: {
+                auto pow = std::static_pointer_cast<SymPow>(target.ptr);
+                return substituteCaptures(SymExpr(pow->base), captures) ^ substituteCaptures(SymExpr(pow->exp), captures);
+            }
+            case SymType::FUNC: {
+                auto func = std::static_pointer_cast<SymFunc>(target.ptr);
+                std::vector<std::shared_ptr<SymNode>> newArgs;
+                for (auto& arg : func->args) newArgs.push_back(substituteCaptures(SymExpr(arg), captures).ptr);
+                return SymExpr(std::make_shared<SymFunc>(func->name, std::move(newArgs)));
+            }
+        }
+        return target;
+    }
+
+    // 核心入口：后序遍历并尝试重写
+    SymExpr applyRule(const SymExpr& expr, const SymExpr& pattern, const SymExpr& target) {
+        if (!expr.ptr) return expr;
+        
+        // 1. 无情探底（Post-order traversal）
+        SymExpr current = expr;
+        switch (expr.ptr->getType()) {
+            case SymType::ADD: {
+                auto add = std::static_pointer_cast<SymAdd>(expr.ptr);
+                SymExpr res(BigInt(0));
+                for (auto& arg : add->args) res = res + applyRule(SymExpr(arg), pattern, target);
+                current = res;
+                break;
+            }
+            case SymType::MUL: {
+                auto mul = std::static_pointer_cast<SymMul>(expr.ptr);
+                SymExpr res(BigInt(1));
+                for (auto& arg : mul->args) res = res * applyRule(SymExpr(arg), pattern, target);
+                current = res;
+                break;
+            }
+            case SymType::POW: {
+                auto pow = std::static_pointer_cast<SymPow>(expr.ptr);
+                current = applyRule(SymExpr(pow->base), pattern, target) ^ applyRule(SymExpr(pow->exp), pattern, target);
+                break;
+            }
+            case SymType::FUNC: {
+                auto func = std::static_pointer_cast<SymFunc>(expr.ptr);
+                std::vector<std::shared_ptr<SymNode>> newArgs;
+                for (auto& arg : func->args) newArgs.push_back(applyRule(SymExpr(arg), pattern, target).ptr);
+                current = SymExpr(std::make_shared<SymFunc>(func->name, std::move(newArgs)));
+                break;
+            }
+            default: break;
+        }
+        
+        // 2. 尝试整体 matchAST
+        std::map<std::string, SymExpr> captures;
+        if (matchAST(current.ptr, pattern.ptr, captures)) {
+            return substituteCaptures(target, captures);
+        }
+        
+        // 3. 子集拦截匹配 (Subset Matching)
+        if ((current.ptr->getType() == SymType::ADD && pattern.ptr->getType() == SymType::ADD) ||
+            (current.ptr->getType() == SymType::MUL && pattern.ptr->getType() == SymType::MUL)) {
+            
+            const auto& cArgs = (current.ptr->getType() == SymType::ADD) ? std::static_pointer_cast<SymAdd>(current.ptr)->args : std::static_pointer_cast<SymMul>(current.ptr)->args;
+            const auto& pArgs = (pattern.ptr->getType() == SymType::ADD) ? std::static_pointer_cast<SymAdd>(pattern.ptr)->args : std::static_pointer_cast<SymMul>(pattern.ptr)->args;
+            
+            size_t N = cArgs.size();
+            size_t K = pArgs.size();
+            
+            if (N > K) {
+                std::vector<bool> v(N);
+                std::fill(v.end() - K, v.end(), true);
+                
+                do {
+                    std::vector<std::shared_ptr<SymNode>> selected;
+                    std::vector<std::shared_ptr<SymNode>> remaining;
+                    for (size_t i = 0; i < N; ++i) {
+                        if (v[i]) selected.push_back(cArgs[i]);
+                        else remaining.push_back(cArgs[i]);
+                    }
+                    
+                    std::vector<size_t> indices(K);
+                    std::iota(indices.begin(), indices.end(), 0);
+                    bool subsetMatched = false;
+                    std::map<std::string, SymExpr> subCaptures;
+                    
+                    do {
+                        subCaptures.clear();
+                        bool allMatch = true;
+                        for (size_t i = 0; i < K; ++i) {
+                            if (!matchAST(selected[indices[i]], pArgs[i], subCaptures)) {
+                                allMatch = false;
+                                break;
+                            }
+                        }
+                        if (allMatch) {
+                            subsetMatched = true;
+                            break;
+                        }
+                    } while (std::next_permutation(indices.begin(), indices.end()));
+                    
+                    if (subsetMatched) {
+                        SymExpr replaced = substituteCaptures(target, subCaptures);
+                        if (current.ptr->getType() == SymType::ADD) {
+                            SymExpr res = replaced;
+                            for (auto& rem : remaining) res = res + SymExpr(rem);
+                            return res;
+                        } else {
+                            SymExpr res = replaced;
+                            for (auto& rem : remaining) res = res * SymExpr(rem);
+                            return res;
+                        }
+                    }
+                } while (std::next_permutation(v.begin(), v.end()));
+            }
+        }
+        
+        return current;
     }
 
     // =================================================================
@@ -2203,60 +2435,65 @@ namespace jc {
         SymExpr expanded;
         try { expanded = expand(expr, 1000); } catch (...) { expanded = expr; }
 
+        SymExpr x = SymExpr::makeVar(var);
+        SymExpr _n = SymExpr::makeVar("_n");
+
+        // 积分规则字典表 (公式驱动)
+        std::vector<std::pair<SymExpr, SymExpr>> rules = {
+            { x ^ SymExpr(-1), SymExpr(std::make_shared<SymFunc>("log", std::vector<std::shared_ptr<SymNode>>{x.ptr})) },
+            { x ^ _n, (SymExpr(1) / (_n + SymExpr(1))) * (x ^ (_n + SymExpr(1))) },
+            { x, (SymExpr(1) / SymExpr(2)) * (x ^ SymExpr(2)) },
+            { SymExpr(std::make_shared<SymFunc>("sin", std::vector<std::shared_ptr<SymNode>>{x.ptr})), -SymExpr(std::make_shared<SymFunc>("cos", std::vector<std::shared_ptr<SymNode>>{x.ptr})) },
+            { SymExpr(std::make_shared<SymFunc>("cos", std::vector<std::shared_ptr<SymNode>>{x.ptr})), SymExpr(std::make_shared<SymFunc>("sin", std::vector<std::shared_ptr<SymNode>>{x.ptr})) },
+            { SymExpr(std::make_shared<SymFunc>("exp", std::vector<std::shared_ptr<SymNode>>{x.ptr})), SymExpr(std::make_shared<SymFunc>("exp", std::vector<std::shared_ptr<SymNode>>{x.ptr})) }
+        };
+
         std::function<SymExpr(const SymExpr&)> doInteg = [&](const SymExpr& e) -> SymExpr {
             if (!containsVar(e.ptr, var)) {
-                return e * SymExpr::makeVar(var); // ∫ c dx = c * x
+                return e * x; // ∫ c dx = c * x
             }
 
-            switch (e.ptr->getType()) {
-            case SymType::VAR: {
-                auto v = std::static_pointer_cast<SymVar>(e.ptr);
-                if (v->name == var) return (SymExpr(BigInt(1)) / SymExpr(BigInt(2))) * (e ^ SymExpr(BigInt(2))); // ∫ x dx = 1/2 x^2
-                return e * SymExpr::makeVar(var);
-            }
-            case SymType::ADD: {
+            if (e.ptr->getType() == SymType::ADD) {
                 auto add = std::static_pointer_cast<SymAdd>(e.ptr);
                 SymExpr res(BigInt(0));
                 for (auto& arg : add->args) res = res + doInteg(SymExpr(arg));
                 return res;
             }
-            case SymType::MUL: {
+
+            SymExpr coeff(BigInt(1));
+            SymExpr varPart(BigInt(1));
+
+            if (e.ptr->getType() == SymType::MUL) {
                 auto mul = std::static_pointer_cast<SymMul>(e.ptr);
-                SymExpr coeff(BigInt(1));
-                SymExpr varPart(BigInt(1));
                 for (auto& arg : mul->args) {
                     if (!containsVar(arg, var)) coeff = coeff * SymExpr(arg);
                     else varPart = varPart * SymExpr(arg);
                 }
-                if (varPart.ptr->getType() == SymType::MUL) {
-                    throw std::runtime_error("Calculus Error: Integration by parts not fully supported yet.");
+            } else {
+                varPart = e;
+            }
+
+            if (varPart.ptr->getType() == SymType::MUL) {
+                throw std::runtime_error("Calculus Error: Integration by parts not fully supported yet.");
+            }
+
+            // 使用 applyRule 尝试匹配 varPart
+            SymExpr integratedPart = varPart;
+            bool matched = false;
+            for (const auto& rule : rules) {
+                SymExpr res = applyRule(varPart, rule.first, rule.second);
+                if (res.ptr != varPart.ptr && res.toString() != varPart.toString()) {
+                    integratedPart = res;
+                    matched = true;
+                    break;
                 }
-                return coeff * doInteg(varPart); // ∫ c*f(x) dx = c * ∫ f(x) dx
             }
-            case SymType::POW: {
-                auto powNode = std::static_pointer_cast<SymPow>(e.ptr);
-                if (!containsVar(powNode->exp, var) && powNode->base->getType() == SymType::VAR && std::static_pointer_cast<SymVar>(powNode->base)->name == var) {
-                    SymExpr n(powNode->exp);
-                    if (n == SymExpr(-1)) {
-                        return SymExpr(std::make_shared<SymFunc>("log", std::vector<std::shared_ptr<SymNode>>{powNode->base})); // ∫ x^-1 dx = ln(x)
-                    }
-                    SymExpr nPlus1 = n + SymExpr(BigInt(1));
-                    return (SymExpr(BigInt(1)) / nPlus1) * (SymExpr(powNode->base) ^ nPlus1); // ∫ x^n dx = 1/(n+1) x^(n+1)
-                }
-                throw std::runtime_error("Calculus Error: Complex power integration not supported.");
+
+            if (!matched) {
+                throw std::runtime_error("Calculus Error: Function integration not supported or complex power.");
             }
-            case SymType::FUNC: {
-                auto func = std::static_pointer_cast<SymFunc>(e.ptr);
-                if (func->args.size() == 1 && func->args[0]->getType() == SymType::VAR && std::static_pointer_cast<SymVar>(func->args[0])->name == var) {
-                    if (func->name == "sin") return -SymExpr(std::make_shared<SymFunc>("cos", func->args)); // ∫ sin(x) dx = -cos(x)
-                    if (func->name == "cos") return SymExpr(std::make_shared<SymFunc>("sin", func->args));  // ∫ cos(x) dx = sin(x)
-                    if (func->name == "exp") return e;                                                      // ∫ exp(x) dx = exp(x)
-                }
-                throw std::runtime_error("Calculus Error: Function integration not supported.");
-            }
-            default: break;
-            }
-            return SymExpr(BigInt(0));
+
+            return coeff * integratedPart;
         };
 
         return simplify(doInteg(expanded));
@@ -2267,87 +2504,34 @@ namespace jc {
     // =================================================================
     SymExpr trigsimp(const SymExpr& expr) {
         if (!expr.ptr) return expr;
-        
+
+        SymExpr _x = SymExpr::makeVar("_x");
+        SymExpr _c = SymExpr::makeVar("_c");
+        SymExpr sin_x = SymExpr(std::make_shared<SymFunc>("sin", std::vector<std::shared_ptr<SymNode>>{_x.ptr}));
+        SymExpr cos_x = SymExpr(std::make_shared<SymFunc>("cos", std::vector<std::shared_ptr<SymNode>>{_x.ptr}));
+
+        // 三角化简规则字典表 (公式驱动)
+        std::vector<std::pair<SymExpr, SymExpr>> rules = {
+            { (sin_x ^ SymExpr(2)) + (cos_x ^ SymExpr(2)), SymExpr(1) },
+            { _c * (sin_x ^ SymExpr(2)) + _c * (cos_x ^ SymExpr(2)), _c }
+        };
+
         SymExpr current = expr;
-        if (current.ptr->getType() == SymType::ADD) {
-            auto add = std::static_pointer_cast<SymAdd>(current.ptr);
-            std::vector<SymExpr> terms;
-            for (auto& arg : add->args) terms.push_back(trigsimp(SymExpr(arg)));
-            
-            bool changed = true;
-            while (changed) {
-                changed = false;
-                for (size_t i = 0; i < terms.size(); ++i) {
-                    if (terms[i].isZero()) continue;
-                    for (size_t j = i + 1; j < terms.size(); ++j) {
-                        if (terms[j].isZero()) continue;
-                        
-                        auto isTrigSq = [](const SymExpr& t, std::string& funcName, std::string& innerArg) -> bool {
-                            if (t.ptr->getType() == SymType::POW) {
-                                auto p = std::static_pointer_cast<SymPow>(t.ptr);
-                                if (p->exp->getType() == SymType::NUM) {
-                                    auto [isInt, n] = extractExactInt(std::static_pointer_cast<SymNum>(p->exp)->value);
-                                    if (isInt && n == 2 && p->base->getType() == SymType::FUNC) {
-                                        auto f = std::static_pointer_cast<SymFunc>(p->base);
-                                        if ((f->name == "sin" || f->name == "cos") && f->args.size() == 1) {
-                                            funcName = f->name;
-                                            innerArg = f->args[0]->toString();
-                                            return true;
-                                        }
-                                    }
-                                }
-                            }
-                            return false;
-                        };
-                        
-                        auto extractCoeff = [&](SymExpr t, SymExpr& c, std::string& f, std::string& a) -> bool {
-                            if (isTrigSq(t, f, a)) { c = SymExpr(BigInt(1)); return true; }
-                            if (t.ptr->getType() == SymType::MUL) {
-                                auto mul = std::static_pointer_cast<SymMul>(t.ptr);
-                                if (mul->args.size() == 2 && mul->args[0]->getType() == SymType::NUM) {
-                                    if (isTrigSq(SymExpr(mul->args[1]), f, a)) {
-                                        c = SymExpr(mul->args[0]);
-                                        return true;
-                                    }
-                                }
-                            }
-                            return false;
-                        };
-                        
-                        std::string f1, arg1, f2, arg2;
-                        SymExpr c1(BigInt(1)), c2(BigInt(1));
-                        
-                        if (extractCoeff(terms[i], c1, f1, arg1) && extractCoeff(terms[j], c2, f2, arg2)) {
-                            if (arg1 == arg2 && f1 != f2 && c1 == c2) {
-                                terms[i] = c1;
-                                terms[j] = SymExpr(BigInt(0));
-                                changed = true;
-                                break;
-                            }
-                        }
-                    }
+        bool changed = true;
+        
+        // 循环尝试应用规则，直到表达式不再发生变化
+        while (changed) {
+            changed = false;
+            for (const auto& rule : rules) {
+                SymExpr next = applyRule(current, rule.first, rule.second);
+                if (next.ptr != current.ptr && next.toString() != current.toString()) {
+                    current = next;
+                    changed = true;
+                    break;
                 }
             }
-            SymExpr res(BigInt(0));
-            for (auto& t : terms) res = res + t;
-            return res;
         }
-        else if (current.ptr->getType() == SymType::MUL) {
-            auto mul = std::static_pointer_cast<SymMul>(current.ptr);
-            SymExpr res(BigInt(1));
-            for (auto& arg : mul->args) res = res * trigsimp(SymExpr(arg));
-            return res;
-        }
-        else if (current.ptr->getType() == SymType::POW) {
-            auto p = std::static_pointer_cast<SymPow>(current.ptr);
-            return trigsimp(SymExpr(p->base)) ^ trigsimp(SymExpr(p->exp));
-        }
-        else if (current.ptr->getType() == SymType::FUNC) {
-            auto f = std::static_pointer_cast<SymFunc>(current.ptr);
-            std::vector<std::shared_ptr<SymNode>> nArgs;
-            for (auto& arg : f->args) nArgs.push_back(trigsimp(SymExpr(arg)).ptr);
-            return SymExpr(std::make_shared<SymFunc>(f->name, std::move(nArgs)));
-        }
+
         return current;
     }
 

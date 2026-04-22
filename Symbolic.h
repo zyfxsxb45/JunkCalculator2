@@ -52,7 +52,7 @@ namespace jc {
 
         // 隐式升维构造
         SymExpr(double v);
-        template<typename T, typename std::enable_if_t<std::is_integral_v<T>, int> = 0>
+        template<typename T, std::enable_if_t<std::is_integral_v<T>, int> = 0>
         SymExpr(T v);
         SymExpr(const BigInt& v);
         SymExpr(const Fraction& v);
@@ -104,6 +104,9 @@ namespace jc {
 
     // 因式分解
     SymExpr factor(const SymExpr& expr, int depth = 0);
+
+    // 代数重写引擎 (Pattern Matching Engine)
+    SymExpr applyRule(const SymExpr& expr, const SymExpr& pattern, const SymExpr& target);
 
     // 符号方程求解
     std::vector<SymExpr> solveEq(const SymExpr& expr, const std::string& var);
@@ -175,7 +178,7 @@ namespace jc {
     };
 
     // 模板构造函数实现 (必须在 SymNum 完整定义之后)
-    template<typename T, typename std::enable_if_t<std::is_integral_v<T>, int>>
+    template<typename T, std::enable_if_t<std::is_integral_v<T>, int>>
     SymExpr::SymExpr(T v) : ptr(std::make_shared<SymNum>(BigInt(static_cast<int64_t>(v)))) {}
 
 } // namespace jc
