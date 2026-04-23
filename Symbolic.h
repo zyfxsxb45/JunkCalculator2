@@ -48,7 +48,7 @@ namespace jc {
     public:
         std::shared_ptr<SymNode> ptr;
 
-        SymExpr() = default;
+        SymExpr();
         explicit SymExpr(std::shared_ptr<SymNode> p) : ptr(std::move(p)) {}
 
         // 隐式升维构造

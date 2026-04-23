@@ -372,11 +372,15 @@ namespace jc {
         catch (const StackTracedException&) {
             currentTargetFrameDepth = savedTargetFrameDepth;
             pendingRefWritebacks = savedRefWritebacks;
+            frames.resize(boundary);
+            stack.resize(newFrame.stackBase);
             throw;
         }
         catch (...) {
             currentTargetFrameDepth = savedTargetFrameDepth;
             pendingRefWritebacks = savedRefWritebacks;
+            frames.resize(boundary);
+            stack.resize(newFrame.stackBase);
             throw;
         }
         if (profileMode) {
