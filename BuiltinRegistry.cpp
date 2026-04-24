@@ -206,6 +206,16 @@ void BuiltinRegistry::registerMath() {
                 for (const auto& a : args) {
                     symArgs.push_back(a.asSymbolic().ptr);
                 }
+                // 在构建 AST 时直接将根式转换为分数幂，统一底层数学表达
+                if (name == "sqrt" && symArgs.size() == 1) {
+                    return Value(SymExpr(symArgs[0]) ^ SymExpr(Fraction(1, 2)));
+                }
+                if (name == "cbrt" && symArgs.size() == 1) {
+                    return Value(SymExpr(symArgs[0]) ^ SymExpr(Fraction(1, 3)));
+                }
+                if (name == "root" && symArgs.size() == 2) {
+                    return Value(SymExpr(symArgs[0]) ^ (SymExpr(BigInt(1)) / SymExpr(symArgs[1])));
+                }
                 return Value(SymExpr(std::make_shared<SymFunc>(name, std::move(symArgs))));
             }
             // 否则正常执行数值计算
@@ -445,6 +455,38 @@ void BuiltinRegistry::registerMath() {
     regMath("atan2", { 2 }, [](const std::vector<Value>& args) -> Value {
         return Value(std::atan2(args[0].asDouble(), args[1].asDouble()));
         });
+
+    regMath("asinh", { 1 }, [](const std::vector<Value>& args) -> Value {
+        if (std::holds_alternative<Complex>(args[0].data)) {
+            Complex z = std::get<Complex>(args[0].data);
+            return Value(log(z + sqrt(z * z + Complex(1.0, 0.0))));
+        }
+        return Value(std::asinh(args[0].asDouble()));
+    });
+    regMath("acosh", { 1 }, [](const std::vector<Value>& args) -> Value {
+        if (std::holds_alternative<Complex>(args[0].data)) {
+            Complex z = std::get<Complex>(args[0].data);
+            return Value(log(z + sqrt(z * z - Complex(1.0, 0.0))));
+        }
+        double x = args[0].asDouble();
+        if (x < 1.0) {
+            Complex z(x, 0.0);
+            return Value(log(z + sqrt(z * z - Complex(1.0, 0.0))));
+        }
+        return Value(std::acosh(x));
+    });
+    regMath("atanh", { 1 }, [](const std::vector<Value>& args) -> Value {
+        if (std::holds_alternative<Complex>(args[0].data)) {
+            Complex z = std::get<Complex>(args[0].data);
+            return Value(Complex(0.5, 0.0) * log((Complex(1.0, 0.0) + z) / (Complex(1.0, 0.0) - z)));
+        }
+        double x = args[0].asDouble();
+        if (x <= -1.0 || x >= 1.0) {
+            Complex z(x, 0.0);
+            return Value(Complex(0.5, 0.0) * log((Complex(1.0, 0.0) + z) / (Complex(1.0, 0.0) - z)));
+        }
+        return Value(std::atanh(x));
+    });
 
     regMath("erf", { 1 }, [](const std::vector<Value>& args) -> Value {
         return Value(std::erf(args[0].asDouble()));

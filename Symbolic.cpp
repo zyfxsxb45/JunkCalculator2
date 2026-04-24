@@ -1512,6 +1512,15 @@ namespace jc {
                 if (name == "atan") {
                     return du / (SymExpr(BigInt(1)) + u * u); // 1 / (1+u^2)
                 }
+                if (name == "asinh") {
+                    return du / ((u * u + SymExpr(BigInt(1))) ^ SymExpr(Fraction(1, 2)));
+                }
+                if (name == "acosh") {
+                    return du / ((u * u - SymExpr(BigInt(1))) ^ SymExpr(Fraction(1, 2)));
+                }
+                if (name == "atanh") {
+                    return du / (SymExpr(BigInt(1)) - u * u);
+                }
                 if (name == "sinh") {
                     SymExpr cosh_u(std::make_shared<SymFunc>("cosh", std::vector<std::shared_ptr<SymNode>>{u.ptr}));
                     return cosh_u * du;
@@ -3616,7 +3625,7 @@ namespace jc {
             }
 
             // --- 1.9 二次根式三角换元 (Trigonometric Substitution) ---
-            if (var != "_t") {
+            if (var != "_t" && var != "_weierstrass_t") {
                 SymExpr quadBase;
                 bool foundQuad = false;
                 
@@ -3700,8 +3709,9 @@ namespace jc {
                     if (valid) {
                         try {
                             SymExpr subbed = simplifyCore(subs(varPart, var, x_sub) * dx_sub);
-                            SymExpr int_t = doInteg(trigsimp(subbed), depth + 1);
-                            SymExpr res = subs(int_t, "_t", t_back);
+                            SymExpr subbed_var = subs(subbed, "_t", SymExpr::makeVar(var));
+                            SymExpr int_var = doInteg(trigsimp(subbed_var), depth + 1);
+                            SymExpr res = subs(int_var, var, t_back);
                             return coeff * res;
                         } catch (...) {}
                     }
@@ -3756,7 +3766,8 @@ namespace jc {
                             SymExpr k = ratio1;
                             SymExpr one_plus_k = simplifyCore(SymExpr(BigInt(1)) + k);
                             if (!one_plus_k.isZero()) {
-                                return coeff * simplifyCore((u * v) / one_plus_k);
+                                // 修复：分部积分循环时，必须确保 u*v 不会被错误化简
+                                return coeff * simplify(expand((u * v) / one_plus_k, 500));
                             }
                         }
                         
@@ -4051,9 +4062,10 @@ namespace jc {
                     }
                     
                     SymExpr rational_t = simplifyCore(expand(num_t / den_t, 500));
-                    SymExpr integrated_t = doInteg(rational_t, depth + 1);
+                    SymExpr rational_var = subs(rational_t, t_var, SymExpr::makeVar(var));
+                    SymExpr integrated_var = doInteg(rational_var, depth + 1);
                     SymExpr back_sub = SymExpr(std::make_shared<SymFunc>("tan", std::vector<std::shared_ptr<SymNode>>{(SymExpr::makeVar(var) / SymExpr(BigInt(2))).ptr}));
-                    return coeff * simplifyCore(subs(integrated_t, t_var, back_sub));
+                    return coeff * simplifyCore(subs(integrated_var, var, back_sub));
                 } catch (...) {}
             }
 

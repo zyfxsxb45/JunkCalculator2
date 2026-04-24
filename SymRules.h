@@ -34,11 +34,16 @@ namespace jc {
             // 基础三角函数
             { func("sin", x), -func("cos", x) },
             { func("cos", x), func("sin", x) },
+            { func("tan", x), -func("log", func("cos", x)) },
+            { SymExpr(1) / func("tan", x), func("log", func("sin", x)) },
+            { SymExpr(1) / func("cos", x), func("log", (SymExpr(1) + func("sin", x)) / func("cos", x)) },
+            { SymExpr(1) / func("sin", x), func("log", func("tan", x / SymExpr(2))) },
             { SymExpr(1) / (func("cos", x) ^ SymExpr(2)), func("tan", x) },
             { SymExpr(1) / (func("sin", x) ^ SymExpr(2)), -SymExpr(1) / func("tan", x) },
             
-            // 三角函数平方
+            // 三角函数平方与倒数平方
             { func("tan", x) ^ SymExpr(2), func("tan", x) - x },
+            { SymExpr(1) / (func("tan", x) ^ SymExpr(2)), -x - SymExpr(1) / func("tan", x) },
             
             // 反三角函数导数逆运算
             { SymExpr(1) / (SymExpr(1) + (x ^ SymExpr(2))), func("atan", x) },
@@ -55,7 +60,16 @@ namespace jc {
             { SymExpr(1) / (func("cosh", x) ^ SymExpr(2)), func("tanh", x) },
             { SymExpr(1) / (func("sinh", x) ^ SymExpr(2)), -SymExpr(1) / func("tanh", x) },
             { func("tanh", x) ^ SymExpr(2), x - func("tanh", x) },
+            { SymExpr(1) / (func("tanh", x) ^ SymExpr(2)), x - SymExpr(1) / func("tanh", x) },
             
+            // 常见无理函数积分 (避免错误的分部积分或换元)
+            { (SymExpr(1) + (x ^ SymExpr(2))) ^ SymExpr(Fraction(1, 2)), 
+              (x * ((SymExpr(1) + (x ^ SymExpr(2))) ^ SymExpr(Fraction(1, 2))) / SymExpr(2)) + 
+              (SymExpr(1) / SymExpr(2)) * func("log", x + ((SymExpr(1) + (x ^ SymExpr(2))) ^ SymExpr(Fraction(1, 2)))) },
+            { ((x ^ SymExpr(2)) + SymExpr(1)) ^ SymExpr(Fraction(1, 2)), 
+              (x * (((x ^ SymExpr(2)) + SymExpr(1)) ^ SymExpr(Fraction(1, 2))) / SymExpr(2)) + 
+              (SymExpr(1) / SymExpr(2)) * func("log", x + (((x ^ SymExpr(2)) + SymExpr(1)) ^ SymExpr(Fraction(1, 2)))) },
+
             // 特殊函数 (误差函数与菲涅尔积分)
             { func("exp", -(x ^ SymExpr(2))), (SymExpr(Fraction(1, 2)) * (SymExpr::makeVar("PI") ^ SymExpr(Fraction(1, 2)))) * func("erf", x) },
             { func("sin", x ^ SymExpr(2)), ((SymExpr::makeVar("PI") / SymExpr(2)) ^ SymExpr(Fraction(1, 2))) * func("fresnel_s", ((SymExpr(2) / SymExpr::makeVar("PI")) ^ SymExpr(Fraction(1, 2))) * x) },
@@ -138,6 +152,9 @@ namespace jc {
                 { func("sin", func("asin", _x)), _x },
                 { func("cos", func("acos", _x)), _x },
                 { func("tan", func("atan", _x)), _x },
+                { func("asin", func("sin", _x)), _x },
+                { func("acos", func("cos", _x)), _x },
+                { func("atan", func("tan", _x)), _x },
                 { func("cos", func("asin", _x)), (SymExpr(1) - (_x ^ SymExpr(2))) ^ SymExpr(Fraction(1, 2)) },
                 { func("sin", func("acos", _x)), (SymExpr(1) - (_x ^ SymExpr(2))) ^ SymExpr(Fraction(1, 2)) },
                 { func("sin", func("atan", _x)), _x / ((SymExpr(1) + (_x ^ SymExpr(2))) ^ SymExpr(Fraction(1, 2))) },
