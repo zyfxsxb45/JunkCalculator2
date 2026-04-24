@@ -918,12 +918,8 @@ namespace jc {
 
         switch (expr.ptr->getType()) {
         case SymType::NUM:
-        case SymType::VAR: {
-            auto v = std::static_pointer_cast<SymVar>(expr.ptr);
-            if (v->name == "PI") return SymExpr(3.14159265358979323846);
-            if (v->name == "E") return SymExpr(2.71828182845904523536);
+        case SymType::VAR:
             return expr;
-        }
 
         case SymType::ADD: {
             SymExpr result(BigInt(0));
@@ -2858,7 +2854,8 @@ namespace jc {
     // 🚀 泰勒展开 (Taylor Series)
     // =================================================================
     SymExpr taylor(const SymExpr& expr, const std::string& var, const SymExpr& a, int order) {
-        if (!expr.ptr || order < 0) return SymExpr(BigInt(0));
+        if (order < 0) throw std::runtime_error("Math Error: Taylor expansion order must be non-negative.");
+        if (!expr.ptr) return SymExpr(BigInt(0));
         SymExpr result(BigInt(0));
         SymExpr current_deriv = expr;
         BigInt fact(1);
@@ -2891,7 +2888,8 @@ namespace jc {
     // 🚀 极限计算 (Limit) - 洛必达法则与泰勒截断
     // =================================================================
     static SymExpr limitCore(const SymExpr& expr, const std::string& var, const SymExpr& val, int depth) {
-        if (!expr.ptr || depth > 10) return expr;
+        if (depth > 10) throw std::runtime_error("Calculus Error: Limit evaluation depth exceeded.");
+        if (!expr.ptr) return expr;
 
         // 尝试直接代入
         try {

@@ -3194,17 +3194,20 @@ void BuiltinRegistry::registerCAS() {
         });
 
     reg("simplify", { 1 }, [](const std::vector<Value>& args) -> Value {
-        if (!args[0].isSymbolic()) return args[0];
+        if (!args[0].isSymbolic())
+            throw std::runtime_error("TypeError: simplify() expects a symbolic expression.");
         return Value(simplify(args[0].asSymbolic()));
         });
 
     reg("contract", { 1 }, [](const std::vector<Value>& args) -> Value {
-        if (!args[0].isSymbolic()) return args[0];
+        if (!args[0].isSymbolic())
+            throw std::runtime_error("TypeError: contract() expects a symbolic expression.");
         return Value(contract(args[0].asSymbolic()));
         });
 
     reg("trigsimp", { 1 }, [](const std::vector<Value>& args) -> Value {
-        if (!args[0].isSymbolic()) return args[0];
+        if (!args[0].isSymbolic())
+            throw std::runtime_error("TypeError: trigsimp() expects a symbolic expression.");
         return Value(trigsimp(args[0].asSymbolic()));
         });
 
@@ -3353,7 +3356,7 @@ void BuiltinRegistry::registerCAS() {
 
     reg("evalf", { 1 }, [fnsPtr](const std::vector<Value>& args) -> Value {
         if (!args[0].isSymbolic())
-            return Value(args[0].asDouble());
+            throw std::runtime_error("TypeError: evalf() expects a symbolic expression.");
 
         SymExpr expr = std::get<SymExpr>(args[0].data);
         expr = evalFloat(expr);
@@ -3368,7 +3371,7 @@ void BuiltinRegistry::registerCAS() {
 
     reg("evalv", { 1 }, [fnsPtr](const std::vector<Value>& args) -> Value {
         if (!args[0].isSymbolic())
-            return args[0];
+            throw std::runtime_error("TypeError: evalv() expects a symbolic expression.");
 
         SymExpr expr = std::get<SymExpr>(args[0].data);
         expr = evalValue(expr);
@@ -3442,7 +3445,8 @@ void BuiltinRegistry::registerCAS() {
         });
 
     reg("taylor", { 3, 4 }, [](const std::vector<Value>& args) -> Value {
-        if (!args[0].isSymbolic()) return args[0];
+        if (!args[0].isSymbolic())
+            throw std::runtime_error("TypeError: taylor() expects a symbolic expression as first argument.");
         if (!std::holds_alternative<std::string>(args[1].data))
             throw std::runtime_error("TypeError: taylor() expects variable name as second argument.");
         int order = 5;
@@ -3526,8 +3530,14 @@ void BuiltinRegistry::registerCAS() {
                 SymExpr a = args[2].asSymbolic();
                 SymExpr b = args[3].asSymbolic();
                 return Value(simplify(subs(integral, var, b) - subs(integral, var, a)));
+            } else if (args.size() == 3) {
+                throw std::runtime_error("TypeError: Symbolic definite integration expects 4 arguments: expr, var, a, b.");
             }
             return Value(simplify(integral));
+        }
+
+        if (args.size() < 3) {
+            throw std::runtime_error("TypeError: Numeric integration expects at least 3 arguments: func, a, b.");
         }
 
         auto cl = args[0].asFunction();
