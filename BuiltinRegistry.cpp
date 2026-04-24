@@ -39,6 +39,34 @@ namespace jc {
         return std::visit([](auto&& arg) -> Value { return Value(arg); }, v);
     }
 
+    static bool isConstantExpr(const SymExpr& expr) {
+        if (!expr.ptr) return true;
+        switch (expr.ptr->getType()) {
+            case SymType::NUM: return true;
+            case SymType::VAR: {
+                auto name = std::static_pointer_cast<SymVar>(expr.ptr)->name;
+                return name == "PI" || name == "E" || name == "i" || name == "I";
+            }
+            case SymType::ADD:
+                for (auto& arg : std::static_pointer_cast<SymAdd>(expr.ptr)->args)
+                    if (!isConstantExpr(SymExpr(arg))) return false;
+                return true;
+            case SymType::MUL:
+                for (auto& arg : std::static_pointer_cast<SymMul>(expr.ptr)->args)
+                    if (!isConstantExpr(SymExpr(arg))) return false;
+                return true;
+            case SymType::POW: {
+                auto p = std::static_pointer_cast<SymPow>(expr.ptr);
+                return isConstantExpr(SymExpr(p->base)) && isConstantExpr(SymExpr(p->exp));
+            }
+            case SymType::FUNC:
+                for (auto& arg : std::static_pointer_cast<SymFunc>(expr.ptr)->args)
+                    if (!isConstantExpr(SymExpr(arg))) return false;
+                return true;
+        }
+        return false;
+    }
+
     template<typename MapType>
     static SymExpr collapseSymFuncs(const SymExpr& expr, const MapType& fns) {
         if (!expr.ptr) return expr;
@@ -73,23 +101,33 @@ namespace jc {
         case SymType::FUNC: {
             auto func = std::static_pointer_cast<SymFunc>(expr.ptr);
             std::vector<SymExpr> newArgs;
+            std::vector<Value> vals;
             bool allNumeric = true;
             for (auto& arg : func->args) {
                 SymExpr collapsed = collapseSymFuncs(SymExpr(arg), fns);
                 newArgs.push_back(collapsed);
-                if (collapsed.ptr->getType() != SymType::NUM)
+                
+                if (isConstantExpr(collapsed)) {
+                    try {
+                        std::map<std::string, Value> emptyEnv;
+                        SymbolicFuncResolver resolver = [&fns](const std::string& name, const std::vector<Value>& fnArgs) -> Value {
+                            auto it = fns.find(name);
+                            if (it != fns.end()) return it->second(fnArgs);
+                            throw std::runtime_error("Function not found");
+                        };
+                        vals.push_back(evalUniversal(collapsed.ptr, emptyEnv, resolver));
+                    } catch (...) {
+                        allNumeric = false;
+                    }
+                } else {
                     allNumeric = false;
+                }
             }
 
             // 所有参数都是纯数字 → 尝试调用实际函数求值
             if (allNumeric) {
                 auto it = fns.find(func->name);
                 if (it != fns.end()) {
-                    std::vector<Value> vals;
-                    for (auto& a : newArgs) {
-                        auto num = std::static_pointer_cast<SymNum>(a.ptr);
-                        vals.push_back(casValToValue(num->value));
-                    }
                     try {
                         Value result = it->second(vals);
                         return result.asSymbolic();
@@ -3362,9 +3400,16 @@ void BuiltinRegistry::registerCAS() {
         expr = evalFloat(expr);
         expr = collapseSymFuncs(expr, *fnsPtr);
 
-        if (expr.ptr->getType() == SymType::NUM) {
-            auto num = std::static_pointer_cast<SymNum>(expr.ptr);
-            return Value(casValToValue(num->value).asDouble());
+        if (isConstantExpr(expr)) {
+            try {
+                std::map<std::string, Value> emptyEnv;
+                SymbolicFuncResolver resolver = [fnsPtr](const std::string& name, const std::vector<Value>& fnArgs) -> Value {
+                    auto it = fnsPtr->find(name);
+                    if (it != fnsPtr->end()) return it->second(fnArgs);
+                    throw std::runtime_error("Function not found");
+                };
+                return evalUniversal(expr.ptr, emptyEnv, resolver);
+            } catch (...) {}
         }
         return Value(expr);
         });
@@ -3377,9 +3422,16 @@ void BuiltinRegistry::registerCAS() {
         expr = evalValue(expr);
         expr = simplify(collapseSymFuncs(expr, *fnsPtr));
 
-        if (expr.ptr->getType() == SymType::NUM) {
-            auto num = std::static_pointer_cast<SymNum>(expr.ptr);
-            return casValToValue(num->value);
+        if (isConstantExpr(expr)) {
+            try {
+                std::map<std::string, Value> emptyEnv;
+                SymbolicFuncResolver resolver = [fnsPtr](const std::string& name, const std::vector<Value>& fnArgs) -> Value {
+                    auto it = fnsPtr->find(name);
+                    if (it != fnsPtr->end()) return it->second(fnArgs);
+                    throw std::runtime_error("Function not found");
+                };
+                return evalUniversal(expr.ptr, emptyEnv, resolver);
+            } catch (...) {}
         }
         return Value(expr);
         });

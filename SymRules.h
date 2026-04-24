@@ -132,7 +132,18 @@ namespace jc {
                 // 负角化简
                 { func("sin", SymExpr(-1) * _x), -sin_x },
                 { func("cos", SymExpr(-1) * _x), cos_x },
-                { func("tan", SymExpr(-1) * _x), -tan_x }
+                { func("tan", SymExpr(-1) * _x), -tan_x },
+
+                // 反三角函数嵌套化简
+                { func("sin", func("asin", _x)), _x },
+                { func("cos", func("acos", _x)), _x },
+                { func("tan", func("atan", _x)), _x },
+                { func("cos", func("asin", _x)), (SymExpr(1) - (_x ^ SymExpr(2))) ^ SymExpr(Fraction(1, 2)) },
+                { func("sin", func("acos", _x)), (SymExpr(1) - (_x ^ SymExpr(2))) ^ SymExpr(Fraction(1, 2)) },
+                { func("sin", func("atan", _x)), _x / ((SymExpr(1) + (_x ^ SymExpr(2))) ^ SymExpr(Fraction(1, 2))) },
+                { func("cos", func("atan", _x)), SymExpr(1) / ((SymExpr(1) + (_x ^ SymExpr(2))) ^ SymExpr(Fraction(1, 2))) },
+                { func("tan", func("asin", _x)), _x / ((SymExpr(1) - (_x ^ SymExpr(2))) ^ SymExpr(Fraction(1, 2))) },
+                { func("tan", func("acos", _x)), ((SymExpr(1) - (_x ^ SymExpr(2))) ^ SymExpr(Fraction(1, 2))) / _x }
             };
         }
         return rules;
