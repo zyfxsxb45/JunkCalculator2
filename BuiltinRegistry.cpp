@@ -408,6 +408,46 @@ void BuiltinRegistry::registerMath() {
         return Value(std::atan2(args[0].asDouble(), args[1].asDouble()));
         });
 
+    regMath("erf", { 1 }, [](const std::vector<Value>& args) -> Value {
+        return Value(std::erf(args[0].asDouble()));
+        });
+    // 通用高精度数值积分器 (Simpson's 1/3 Rule)
+    auto numInteg = [](auto f, double a, double b) -> double {
+        int n = std::max(1000, static_cast<int>(std::abs(b - a) * 1000));
+        if (n % 2 != 0) n++;
+        if (n > 100000) n = 100000; // 限制最大迭代次数防止卡死
+        double h = (b - a) / n;
+        double sum = f(a) + f(b);
+        for (int i = 1; i < n; i += 2) sum += 4 * f(a + i * h);
+        for (int i = 2; i < n - 1; i += 2) sum += 2 * f(a + i * h);
+        return sum * h / 3.0;
+    };
+
+    regMath("fresnel_s", { 1 }, [numInteg](const std::vector<Value>& args) -> Value {
+        double x = args[0].asDouble();
+        return Value(numInteg([](double t) { return std::sin(1.57079632679489661923 * t * t); }, 0.0, x));
+        });
+    regMath("fresnel_c", { 1 }, [numInteg](const std::vector<Value>& args) -> Value {
+        double x = args[0].asDouble();
+        return Value(numInteg([](double t) { return std::cos(1.57079632679489661923 * t * t); }, 0.0, x));
+        });
+    regMath("Si", { 1 }, [numInteg](const std::vector<Value>& args) -> Value {
+        double x = args[0].asDouble();
+        return Value(numInteg([](double t) { return t == 0.0 ? 1.0 : std::sin(t) / t; }, 0.0, x));
+        });
+    regMath("Ci", { 1 }, [numInteg](const std::vector<Value>& args) -> Value {
+        double x = args[0].asDouble();
+        if (x <= 0.0) throw std::runtime_error("Math Error: Ci(x) is only real for x > 0.");
+        double gamma = 0.577215664901532860606; // Euler-Mascheroni constant
+        return Value(gamma + std::log(x) + numInteg([](double t) { return t == 0.0 ? 0.0 : (std::cos(t) - 1.0) / t; }, 0.0, x));
+        });
+    regMath("Ei", { 1 }, [numInteg](const std::vector<Value>& args) -> Value {
+        double x = args[0].asDouble();
+        if (x == 0.0) throw std::runtime_error("Math Error: Ei(0) is undefined.");
+        double gamma = 0.577215664901532860606; // Euler-Mascheroni constant
+        return Value(gamma + std::log(std::abs(x)) + numInteg([](double t) { return t == 0.0 ? 1.0 : (std::exp(t) - 1.0) / t; }, 0.0, x));
+        });
+
     regMath("abs", { 1 }, [](const std::vector<Value>& args) -> Value {
         // ★ Dunder 钩子: __abs__
         if (std::holds_alternative<std::shared_ptr<Instance>>(args[0].data)) {

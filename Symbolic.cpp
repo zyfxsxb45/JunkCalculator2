@@ -1439,6 +1439,36 @@ namespace jc {
                     SymExpr sinh_u(std::make_shared<SymFunc>("sinh", std::vector<std::shared_ptr<SymNode>>{u.ptr}));
                     return sinh_u * du;
                 }
+                if (name == "erf") {
+                    SymExpr pi = SymExpr::makeVar("PI");
+                    SymExpr minus_u2 = -(u ^ SymExpr(BigInt(2)));
+                    SymExpr exp_u(std::make_shared<SymFunc>("exp", std::vector<std::shared_ptr<SymNode>>{minus_u2.ptr}));
+                    return (SymExpr(BigInt(2)) / (pi ^ SymExpr(Fraction(1, 2)))) * exp_u * du;
+                }
+                if (name == "fresnel_s") {
+                    SymExpr pi = SymExpr::makeVar("PI");
+                    SymExpr arg = (pi / SymExpr(BigInt(2))) * (u ^ SymExpr(BigInt(2)));
+                    SymExpr sin_u(std::make_shared<SymFunc>("sin", std::vector<std::shared_ptr<SymNode>>{arg.ptr}));
+                    return sin_u * du;
+                }
+                if (name == "fresnel_c") {
+                    SymExpr pi = SymExpr::makeVar("PI");
+                    SymExpr arg = (pi / SymExpr(BigInt(2))) * (u ^ SymExpr(BigInt(2)));
+                    SymExpr cos_u(std::make_shared<SymFunc>("cos", std::vector<std::shared_ptr<SymNode>>{arg.ptr}));
+                    return cos_u * du;
+                }
+                if (name == "Si") {
+                    SymExpr sin_u(std::make_shared<SymFunc>("sin", std::vector<std::shared_ptr<SymNode>>{u.ptr}));
+                    return (sin_u / u) * du;
+                }
+                if (name == "Ci") {
+                    SymExpr cos_u(std::make_shared<SymFunc>("cos", std::vector<std::shared_ptr<SymNode>>{u.ptr}));
+                    return (cos_u / u) * du;
+                }
+                if (name == "Ei") {
+                    SymExpr exp_u(std::make_shared<SymFunc>("exp", std::vector<std::shared_ptr<SymNode>>{u.ptr}));
+                    return (exp_u / u) * du;
+                }
             }
             // =========================================================
             // 二元函数 f(u, v) 偏导分配律：f_x = f_u * u_x + f_v * v_x
@@ -1744,6 +1774,7 @@ namespace jc {
                 if (inner.isZero()) {
                     if (func->name == "sin") return SymExpr(BigInt(0));
                     if (func->name == "cos") return SymExpr(BigInt(1));
+                    if (func->name == "erf" || func->name == "fresnel_s" || func->name == "fresnel_c" || func->name == "Si") return SymExpr(BigInt(0));
                 }
             }
             newNode = SymExpr(std::make_shared<SymFunc>(func->name, std::move(nArgs))).ptr;
@@ -3102,16 +3133,14 @@ namespace jc {
     SymExpr integrate(const SymExpr& expr, const std::string& var) {
         if (!expr.ptr) return expr;
 
-        // 积分的线性性质：先尝试完全展开表达式，逐项积分
-        SymExpr expanded;
-        try { expanded = expand(expr, 1000); } catch (...) { expanded = expr; }
-
         SymExpr x = SymExpr::makeVar(var);
 
         // 从规则库获取当前变量的积分规则
         std::vector<std::pair<SymExpr, SymExpr>> rules = getIntegRules(var);
 
-        std::function<SymExpr(const SymExpr&)> doInteg = [&](const SymExpr& e) -> SymExpr {
+        std::function<SymExpr(const SymExpr&, int)> doInteg = [&](const SymExpr& e, int depth) -> SymExpr {
+            if (depth > 3) throw std::runtime_error("Calculus Error: Integration depth limit exceeded.");
+
             if (!containsVar(e.ptr, var)) {
                 return e * x; // ∫ c dx = c * x
             }
@@ -3119,7 +3148,7 @@ namespace jc {
             if (e.ptr->getType() == SymType::ADD) {
                 auto add = std::static_pointer_cast<SymAdd>(e.ptr);
                 SymExpr res(BigInt(0));
-                for (auto& arg : add->args) res = res + doInteg(SymExpr(arg));
+                for (auto& arg : add->args) res = res + doInteg(SymExpr(arg), depth);
                 return res;
             }
 
@@ -3178,7 +3207,7 @@ namespace jc {
                 
                 SymExpr res(BigInt(0));
                 if (!polyE.isZero()) {
-                    res = doInteg(polyE);
+                    res = doInteg(polyE, depth);
                 }
                 
                 if (!R.isZero()) {
@@ -3267,7 +3296,7 @@ namespace jc {
                             polyPart = polyPart + curr_N;
                         }
                         if (!polyPart.isZero()) {
-                            res = res + doInteg(polyPart);
+                            res = res + doInteg(polyPart, depth);
                         }
                     }
                 }
@@ -3288,10 +3317,6 @@ namespace jc {
                 varPart = e;
             }
 
-            if (varPart.ptr->getType() == SymType::MUL) {
-                throw std::runtime_error("Calculus Error: Integration by parts not fully supported yet.");
-            }
-
             // 使用 matchAST 尝试在顶层匹配 varPart
             SymExpr integratedPart = varPart;
             bool matched = false;
@@ -3304,15 +3329,261 @@ namespace jc {
                 }
             }
 
-            if (!matched) {
-                throw std::runtime_error("Calculus Error: Function integration not supported or complex power.");
+            if (matched) {
+                return coeff * integratedPart;
             }
 
-            return coeff * integratedPart;
+            // --- 1. 线性换元法 (Linear Substitution) ---
+            auto findLinearArg = [&](const std::shared_ptr<SymNode>& node, SymExpr& out_u, SymExpr& out_a) -> bool {
+                if (!node) return false;
+                if (node->getType() == SymType::FUNC) {
+                    auto func = std::static_pointer_cast<SymFunc>(node);
+                    for (auto& arg : func->args) {
+                        SymExpr u(arg);
+                        SymExpr du = simplifyCore(diff(u, var));
+                        if (!du.isZero() && !containsVar(du.ptr, var)) {
+                            if (u.ptr->getType() != SymType::VAR) {
+                                out_u = u;
+                                out_a = du;
+                                return true;
+                            }
+                        }
+                    }
+                } else if (node->getType() == SymType::POW) {
+                    auto powNode = std::static_pointer_cast<SymPow>(node);
+                    SymExpr u(powNode->base);
+                    SymExpr du = simplifyCore(diff(u, var));
+                    if (!du.isZero() && !containsVar(du.ptr, var)) {
+                        if (u.ptr->getType() != SymType::VAR) {
+                            out_u = u;
+                            out_a = du;
+                            return true;
+                        }
+                    }
+                }
+                return false;
+            };
+
+            SymExpr sub_u, sub_a;
+            if (findLinearArg(varPart.ptr, sub_u, sub_a)) {
+                std::string u_var = "_u";
+                SymExpr u_sym = SymExpr::makeVar(u_var);
+                std::function<SymExpr(const SymExpr&)> replaceNode = [&](const SymExpr& expr_node) -> SymExpr {
+                    if (!expr_node.ptr) return expr_node;
+                    if (expr_node.toString() == sub_u.toString()) return u_sym;
+                    switch (expr_node.ptr->getType()) {
+                        case SymType::ADD: {
+                            SymExpr res(BigInt(0));
+                            for (auto& arg : std::static_pointer_cast<SymAdd>(expr_node.ptr)->args) res = res + replaceNode(SymExpr(arg));
+                            return res;
+                        }
+                        case SymType::MUL: {
+                            SymExpr res(BigInt(1));
+                            for (auto& arg : std::static_pointer_cast<SymMul>(expr_node.ptr)->args) res = res * replaceNode(SymExpr(arg));
+                            return res;
+                        }
+                        case SymType::POW: {
+                            auto p = std::static_pointer_cast<SymPow>(expr_node.ptr);
+                            return replaceNode(SymExpr(p->base)) ^ replaceNode(SymExpr(p->exp));
+                        }
+                        case SymType::FUNC: {
+                            auto f = std::static_pointer_cast<SymFunc>(expr_node.ptr);
+                            std::vector<std::shared_ptr<SymNode>> nArgs;
+                            for (auto& arg : f->args) nArgs.push_back(replaceNode(SymExpr(arg)).ptr);
+                            return SymExpr(std::make_shared<SymFunc>(f->name, std::move(nArgs)));
+                        }
+                        default: return expr_node;
+                    }
+                };
+                
+                SymExpr f_u = replaceNode(varPart);
+                if (!containsVar(f_u.ptr, var)) {
+                    try {
+                        SymExpr f_var = subs(f_u, u_var, SymExpr::makeVar(var));
+                        SymExpr int_var = doInteg(simplifyCore(f_var / sub_a), depth + 1);
+                        SymExpr res = subs(int_var, var, sub_u);
+                        return coeff * res;
+                    } catch (...) {}
+                }
+            }
+
+            // --- 1.5 广义换元法 (凑微分法) ---
+            if (varPart.ptr->getType() == SymType::MUL) {
+                auto mul = std::static_pointer_cast<SymMul>(varPart.ptr);
+                std::vector<SymExpr> candidate_us;
+                for (auto& arg : mul->args) {
+                    candidate_us.push_back(SymExpr(arg));
+                    if (arg->getType() == SymType::POW) {
+                        candidate_us.push_back(SymExpr(std::static_pointer_cast<SymPow>(arg)->base));
+                    } else if (arg->getType() == SymType::FUNC) {
+                        auto func = std::static_pointer_cast<SymFunc>(arg);
+                        if (func->args.size() == 1) {
+                            candidate_us.push_back(SymExpr(func->args[0]));
+                        }
+                    }
+                }
+                
+                for (const auto& u : candidate_us) {
+                    if (u.ptr->getType() == SymType::VAR || u.ptr->getType() == SymType::NUM) continue;
+                    SymExpr du = simplifyCore(diff(u, var));
+                    if (du.isZero()) continue;
+                    
+                    SymExpr rem = simplifyCore(varPart / du);
+                    
+                    std::string u_var = "_u";
+                    SymExpr u_sym = SymExpr::makeVar(u_var);
+                    std::function<SymExpr(const SymExpr&)> replaceU = [&](const SymExpr& expr_node) -> SymExpr {
+                        if (!expr_node.ptr) return expr_node;
+                        if (expr_node.toString() == u.toString()) return u_sym;
+                        switch (expr_node.ptr->getType()) {
+                            case SymType::ADD: {
+                                SymExpr res(BigInt(0));
+                                for (auto& arg : std::static_pointer_cast<SymAdd>(expr_node.ptr)->args) res = res + replaceU(SymExpr(arg));
+                                return res;
+                            }
+                            case SymType::MUL: {
+                                SymExpr res(BigInt(1));
+                                for (auto& arg : std::static_pointer_cast<SymMul>(expr_node.ptr)->args) res = res * replaceU(SymExpr(arg));
+                                return res;
+                            }
+                            case SymType::POW: {
+                                auto p = std::static_pointer_cast<SymPow>(expr_node.ptr);
+                                return replaceU(SymExpr(p->base)) ^ replaceU(SymExpr(p->exp));
+                            }
+                            case SymType::FUNC: {
+                                auto f = std::static_pointer_cast<SymFunc>(expr_node.ptr);
+                                std::vector<std::shared_ptr<SymNode>> nArgs;
+                                for (auto& arg : f->args) nArgs.push_back(replaceU(SymExpr(arg)).ptr);
+                                return SymExpr(std::make_shared<SymFunc>(f->name, std::move(nArgs)));
+                            }
+                            default: return expr_node;
+                        }
+                    };
+                    
+                    SymExpr rem_u = replaceU(rem);
+                    if (!containsVar(rem_u.ptr, var)) {
+                        try {
+                            SymExpr f_var = subs(rem_u, u_var, SymExpr::makeVar(var));
+                            SymExpr int_var = doInteg(f_var, depth + 1);
+                            SymExpr res = subs(int_var, var, u);
+                            return coeff * res;
+                        } catch (...) {}
+                    }
+                }
+            }
+
+            // --- 1.8 三角函数高次幂降幂与拆分 ---
+            if (varPart.ptr->getType() == SymType::POW) {
+                auto powNode = std::static_pointer_cast<SymPow>(varPart.ptr);
+                if (powNode->base->getType() == SymType::FUNC && powNode->exp->getType() == SymType::NUM) {
+                    auto func = std::static_pointer_cast<SymFunc>(powNode->base);
+                    auto [isInt, n] = extractExactInt(std::static_pointer_cast<SymNum>(powNode->exp)->value);
+                    if (isInt && n >= 2 && func->args.size() == 1) {
+                        SymExpr arg(func->args[0]);
+                        if (func->name == "sin") {
+                            if (n % 2 == 0) {
+                                SymExpr _C = SymExpr::makeVar("_C");
+                                SymExpr halfAngle = (SymExpr(BigInt(1)) - _C) / SymExpr(BigInt(2));
+                                SymExpr expanded = expand(halfAngle ^ SymExpr(BigInt(n / 2)), 500);
+                                SymExpr cos2x = SymExpr(std::make_shared<SymFunc>("cos", std::vector<std::shared_ptr<SymNode>>{(SymExpr(BigInt(2)) * arg).ptr}));
+                                expanded = subs(expanded, "_C", cos2x);
+                                try { return coeff * doInteg(expanded, depth + 1); } catch (...) {}
+                            } else {
+                                SymExpr _C = SymExpr::makeVar("_C");
+                                SymExpr cosSq = SymExpr(BigInt(1)) - (_C ^ SymExpr(BigInt(2)));
+                                SymExpr rem = SymExpr(std::make_shared<SymFunc>("sin", std::vector<std::shared_ptr<SymNode>>{arg.ptr})) * (cosSq ^ SymExpr(BigInt((n - 1) / 2)));
+                                SymExpr expanded = expand(rem, 500);
+                                SymExpr cosx = SymExpr(std::make_shared<SymFunc>("cos", std::vector<std::shared_ptr<SymNode>>{arg.ptr}));
+                                expanded = subs(expanded, "_C", cosx);
+                                try { return coeff * doInteg(expanded, depth + 1); } catch (...) {}
+                            }
+                        } else if (func->name == "cos") {
+                            if (n % 2 == 0) {
+                                SymExpr _C = SymExpr::makeVar("_C");
+                                SymExpr halfAngle = (SymExpr(BigInt(1)) + _C) / SymExpr(BigInt(2));
+                                SymExpr expanded = expand(halfAngle ^ SymExpr(BigInt(n / 2)), 500);
+                                SymExpr cos2x = SymExpr(std::make_shared<SymFunc>("cos", std::vector<std::shared_ptr<SymNode>>{(SymExpr(BigInt(2)) * arg).ptr}));
+                                expanded = subs(expanded, "_C", cos2x);
+                                try { return coeff * doInteg(expanded, depth + 1); } catch (...) {}
+                            } else {
+                                SymExpr _S = SymExpr::makeVar("_S");
+                                SymExpr sinSq = SymExpr(BigInt(1)) - (_S ^ SymExpr(BigInt(2)));
+                                SymExpr rem = SymExpr(std::make_shared<SymFunc>("cos", std::vector<std::shared_ptr<SymNode>>{arg.ptr})) * (sinSq ^ SymExpr(BigInt((n - 1) / 2)));
+                                SymExpr expanded = expand(rem, 500);
+                                SymExpr sinx = SymExpr(std::make_shared<SymFunc>("sin", std::vector<std::shared_ptr<SymNode>>{arg.ptr}));
+                                expanded = subs(expanded, "_S", sinx);
+                                try { return coeff * doInteg(expanded, depth + 1); } catch (...) {}
+                            }
+                        }
+                    }
+                }
+            }
+
+            // --- 2. 启发式分部积分 (Integration by Parts) ---
+            if (varPart.ptr->getType() == SymType::MUL) {
+                auto mul = std::static_pointer_cast<SymMul>(varPart.ptr);
+                std::vector<SymExpr> factors;
+                for (auto& arg : mul->args) factors.push_back(SymExpr(arg));
+
+                auto getPriority = [&](const SymExpr& f) -> int {
+                    if (f.ptr->getType() == SymType::FUNC) {
+                        auto fn = std::static_pointer_cast<SymFunc>(f.ptr);
+                        if (fn->name == "log" || fn->name == "ln" || fn->name == "asin" || fn->name == "acos" || fn->name == "atan") return 1;
+                    }
+                    if (f.ptr->getType() == SymType::POW) {
+                        auto p = std::static_pointer_cast<SymPow>(f.ptr);
+                        if (p->base->getType() == SymType::VAR && std::static_pointer_cast<SymVar>(p->base)->name == var) {
+                            if (p->exp->getType() == SymType::NUM) {
+                                auto [isInt, n] = extractExactInt(std::static_pointer_cast<SymNum>(p->exp)->value);
+                                if (isInt && n > 0) return 2;
+                            }
+                        }
+                    }
+                    if (f.ptr->getType() == SymType::VAR && std::static_pointer_cast<SymVar>(f.ptr)->name == var) return 2;
+                    return 3;
+                };
+
+                std::vector<size_t> indices(factors.size());
+                std::iota(indices.begin(), indices.end(), 0);
+                std::sort(indices.begin(), indices.end(), [&](size_t a, size_t b) {
+                    return getPriority(factors[a]) < getPriority(factors[b]);
+                });
+
+                for (size_t i : indices) {
+                    SymExpr u = factors[i];
+                    SymExpr dv(BigInt(1));
+                    for (size_t j = 0; j < factors.size(); ++j) {
+                        if (j != i) dv = dv * factors[j];
+                    }
+
+                    SymExpr du = simplifyCore(diff(u, var));
+                    try {
+                        SymExpr v = doInteg(dv, depth + 1);
+                        SymExpr v_du = simplifyCore(v * du);
+                        SymExpr int_v_du = doInteg(v_du, depth + 1);
+                        return coeff * simplifyCore(u * v - int_v_du);
+                    } catch (...) {}
+                }
+            }
+
+            throw std::runtime_error("Calculus Error: Function integration not supported or complex power.");
+        };
+
+        auto tryInteg = [&]() -> SymExpr {
+            try {
+                return simplify(doInteg(expr, 0));
+            } catch (...) {
+                SymExpr expanded;
+                try { expanded = expand(expr, 1000); } catch (...) { expanded = expr; }
+                if (expanded.toString() != expr.toString()) {
+                    return simplify(doInteg(expanded, 0));
+                }
+                throw std::runtime_error("Calculus Error: Function integration not supported or complex power.");
+            }
         };
 
         try {
-            return simplify(doInteg(expanded));
+            return tryInteg();
         } catch (const std::runtime_error& original_err) {
             // --- 万能公式 (Weierstrass Substitution) 降级拦截 ---
             bool hasTrig = false;
