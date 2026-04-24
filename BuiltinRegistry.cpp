@@ -3379,13 +3379,7 @@ void BuiltinRegistry::registerCAS() {
 
         if (expr.ptr->getType() == SymType::NUM) {
             auto num = std::static_pointer_cast<SymNum>(expr.ptr);
-            Value result = casValToValue(num->value);
-            if (std::holds_alternative<Complex>(result.data)) {
-                Complex c = std::get<Complex>(result.data);
-                if (Tol::isEq(c.getImage(), 0.0))
-                    return Value(c.getReal());
-            }
-            return result;
+            return casValToValue(num->value);
         }
         return Value(expr);
         });

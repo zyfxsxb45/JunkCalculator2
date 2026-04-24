@@ -28,6 +28,9 @@ namespace jc {
             // 指数函数
             { func("exp", x), func("exp", x) },
             
+            // 绝对值与符号函数
+            { func("sgn", x), func("abs", x) },
+            
             // 基础三角函数
             { func("sin", x), -func("cos", x) },
             { func("cos", x), func("sin", x) },
@@ -41,9 +44,17 @@ namespace jc {
             { SymExpr(1) / (SymExpr(1) + (x ^ SymExpr(2))), func("atan", x) },
             { SymExpr(1) / ((SymExpr(1) - (x ^ SymExpr(2))) ^ SymExpr(Fraction(1, 2))), func("asin", x) },
             
+            // 反双曲函数导数逆运算
+            { SymExpr(1) / ((SymExpr(1) + (x ^ SymExpr(2))) ^ SymExpr(Fraction(1, 2))), func("asinh", x) },
+            { SymExpr(1) / (((x ^ SymExpr(2)) - SymExpr(1)) ^ SymExpr(Fraction(1, 2))), func("acosh", x) },
+            
             // 双曲函数
             { func("sinh", x), func("cosh", x) },
             { func("cosh", x), func("sinh", x) },
+            { func("tanh", x), func("log", func("cosh", x)) },
+            { SymExpr(1) / (func("cosh", x) ^ SymExpr(2)), func("tanh", x) },
+            { SymExpr(1) / (func("sinh", x) ^ SymExpr(2)), -SymExpr(1) / func("tanh", x) },
+            { func("tanh", x) ^ SymExpr(2), x - func("tanh", x) },
             
             // 特殊函数 (误差函数与菲涅尔积分)
             { func("exp", -(x ^ SymExpr(2))), (SymExpr(Fraction(1, 2)) * (SymExpr::makeVar("PI") ^ SymExpr(Fraction(1, 2)))) * func("erf", x) },
@@ -73,6 +84,8 @@ namespace jc {
             SymExpr sin_x = func("sin", _x);
             SymExpr cos_x = func("cos", _x);
             SymExpr tan_x = func("tan", _x);
+            SymExpr sin_2x = func("sin", SymExpr(2) * _x);
+            SymExpr cos_2x = func("cos", SymExpr(2) * _x);
 
             rules = {
                 // 平方和恒等式
@@ -82,6 +95,8 @@ namespace jc {
                 // 平方差转换
                 { SymExpr(1) - (sin_x ^ SymExpr(2)), cos_x ^ SymExpr(2) },
                 { SymExpr(1) - (cos_x ^ SymExpr(2)), sin_x ^ SymExpr(2) },
+                { _c - _c * (sin_x ^ SymExpr(2)), _c * (cos_x ^ SymExpr(2)) },
+                { _c - _c * (cos_x ^ SymExpr(2)), _c * (sin_x ^ SymExpr(2)) },
                 
                 // 商数关系
                 { sin_x / cos_x, tan_x },
@@ -91,6 +106,7 @@ namespace jc {
                 
                 // 乘积与消去关系
                 { tan_x * cos_x, sin_x },
+                { cos_x * tan_x, sin_x },
                 { sin_x / tan_x, cos_x },
                 { tan_x / sin_x, SymExpr(1) / cos_x },
                 
@@ -98,7 +114,25 @@ namespace jc {
                 { SymExpr(1) + (tan_x ^ SymExpr(2)), SymExpr(1) / (cos_x ^ SymExpr(2)) },
                 { _c + _c * (tan_x ^ SymExpr(2)), _c / (cos_x ^ SymExpr(2)) },
                 { (SymExpr(1) / (cos_x ^ SymExpr(2))) - (tan_x ^ SymExpr(2)), SymExpr(1) },
-                { (SymExpr(1) / (cos_x ^ SymExpr(2))) - SymExpr(1), tan_x ^ SymExpr(2) }
+                { (SymExpr(1) / (cos_x ^ SymExpr(2))) - SymExpr(1), tan_x ^ SymExpr(2) },
+
+                // 倍角公式逆向化简
+                { sin_x * cos_x, (SymExpr(1) / SymExpr(2)) * sin_2x },
+                { SymExpr(2) * sin_x * cos_x, sin_2x },
+                { _c * sin_x * cos_x, (_c / SymExpr(2)) * sin_2x },
+                { (cos_x ^ SymExpr(2)) - (sin_x ^ SymExpr(2)), cos_2x },
+                { _c * (cos_x ^ SymExpr(2)) - _c * (sin_x ^ SymExpr(2)), _c * cos_2x },
+                { SymExpr(1) - SymExpr(2) * (sin_x ^ SymExpr(2)), cos_2x },
+                { SymExpr(2) * (cos_x ^ SymExpr(2)) - SymExpr(1), cos_2x },
+
+                // 倍角公式正向约分
+                { sin_2x / cos_x, SymExpr(2) * sin_x },
+                { sin_2x / sin_x, SymExpr(2) * cos_x },
+
+                // 负角化简
+                { func("sin", SymExpr(-1) * _x), -sin_x },
+                { func("cos", SymExpr(-1) * _x), cos_x },
+                { func("tan", SymExpr(-1) * _x), -tan_x }
             };
         }
         return rules;

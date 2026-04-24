@@ -24,7 +24,6 @@ namespace jc {
         if (std::holds_alternative<BigInt>(v.data))    return std::get<BigInt>(v.data);
         if (std::holds_alternative<Fraction>(v.data))  return std::get<Fraction>(v.data);
         if (std::holds_alternative<double>(v.data))    return std::get<double>(v.data);
-        if (std::holds_alternative<Complex>(v.data))   return std::get<Complex>(v.data);
         throw std::runtime_error("CAS Error: Cannot convert value to CAS type.");
     }
 
@@ -49,7 +48,6 @@ namespace jc {
             if constexpr (std::is_same_v<T, BigInt>) return arg.isNegative();
             else if constexpr (std::is_same_v<T, Fraction>) return arg.getNum().isNegative() != arg.getDen().isNegative();
             else if constexpr (std::is_same_v<T, double>) return arg < 0.0;
-            else if constexpr (std::is_same_v<T, Complex>) return arg.real < 0.0;
             else return false;
             }, v);
     }
@@ -58,7 +56,6 @@ namespace jc {
         Value val = casValToValue(v);
         std::ostringstream oss;
         oss << val;
-        if (std::holds_alternative<Complex>(v)) return "(" + oss.str() + ")";
         return oss.str();
     }
 
@@ -269,13 +266,6 @@ namespace jc {
                     }
                 }
             }
-            else if constexpr (std::is_same_v<T, Complex>) {
-                if (Tol::isEq(arg.imag, 0.0) && std::isfinite(arg.real) && arg.real == std::floor(arg.real)) {
-                    if (std::abs(arg.real) < 9e15) {
-                        return { true, static_cast<int64_t>(arg.real) };
-                    }
-                }
-            }
 
             return { false, 0 };
             }, cval);
@@ -288,7 +278,20 @@ namespace jc {
     SymExpr::SymExpr(double v) : ptr(std::make_shared<SymNum>(v)) {}
     SymExpr::SymExpr(const BigInt& v) : ptr(std::make_shared<SymNum>(v)) {}
     SymExpr::SymExpr(const Fraction& v) : ptr(std::make_shared<SymNum>(v)) {}
-    SymExpr::SymExpr(const Complex& v) : ptr(std::make_shared<SymNum>(v)) {}
+    SymExpr::SymExpr(const Complex& v) {
+        if (Tol::isEq(v.imag, 0.0)) {
+            ptr = std::make_shared<SymNum>(v.real);
+        } else if (Tol::isEq(v.real, 0.0)) {
+            SymExpr imagPart(v.imag);
+            SymExpr iVar = SymExpr::makeVar("i");
+            ptr = (imagPart * iVar).ptr;
+        } else {
+            SymExpr realPart(v.real);
+            SymExpr imagPart(v.imag);
+            SymExpr iVar = SymExpr::makeVar("i");
+            ptr = (realPart + imagPart * iVar).ptr;
+        }
+    }
     SymExpr::SymExpr(const CASVal& v) : ptr(std::make_shared<SymNum>(v)) {}
 
     SymExpr SymExpr::makeVar(const std::string& name) {
@@ -1206,6 +1209,7 @@ namespace jc {
             auto v = std::static_pointer_cast<SymVar>(expr.ptr);
             if (v->name == "PI") return SymExpr(3.14159265358979323846);
             if (v->name == "E") return SymExpr(2.71828182845904523536);
+            if (v->name == "i" || v->name == "I") return SymExpr(Complex(0.0, 1.0));
             return expr;
         }
 
@@ -1434,6 +1438,22 @@ namespace jc {
                 if (name == "cosh") {
                     SymExpr sinh_u(std::make_shared<SymFunc>("sinh", std::vector<std::shared_ptr<SymNode>>{u.ptr}));
                     return sinh_u * du;
+                }
+                if (name == "tanh") {
+                    SymExpr cosh_u(std::make_shared<SymFunc>("cosh", std::vector<std::shared_ptr<SymNode>>{u.ptr}));
+                    return (SymExpr(BigInt(1)) / (cosh_u * cosh_u)) * du;
+                }
+                if (name == "cbrt") {
+                    return du / (SymExpr(BigInt(3)) * (expr ^ SymExpr(BigInt(2))));
+                }
+                if (name == "sgn" || name == "round" || name == "floor" || name == "ceil" || name == "trunc") {
+                    return SymExpr(BigInt(0));
+                }
+                if (name == "deg") {
+                    return (SymExpr(BigInt(180)) / SymExpr::makeVar("PI")) * du;
+                }
+                if (name == "rad") {
+                    return (SymExpr::makeVar("PI") / SymExpr(BigInt(180))) * du;
                 }
                 if (name == "erf") {
                     SymExpr pi = SymExpr::makeVar("PI");
@@ -2566,9 +2586,9 @@ namespace jc {
                             bool hasComplex = false;
                             std::function<void(const std::shared_ptr<SymNode>&)> checkComplex = [&](const std::shared_ptr<SymNode>& node) {
                                 if (!node || hasComplex) return;
-                                if (node->getType() == SymType::NUM) {
-                                    auto num = std::static_pointer_cast<SymNum>(node);
-                                    if (std::holds_alternative<Complex>(num->value)) hasComplex = true;
+                                if (node->getType() == SymType::VAR) {
+                                    auto varNode = std::static_pointer_cast<SymVar>(node);
+                                    if (varNode->name == "i" || varNode->name == "I") hasComplex = true;
                                 } else if (node->getType() == SymType::ADD) {
                                     for (auto& arg : std::static_pointer_cast<SymAdd>(node)->args) checkComplex(arg);
                                 } else if (node->getType() == SymType::MUL) {
@@ -2786,7 +2806,7 @@ namespace jc {
                             }
                         }
                         if (isNeg) {
-                            SymExpr I(Complex(0.0, 1.0));
+                            SymExpr I = SymExpr::makeVar("i");
                             auto [ok2, sqrtPosDelta] = trySquareRoot(-delta, true);
                             if (ok2) {
                                 sqrtDelta = simplify(I * sqrtPosDelta);
@@ -2821,7 +2841,7 @@ namespace jc {
                             } else {
                                 SymExpr E = SymExpr::makeVar("E");
                                 SymExpr PI = SymExpr::makeVar("PI");
-                                SymExpr I(Complex(0.0, 1.0));
+                                SymExpr I = SymExpr::makeVar("i");
                                 SymExpr exponent = SymExpr(Fraction(BigInt(2 * k), BigInt(degree))) * PI * I;
                                 SymExpr unity = E ^ exponent;
                                 roots.push_back(simplify(principal * unity));
@@ -3784,6 +3804,7 @@ namespace jc {
             if (it != env.end()) return it->second;
             if (varName == "PI") return Value(3.14159265358979323846);
             if (varName == "E") return Value(2.71828182845904523536);
+            if (varName == "i" || varName == "I") return Value(Complex(0.0, 1.0));
             return Value(0.0);
         }
         case SymType::ADD: {

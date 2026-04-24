@@ -20,7 +20,7 @@ namespace jc {
     // ==========================================
     // 内部高精度数值载体 (隔离 VM)
     // ==========================================
-    using CASVal = std::variant<double, BigInt, Fraction, Complex>;
+    using CASVal = std::variant<double, BigInt, Fraction>;
 
     bool isCasZero(const CASVal& v);
     bool isCasOne(const CASVal& v);
