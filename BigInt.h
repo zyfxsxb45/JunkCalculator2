@@ -120,110 +120,105 @@ namespace jc {
             }
 
             // =============================================
-            // 高位估商法 —— 用最高位原生整数除法估算商
-            // remainder 大小始终 <= absB.size() + 1
-            // 总复杂度：O(n * m)
-            //   n = 被除数 limb 数
-            //   m = 除数 limb 数
+            // Knuth D 算法 (In-place Long Division)
+            // 避免了内层循环中频繁的 BigInt 对象创建和拷贝
             // =============================================
-            int n = static_cast<int>(absA.data.size());
+            int n_orig = static_cast<int>(absA.data.size());
             int m = static_cast<int>(absB.data.size());
 
+            // 归一化因子 d，使得除数最高位 >= BASE / 2
+            int64_t d = BASE / (static_cast<int64_t>(absB.data.back()) + 1);
+
+            auto mul_scalar = [](const BigInt& num, int64_t scalar) {
+                if (scalar == 1) return num;
+                BigInt res;
+                res.data.resize(num.data.size(), 0);
+                int64_t carry = 0;
+                for (size_t i = 0; i < num.data.size(); ++i) {
+                    int64_t prod = static_cast<int64_t>(num.data[i]) * scalar + carry;
+                    res.data[i] = static_cast<int32_t>(prod % BASE);
+                    carry = prod / BASE;
+                }
+                if (carry > 0) res.data.push_back(static_cast<int32_t>(carry));
+                return res;
+            };
+
+            BigInt u = mul_scalar(absA, d);
+            BigInt v = mul_scalar(absB, d);
+
+            // 确保 u 有 n_orig + 1 个 limb
+            u.data.resize(n_orig + 1, 0);
+
             BigInt quotient;
-            quotient.data.resize(n, 0);
+            quotient.data.resize(n_orig - m + 1, 0);
 
-            BigInt remainder;
-            remainder.data.reserve(m + 2);
+            for (int j = n_orig - m; j >= 0; --j) {
+                // 估算商 q_hat
+                int64_t num = static_cast<int64_t>(u.data[j + m]) * BASE + u.data[j + m - 1];
+                int64_t q_hat = num / v.data[m - 1];
+                int64_t r_hat = num % v.data[m - 1];
 
-            // ★ 预计算除数最高两位组合值用于估商
-            // divisorHigh = absB 最高位（或最高两位组合），用于快速除法
-            int64_t divisorHigh = absB.data[m - 1];
-            if (m >= 2) {
-                // 组合最高两个 limb：high * BASE + secondHigh
-                // 用于更精确的估商
-                divisorHigh = static_cast<int64_t>(absB.data[m - 1]) * BASE
-                    + static_cast<int64_t>(absB.data[m - 2]);
-            }
-
-            for (int i = n - 1; i >= 0; --i) {
-                // 移位：remainder = remainder * BASE + absA.data[i]
-                int rsize = static_cast<int>(remainder.data.size());
-                remainder.data.push_back(0);
-                for (int j = rsize; j > 0; --j)
-                    remainder.data[j] = remainder.data[j - 1];
-                remainder.data[0] = absA.data[i];
-                remainder.trim();
-
-                // ★ 高位估商
-                int rLen = static_cast<int>(remainder.data.size());
-                int64_t q = 0;
-
-                if (rLen > m) {
-                    // remainder 比 divisor 多出至少一个 limb → 商 >= 1
-                    if (m >= 2) {
-                        // 取 remainder 最高三位组合 / divisor 最高两位组合
-                        int64_t remHigh;
-                        if (rLen >= 3) {
-                            remHigh = static_cast<int64_t>(remainder.data[rLen - 1]) * BASE * BASE
-                                + static_cast<int64_t>(remainder.data[rLen - 2]) * BASE
-                                + static_cast<int64_t>(remainder.data[rLen - 3]);
-                        }
-                        else if (rLen == 2) {
-                            remHigh = static_cast<int64_t>(remainder.data[rLen - 1]) * BASE
-                                + static_cast<int64_t>(remainder.data[rLen - 2]);
-                        }
-                        else {
-                            remHigh = static_cast<int64_t>(remainder.data[rLen - 1]);
-                        }
-                        q = remHigh / divisorHigh;
-                    }
-                    else {
-                        // 单 limb 除数走到这里说明逻辑异常，但兜底
-                        int64_t remHigh = static_cast<int64_t>(remainder.data[rLen - 1]) * BASE
-                            + static_cast<int64_t>(remainder.data[rLen - 2]);
-                        q = remHigh / divisorHigh;
-                    }
-                }
-                else if (rLen == m) {
-                    // 位数相同，取最高位/最高位作为估计
-                    if (m >= 2) {
-                        int64_t remHigh = static_cast<int64_t>(remainder.data[rLen - 1]) * BASE
-                            + static_cast<int64_t>(remainder.data[rLen - 2]);
-                        q = remHigh / divisorHigh;
-                    }
-                    else {
-                        q = static_cast<int64_t>(remainder.data[rLen - 1]) / divisorHigh;
-                    }
-                }
-                // else rLen < m → q = 0
-
-                // 限幅：商不可能超过 BASE - 1
-                if (q >= BASE) q = BASE - 1;
-                if (q < 0) q = 0;
-
-                // ★ 微调：估商可能偏大，最多修正 2 次
-                if (q > 0) {
-                    BigInt product = absB * BigInt(q);
-                    while (product > remainder && q > 0) {
-                        q--;
-                        product = product - absB;
-                    }
-                    remainder = remainder - product;
+                // 修正 q_hat
+                while (q_hat == BASE || (m >= 2 && q_hat * v.data[m - 2] > BASE * r_hat + u.data[j + m - 2])) {
+                    q_hat--;
+                    r_hat += v.data[m - 1];
+                    if (r_hat >= BASE) break;
                 }
 
-                // ★ 防御：估商可能偏小（极少发生），向上修正
-                while (remainder >= absB) {
-                    remainder = remainder - absB;
-                    q++;
+                // 乘法并减去 (u[j..j+m] -= q_hat * v)
+                int64_t carry = 0;
+                int64_t borrow = 0;
+                for (int i = 0; i < m; ++i) {
+                    int64_t prod = q_hat * v.data[i] + carry;
+                    carry = prod / BASE;
+                    int64_t diff = static_cast<int64_t>(u.data[j + i]) - (prod % BASE) - borrow;
+                    if (diff < 0) {
+                        diff += BASE;
+                        borrow = 1;
+                    } else {
+                        borrow = 0;
+                    }
+                    u.data[j + i] = static_cast<int32_t>(diff);
                 }
+                int64_t diff = static_cast<int64_t>(u.data[j + m]) - carry - borrow;
+                if (diff < 0) {
+                    diff += BASE;
+                    borrow = 1;
+                } else {
+                    borrow = 0;
+                }
+                u.data[j + m] = static_cast<int32_t>(diff);
 
-                quotient.data[i] = static_cast<int32_t>(q);
+                quotient.data[j] = static_cast<int32_t>(q_hat);
+
+                // 如果减多了，加回来 (极少发生)
+                if (borrow) {
+                    quotient.data[j]--;
+                    int64_t carry_add = 0;
+                    for (int i = 0; i < m; ++i) {
+                        int64_t sum = static_cast<int64_t>(u.data[j + i]) + v.data[i] + carry_add;
+                        u.data[j + i] = static_cast<int32_t>(sum % BASE);
+                        carry_add = sum / BASE;
+                    }
+                    u.data[j + m] = static_cast<int32_t>((static_cast<int64_t>(u.data[j + m]) + carry_add) % BASE);
+                }
             }
 
             quotient.negative = (a.negative != b.negative);
-            remainder.negative = a.negative;
             quotient.trim();
+
+            // 还原余数 (r = u / d)
+            BigInt remainder;
+            remainder.data.resize(m, 0);
+            int64_t rem = 0;
+            for (int i = m - 1; i >= 0; --i) {
+                int64_t cur = rem * BASE + u.data[i];
+                remainder.data[i] = static_cast<int32_t>(cur / d);
+                rem = cur % d;
+            }
+            remainder.negative = a.negative;
             remainder.trim();
+
             return { quotient, remainder };
         }
 
