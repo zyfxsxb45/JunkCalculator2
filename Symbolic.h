@@ -117,6 +117,8 @@ namespace jc {
     SymExpr polyGCD(const SymExpr& a, const SymExpr& b, const std::string& var);
     // 多项式扩展欧几里得算法 (EEA)
     std::tuple<SymExpr, SymExpr, SymExpr> polyEGCD(const SymExpr& a, const SymExpr& b, const std::string& var);
+    // 多项式无平方分解 (Square-Free Factorization)
+    std::vector<std::pair<SymExpr, int>> polySquareFree(const SymExpr& p, const std::string& var);
 
     // 代数重写引擎 (Pattern Matching Engine)
     SymExpr applyRule(const SymExpr& expr, const SymExpr& pattern, const SymExpr& target);
@@ -129,8 +131,15 @@ namespace jc {
     // ==========================================
     SymExpr limit(const SymExpr& expr, const std::string& var, const SymExpr& val);
     SymExpr trigsimp(const SymExpr& expr);
-    SymExpr integrate(const SymExpr& expr, const std::string& var); // 符号积分
     SymExpr taylor(const SymExpr& expr, const std::string& var, const SymExpr& a, int order); // 泰勒展开
+
+    // 内部工具暴露给 Integration 模块
+    std::pair<bool, int64_t> extractExactInt(const CASVal& cval);
+    bool containsVar(const std::shared_ptr<SymNode>& node, const std::string& var);
+    bool matchAST(const std::shared_ptr<SymNode>& node, const std::shared_ptr<SymNode>& pat, std::map<std::string, SymExpr>& captures);
+    SymExpr substituteCaptures(const SymExpr& target, const std::map<std::string, SymExpr>& captures);
+    SymExpr simplifyCore(const SymExpr& expr);
+    std::vector<SymExpr> extractCoeffs(const SymExpr& expr, const std::string& var);
 
     // ==========================================
     // 派生数学节点

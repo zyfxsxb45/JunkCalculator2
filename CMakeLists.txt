@@ -27,6 +27,7 @@ set(JC2_HEADERS
     "Tolerance.h" "Image.h" "Probability.h" "Highlight.h"
     "HelpText.h" "Bytecode.h" "Compiler.h" "VM.h"
     "Module.h" "GcHeap.h" "BuiltinRegistry.h" "Symbolic.h"
+    "Integration.h"
     "modules/json_module.h"
     "modules/image_module.h"
     "modules/prob_module.h"
@@ -39,7 +40,7 @@ set(JC2_HEADERS
 set(JC2_SOURCES
     "Lexer.cpp" "Parser.cpp" "Compiler.cpp"
     "VM.cpp" "BuiltinRegistry.cpp" "main.cpp"
-    "Symbolic.cpp"
+    "Symbolic.cpp" "Integration.cpp"
 )
 
 add_executable(JunkCalculator2 ${JC2_HEADERS} ${JC2_SOURCES})
