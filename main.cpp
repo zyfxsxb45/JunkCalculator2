@@ -181,7 +181,7 @@ void saveWorkspace(const std::string& filename) {
 
     int count = 0;
     for (const auto& [name, value] : vm.getGlobals()) {
-        if (name == "PI" || name == "E" || name == "i" || name == "I" || name == "ANS" || name == "true" || name == "false") continue;
+        if (name == "PI" || name == "E" || name == "i" || name == "I" || name == "ANS" || name == "true" || name == "false" || name == "none") continue;
         out << name << " = " << value.toJC2Expression() << "\n";
         count++;
     }

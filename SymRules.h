@@ -31,6 +31,13 @@ namespace jc {
             // 绝对值与符号函数
             { func("sgn", x), func("abs", x) },
             
+            // 对数与反三角函数 (可由分部积分推导，此处作为查表加速)
+            { func("log", x), x * func("log", x) - x },
+            { func("ln", x), x * func("ln", x) - x },
+            { func("asin", x), x * func("asin", x) + ((SymExpr(1) - (x ^ SymExpr(2))) ^ SymExpr(Fraction(1, 2))) },
+            { func("acos", x), x * func("acos", x) - ((SymExpr(1) - (x ^ SymExpr(2))) ^ SymExpr(Fraction(1, 2))) },
+            { func("atan", x), x * func("atan", x) - (SymExpr(1) / SymExpr(2)) * func("log", SymExpr(1) + (x ^ SymExpr(2))) },
+
             // 基础三角函数
             { func("sin", x), -func("cos", x) },
             { func("cos", x), func("sin", x) },

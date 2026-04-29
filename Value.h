@@ -1420,7 +1420,7 @@ namespace jc {
                     return "\"<super>\"";
                 }
                 else if constexpr (std::is_same_v<T, SymExpr>) {
-                    return "sym(" + arg.toString() + ")";
+                    return "sym(\" " + arg.toString() + "\")";
                 }
                 else { return "none()"; }
                 }, data);

@@ -3719,11 +3719,19 @@ namespace jc {
             }
 
             // --- 2. 启发式分部积分 (Integration by Parts) ---
+            bool tryParts = false;
+            std::vector<SymExpr> factors;
             if (varPart.ptr->getType() == SymType::MUL) {
                 auto mul = std::static_pointer_cast<SymMul>(varPart.ptr);
-                std::vector<SymExpr> factors;
                 for (auto& arg : mul->args) factors.push_back(SymExpr(arg));
+                tryParts = true;
+            } else if (varPart.ptr->getType() == SymType::FUNC || varPart.ptr->getType() == SymType::POW) {
+                factors.push_back(varPart);
+                factors.push_back(SymExpr(BigInt(1)));
+                tryParts = true;
+            }
 
+            if (tryParts) {
                 auto getPriority = [&](const SymExpr& f) -> int {
                     if (f.ptr->getType() == SymType::FUNC) {
                         auto fn = std::static_pointer_cast<SymFunc>(f.ptr);
@@ -3879,7 +3887,7 @@ namespace jc {
                     
                     if (!R.isZero()) {
                         SymExpr factD = factorReal(den);
-                        std::vector<std::pair<SymExpr, int>> factors;
+                        std::vector<std::pair<SymExpr, int>> denFactors;
                         auto process = [&](const SymExpr& f) {
                             if (!containsVar(f.ptr, var)) return;
                             if (f.ptr->getType() == SymType::POW) {
@@ -3887,12 +3895,12 @@ namespace jc {
                                 if (powNode->exp->getType() == SymType::NUM) {
                                     auto [isInt, n] = extractExactInt(std::static_pointer_cast<SymNum>(powNode->exp)->value);
                                     if (isInt && n > 0) {
-                                        factors.push_back({SymExpr(powNode->base), static_cast<int>(n)});
+                                        denFactors.push_back({SymExpr(powNode->base), static_cast<int>(n)});
                                         return;
                                     }
                                 }
                             }
-                            factors.push_back({f, 1});
+                            denFactors.push_back({f, 1});
                         };
                         if (factD.ptr->getType() == SymType::MUL) {
                             for (auto& arg : std::static_pointer_cast<SymMul>(factD.ptr)->args) process(SymExpr(arg));
@@ -3900,12 +3908,12 @@ namespace jc {
                             process(factD);
                         }
                         
-                        if (factors.empty()) {
+                        if (denFactors.empty()) {
                             throw std::runtime_error("Calculus Error: Failed to factorize denominator for partial fraction decomposition.");
                         } else {
                             SymExpr remaining_N = R;
                             SymExpr remaining_D(BigInt(1));
-                            for (auto& f : factors) remaining_D = simplifyCore(expand(remaining_D * (f.first ^ SymExpr(BigInt(f.second))), 500));
+                            for (auto& f : denFactors) remaining_D = simplifyCore(expand(remaining_D * (f.first ^ SymExpr(BigInt(f.second))), 500));
                             
                             SymExpr D_expanded = den_expanded;
                             auto coeffs_D = extractCoeffs(D_expanded, var);
@@ -3919,15 +3927,15 @@ namespace jc {
                             remaining_N = simplifyCore(expand(remaining_N / const_factor, 500));
                             
                             std::vector<std::pair<SymExpr, SymExpr>> partialFractions;
-                            for (size_t i = 0; i < factors.size(); ++i) {
-                                if (i == factors.size() - 1) {
+                            for (size_t i = 0; i < denFactors.size(); ++i) {
+                                if (i == denFactors.size() - 1) {
                                     partialFractions.push_back({remaining_N, remaining_D});
                                     break;
                                 }
-                                SymExpr D1 = simplifyCore(expand(factors[i].first ^ SymExpr(BigInt(factors[i].second)), 500));
+                                SymExpr D1 = simplifyCore(expand(denFactors[i].first ^ SymExpr(BigInt(denFactors[i].second)), 500));
                                 SymExpr D2(BigInt(1));
-                                for (size_t j = i + 1; j < factors.size(); ++j) {
-                                    D2 = simplifyCore(expand(D2 * (factors[j].first ^ SymExpr(BigInt(factors[j].second))), 500));
+                                for (size_t j = i + 1; j < denFactors.size(); ++j) {
+                                    D2 = simplifyCore(expand(D2 * (denFactors[j].first ^ SymExpr(BigInt(denFactors[j].second))), 500));
                                 }
                                 
                                 try {
@@ -3948,8 +3956,8 @@ namespace jc {
                             SymExpr polyPart(BigInt(0));
                             for (size_t i = 0; i < partialFractions.size(); ++i) {
                                 SymExpr curr_N = partialFractions[i].first;
-                                SymExpr base_D = factors[i].first;
-                                int k = factors[i].second;
+                                SymExpr base_D = denFactors[i].first;
+                                int k = denFactors[i].second;
                                 
                                 for (int j = k; j >= 1; --j) {
                                     try {
