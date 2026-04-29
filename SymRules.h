@@ -85,7 +85,9 @@ namespace jc {
             // 积分正弦、余弦与指数积分
             { func("sin", x) / x, func("Si", x) },
             { func("cos", x) / x, func("Ci", x) },
-            { func("exp", x) / x, func("Ei", x) }
+            { func("exp", x) / x, func("Ei", x) },
+            { SymExpr(1) / func("log", x), func("Li", x) },
+            { SymExpr(1) / func("ln", x), func("Li", x) }
         };
     }
 
@@ -109,6 +111,11 @@ namespace jc {
             SymExpr cos_2x = func("cos", SymExpr(2) * _x);
 
             rules = {
+                // 倒数关系 (将 cot, sec, csc 统一化归为 tan, cos, sin)
+                { func("cot", _x), SymExpr(1) / tan_x },
+                { func("sec", _x), SymExpr(1) / cos_x },
+                { func("csc", _x), SymExpr(1) / sin_x },
+
                 // 平方和恒等式
                 { (sin_x ^ SymExpr(2)) + (cos_x ^ SymExpr(2)), SymExpr(1) },
                 { _c * (sin_x ^ SymExpr(2)) + _c * (cos_x ^ SymExpr(2)), _c },

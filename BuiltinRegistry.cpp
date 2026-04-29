@@ -384,6 +384,54 @@ void BuiltinRegistry::registerMath() {
         if (std::holds_alternative<Complex>(args[0].data)) return Value(tanh(std::get<Complex>(args[0].data)));
         return Value(std::tanh(args[0].asDouble()));
     });
+    regMath("cot", { 1 }, [](const std::vector<Value>& args) -> Value {
+        if (std::holds_alternative<RealMatrix>(args[0].data)) {
+            auto m = std::get<RealMatrix>(args[0].data).matTan();
+            std::vector<double> flat = m.rawData();
+            for(auto& v : flat) v = 1.0 / v;
+            return Value(RealMatrix(m.getRows(), m.getCols(), flat));
+        }
+        if (std::holds_alternative<ComplexMatrix>(args[0].data)) {
+            auto m = std::get<ComplexMatrix>(args[0].data).matTan();
+            std::vector<Complex> flat = m.rawData();
+            for(auto& v : flat) v = Complex(1.0, 0.0) / v;
+            return Value(ComplexMatrix(m.getRows(), m.getCols(), flat));
+        }
+        if (std::holds_alternative<Complex>(args[0].data)) return Value(Complex(1.0, 0.0) / tan(std::get<Complex>(args[0].data)));
+        return Value(1.0 / std::tan(args[0].asDouble()));
+    });
+    regMath("sec", { 1 }, [](const std::vector<Value>& args) -> Value {
+        if (std::holds_alternative<RealMatrix>(args[0].data)) {
+            auto m = std::get<RealMatrix>(args[0].data).matCos();
+            std::vector<double> flat = m.rawData();
+            for(auto& v : flat) v = 1.0 / v;
+            return Value(RealMatrix(m.getRows(), m.getCols(), flat));
+        }
+        if (std::holds_alternative<ComplexMatrix>(args[0].data)) {
+            auto m = std::get<ComplexMatrix>(args[0].data).matCos();
+            std::vector<Complex> flat = m.rawData();
+            for(auto& v : flat) v = Complex(1.0, 0.0) / v;
+            return Value(ComplexMatrix(m.getRows(), m.getCols(), flat));
+        }
+        if (std::holds_alternative<Complex>(args[0].data)) return Value(Complex(1.0, 0.0) / cos(std::get<Complex>(args[0].data)));
+        return Value(1.0 / std::cos(args[0].asDouble()));
+    });
+    regMath("csc", { 1 }, [](const std::vector<Value>& args) -> Value {
+        if (std::holds_alternative<RealMatrix>(args[0].data)) {
+            auto m = std::get<RealMatrix>(args[0].data).matSin();
+            std::vector<double> flat = m.rawData();
+            for(auto& v : flat) v = 1.0 / v;
+            return Value(RealMatrix(m.getRows(), m.getCols(), flat));
+        }
+        if (std::holds_alternative<ComplexMatrix>(args[0].data)) {
+            auto m = std::get<ComplexMatrix>(args[0].data).matSin();
+            std::vector<Complex> flat = m.rawData();
+            for(auto& v : flat) v = Complex(1.0, 0.0) / v;
+            return Value(ComplexMatrix(m.getRows(), m.getCols(), flat));
+        }
+        if (std::holds_alternative<Complex>(args[0].data)) return Value(Complex(1.0, 0.0) / sin(std::get<Complex>(args[0].data)));
+        return Value(1.0 / std::sin(args[0].asDouble()));
+    });
 
     regMath("log", { 1, 2 }, [](const std::vector<Value>& args) -> Value {
         if (args.size() == 1) {
@@ -527,6 +575,13 @@ void BuiltinRegistry::registerMath() {
         if (x == 0.0) throw std::runtime_error("Math Error: Ei(0) is undefined.");
         double gamma = 0.577215664901532860606; // Euler-Mascheroni constant
         return Value(gamma + std::log(std::abs(x)) + numInteg([](double t) { return t == 0.0 ? 1.0 : (std::exp(t) - 1.0) / t; }, 0.0, x));
+        });
+    regMath("Li", { 1 }, [numInteg](const std::vector<Value>& args) -> Value {
+        double x = args[0].asDouble();
+        if (x <= 0.0 || x == 1.0) throw std::runtime_error("Math Error: Li(x) is defined for x > 0 and x != 1.");
+        double lnx = std::log(x);
+        double gamma = 0.577215664901532860606;
+        return Value(gamma + std::log(std::abs(lnx)) + numInteg([](double t) { return t == 0.0 ? 1.0 : (std::exp(t) - 1.0) / t; }, 0.0, lnx));
         });
 
     regMath("abs", { 1 }, [](const std::vector<Value>& args) -> Value {

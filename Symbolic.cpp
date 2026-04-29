@@ -1576,6 +1576,20 @@ namespace jc {
                     SymExpr cos_u(std::make_shared<SymFunc>("cos", std::vector<std::shared_ptr<SymNode>>{u.ptr}));
                     return (SymExpr(BigInt(1)) / (cos_u * cos_u)) * du; // sec^2(u)
                 }
+                if (name == "cot") {
+                    SymExpr sin_u(std::make_shared<SymFunc>("sin", std::vector<std::shared_ptr<SymNode>>{u.ptr}));
+                    return -(SymExpr(BigInt(1)) / (sin_u * sin_u)) * du; // -csc^2(u)
+                }
+                if (name == "sec") {
+                    SymExpr cos_u(std::make_shared<SymFunc>("cos", std::vector<std::shared_ptr<SymNode>>{u.ptr}));
+                    SymExpr sin_u(std::make_shared<SymFunc>("sin", std::vector<std::shared_ptr<SymNode>>{u.ptr}));
+                    return (sin_u / (cos_u * cos_u)) * du; // sec(u)tan(u)
+                }
+                if (name == "csc") {
+                    SymExpr cos_u(std::make_shared<SymFunc>("cos", std::vector<std::shared_ptr<SymNode>>{u.ptr}));
+                    SymExpr sin_u(std::make_shared<SymFunc>("sin", std::vector<std::shared_ptr<SymNode>>{u.ptr}));
+                    return -(cos_u / (sin_u * sin_u)) * du; // -csc(u)cot(u)
+                }
                 if (name == "exp") {
                     return expr * du; // exp(u)' = exp(u) * u'
                 }
@@ -1659,6 +1673,10 @@ namespace jc {
                 if (name == "Ei") {
                     SymExpr exp_u(std::make_shared<SymFunc>("exp", std::vector<std::shared_ptr<SymNode>>{u.ptr}));
                     return (exp_u / u) * du;
+                }
+                if (name == "Li") {
+                    SymExpr log_u(std::make_shared<SymFunc>("log", std::vector<std::shared_ptr<SymNode>>{u.ptr}));
+                    return du / log_u;
                 }
             }
             // =========================================================
@@ -2061,12 +2079,38 @@ namespace jc {
                             if (c == Fraction(BigInt(5), BigInt(6)) || c == Fraction(BigInt(11), BigInt(6))) return SymExpr(Fraction(BigInt(-1), BigInt(3))) * (SymExpr(BigInt(3)) ^ SymExpr(Fraction(BigInt(1), BigInt(2))));
                             if (c == Fraction(BigInt(1), BigInt(3)) || c == Fraction(BigInt(4), BigInt(3))) return SymExpr(BigInt(3)) ^ SymExpr(Fraction(BigInt(1), BigInt(2)));
                             if (c == Fraction(BigInt(2), BigInt(3)) || c == Fraction(BigInt(5), BigInt(3))) return -(SymExpr(BigInt(3)) ^ SymExpr(Fraction(BigInt(1), BigInt(2))));
+                        } else if (func->name == "cot") {
+                            if (c == Fraction(BigInt(1), BigInt(2)) || c == Fraction(BigInt(3), BigInt(2))) return SymExpr(BigInt(0));
+                            if (c == Fraction(BigInt(1), BigInt(4)) || c == Fraction(BigInt(5), BigInt(4))) return SymExpr(BigInt(1));
+                            if (c == Fraction(BigInt(3), BigInt(4)) || c == Fraction(BigInt(7), BigInt(4))) return SymExpr(BigInt(-1));
+                            if (c == Fraction(BigInt(1), BigInt(6)) || c == Fraction(BigInt(7), BigInt(6))) return SymExpr(BigInt(3)) ^ SymExpr(Fraction(BigInt(1), BigInt(2)));
+                            if (c == Fraction(BigInt(5), BigInt(6)) || c == Fraction(BigInt(11), BigInt(6))) return -(SymExpr(BigInt(3)) ^ SymExpr(Fraction(BigInt(1), BigInt(2))));
+                            if (c == Fraction(BigInt(1), BigInt(3)) || c == Fraction(BigInt(4), BigInt(3))) return SymExpr(Fraction(BigInt(1), BigInt(3))) * (SymExpr(BigInt(3)) ^ SymExpr(Fraction(BigInt(1), BigInt(2))));
+                            if (c == Fraction(BigInt(2), BigInt(3)) || c == Fraction(BigInt(5), BigInt(3))) return SymExpr(Fraction(BigInt(-1), BigInt(3))) * (SymExpr(BigInt(3)) ^ SymExpr(Fraction(BigInt(1), BigInt(2))));
+                        } else if (func->name == "sec") {
+                            if (c == Fraction(0)) return SymExpr(BigInt(1));
+                            if (c == Fraction(1)) return SymExpr(BigInt(-1));
+                            if (c == Fraction(BigInt(1), BigInt(3)) || c == Fraction(BigInt(5), BigInt(3))) return SymExpr(BigInt(2));
+                            if (c == Fraction(BigInt(2), BigInt(3)) || c == Fraction(BigInt(4), BigInt(3))) return SymExpr(BigInt(-2));
+                            if (c == Fraction(BigInt(1), BigInt(4)) || c == Fraction(BigInt(7), BigInt(4))) return SymExpr(BigInt(2)) ^ SymExpr(Fraction(BigInt(1), BigInt(2)));
+                            if (c == Fraction(BigInt(3), BigInt(4)) || c == Fraction(BigInt(5), BigInt(4))) return -(SymExpr(BigInt(2)) ^ SymExpr(Fraction(BigInt(1), BigInt(2))));
+                            if (c == Fraction(BigInt(1), BigInt(6)) || c == Fraction(BigInt(11), BigInt(6))) return SymExpr(Fraction(BigInt(2), BigInt(3))) * (SymExpr(BigInt(3)) ^ SymExpr(Fraction(BigInt(1), BigInt(2))));
+                            if (c == Fraction(BigInt(5), BigInt(6)) || c == Fraction(BigInt(7), BigInt(6))) return SymExpr(Fraction(BigInt(-2), BigInt(3))) * (SymExpr(BigInt(3)) ^ SymExpr(Fraction(BigInt(1), BigInt(2))));
+                        } else if (func->name == "csc") {
+                            if (c == Fraction(BigInt(1), BigInt(2))) return SymExpr(BigInt(1));
+                            if (c == Fraction(BigInt(3), BigInt(2))) return SymExpr(BigInt(-1));
+                            if (c == Fraction(BigInt(1), BigInt(6)) || c == Fraction(BigInt(5), BigInt(6))) return SymExpr(BigInt(2));
+                            if (c == Fraction(BigInt(7), BigInt(6)) || c == Fraction(BigInt(11), BigInt(6))) return SymExpr(BigInt(-2));
+                            if (c == Fraction(BigInt(1), BigInt(4)) || c == Fraction(BigInt(3), BigInt(4))) return SymExpr(BigInt(2)) ^ SymExpr(Fraction(BigInt(1), BigInt(2)));
+                            if (c == Fraction(BigInt(5), BigInt(4)) || c == Fraction(BigInt(7), BigInt(4))) return -(SymExpr(BigInt(2)) ^ SymExpr(Fraction(BigInt(1), BigInt(2))));
+                            if (c == Fraction(BigInt(1), BigInt(3)) || c == Fraction(BigInt(2), BigInt(3))) return SymExpr(Fraction(BigInt(2), BigInt(3))) * (SymExpr(BigInt(3)) ^ SymExpr(Fraction(BigInt(1), BigInt(2))));
+                            if (c == Fraction(BigInt(4), BigInt(3)) || c == Fraction(BigInt(5), BigInt(3))) return SymExpr(Fraction(BigInt(-2), BigInt(3))) * (SymExpr(BigInt(3)) ^ SymExpr(Fraction(BigInt(1), BigInt(2))));
                         }
                     }
                 }
                 
                 if (inner.isZero()) {
-                    if (func->name == "erf" || func->name == "fresnel_s" || func->name == "fresnel_c" || func->name == "Si") return SymExpr(BigInt(0));
+                    if (func->name == "erf" || func->name == "fresnel_s" || func->name == "fresnel_c" || func->name == "Si" || func->name == "Li") return SymExpr(BigInt(0));
                 }
                 if (func->name == "sqrt") {
                     return inner ^ SymExpr(Fraction(BigInt(1), BigInt(2)));
