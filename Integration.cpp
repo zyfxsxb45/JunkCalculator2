@@ -493,7 +493,7 @@ namespace jc {
                         } else {
                             // 求解 Risch 微分方程 B_i' + i u' B_i = A_i
                             SymExpr A_i = backSubstitute(coeffs[i]);
-                            SymExpr V_i = simplifyCore(SymExpr(BigInt(i)) * u_deriv);
+                            SymExpr V_i = backSubstitute(simplifyCore(SymExpr(BigInt(i)) * u_deriv));
                             
                             SymExpr B_i(BigInt(0));
                             SymExpr currentA = A_i;
@@ -509,7 +509,8 @@ namespace jc {
                                 
                                 if (cA.empty() || cV.empty()) {
                                     SymExpr B_term = simplifyCore(currentA / V_i);
-                                    if (simplifyCore(diff(B_term, var)).isZero()) {
+                                    // 严格检查 B_term 是否为常数（不包含积分变量）
+                                    if (!containsVar(B_term.ptr, var)) {
                                         B_i = B_i + B_term;
                                         rde_success = true;
                                     }
@@ -1256,6 +1257,14 @@ namespace jc {
 
                             SymExpr int_v_du = doInteg(v_du, depth + 1);
                             return {true, coeff * simplifyCore(u * v - int_v_du)};
+                        } catch (const std::runtime_error& e) {
+                            std::string msg = e.what();
+                            // 如果是深度超限或 Risch 明确宣告失败，则放弃当前分部积分分支
+                            if (msg.find("Integration depth limit exceeded") != std::string::npos ||
+                                msg.find("Risch Field") != std::string::npos) {
+                                return {false, SymExpr(BigInt(0))};
+                            }
+                            return {false, SymExpr(BigInt(0))};
                         } catch (...) {
                             return {false, SymExpr(BigInt(0))};
                         }
