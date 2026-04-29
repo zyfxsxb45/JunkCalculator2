@@ -195,7 +195,7 @@ namespace jc {
         std::string name;
         std::vector<std::shared_ptr<SymNode>> args;
         SymFunc(std::string n, std::vector<std::shared_ptr<SymNode>> a)
-            : name(std::move(n)), args(std::move(a)) {
+            : name(n == "ln" ? "log" : std::move(n)), args(std::move(a)) {
         }
         SymType getType() const override { return SymType::FUNC; }
         std::string toString() const override;

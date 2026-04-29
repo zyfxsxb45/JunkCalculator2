@@ -1250,7 +1250,7 @@ namespace jc {
                 }
             }
 
-            if ((func->name == "log" || func->name == "ln") && expArgs.size() == 1) {
+            if (func->name == "log" && expArgs.size() == 1) {
                 SymExpr inner(expArgs[0]);
 
                 if (inner.ptr->getType() == SymType::MUL) {
@@ -1543,10 +1543,10 @@ namespace jc {
                 return v * (u ^ (v - SymExpr(BigInt(1)))) * du;
             }
 
-            // 一般情况 (广义指数法则): u^v = e^(v * ln(u))
-            // (u^v)' = u^v * (v' * ln(u) + v * u' / u)
-            SymExpr ln_u(std::make_shared<SymFunc>("log", std::vector<std::shared_ptr<SymNode>>{u.ptr}));
-            return (u ^ v) * (dv * ln_u + v * du / u);
+            // 一般情况 (广义指数法则): u^v = e^(v * log(u))
+            // (u^v)' = u^v * (v' * log(u) + v * u' / u)
+            SymExpr log_u(std::make_shared<SymFunc>("log", std::vector<std::shared_ptr<SymNode>>{u.ptr}));
+            return (u ^ v) * (dv * log_u + v * du / u);
         }
 
         case SymType::FUNC: {
@@ -1593,8 +1593,8 @@ namespace jc {
                 if (name == "exp") {
                     return expr * du; // exp(u)' = exp(u) * u'
                 }
-                if (name == "log" || name == "ln") {
-                    return du / u; // ln(u)' = u' / u
+                if (name == "log") {
+                    return du / u; // log(u)' = u' / u
                 }
                 if (name == "sqrt") {
                     return du / (SymExpr(BigInt(2)) * expr); // sqrt(u)' = u' / (2*sqrt(u))
@@ -1691,13 +1691,13 @@ namespace jc {
                 if (du.isZero() && dv.isZero()) return SymExpr(BigInt(0));
 
                 if (name == "pow") {
-                    // POW 作为函数：(u^v)' = u^v * (v'*ln(u) + v*u'/u)
+                    // POW 作为函数：(u^v)' = u^v * (v'*log(u) + v*u'/u)
                     if (dv.isZero()) {
                         SymExpr power_down(std::make_shared<SymFunc>("pow", std::vector<std::shared_ptr<SymNode>>{u.ptr, (v - SymExpr(1)).ptr}));
                         return v * power_down * du;
                     }
-                    SymExpr ln_u(std::make_shared<SymFunc>("log", std::vector<std::shared_ptr<SymNode>>{u.ptr}));
-                    return expr * (dv * ln_u + v * du / u);
+                    SymExpr log_u(std::make_shared<SymFunc>("log", std::vector<std::shared_ptr<SymNode>>{u.ptr}));
+                    return expr * (dv * log_u + v * du / u);
                 }
                 if (name == "root") {
                     // root(u, v) 实际上是 u^(1/v)。将其转换到底层幂节点然后递归求导即可！
@@ -1705,13 +1705,13 @@ namespace jc {
                     return diff(p, var);
                 }
                 if (name == "log") {
-                    // 指定底数的对数 log(u, v) = ln(v) / ln(u) (u 为底，v 为真数)
+                    // 指定底数的对数 log(u, v) = log(v) / log(u) (u 为底，v 为真数)
                     // 运用商的导数法则: (f/g)' = (f'g - fg')/g^2
-                    SymExpr ln_v(std::make_shared<SymFunc>("log", std::vector<std::shared_ptr<SymNode>>{v.ptr}));
-                    SymExpr ln_u(std::make_shared<SymFunc>("log", std::vector<std::shared_ptr<SymNode>>{u.ptr}));
+                    SymExpr log_v(std::make_shared<SymFunc>("log", std::vector<std::shared_ptr<SymNode>>{v.ptr}));
+                    SymExpr log_u(std::make_shared<SymFunc>("log", std::vector<std::shared_ptr<SymNode>>{u.ptr}));
                     SymExpr df = dv / v;
                     SymExpr dg = du / u;
-                    return (df * ln_u - ln_v * dg) / (ln_u * ln_u);
+                    return (df * log_u - log_v * dg) / (log_u * log_u);
                 }
                 if (name == "atan2") {
                     // atan2(y, x) => atan2(u, v)
@@ -1754,7 +1754,7 @@ namespace jc {
                 // 嗅探：纯 log(x)
                 if (term.ptr->getType() == SymType::FUNC) {
                     auto fn = std::static_pointer_cast<SymFunc>(term.ptr);
-                    if ((fn->name == "log" || fn->name == "ln") && fn->args.size() == 1) {
+                    if (fn->name == "log" && fn->args.size() == 1) {
                         logNode = fn;
                     }
                 }
@@ -1766,7 +1766,7 @@ namespace jc {
                     for (auto& f : mul->args) {
                         if (!foundLog && f->getType() == SymType::FUNC) {
                             auto fn = std::static_pointer_cast<SymFunc>(f);
-                            if ((fn->name == "log" || fn->name == "ln") && fn->args.size() == 1) {
+                            if (fn->name == "log" && fn->args.size() == 1) {
                                 foundLog = fn;
                                 continue;
                             }
@@ -1968,7 +1968,7 @@ namespace jc {
             if (nArgs.size() == 1) {
                 SymExpr inner(nArgs[0]);
                 
-                if (func->name == "log" || func->name == "ln") {
+                if (func->name == "log") {
                     if (inner.isOne()) return SymExpr(BigInt(0));
                     if (inner.ptr->getType() == SymType::VAR && std::static_pointer_cast<SymVar>(inner.ptr)->name == "E") {
                         return SymExpr(BigInt(1));
@@ -1989,7 +1989,7 @@ namespace jc {
                     if (inner.isZero()) return SymExpr(BigInt(1));
                     if (inner.ptr->getType() == SymType::FUNC) {
                         auto innerFn = std::static_pointer_cast<SymFunc>(inner.ptr);
-                        if (innerFn->name == "log" || innerFn->name == "ln")
+                        if (innerFn->name == "log")
                             return SymExpr(innerFn->args[0]);
                     }
                     if (inner.ptr->getType() == SymType::MUL) {
@@ -1999,7 +1999,7 @@ namespace jc {
                         for (auto& arg : mul->args) {
                             if (arg->getType() == SymType::FUNC) {
                                 auto fn = std::static_pointer_cast<SymFunc>(arg);
-                                if ((fn->name == "log" || fn->name == "ln") && fn->args.size() == 1) {
+                                if (fn->name == "log" && fn->args.size() == 1) {
                                     logArg = fn->args[0];
                                     continue;
                                 }

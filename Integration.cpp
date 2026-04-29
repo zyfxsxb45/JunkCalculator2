@@ -138,14 +138,45 @@ namespace jc {
 
         // 将表达式重写为微分域变量的代数式
         SymExpr rewrite(const SymExpr& expr) const {
-            SymExpr res = expr;
+            std::function<SymExpr(const SymExpr&)> preprocessPow = [&](const SymExpr& e) -> SymExpr {
+                if (!e.ptr) return e;
+                switch (e.ptr->getType()) {
+                    case SymType::ADD: {
+                        SymExpr r(BigInt(0));
+                        for (auto& arg : std::static_pointer_cast<SymAdd>(e.ptr)->args) r = r + preprocessPow(SymExpr(arg));
+                        return r;
+                    }
+                    case SymType::MUL: {
+                        SymExpr r(BigInt(1));
+                        for (auto& arg : std::static_pointer_cast<SymMul>(e.ptr)->args) r = r * preprocessPow(SymExpr(arg));
+                        return r;
+                    }
+                    case SymType::POW: {
+                        auto p = std::static_pointer_cast<SymPow>(e.ptr);
+                        SymExpr base = preprocessPow(SymExpr(p->base));
+                        SymExpr exp = preprocessPow(SymExpr(p->exp));
+                        if (containsVar(exp.ptr, x_var)) {
+                            SymExpr log_base(std::make_shared<SymFunc>("log", std::vector<std::shared_ptr<SymNode>>{base.ptr}));
+                            return SymExpr(std::make_shared<SymFunc>("exp", std::vector<std::shared_ptr<SymNode>>{(exp * log_base).ptr}));
+                        }
+                        return base ^ exp;
+                    }
+                    case SymType::FUNC: {
+                        auto f = std::static_pointer_cast<SymFunc>(e.ptr);
+                        std::vector<std::shared_ptr<SymNode>> nArgs;
+                        for (auto& arg : f->args) nArgs.push_back(preprocessPow(SymExpr(arg)).ptr);
+                        return SymExpr(std::make_shared<SymFunc>(f->name, std::move(nArgs)));
+                    }
+                    default: return e;
+                }
+            };
+            SymExpr res = preprocessPow(expr);
+            
             // 从塔顶向下替换，确保嵌套扩张被正确处理 (如 exp(exp(x)))
             for (auto it = tower.rbegin(); it != tower.rend(); ++it) {
                 if (it->type == RischExtType::LOG) {
                     SymExpr targetLog(std::make_shared<SymFunc>("log", std::vector<std::shared_ptr<SymNode>>{it->arg.ptr}));
                     res = applyRule(res, targetLog, it->t_var);
-                    SymExpr targetLn(std::make_shared<SymFunc>("ln", std::vector<std::shared_ptr<SymNode>>{it->arg.ptr}));
-                    res = applyRule(res, targetLn, it->t_var);
                 } else if (it->type == RischExtType::EXP) {
                     SymExpr targetExp(std::make_shared<SymFunc>("exp", std::vector<std::shared_ptr<SymNode>>{it->arg.ptr}));
                     res = applyRule(res, targetExp, it->t_var);
@@ -168,22 +199,28 @@ namespace jc {
                 break;
             case SymType::POW: {
                 auto p = std::static_pointer_cast<SymPow>(expr.ptr);
-                buildRischFieldRec(SymExpr(p->base), x, field, counter);
-                buildRischFieldRec(SymExpr(p->exp), x, field, counter);
+                if (containsVar(p->exp, x)) {
+                    SymExpr log_base(std::make_shared<SymFunc>("log", std::vector<std::shared_ptr<SymNode>>{p->base}));
+                    SymExpr exp_node(std::make_shared<SymFunc>("exp", std::vector<std::shared_ptr<SymNode>>{(SymExpr(p->exp) * log_base).ptr}));
+                    buildRischFieldRec(exp_node, x, field, counter);
+                } else {
+                    buildRischFieldRec(SymExpr(p->base), x, field, counter);
+                    buildRischFieldRec(SymExpr(p->exp), x, field, counter);
+                }
                 break;
             }
             case SymType::FUNC: {
                 auto f = std::static_pointer_cast<SymFunc>(expr.ptr);
                 for (auto& arg : f->args) buildRischFieldRec(SymExpr(arg), x, field, counter);
                 
-                if (f->name == "log" || f->name == "ln" || f->name == "exp") {
+                if (f->name == "log" || f->name == "exp") {
                     SymExpr arg(f->args[0]);
                     if (!containsVar(arg.ptr, x)) break; // 常数不构成扩张
                     
                     // 检查是否已在塔中
                     bool exists = false;
                     for (const auto& ext : field.tower) {
-                        if ((ext.type == RischExtType::LOG && (f->name == "log" || f->name == "ln")) ||
+                        if ((ext.type == RischExtType::LOG && f->name == "log") ||
                             (ext.type == RischExtType::EXP && f->name == "exp")) {
                             if (ext.arg.toString() == arg.toString()) {
                                 exists = true;
@@ -1126,7 +1163,7 @@ namespace jc {
                 auto getPriority = [&](const SymExpr& f) -> int {
                     if (f.ptr->getType() == SymType::FUNC) {
                         auto fn = std::static_pointer_cast<SymFunc>(f.ptr);
-                        if (fn->name == "log" || fn->name == "ln" || fn->name == "asin" || fn->name == "acos" || fn->name == "atan") return 1;
+                        if (fn->name == "log" || fn->name == "asin" || fn->name == "acos" || fn->name == "atan") return 1;
                     }
                     if (f.ptr->getType() == SymType::POW) {
                         auto p = std::static_pointer_cast<SymPow>(f.ptr);

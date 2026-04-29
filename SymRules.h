@@ -35,7 +35,6 @@ namespace jc {
             
             // 对数与反三角函数 (可由分部积分推导，此处作为查表加速)
             { func("log", x), x * func("log", x) - x },
-            { func("ln", x), x * func("ln", x) - x },
             { func("asin", x), x * func("asin", x) + ((SymExpr(1) - (x ^ SymExpr(2))) ^ SymExpr(Fraction(1, 2))) },
             { func("acos", x), x * func("acos", x) - ((SymExpr(1) - (x ^ SymExpr(2))) ^ SymExpr(Fraction(1, 2))) },
             { func("atan", x), x * func("atan", x) - (SymExpr(1) / SymExpr(2)) * func("log", SymExpr(1) + (x ^ SymExpr(2))) },
@@ -88,8 +87,7 @@ namespace jc {
             { func("sin", x) / x, func("Si", x) },
             { func("cos", x) / x, func("Ci", x) },
             { func("exp", x) / x, func("Ei", x) },
-            { SymExpr(1) / func("log", x), func("Li", x) },
-            { SymExpr(1) / func("ln", x), func("Li", x) }
+            { SymExpr(1) / func("log", x), func("Li", x) }
         };
     }
 
