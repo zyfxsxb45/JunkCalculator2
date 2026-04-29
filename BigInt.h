@@ -803,7 +803,7 @@ namespace jc {
                 }
             }
 
-            BigInt candidate = count > 0 ? BigInt(lastP) + BigInt(2) : BigInt(3);
+            BigInt candidate = count > 0 ? (lastP == 2 ? BigInt(3) : BigInt(lastP) + BigInt(2)) : BigInt(3);
             if (count == 0) {
                 if (n == 1) return BigInt(2);
                 count = 1;
@@ -868,7 +868,7 @@ namespace jc {
                 }
             }
 
-            BigInt candidate = count > 0 ? BigInt(lastP) + BigInt(2) : BigInt(2);
+            BigInt candidate = count > 0 ? (lastP == 2 ? BigInt(3) : BigInt(lastP) + BigInt(2)) : BigInt(2);
             if (count == 0) {
                 if (nBI >= BigInt(2)) { count = 1; candidate = BigInt(3); }
             }
@@ -945,7 +945,7 @@ namespace jc {
             }
 
             if (n > BigInt(1)) {
-                BigInt i = lastP > 0 ? BigInt(lastP) + BigInt(2) : BigInt(3);
+                BigInt i = lastP > 0 ? (lastP == 2 ? BigInt(3) : BigInt(lastP) + BigInt(2)) : BigInt(3);
                 if (lastP == 0) {
                     int count = 0;
                     while (true) {

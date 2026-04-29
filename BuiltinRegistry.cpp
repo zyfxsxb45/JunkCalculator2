@@ -1051,7 +1051,7 @@ void BuiltinRegistry::registerSystemUtils() {
     reg("buildIndex", { 0 }, [](const std::vector<Value>&) -> Value { BigInt::buildFileIndex(); return Value::none(); });
     builtins["loadPrimes"] = builtins["buildIndex"]; builtinArity["loadPrimes"] = builtinArity["buildIndex"];
     reg("mountPrimes", { 1 }, [](const std::vector<Value>& args) -> Value { if (!std::holds_alternative<std::string>(args[0].data)) throw std::runtime_error("Runtime Error: mountPrimes(\"path\") expects a string."); BigInt::setPrimeFilePath(std::get<std::string>(args[0].data)); return Value::none(); });
-    reg("sysinfo", { 0 }, [](const std::vector<Value>&) -> Value { std::cout << "--- Junk Calculator System Info ---\n" << "Prime DB: " << BigInt::getPrimeFilePath() << "\n" << "Indexed:  " << BigInt::totalPrimesInFile << " primes\n"; if (BigInt::totalPrimesInFile > 0) std::cout << "Max:      " << BigInt::largestPrimeInFile << "\n"; std::cout << "-----------------------------------" << std::endl; return Value::none(); });
+    reg("sysinfo", { 0 }, [](const std::vector<Value>&) -> Value { std::cout << "--- Junk Calculator System Info ---\n" << "Prime DB: " << (BigInt::getPrimeFilePath().empty() ? "(Dynamic Computation)" : BigInt::getPrimeFilePath()) << "\n" << "Indexed:  " << BigInt::totalPrimesInFile << " primes\n"; if (BigInt::totalPrimesInFile > 0) std::cout << "Max:      " << BigInt::largestPrimeInFile << "\n"; std::cout << "-----------------------------------" << std::endl; return Value::none(); });
     reg("gc", { 0, 1 }, [](const std::vector<Value>& args) -> Value {
         if (!VM::activeVM) return Value(0.0);
 
