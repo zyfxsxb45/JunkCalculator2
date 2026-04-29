@@ -565,9 +565,19 @@ namespace jc {
             for (const auto& rule : rules) {
                 std::map<std::string, SymExpr> captures;
                 if (matchAST(varPart.ptr, rule.first.ptr, captures)) {
-                    integratedPart = substituteCaptures(rule.second, captures);
-                    matched = true;
-                    break;
+                    // 积分规则中的 _n, _a 必须是相对于积分变量的常数
+                    bool validMatch = true;
+                    for (const auto& cap : captures) {
+                        if ((cap.first == "_n" || cap.first == "_a") && containsVar(cap.second.ptr, var)) {
+                            validMatch = false;
+                            break;
+                        }
+                    }
+                    if (validMatch) {
+                        integratedPart = substituteCaptures(rule.second, captures);
+                        matched = true;
+                        break;
+                    }
                 }
             }
 
@@ -593,12 +603,21 @@ namespace jc {
                     }
                 } else if (node->getType() == SymType::POW) {
                     auto powNode = std::static_pointer_cast<SymPow>(node);
-                    SymExpr u(powNode->base);
-                    SymExpr du = simplifyCore(diff(u, var));
-                    if (!du.isZero() && !containsVar(du.ptr, var)) {
-                        if (u.ptr->getType() != SymType::VAR) {
-                            out_u = u;
-                            out_a = du;
+                    SymExpr u_base(powNode->base);
+                    SymExpr du_base = simplifyCore(diff(u_base, var));
+                    if (!du_base.isZero() && !containsVar(du_base.ptr, var)) {
+                        if (u_base.ptr->getType() != SymType::VAR) {
+                            out_u = u_base;
+                            out_a = du_base;
+                            return true;
+                        }
+                    }
+                    SymExpr u_exp(powNode->exp);
+                    SymExpr du_exp = simplifyCore(diff(u_exp, var));
+                    if (!du_exp.isZero() && !containsVar(du_exp.ptr, var)) {
+                        if (u_exp.ptr->getType() != SymType::VAR) {
+                            out_u = u_exp;
+                            out_a = du_exp;
                             return true;
                         }
                     }

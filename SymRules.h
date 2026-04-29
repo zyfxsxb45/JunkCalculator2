@@ -14,6 +14,7 @@ namespace jc {
     inline std::vector<std::pair<SymExpr, SymExpr>> getIntegRules(const std::string& var) {
         SymExpr x = SymExpr::makeVar(var);
         SymExpr _n = SymExpr::makeVar("_n");
+        SymExpr _a = SymExpr::makeVar("_a");
 
         auto func = [](const std::string& name, const SymExpr& arg) {
             return SymExpr(std::make_shared<SymFunc>(name, std::vector<std::shared_ptr<SymNode>>{arg.ptr}));
@@ -27,6 +28,7 @@ namespace jc {
             
             // 指数函数
             { func("exp", x), func("exp", x) },
+            { _a ^ x, (_a ^ x) / func("log", _a) },
             
             // 绝对值与符号函数
             { func("sgn", x), func("abs", x) },
