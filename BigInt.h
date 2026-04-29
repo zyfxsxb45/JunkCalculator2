@@ -234,30 +234,13 @@ namespace jc {
 
         inline static std::vector<PrimeIndex> primeFileIndex;
         inline static bool fileIndexed = false;
-        inline static bool primeStatusPrinted = false;
         inline static int64_t totalPrimesInFile = 0;
         inline static int64_t largestPrimeInFile = 0;
         static constexpr int64_t BLOCK_SIZE = 10000;
 
         inline static std::string customPrimePath = "";
         static std::string getPrimeFilePath() {
-            if (!customPrimePath.empty()) return customPrimePath;
-            // 如果没有自定义，走老规矩
-            namespace fs = std::filesystem;
-            fs::path dir = fs::current_path() / "data";
-            return (dir / "Prime.txt").string();
-        }
-        static void printPrimeStatusOnce() {
-            if (primeStatusPrinted) return;
-            primeStatusPrinted = true;
-            if (fileIndexed) return;
-            std::string filepath = getPrimeFilePath();
-            std::ifstream file(filepath, std::ios::binary);
-            if (file.is_open()) {
-                std::cout << "[System] Prime table found at " << filepath << ". Using stream reading." << std::endl;
-            } else {
-                std::cout << "[System] Notice: Prime table not found at " << filepath << ". Using dynamic computation." << std::endl;
-            }
+            return customPrimePath;
         }
 
         // --- 外部更换挂载路径接口 ---
@@ -273,19 +256,24 @@ namespace jc {
             // 路径变了，以前的旧锚点、旧索引全部作废，必须清空！
             primeFileIndex.clear();
             fileIndexed = false;
-            primeStatusPrinted = false;
             totalPrimesInFile = 0;
             largestPrimeInFile = 0;
 
-            std::cout << "[System] Prime engine remounted to: " << getPrimeFilePath() << std::endl;
+            if (customPrimePath.empty()) {
+                std::cout << "[System] Prime engine remounted to dynamic computation." << std::endl;
+            } else {
+                std::cout << "[System] Prime engine remounted to: " << getPrimeFilePath() << std::endl;
+                buildFileIndex();
+            }
         }
 
         // --- (可选加速) 极速扫描建立文件索引 (使用堆内存 buffer 防栈溢出) ---
         static void buildFileIndex() {
             if (fileIndexed) return;
-            primeStatusPrinted = true;
 
             std::string filepath = getPrimeFilePath();
+            if (filepath.empty()) return;
+
             std::ifstream file(filepath, std::ios::binary);
             if (!file.is_open()) {
                 fileIndexed = true;
@@ -662,8 +650,6 @@ namespace jc {
             if (n == BigInt(2) || n == BigInt(3) || n == BigInt(5) || n == BigInt(7)) return true;
             if (n.data[0] % 2 == 0) return false;
 
-            printPrimeStatusOnce();
-
             // =========================================================
             // [极速外存探针]
             // =========================================================
@@ -720,8 +706,6 @@ namespace jc {
             BigInt n = this->abs();
             if (n < BigInt(2)) return BigInt(2);
 
-            printPrimeStatusOnce();
-
             // =========================================================
             // [极速外存探针]
             // =========================================================
@@ -767,7 +751,6 @@ namespace jc {
         // --- 极速单向流读取版 (带堆内存防栈溢出缓冲) ---
         static BigInt nthPrime(int64_t n) {
             if (n < 1) throw std::runtime_error("Math Error: nthPrime requires n >= 1.");
-            printPrimeStatusOnce();
             // 索引加速空降
             if (fileIndexed && n <= totalPrimesInFile) {
                 int64_t p = getPrimeAt(n - 1);
@@ -775,11 +758,13 @@ namespace jc {
                 // ★ 空降失败，不直接报错，降级到流式扫描继续尝试
             }
 
-            std::ifstream file(getPrimeFilePath(), std::ios::binary);
             int64_t count = 0;
             int64_t lastP = 0;
+            std::string filepath = getPrimeFilePath();
 
-            if (file.is_open()) {
+            if (!filepath.empty()) {
+                std::ifstream file(filepath, std::ios::binary);
+                if (file.is_open()) {
                 constexpr size_t BUFFER_SIZE = 65536;
                 std::vector<char> buffer(BUFFER_SIZE); // 使用堆内存防溢出
                 int64_t currentPrime = 0;
@@ -809,12 +794,13 @@ namespace jc {
                         }
                     }
                 }
-                if (!done && readingNumber) {
-                    count++;
-                    lastP = currentPrime;
-                    if (count == n) { file.close(); return BigInt(lastP); }
+                    if (!done && readingNumber) {
+                        count++;
+                        lastP = currentPrime;
+                        if (count == n) { file.close(); return BigInt(lastP); }
+                    }
+                    file.close();
                 }
-                file.close();
             }
 
             BigInt candidate = count > 0 ? BigInt(lastP) + BigInt(2) : BigInt(3);
@@ -834,8 +820,6 @@ namespace jc {
             BigInt nBI = this->abs();
             if (nBI < BigInt(2)) return 0;
 
-            printPrimeStatusOnce();
-
             int64_t count = 0;
             int64_t lastP = 0;
 
@@ -845,8 +829,10 @@ namespace jc {
             catch (...) { /* 超出 int64 范围 */ }
 
             if (n >= 2) {
-                std::ifstream file(getPrimeFilePath(), std::ios::binary);
-                if (file.is_open()) {
+                std::string filepath = getPrimeFilePath();
+                if (!filepath.empty()) {
+                    std::ifstream file(filepath, std::ios::binary);
+                    if (file.is_open()) {
                     constexpr size_t BUFFER_SIZE = 65536;
                     std::vector<char> buffer(BUFFER_SIZE);
                     int64_t currentPrime = 0;
@@ -872,12 +858,13 @@ namespace jc {
                             }
                         }
                     }
-                    if (!done && readingNumber && currentPrime <= n) {
-                        count++;
-                        lastP = currentPrime;
+                        if (!done && readingNumber && currentPrime <= n) {
+                            count++;
+                            lastP = currentPrime;
+                        }
+                        file.close();
+                        if (done) return count;
                     }
-                    file.close();
-                    if (done) return count;
                 }
             }
 
@@ -896,13 +883,13 @@ namespace jc {
             BigInt n = this->abs();
             if (n <= BigInt(1)) throw std::runtime_error("Math Error: Factorization requires n > 1.");
 
-            printPrimeStatusOnce();
-
             std::vector<std::pair<BigInt, int>> factors;
             int64_t lastP = 0;
 
-            std::ifstream file(getPrimeFilePath(), std::ios::binary);
-            if (file.is_open()) {
+            std::string filepath = getPrimeFilePath();
+            if (!filepath.empty()) {
+                std::ifstream file(filepath, std::ios::binary);
+                if (file.is_open()) {
                 constexpr size_t BUFFER_SIZE = 65536;
                 std::vector<char> buffer(BUFFER_SIZE);
                 int64_t currentPrime = 0;
@@ -939,21 +926,22 @@ namespace jc {
                         }
                     }
                 }
-                if (!done && readingNumber) {
-                    BigInt pBI(currentPrime);
-                    lastP = currentPrime;
-                    if (pBI * pBI <= n) {
-                        int count = 0;
-                        while (true) {
-                            auto [q, rem] = divmod(n, pBI);
-                            if (!rem.isZero()) break;
-                            n = q;
-                            count++;
+                    if (!done && readingNumber) {
+                        BigInt pBI(currentPrime);
+                        lastP = currentPrime;
+                        if (pBI * pBI <= n) {
+                            int count = 0;
+                            while (true) {
+                                auto [q, rem] = divmod(n, pBI);
+                                if (!rem.isZero()) break;
+                                n = q;
+                                count++;
+                            }
+                            if (count > 0) factors.push_back({ pBI, count });
                         }
-                        if (count > 0) factors.push_back({ pBI, count });
                     }
+                    file.close();
                 }
-                file.close();
             }
 
             if (n > BigInt(1)) {
