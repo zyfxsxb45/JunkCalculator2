@@ -388,7 +388,12 @@ namespace jc {
                 double magnitude = std::pow(absBase, static_cast<double>(std::abs(p)) / static_cast<double>(q));
                 if (p < 0) magnitude = 1.0 / magnitude;
                 bool negResult = (std::abs(p) % 2 != 0);
-                return Value(negResult ? -magnitude : magnitude);
+                double res = negResult ? -magnitude : magnitude;
+                double rounded = std::round(res);
+                if (Tol::isEq(res, rounded, 1e5) && std::abs(rounded) < 9e15) {
+                    return Value(BigInt(static_cast<int64_t>(rounded)));
+                }
+                return Value(res);
             }
             else {
                 return Value(Complex(base, 0.0) ^ Complex(static_cast<double>(p) / static_cast<double>(q), 0.0));
@@ -949,7 +954,12 @@ namespace jc {
                         }
                         return Value(Complex(a, 0.0) ^ Complex(b, 0.0));
                     }
-                    return std::pow(a, b);
+                    double res = std::pow(a, b);
+                    double rounded = std::round(res);
+                    if (Tol::isEq(res, rounded, 1e5) && std::abs(rounded) < 9e15) {
+                        return Value(BigInt(static_cast<int64_t>(rounded)));
+                    }
+                    return Value(res);
                 }
                 else if constexpr ((std::is_same_v<T1, Complex> && std::is_same_v<T2, Complex>) ||
                     (std::is_same_v<T1, Complex> && std::is_same_v<T2, double>) ||
@@ -1073,13 +1083,28 @@ namespace jc {
                     int64_t p = static_cast<int64_t>(b.getNum().toDouble());
                     int64_t q = static_cast<int64_t>(b.getDen().toDouble());
                     if (a < 0) return Value::negativePow(a, p, q);
-                    return Value(std::pow(a, static_cast<double>(p) / static_cast<double>(q)));
+                    double res = std::pow(a, static_cast<double>(p) / static_cast<double>(q));
+                    double rounded = std::round(res);
+                    if (Tol::isEq(res, rounded, 1e5) && std::abs(rounded) < 9e15) {
+                        return Value(BigInt(static_cast<int64_t>(rounded)));
+                    }
+                    return Value(res);
                 }
                 else if constexpr (std::is_same_v<T1, BigInt> && std::is_same_v<T2, double>) {
-                    return Value(a.toDouble()) ^ rhs;
+                    double res = std::pow(a.toDouble(), b);
+                    double rounded = std::round(res);
+                    if (Tol::isEq(res, rounded, 1e5) && std::abs(rounded) < 9e15) {
+                        return Value(BigInt(static_cast<int64_t>(rounded)));
+                    }
+                    return Value(res);
                 }
                 else if constexpr (std::is_same_v<T1, Fraction> && std::is_same_v<T2, double>) {
-                    return Value(a.toDouble()) ^ rhs;
+                    double res = std::pow(a.toDouble(), b);
+                    double rounded = std::round(res);
+                    if (Tol::isEq(res, rounded, 1e5) && std::abs(rounded) < 9e15) {
+                        return Value(BigInt(static_cast<int64_t>(rounded)));
+                    }
+                    return Value(res);
                 }
                 else if constexpr (std::is_same_v<T1, BaseNum> && std::is_same_v<T2, BaseNum>) {
                     return Value(a ^ b);

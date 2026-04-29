@@ -596,48 +596,133 @@ namespace jc {
                     if (msg.find("Math Error") != std::string::npos) throw;
                     if (msg.find("CAS Error") != std::string::npos) throw;
                 }
-            } else {
-                if (isCasNegative(baseNum->value)) {
-                    if (std::holds_alternative<Fraction>(expNum->value)) {
-                        Fraction expF = std::get<Fraction>(expNum->value);
-                        if (expF.getNum() == BigInt(1) || expF.getNum() == BigInt(-1)) {
-                            int64_t den = 0;
-                            try { den = static_cast<int64_t>(expF.getDen().toDouble()); } catch(...) {}
-                            if (den > 0) {
-                                if (den % 2 != 0) {
-                                    // 奇数次根：(-A)^(1/n) = - (A^(1/n))
-                                    CASVal posBase = casMul(baseNum->value, BigInt(-1));
-                                    return -(SymExpr(posBase) ^ b);
-                                } else if (den == 2 && expF.getNum() == BigInt(1)) {
-                                    // 平方根：(-A)^(1/2) = i * A^(1/2)
-                                    CASVal posBase = casMul(baseNum->value, BigInt(-1));
-                                    return SymExpr::makeVar("i") * (SymExpr(posBase) ^ b);
+            } else if (std::holds_alternative<Fraction>(expNum->value)) {
+                Fraction expF = std::get<Fraction>(expNum->value);
+                BigInt m = expF.getNum();
+                BigInt n_den = expF.getDen();
+                
+                auto processIntBase = [&](BigInt baseInt) -> SymExpr {
+                    if (baseInt.isZero()) return SymExpr(BigInt(0));
+                    if (baseInt == BigInt(1)) return SymExpr(BigInt(1));
+                    
+                    bool isNeg = baseInt.isNegative();
+                    if (isNeg) baseInt = baseInt.abs();
+                    
+                    auto factors = baseInt.factorize();
+                    SymExpr outside(BigInt(1));
+                    BigInt insideInt(1);
+                    
+                    for (const auto& f : factors) {
+                        BigInt p = f.first;
+                        BigInt k(f.second);
+                        BigInt totalPow = k * m;
+                        
+                        BigInt q = totalPow / n_den;
+                        BigInt r = totalPow % n_den;
+                        if (r.isNegative()) {
+                            r = r + n_den;
+                            q = q - BigInt(1);
+                        }
+                        
+                        if (!q.isZero()) {
+                            SymExpr term = SymExpr(p) ^ SymExpr(q);
+                            if (outside.isOne()) outside = term;
+                            else outside = SymExpr(std::make_shared<SymMul>(std::vector<std::shared_ptr<SymNode>>{outside.ptr, term.ptr}));
+                        }
+                        if (!r.isZero()) {
+                            BigInt pr(1);
+                            for(BigInt i(0); i < r; i = i + BigInt(1)) pr = pr * p;
+                            insideInt = insideInt * pr;
+                        }
+                    }
+                    
+                    SymExpr res = outside;
+                    if (insideInt > BigInt(1)) {
+                        SymExpr insideSym(insideInt);
+                        SymExpr fracSym(Fraction(BigInt(1), n_den));
+                        SymExpr powPart(std::make_shared<SymPow>(insideSym.ptr, fracSym.ptr));
+                        if (res.isOne()) res = powPart;
+                        else res = SymExpr(std::make_shared<SymMul>(std::vector<std::shared_ptr<SymNode>>{res.ptr, powPart.ptr}));
+                    }
+                    
+                    if (isNeg) {
+                        BigInt q_neg = m / n_den;
+                        BigInt r_neg = m % n_den;
+                        if (r_neg.isNegative()) {
+                            r_neg = r_neg + n_den;
+                            q_neg = q_neg - BigInt(1);
+                        }
+                        
+                        auto multiplyRes = [&](SymExpr factor) {
+                            if (res.isOne()) res = factor;
+                            else res = SymExpr(std::make_shared<SymMul>(std::vector<std::shared_ptr<SymNode>>{factor.ptr, res.ptr}));
+                        };
+
+                        if (!(q_neg % BigInt(2)).isZero()) {
+                            multiplyRes(SymExpr(BigInt(-1)));
+                        }
+                        
+                        if (!r_neg.isZero()) {
+                            if (!(n_den % BigInt(2)).isZero()) {
+                                if (!(r_neg % BigInt(2)).isZero()) {
+                                    multiplyRes(SymExpr(BigInt(-1)));
                                 }
+                            } else if (n_den == BigInt(2) && r_neg == BigInt(1)) {
+                                multiplyRes(SymExpr::makeVar("i"));
+                            } else {
+                                SymExpr minusOne(BigInt(-1));
+                                SymExpr fracSym(Fraction(r_neg, n_den));
+                                SymExpr powPart(std::make_shared<SymPow>(minusOne.ptr, fracSym.ptr));
+                                multiplyRes(powPart);
                             }
                         }
                     }
+                    return res;
+                };
+
+                if (std::holds_alternative<BigInt>(baseNum->value)) {
+                    return processIntBase(std::get<BigInt>(baseNum->value));
                 } else if (std::holds_alternative<Fraction>(baseNum->value)) {
-                    Fraction f = std::get<Fraction>(baseNum->value);
-                    if (f.getNum() > BigInt(0)) {
-                        if (isCasNegative(expNum->value)) {
-                            // 负分数指数: 仅当分母 > 1 时翻转 (避免 2^(-3/2) 变成 (1/2)^(3/2))
-                            if (f.getDen() > BigInt(1)) {
-                                Fraction invF(f.getDen(), f.getNum());
-                                CASVal posExp = casMul(expNum->value, BigInt(-1));
-                                return SymExpr(invF) ^ SymExpr(posExp);
-                            }
-                        } else {
-                            // 正分数指数: 如果是 1/n，翻转为 n^(-c)
-                            if (f.getNum() == BigInt(1) && f.getDen() > BigInt(1)) {
-                                Fraction invF(f.getDen(), f.getNum());
-                                CASVal negExp = casMul(expNum->value, BigInt(-1));
-                                return SymExpr(invF) ^ SymExpr(negExp);
-                            }
-                        }
+                    Fraction baseF = std::get<Fraction>(baseNum->value);
+                    SymExpr numRes = processIntBase(baseF.getNum());
+                    SymExpr denRes = processIntBase(baseF.getDen());
+                    return numRes / denRes;
+                } else if (std::holds_alternative<double>(baseNum->value)) {
+                    try {
+                        Value result = casValToValue(baseNum->value) ^ casValToValue(expNum->value);
+                        return result.asSymbolic();
+                    } catch (...) {}
+                }
+            } else if (std::holds_alternative<double>(expNum->value)) {
+                try {
+                    Value result = casValToValue(baseNum->value) ^ casValToValue(expNum->value);
+                    return result.asSymbolic();
+                } catch (...) {}
+            }
+            // 非整数指数保留符号形式（由 Value 的升维机制自动保障）
+        }
+
+        // 假分数指数拆分: x^(3/2) -> x * x^(1/2)
+        if (b.ptr->getType() == SymType::NUM) {
+            auto expNum = std::static_pointer_cast<SymNum>(b.ptr);
+            if (std::holds_alternative<Fraction>(expNum->value)) {
+                Fraction expF = std::get<Fraction>(expNum->value);
+                BigInt m = expF.getNum();
+                BigInt n_den = expF.getDen();
+                if (n_den > BigInt(1) && m.abs() > n_den) {
+                    BigInt q = m / n_den;
+                    BigInt r = m % n_den;
+                    if (r.isNegative()) {
+                        r = r + n_den;
+                        q = q - BigInt(1);
+                    }
+                    if (!q.isZero() && !r.isZero()) {
+                        SymExpr part1 = a ^ SymExpr(q);
+                        SymExpr part2 = a ^ SymExpr(Fraction(r, n_den));
+                        return SymExpr(std::make_shared<SymMul>(std::vector<std::shared_ptr<SymNode>>{part1.ptr, part2.ptr}));
                     }
                 }
             }
-            // 非整数指数保留符号形式（由 Value 的升维机制自动保障）
         }
 
         // 幂的幂法则: (a^m)^n = a^(m*n)
@@ -1864,29 +1949,130 @@ namespace jc {
 
             if (nArgs.size() == 1) {
                 SymExpr inner(nArgs[0]);
-                if ((func->name == "log" || func->name == "ln") && inner.isOne())
-                    return SymExpr(BigInt(0));
-                if (func->name == "exp" && inner.isZero())
-                    return SymExpr(BigInt(1));
-                if ((func->name == "log" || func->name == "ln") && inner.ptr->getType() == SymType::FUNC) {
-                    auto innerFn = std::static_pointer_cast<SymFunc>(inner.ptr);
-                    if (innerFn->name == "exp") return SymExpr(innerFn->args[0]);
+                
+                if (func->name == "log" || func->name == "ln") {
+                    if (inner.isOne()) return SymExpr(BigInt(0));
+                    if (inner.ptr->getType() == SymType::VAR && std::static_pointer_cast<SymVar>(inner.ptr)->name == "E") {
+                        return SymExpr(BigInt(1));
+                    }
+                    if (inner.ptr->getType() == SymType::FUNC) {
+                        auto innerFn = std::static_pointer_cast<SymFunc>(inner.ptr);
+                        if (innerFn->name == "exp") return SymExpr(innerFn->args[0]);
+                    }
+                    if (inner.ptr->getType() == SymType::POW) {
+                        auto powNode = std::static_pointer_cast<SymPow>(inner.ptr);
+                        if (powNode->base->getType() == SymType::VAR && std::static_pointer_cast<SymVar>(powNode->base)->name == "E") {
+                            return SymExpr(powNode->exp);
+                        }
+                    }
                 }
-                if (func->name == "exp" && inner.ptr->getType() == SymType::FUNC) {
-                    auto innerFn = std::static_pointer_cast<SymFunc>(inner.ptr);
-                    if (innerFn->name == "log" || innerFn->name == "ln")
-                        return SymExpr(innerFn->args[0]);
+                
+                if (func->name == "exp") {
+                    if (inner.isZero()) return SymExpr(BigInt(1));
+                    if (inner.ptr->getType() == SymType::FUNC) {
+                        auto innerFn = std::static_pointer_cast<SymFunc>(inner.ptr);
+                        if (innerFn->name == "log" || innerFn->name == "ln")
+                            return SymExpr(innerFn->args[0]);
+                    }
+                    if (inner.ptr->getType() == SymType::MUL) {
+                        auto mul = std::static_pointer_cast<SymMul>(inner.ptr);
+                        SymExpr coeff(BigInt(1));
+                        std::shared_ptr<SymNode> logArg = nullptr;
+                        for (auto& arg : mul->args) {
+                            if (arg->getType() == SymType::FUNC) {
+                                auto fn = std::static_pointer_cast<SymFunc>(arg);
+                                if ((fn->name == "log" || fn->name == "ln") && fn->args.size() == 1) {
+                                    logArg = fn->args[0];
+                                    continue;
+                                }
+                            }
+                            coeff = coeff * SymExpr(arg);
+                        }
+                        if (logArg) {
+                            return SymExpr(logArg) ^ coeff;
+                        }
+                    }
                 }
+                
+                if (func->name == "sin" || func->name == "cos" || func->name == "tan") {
+                    if (inner.isZero()) {
+                        if (func->name == "sin" || func->name == "tan") return SymExpr(BigInt(0));
+                        if (func->name == "cos") return SymExpr(BigInt(1));
+                    }
+                    
+                    auto getPiCoeff = [](const SymExpr& e) -> std::pair<bool, Fraction> {
+                        if (e.ptr->getType() == SymType::VAR && std::static_pointer_cast<SymVar>(e.ptr)->name == "PI") {
+                            return {true, Fraction(1)};
+                        }
+                        if (e.ptr->getType() == SymType::MUL) {
+                            auto mul = std::static_pointer_cast<SymMul>(e.ptr);
+                            bool hasPi = false;
+                            Fraction coeff(1);
+                            bool valid = true;
+                            for (auto& arg : mul->args) {
+                                if (arg->getType() == SymType::VAR && std::static_pointer_cast<SymVar>(arg)->name == "PI") {
+                                    hasPi = true;
+                                } else if (arg->getType() == SymType::NUM) {
+                                    auto num = std::static_pointer_cast<SymNum>(arg);
+                                    if (std::holds_alternative<BigInt>(num->value)) coeff = coeff * Fraction(std::get<BigInt>(num->value));
+                                    else if (std::holds_alternative<Fraction>(num->value)) coeff = coeff * std::get<Fraction>(num->value);
+                                    else valid = false;
+                                } else {
+                                    valid = false;
+                                }
+                            }
+                            if (valid && hasPi) return {true, coeff};
+                        }
+                        return {false, Fraction(0)};
+                    };
+                    
+                    auto [isPiMul, piCoeff] = getPiCoeff(inner);
+                    if (isPiMul) {
+                        Fraction two(2);
+                        Fraction c = piCoeff;
+                        while (c < Fraction(0)) c = c + two;
+                        while (c >= two) c = c - two;
+                        
+                        if (func->name == "sin") {
+                            if (c == Fraction(0) || c == Fraction(1)) return SymExpr(BigInt(0));
+                            if (c == Fraction(BigInt(1), BigInt(2))) return SymExpr(BigInt(1));
+                            if (c == Fraction(BigInt(3), BigInt(2))) return SymExpr(BigInt(-1));
+                            if (c == Fraction(BigInt(1), BigInt(6)) || c == Fraction(BigInt(5), BigInt(6))) return SymExpr(Fraction(BigInt(1), BigInt(2)));
+                            if (c == Fraction(BigInt(7), BigInt(6)) || c == Fraction(BigInt(11), BigInt(6))) return SymExpr(Fraction(BigInt(-1), BigInt(2)));
+                            if (c == Fraction(BigInt(1), BigInt(4)) || c == Fraction(BigInt(3), BigInt(4))) return SymExpr(Fraction(BigInt(1), BigInt(2))) * (SymExpr(BigInt(2)) ^ SymExpr(Fraction(BigInt(1), BigInt(2))));
+                            if (c == Fraction(BigInt(5), BigInt(4)) || c == Fraction(BigInt(7), BigInt(4))) return SymExpr(Fraction(BigInt(-1), BigInt(2))) * (SymExpr(BigInt(2)) ^ SymExpr(Fraction(BigInt(1), BigInt(2))));
+                            if (c == Fraction(BigInt(1), BigInt(3)) || c == Fraction(BigInt(2), BigInt(3))) return SymExpr(Fraction(BigInt(1), BigInt(2))) * (SymExpr(BigInt(3)) ^ SymExpr(Fraction(BigInt(1), BigInt(2))));
+                            if (c == Fraction(BigInt(4), BigInt(3)) || c == Fraction(BigInt(5), BigInt(3))) return SymExpr(Fraction(BigInt(-1), BigInt(2))) * (SymExpr(BigInt(3)) ^ SymExpr(Fraction(BigInt(1), BigInt(2))));
+                        } else if (func->name == "cos") {
+                            if (c == Fraction(BigInt(1), BigInt(2)) || c == Fraction(BigInt(3), BigInt(2))) return SymExpr(BigInt(0));
+                            if (c == Fraction(0)) return SymExpr(BigInt(1));
+                            if (c == Fraction(1)) return SymExpr(BigInt(-1));
+                            if (c == Fraction(BigInt(1), BigInt(3)) || c == Fraction(BigInt(5), BigInt(3))) return SymExpr(Fraction(BigInt(1), BigInt(2)));
+                            if (c == Fraction(BigInt(2), BigInt(3)) || c == Fraction(BigInt(4), BigInt(3))) return SymExpr(Fraction(BigInt(-1), BigInt(2)));
+                            if (c == Fraction(BigInt(1), BigInt(4)) || c == Fraction(BigInt(7), BigInt(4))) return SymExpr(Fraction(BigInt(1), BigInt(2))) * (SymExpr(BigInt(2)) ^ SymExpr(Fraction(BigInt(1), BigInt(2))));
+                            if (c == Fraction(BigInt(3), BigInt(4)) || c == Fraction(BigInt(5), BigInt(4))) return SymExpr(Fraction(BigInt(-1), BigInt(2))) * (SymExpr(BigInt(2)) ^ SymExpr(Fraction(BigInt(1), BigInt(2))));
+                            if (c == Fraction(BigInt(1), BigInt(6)) || c == Fraction(BigInt(11), BigInt(6))) return SymExpr(Fraction(BigInt(1), BigInt(2))) * (SymExpr(BigInt(3)) ^ SymExpr(Fraction(BigInt(1), BigInt(2))));
+                            if (c == Fraction(BigInt(5), BigInt(6)) || c == Fraction(BigInt(7), BigInt(6))) return SymExpr(Fraction(BigInt(-1), BigInt(2))) * (SymExpr(BigInt(3)) ^ SymExpr(Fraction(BigInt(1), BigInt(2))));
+                        } else if (func->name == "tan") {
+                            if (c == Fraction(0) || c == Fraction(1)) return SymExpr(BigInt(0));
+                            if (c == Fraction(BigInt(1), BigInt(4)) || c == Fraction(BigInt(5), BigInt(4))) return SymExpr(BigInt(1));
+                            if (c == Fraction(BigInt(3), BigInt(4)) || c == Fraction(BigInt(7), BigInt(4))) return SymExpr(BigInt(-1));
+                            if (c == Fraction(BigInt(1), BigInt(6)) || c == Fraction(BigInt(7), BigInt(6))) return SymExpr(Fraction(BigInt(1), BigInt(3))) * (SymExpr(BigInt(3)) ^ SymExpr(Fraction(BigInt(1), BigInt(2))));
+                            if (c == Fraction(BigInt(5), BigInt(6)) || c == Fraction(BigInt(11), BigInt(6))) return SymExpr(Fraction(BigInt(-1), BigInt(3))) * (SymExpr(BigInt(3)) ^ SymExpr(Fraction(BigInt(1), BigInt(2))));
+                            if (c == Fraction(BigInt(1), BigInt(3)) || c == Fraction(BigInt(4), BigInt(3))) return SymExpr(BigInt(3)) ^ SymExpr(Fraction(BigInt(1), BigInt(2)));
+                            if (c == Fraction(BigInt(2), BigInt(3)) || c == Fraction(BigInt(5), BigInt(3))) return -(SymExpr(BigInt(3)) ^ SymExpr(Fraction(BigInt(1), BigInt(2))));
+                        }
+                    }
+                }
+                
                 if (inner.isZero()) {
-                    if (func->name == "sin") return SymExpr(BigInt(0));
-                    if (func->name == "cos") return SymExpr(BigInt(1));
                     if (func->name == "erf" || func->name == "fresnel_s" || func->name == "fresnel_c" || func->name == "Si") return SymExpr(BigInt(0));
                 }
                 if (func->name == "sqrt") {
-                    return inner ^ SymExpr(Fraction(1, 2));
+                    return inner ^ SymExpr(Fraction(BigInt(1), BigInt(2)));
                 }
                 if (func->name == "cbrt") {
-                    return inner ^ SymExpr(Fraction(1, 3));
+                    return inner ^ SymExpr(Fraction(BigInt(1), BigInt(3)));
                 }
             }
             newNode = SymExpr(std::make_shared<SymFunc>(func->name, std::move(nArgs))).ptr;
@@ -2208,6 +2394,37 @@ namespace jc {
         
         // 最终清理，防止 Bezout 系数中残留未合并的代数数
         return { simplifyCore(expand(r0, 100)), simplifyCore(expand(s0, 100)), simplifyCore(expand(t0, 100)) };
+    }
+
+    SymExpr polyResultant(const SymExpr& a, const SymExpr& b, const std::string& var) {
+        int degA = getDegree(a, var);
+        int degB = getDegree(b, var);
+        
+        if (degA < 0 || degB < 0) return SymExpr(BigInt(0));
+        
+        if (degA < degB) {
+            SymExpr res = polyResultant(b, a, var);
+            if ((degA * degB) % 2 != 0) return simplifyCore(expand(-res, 500));
+            return res;
+        }
+        
+        if (degB == 0) {
+            auto coeffsB = extractCoeffs(b, var);
+            SymExpr leadB = coeffsB.empty() ? b : coeffsB[0];
+            return simplifyCore(expand(leadB ^ SymExpr(BigInt(degA)), 500));
+        }
+        
+        auto coeffsB = extractCoeffs(b, var);
+        SymExpr leadB = coeffsB.back();
+        
+        auto [q, r] = polyDiv(a, b, var);
+        if (r.isZero()) return SymExpr(BigInt(0));
+        
+        int degR = getDegree(r, var);
+        SymExpr resBR = polyResultant(b, r, var);
+        
+        SymExpr factor = simplifyCore(expand(leadB ^ SymExpr(BigInt(degA - degR)), 500));
+        return simplifyCore(expand(factor * resBR, 500));
     }
 
     // =================================================================
@@ -2630,7 +2847,8 @@ namespace jc {
                             break;
                         }
                     }
-                    if (isBinomial && degree > 2) {
+                    // 高次多项式：先检查是否为二项式 Ax^n + B (且 B 不为 0，否则已经是单项式因子)
+                    if (isBinomial && degree > 2 && !coeffs[0].isZero()) {
                         SymExpr A = coeffs[degree];
                         SymExpr B = coeffs[0];
                         SymExpr BA = simplify(B / A);
@@ -3275,7 +3493,8 @@ namespace jc {
         bool changed = true;
         
         // 循环尝试应用规则，直到表达式不再发生变化
-        while (changed) {
+        int iter = 0;
+        while (changed && iter++ < 20) {
             changed = false;
             for (const auto& rule : rules) {
                 SymExpr next = applyRule(current, rule.first, rule.second);

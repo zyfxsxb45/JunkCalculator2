@@ -119,6 +119,8 @@ namespace jc {
     std::tuple<SymExpr, SymExpr, SymExpr> polyEGCD(const SymExpr& a, const SymExpr& b, const std::string& var);
     // 多项式无平方分解 (Square-Free Factorization)
     std::vector<std::pair<SymExpr, int>> polySquareFree(const SymExpr& p, const std::string& var);
+    // 多项式结式 (Sylvester Resultant)
+    SymExpr polyResultant(const SymExpr& a, const SymExpr& b, const std::string& var);
 
     // 代数重写引擎 (Pattern Matching Engine)
     SymExpr applyRule(const SymExpr& expr, const SymExpr& pattern, const SymExpr& target);

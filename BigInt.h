@@ -234,6 +234,7 @@ namespace jc {
 
         inline static std::vector<PrimeIndex> primeFileIndex;
         inline static bool fileIndexed = false;
+        inline static bool primeStatusPrinted = false;
         inline static int64_t totalPrimesInFile = 0;
         inline static int64_t largestPrimeInFile = 0;
         static constexpr int64_t BLOCK_SIZE = 10000;
@@ -244,9 +245,21 @@ namespace jc {
             // 如果没有自定义，走老规矩
             namespace fs = std::filesystem;
             fs::path dir = fs::current_path() / "data";
-            if (!fs::exists(dir)) fs::create_directory(dir);
             return (dir / "Prime.txt").string();
         }
+        static void printPrimeStatusOnce() {
+            if (primeStatusPrinted) return;
+            primeStatusPrinted = true;
+            if (fileIndexed) return;
+            std::string filepath = getPrimeFilePath();
+            std::ifstream file(filepath, std::ios::binary);
+            if (file.is_open()) {
+                std::cout << "[System] Prime table found at " << filepath << ". Using stream reading." << std::endl;
+            } else {
+                std::cout << "[System] Notice: Prime table not found at " << filepath << ". Using dynamic computation." << std::endl;
+            }
+        }
+
         // --- 外部更换挂载路径接口 ---
         static void setPrimeFilePath(const std::string& newPath) {
             // 先检查更换的文件存不存在
@@ -260,6 +273,7 @@ namespace jc {
             // 路径变了，以前的旧锚点、旧索引全部作废，必须清空！
             primeFileIndex.clear();
             fileIndexed = false;
+            primeStatusPrinted = false;
             totalPrimesInFile = 0;
             largestPrimeInFile = 0;
 
@@ -269,19 +283,17 @@ namespace jc {
         // --- (可选加速) 极速扫描建立文件索引 (使用堆内存 buffer 防栈溢出) ---
         static void buildFileIndex() {
             if (fileIndexed) return;
+            primeStatusPrinted = true;
 
             std::string filepath = getPrimeFilePath();
             std::ifstream file(filepath, std::ios::binary);
             if (!file.is_open()) {
                 fileIndexed = true;
-                std::cout << "\n[System] Notice: " << filepath
-                    << " not found. Number theory functions will compute dynamically."
-                    << std::endl;
+                std::cout << "[System] Notice: Prime table not found at " << filepath << ". Using dynamic computation." << std::endl;
                 return;
             }
 
-            std::cout << "\n[System] Building prime index tree... "
-                << "(This may take a while depending on file size)" << std::endl;
+            std::cout << "[System] Building prime index tree from " << filepath << "..." << std::endl;
 
             primeFileIndex.clear();
             int64_t count = 0;
@@ -336,8 +348,7 @@ namespace jc {
             fileIndexed = true;
             file.close();
             if (totalPrimesInFile > 0) {
-                std::cout << "[System] Successfully indexed "
-                    << totalPrimesInFile << " primes on disk." << std::endl;
+                std::cout << "[System] Successfully indexed " << totalPrimesInFile << " primes." << std::endl;
             }
         }
 
@@ -651,6 +662,8 @@ namespace jc {
             if (n == BigInt(2) || n == BigInt(3) || n == BigInt(5) || n == BigInt(7)) return true;
             if (n.data[0] % 2 == 0) return false;
 
+            printPrimeStatusOnce();
+
             // =========================================================
             // [极速外存探针]
             // =========================================================
@@ -683,11 +696,6 @@ namespace jc {
             // =========================================================
             // [动态降级]：Miller-Rabin
             // =========================================================
-            static bool warnedOnce = false;
-            if (!warnedOnce) {
-                std::cout << "[System] Note: Using Miller-Rabin primality test (no prime table loaded)." << std::endl;
-                warnedOnce = true;
-            }
             BigInt d = n - BigInt(1);
             int r = 0;
             while (d.data[0] % 2 == 0) { d = d.divmod_small(2).first; r++; }
@@ -711,6 +719,8 @@ namespace jc {
         BigInt nextPrime() const {
             BigInt n = this->abs();
             if (n < BigInt(2)) return BigInt(2);
+
+            printPrimeStatusOnce();
 
             // =========================================================
             // [极速外存探针]
@@ -757,6 +767,7 @@ namespace jc {
         // --- 极速单向流读取版 (带堆内存防栈溢出缓冲) ---
         static BigInt nthPrime(int64_t n) {
             if (n < 1) throw std::runtime_error("Math Error: nthPrime requires n >= 1.");
+            printPrimeStatusOnce();
             // 索引加速空降
             if (fileIndexed && n <= totalPrimesInFile) {
                 int64_t p = getPrimeAt(n - 1);
@@ -806,11 +817,6 @@ namespace jc {
                 file.close();
             }
 
-            static bool warnedFallback = false;
-            if (!warnedFallback) {
-                std::cout << "[System] Note: Prime table not loaded. Using dynamic computation." << std::endl;
-                warnedFallback = true;
-            }
             BigInt candidate = count > 0 ? BigInt(lastP) + BigInt(2) : BigInt(3);
             if (count == 0) {
                 if (n == 1) return BigInt(2);
@@ -827,6 +833,8 @@ namespace jc {
         int64_t primePi() const {
             BigInt nBI = this->abs();
             if (nBI < BigInt(2)) return 0;
+
+            printPrimeStatusOnce();
 
             int64_t count = 0;
             int64_t lastP = 0;
@@ -873,11 +881,6 @@ namespace jc {
                 }
             }
 
-            static bool warnedFallback = false;
-            if (!warnedFallback) {
-                std::cout << "[System] Note: Prime table not loaded. Using dynamic computation." << std::endl;
-                warnedFallback = true;
-            }
             BigInt candidate = count > 0 ? BigInt(lastP) + BigInt(2) : BigInt(2);
             if (count == 0) {
                 if (nBI >= BigInt(2)) { count = 1; candidate = BigInt(3); }
@@ -892,6 +895,8 @@ namespace jc {
         std::vector<std::pair<BigInt, int>> factorize() const {
             BigInt n = this->abs();
             if (n <= BigInt(1)) throw std::runtime_error("Math Error: Factorization requires n > 1.");
+
+            printPrimeStatusOnce();
 
             std::vector<std::pair<BigInt, int>> factors;
             int64_t lastP = 0;
@@ -952,11 +957,6 @@ namespace jc {
             }
 
             if (n > BigInt(1)) {
-                static bool warnedFallback = false;
-                if (!warnedFallback) {
-                    std::cout << "[System] Note: Prime table not loaded. Using dynamic computation." << std::endl;
-                    warnedFallback = true;
-                }
                 BigInt i = lastP > 0 ? BigInt(lastP) + BigInt(2) : BigInt(3);
                 if (lastP == 0) {
                     int count = 0;

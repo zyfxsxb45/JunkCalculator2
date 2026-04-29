@@ -3269,34 +3269,23 @@ void BuiltinRegistry::registerCAS() {
         });
 
     reg("expand", { 1 }, [](const std::vector<Value>& args) -> Value {
-        if (!args[0].isSymbolic())
-            throw std::runtime_error("TypeError: expand() expects a symbolic expression.");
         return Value(expand(args[0].asSymbolic()));
         });
 
     reg("simplify", { 1 }, [](const std::vector<Value>& args) -> Value {
-        if (!args[0].isSymbolic())
-            throw std::runtime_error("TypeError: simplify() expects a symbolic expression.");
         return Value(simplify(args[0].asSymbolic()));
         });
 
     reg("contract", { 1 }, [](const std::vector<Value>& args) -> Value {
-        if (!args[0].isSymbolic())
-            throw std::runtime_error("TypeError: contract() expects a symbolic expression.");
         return Value(contract(args[0].asSymbolic()));
         });
 
     reg("trigsimp", { 1 }, [](const std::vector<Value>& args) -> Value {
-        if (!args[0].isSymbolic())
-            throw std::runtime_error("TypeError: trigsimp() expects a symbolic expression.");
         return Value(trigsimp(args[0].asSymbolic()));
         });
 
     reg("subs", { 3 }, [fnsPtr](const std::vector<Value>& args) -> Value {
-        if (!args[0].isSymbolic())
-            throw std::runtime_error("TypeError: subs() expects a symbolic expression.");
-
-        SymExpr result = std::get<SymExpr>(args[0].data);
+        SymExpr result = args[0].asSymbolic();
 
         std::vector<std::string> vars;
         std::vector<SymExpr> vals;
@@ -3366,9 +3355,6 @@ void BuiltinRegistry::registerCAS() {
         });
 
     reg("toFunc", { 2 }, [](const std::vector<Value>& args) -> Value {
-        if (!args[0].isSymbolic()) {
-            throw std::runtime_error("toFunc(expr, vars): 1st argument must be a symbolic expression.");
-        }
         jc::SymExpr ast = args[0].asSymbolic();
         std::vector<std::string> varNames;
         if (std::holds_alternative<jc::List>(args[1].data)) {
@@ -3436,10 +3422,7 @@ void BuiltinRegistry::registerCAS() {
         });
 
     reg("evalf", { 1 }, [fnsPtr](const std::vector<Value>& args) -> Value {
-        if (!args[0].isSymbolic())
-            throw std::runtime_error("TypeError: evalf() expects a symbolic expression.");
-
-        SymExpr expr = std::get<SymExpr>(args[0].data);
+        SymExpr expr = args[0].asSymbolic();
         expr = evalFloat(expr);
         expr = collapseSymFuncs(expr, *fnsPtr);
 
@@ -3458,10 +3441,7 @@ void BuiltinRegistry::registerCAS() {
         });
 
     reg("evalv", { 1 }, [fnsPtr](const std::vector<Value>& args) -> Value {
-        if (!args[0].isSymbolic())
-            throw std::runtime_error("TypeError: evalv() expects a symbolic expression.");
-
-        SymExpr expr = std::get<SymExpr>(args[0].data);
+        SymExpr expr = args[0].asSymbolic();
         expr = evalValue(expr);
         expr = simplify(collapseSymFuncs(expr, *fnsPtr));
 
@@ -3480,8 +3460,6 @@ void BuiltinRegistry::registerCAS() {
         });
 
     reg("replaceRule", { 3 }, [](const std::vector<Value>& args) -> Value {
-        if (!args[0].isSymbolic() || !args[1].isSymbolic() || !args[2].isSymbolic())
-            throw std::runtime_error("TypeError: replaceRule() expects 3 symbolic expressions.");
         SymExpr expr = args[0].asSymbolic();
         SymExpr pattern = args[1].asSymbolic();
         SymExpr target = args[2].asSymbolic();
@@ -3489,8 +3467,8 @@ void BuiltinRegistry::registerCAS() {
     });
 
     reg("solveEq", { 2 }, [](const std::vector<Value>& args) -> Value {
-        if (!args[0].isSymbolic() || !std::holds_alternative<std::string>(args[1].data))
-            throw std::runtime_error("TypeError: solveEq() expects a symbolic expression and a variable name.");
+        if (!std::holds_alternative<std::string>(args[1].data))
+            throw std::runtime_error("TypeError: solveEq() expects a variable name as the second argument.");
         auto roots = jc::solveEq(args[0].asSymbolic(), std::get<std::string>(args[1].data));
         List L;
         for (const auto& r : roots) L.push_back(valToAny(Value(r)));
@@ -3498,8 +3476,8 @@ void BuiltinRegistry::registerCAS() {
     });
 
     reg("polyDiv", { 3 }, [](const std::vector<Value>& args) -> Value {
-        if (!args[0].isSymbolic() || !args[1].isSymbolic() || !std::holds_alternative<std::string>(args[2].data))
-            throw std::runtime_error("TypeError: polyDiv() expects two symbolic expressions and a variable name.");
+        if (!std::holds_alternative<std::string>(args[2].data))
+            throw std::runtime_error("TypeError: polyDiv() expects a variable name as the third argument.");
         auto [q, r] = jc::polyDiv(args[0].asSymbolic(), args[1].asSymbolic(), std::get<std::string>(args[2].data));
         List L;
         L.push_back(valToAny(Value(q)));
@@ -3508,9 +3486,15 @@ void BuiltinRegistry::registerCAS() {
     });
 
     reg("polyGCD", { 3 }, [](const std::vector<Value>& args) -> Value {
-        if (!args[0].isSymbolic() || !args[1].isSymbolic() || !std::holds_alternative<std::string>(args[2].data))
-            throw std::runtime_error("TypeError: polyGCD() expects two symbolic expressions and a variable name.");
+        if (!std::holds_alternative<std::string>(args[2].data))
+            throw std::runtime_error("TypeError: polyGCD() expects a variable name as the third argument.");
         return Value(jc::polyGCD(args[0].asSymbolic(), args[1].asSymbolic(), std::get<std::string>(args[2].data)));
+    });
+
+    reg("resultant", { 3 }, [](const std::vector<Value>& args) -> Value {
+        if (!std::holds_alternative<std::string>(args[2].data))
+            throw std::runtime_error("TypeError: resultant() expects a variable name as the third argument.");
+        return Value(jc::polyResultant(args[0].asSymbolic(), args[1].asSymbolic(), std::get<std::string>(args[2].data)));
     });
 
     reg("factor", { 1 }, [toBigInt](const std::vector<Value>& args) -> Value {
@@ -3528,14 +3512,10 @@ void BuiltinRegistry::registerCAS() {
         });
 
     reg("factorReal", { 1 }, [](const std::vector<Value>& args) -> Value {
-        if (!args[0].isSymbolic())
-            throw std::runtime_error("TypeError: factorReal() expects a symbolic expression.");
         return Value(jc::factorReal(args[0].asSymbolic()));
         });
 
     reg("taylor", { 3, 4 }, [](const std::vector<Value>& args) -> Value {
-        if (!args[0].isSymbolic())
-            throw std::runtime_error("TypeError: taylor() expects a symbolic expression as first argument.");
         if (!std::holds_alternative<std::string>(args[1].data))
             throw std::runtime_error("TypeError: taylor() expects variable name as second argument.");
         int order = 5;

@@ -23,79 +23,6 @@ namespace jc {
     }
 
     // =================================================================
-    // 实数域有理分式积分模版 (Rational Function Integration Templates)
-    // =================================================================
-    static SymExpr integratePartialFraction(SymExpr N, SymExpr D, int k, const std::string& var) {
-        int degD = getDegree(D, var);
-        auto coeffsD = extractCoeffs(D, var);
-        auto coeffsN = extractCoeffs(N, var);
-        
-        SymExpr X = SymExpr::makeVar(var);
-
-        if (degD == 1) {
-            SymExpr a = coeffsD[1];
-            SymExpr b = coeffsD[0];
-            SymExpr B = simplifyCore(b / a);
-            
-            SymExpr A_num = coeffsN.empty() ? SymExpr(BigInt(0)) : coeffsN[0];
-            SymExpr A = simplifyCore(A_num / (a ^ SymExpr(BigInt(k))));
-
-            if (A.isZero()) return SymExpr(BigInt(0));
-
-            if (k == 1) {
-                return A * SymExpr(std::make_shared<SymFunc>("log", std::vector<std::shared_ptr<SymNode>>{simplifyCore(X + B).ptr}));
-            } else {
-                return simplifyCore((A / SymExpr(BigInt(1 - k))) * ((X + B) ^ SymExpr(BigInt(1 - k))));
-            }
-        } else if (degD == 2) {
-            SymExpr a = coeffsD[2];
-            SymExpr b = coeffsD[1];
-            SymExpr c = coeffsD[0];
-            SymExpr p = simplifyCore(b / a);
-            SymExpr q = simplifyCore(c / a);
-
-            SymExpr A_num = coeffsN.size() > 1 ? coeffsN[1] : SymExpr(BigInt(0));
-            SymExpr B_num = coeffsN.size() > 0 ? coeffsN[0] : SymExpr(BigInt(0));
-            
-            SymExpr ak = a ^ SymExpr(BigInt(k));
-            SymExpr A = simplifyCore(A_num / ak);
-            SymExpr B = simplifyCore(B_num / ak);
-
-            SymExpr C = simplifyCore(B - (A * p) / SymExpr(BigInt(2)));
-            SymExpr Delta = simplifyCore(q - (p * p) / SymExpr(BigInt(4)));
-            
-            SymExpr res(BigInt(0));
-            SymExpr quadratic = simplifyCore((X ^ SymExpr(BigInt(2))) + p * X + q);
-
-            if (!A.isZero()) {
-                if (k == 1) {
-                    res = res + (A / SymExpr(BigInt(2))) * SymExpr(std::make_shared<SymFunc>("log", std::vector<std::shared_ptr<SymNode>>{quadratic.ptr}));
-                } else {
-                    res = res + (A / (SymExpr(BigInt(2)) * SymExpr(BigInt(1 - k)))) * (quadratic ^ SymExpr(BigInt(1 - k)));
-                }
-            }
-
-            if (!C.isZero()) {
-                std::function<SymExpr(int)> integrateArctan = [&](int power) -> SymExpr {
-                    if (power == 1) {
-                        SymExpr sqrtDelta = simplifyCore(Delta ^ SymExpr(Fraction(1, 2)));
-                        SymExpr atanArg = simplifyCore((X + p / SymExpr(BigInt(2))) / sqrtDelta);
-                        return (SymExpr(BigInt(1)) / sqrtDelta) * SymExpr(std::make_shared<SymFunc>("atan", std::vector<std::shared_ptr<SymNode>>{atanArg.ptr}));
-                    } else {
-                        SymExpr u = simplifyCore(X + p / SymExpr(BigInt(2)));
-                        SymExpr term1 = u / (SymExpr(BigInt(2)) * Delta * SymExpr(BigInt(power - 1)) * ((u * u + Delta) ^ SymExpr(BigInt(power - 1))));
-                        SymExpr term2 = (SymExpr(BigInt(2 * power - 3)) / (SymExpr(BigInt(2)) * Delta * SymExpr(BigInt(power - 1)))) * integrateArctan(power - 1);
-                        return simplifyCore(term1 + term2);
-                    }
-                };
-                res = res + C * integrateArctan(k);
-            }
-            return res;
-        }
-        throw std::runtime_error("Calculus Error: Denominator degree > 2 not supported in partial fraction integration.");
-    }
-
-    // =================================================================
     // 提取有理分式的分子和分母 (Get Numerator and Denominator)
     // =================================================================
     static std::pair<SymExpr, SymExpr> getFraction(const SymExpr& expr) {
@@ -150,6 +77,46 @@ namespace jc {
                 return {expr, SymExpr(BigInt(1))};
         }
         return {expr, SymExpr(BigInt(1))};
+    }
+
+    // =================================================================
+    // Rothstein-Trager 算法 (Rothstein-Trager Algorithm)
+    // 用于积分 A/D，其中 D 无平方，deg(A) < deg(D)
+    // =================================================================
+    static SymExpr rothsteinTrager(SymExpr A, SymExpr D, const std::string& var) {
+        SymExpr z = SymExpr::makeVar("_z");
+        SymExpr dD = diff(D, var);
+        SymExpr P = simplifyCore(expand(A - z * dD, 500));
+        
+        SymExpr R_z = polyResultant(P, D, var);
+        R_z = getFraction(R_z).first; // 提取分子，消除伪除法引入的 z 分母
+        
+        std::vector<SymExpr> roots = solveEq(R_z, "_z");
+        if (roots.empty()) {
+            if (R_z.isZero() || getDegree(R_z, "_z") > 0) {
+                throw std::runtime_error("Calculus Error: Rothstein-Trager failed to find roots of the resultant.");
+            }
+            return SymExpr(BigInt(0));
+        }
+        
+        SymExpr result(BigInt(0));
+        for (const auto& root : roots) {
+            SymExpr P_i = simplifyCore(expand(subs(P, "_z", root), 500));
+            SymExpr v_i = polyGCD(P_i, D, var);
+            
+            // 首一化 v_i，保持对数内部整洁
+            auto coeffs = extractCoeffs(v_i, var);
+            if (!coeffs.empty()) {
+                SymExpr lead = coeffs.back();
+                if (!lead.isZero() && !lead.isOne()) {
+                    v_i = simplifyCore(expand(v_i / lead, 500));
+                }
+            }
+            
+            SymExpr log_vi(std::make_shared<SymFunc>("log", std::vector<std::shared_ptr<SymNode>>{v_i.ptr}));
+            result = result + root * log_vi;
+        }
+        return simplifyCore(result);
     }
 
     // =================================================================
@@ -265,16 +232,16 @@ namespace jc {
     // =================================================================
     // 🚀 Risch 算法 Step 2: Hermite 约化 (Hermite Reduction)
     // =================================================================
-    static std::pair<SymExpr, SymExpr> hermiteReduce(SymExpr A, SymExpr D, const std::string& var) {
+    static std::tuple<SymExpr, SymExpr, SymExpr, SymExpr> hermiteReduce(SymExpr A, SymExpr D, const std::string& var) {
         A = simplifyCore(expand(A, 500));
         D = simplifyCore(expand(D, 500));
         
         auto [Q, R] = polyDiv(A, D, var);
         SymExpr rationalPart(0);
-        SymExpr integralPart = Q; 
+        SymExpr polyPart = Q; 
         
         A = R;
-        if (A.isZero()) return {rationalPart, integralPart};
+        if (A.isZero()) return {rationalPart, polyPart, SymExpr(BigInt(0)), SymExpr(BigInt(1))};
 
         auto sqFree = polySquareFree(D, var);
         int m = 0;
@@ -320,8 +287,7 @@ namespace jc {
             }
         }
         
-        integralPart = integralPart + simplifyCore(expand(currentA / currentD, 500));
-        return {rationalPart, integralPart};
+        return {rationalPart, polyPart, currentA, currentD};
     }
 
     // =================================================================
@@ -332,20 +298,64 @@ namespace jc {
         RischDiffField field = buildRischDifferentialField(expr, var);
         SymExpr rewritten = field.rewrite(expr);
         
+        // Step 1.5 - 单一扩张的变量代换降维打击 (Change of Variables for Single Extension)
+        if (field.tower.size() == 1) {
+            auto ext = field.tower[0];
+            
+            // 形式 1: 积分恰好是 F(t) * t' dx = F(t) dt
+            SymExpr F_t = simplifyCore(rewritten / ext.deriv);
+            if (!containsVar(F_t.ptr, var)) {
+                try {
+                    SymExpr int_t = integrate(F_t, ext.name);
+                    SymExpr orig_ext;
+                    if (ext.type == RischExtType::LOG) {
+                        orig_ext = SymExpr(std::make_shared<SymFunc>("log", std::vector<std::shared_ptr<SymNode>>{ext.arg.ptr}));
+                    } else {
+                        orig_ext = SymExpr(std::make_shared<SymFunc>("exp", std::vector<std::shared_ptr<SymNode>>{ext.arg.ptr}));
+                    }
+                    return simplifyCore(subs(int_t, ext.name, orig_ext));
+                } catch (...) {}
+            }
+            
+            // 形式 2: 积分是 F(e^(ax+b)) dx，且 F 中不含 x
+            if (ext.type == RischExtType::EXP && !containsVar(rewritten.ptr, var)) {
+                SymExpr u_deriv = simplifyCore(diff(ext.arg, var));
+                if (!containsVar(u_deriv.ptr, var) && !u_deriv.isZero()) {
+                    try {
+                        SymExpr integrand_t = simplifyCore(rewritten / (u_deriv * ext.t_var));
+                        SymExpr int_t = integrate(integrand_t, ext.name);
+                        SymExpr orig_ext(std::make_shared<SymFunc>("exp", std::vector<std::shared_ptr<SymNode>>{ext.arg.ptr}));
+                        return simplifyCore(subs(int_t, ext.name, orig_ext));
+                    } catch (...) {}
+                }
+            }
+        }
+
         // Step 2 - Hermite 约化 (目前仅针对有理函数域 Q(x))
         if (field.tower.empty()) {
             auto [num, den] = getFraction(rewritten);
             if (getDegree(den, var) > 0) {
-                auto [ratPart, intPart] = hermiteReduce(num, den, var);
+                auto [ratPart, polyPart, cA, cD] = hermiteReduce(num, den, var);
+                
+                SymExpr intPart = polyPart;
+                if (!cA.isZero()) intPart = intPart + simplifyCore(expand(cA / cD, 500));
                 
                 if (intPart.isZero()) return ratPart;
                 
                 try {
                     if (intPart.toString() == expr.toString()) throw std::runtime_error("Loop");
+                    if (getAstNodeCount(intPart) >= getAstNodeCount(expr)) throw std::runtime_error("Complexity increased");
                     SymExpr intRes = integrate(intPart, var);
                     return ratPart + intRes;
+                } catch (const std::exception& e) {
+                    std::string debugInfo = "Hermite Reduction completed, but remaining integral is non-elementary.\n";
+                    debugInfo += "Original: " + expr.toString() + "\n";
+                    debugInfo += "Rational Part: " + ratPart.toString() + "\n";
+                    debugInfo += "Remaining Integral: \\int (" + intPart.toString() + ") d" + var + "\n";
+                    debugInfo += "Reason: " + std::string(e.what()) + "\n";
+                    throw std::runtime_error("Calculus Error: " + debugInfo);
                 } catch (...) {
-                    std::string debugInfo = "Risch Algorithm Step 2 (Hermite Reduction) completed.\n";
+                    std::string debugInfo = "Hermite Reduction completed, but remaining integral is non-elementary.\n";
                     debugInfo += "Original: " + expr.toString() + "\n";
                     debugInfo += "Rational Part: " + ratPart.toString() + "\n";
                     debugInfo += "Remaining Integral: \\int (" + intPart.toString() + ") d" + var + "\n";
@@ -357,18 +367,32 @@ namespace jc {
         // Step 4 & 5 - 扩张多项式积分 (Extension Polynomial Integration)
         if (!field.tower.empty()) {
             auto topExt = field.tower.back();
+            
+            auto backSubstitute = [&](SymExpr res) {
+                for (auto it = field.tower.rbegin(); it != field.tower.rend(); ++it) {
+                    SymExpr orig;
+                    if (it->type == RischExtType::LOG) {
+                        orig = SymExpr(std::make_shared<SymFunc>("log", std::vector<std::shared_ptr<SymNode>>{it->arg.ptr}));
+                    } else {
+                        orig = SymExpr(std::make_shared<SymFunc>("exp", std::vector<std::shared_ptr<SymNode>>{it->arg.ptr}));
+                    }
+                    res = subs(res, it->name, orig);
+                }
+                return res;
+            };
+
             if (topExt.type == RischExtType::LOG) {
                 auto coeffs = extractCoeffs(rewritten, topExt.name);
                 if (!coeffs.empty()) {
                     int n = static_cast<int>(coeffs.size()) - 1;
                     std::vector<SymExpr> B(n + 2, SymExpr(BigInt(0)));
                     SymExpr t_deriv = topExt.deriv;
-                    SymExpr log_u(std::make_shared<SymFunc>("log", std::vector<std::shared_ptr<SymNode>>{topExt.arg.ptr}));
                     SymExpr t_sym = SymExpr::makeVar(topExt.name);
 
                     try {
-                        SymExpr intAn = integrate(coeffs[n], var);
-                        SymExpr intAn_t = applyRule(intAn, log_u, t_sym);
+                        SymExpr intAn_x = backSubstitute(coeffs[n]);
+                        SymExpr intAn = integrate(intAn_x, var);
+                        SymExpr intAn_t = field.rewrite(intAn);
                         auto coeffs_intAn = extractCoeffs(intAn_t, topExt.name);
                         
                         SymExpr c(BigInt(0));
@@ -388,8 +412,9 @@ namespace jc {
                         
                         for (int i = n - 1; i >= 0; --i) {
                             SymExpr integrand = simplifyCore(coeffs[i] - SymExpr(BigInt(i + 1)) * B[i + 1] * t_deriv);
-                            SymExpr int_i = integrate(integrand, var);
-                            SymExpr int_i_t = applyRule(int_i, log_u, t_sym);
+                            SymExpr integrand_x = backSubstitute(integrand);
+                            SymExpr int_i = integrate(integrand_x, var);
+                            SymExpr int_i_t = field.rewrite(int_i);
                             if (containsVar(int_i_t.ptr, topExt.name)) {
                                 throw std::runtime_error("Non-elementary integral.");
                             }
@@ -399,10 +424,10 @@ namespace jc {
                         SymExpr result(BigInt(0));
                         for (int i = 0; i <= n + 1; ++i) {
                             if (!B[i].isZero()) {
-                                result = result + B[i] * (log_u ^ SymExpr(BigInt(i)));
+                                result = result + B[i] * (t_sym ^ SymExpr(BigInt(i)));
                             }
                         }
-                        return simplifyCore(result);
+                        return simplifyCore(backSubstitute(result));
                     } catch (...) {
                         // 失败则继续往下走，抛出调试信息
                     }
@@ -412,7 +437,7 @@ namespace jc {
                 if (!coeffs.empty()) {
                     int n = static_cast<int>(coeffs.size()) - 1;
                     SymExpr u_deriv = simplifyCore(topExt.deriv / SymExpr::makeVar(topExt.name));
-                    SymExpr exp_u(std::make_shared<SymFunc>("exp", std::vector<std::shared_ptr<SymNode>>{topExt.arg.ptr}));
+                    SymExpr t_sym = SymExpr::makeVar(topExt.name);
                     
                     bool success = true;
                     SymExpr result(BigInt(0));
@@ -421,27 +446,63 @@ namespace jc {
                         if (coeffs[i].isZero()) continue;
                         if (i == 0) {
                             try {
-                                result = result + integrate(coeffs[0], var);
+                                SymExpr integrand_x = backSubstitute(coeffs[0]);
+                                SymExpr int_0 = integrate(integrand_x, var);
+                                result = result + field.rewrite(int_0);
                             } catch (...) {
                                 success = false;
                                 break;
                             }
                         } else {
-                            // 启发式求解 Risch 微分方程 B_i' + i u' B_i = A_i
-                            // 猜测 B_i = A_i / (i u')
-                            SymExpr B_guess = simplifyCore(coeffs[i] / (SymExpr(BigInt(i)) * u_deriv));
-                            SymExpr B_guess_deriv = simplifyCore(diff(B_guess, var));
-                            if (B_guess_deriv.isZero()) {
-                                result = result + B_guess * (exp_u ^ SymExpr(BigInt(i)));
+                            // 求解 Risch 微分方程 B_i' + i u' B_i = A_i
+                            SymExpr A_i = backSubstitute(coeffs[i]);
+                            SymExpr V_i = simplifyCore(SymExpr(BigInt(i)) * u_deriv);
+                            
+                            SymExpr B_i(BigInt(0));
+                            SymExpr currentA = A_i;
+                            bool rde_success = false;
+                            
+                            int iter = 0;
+                            while (true) {
+                                if (currentA.isZero()) { rde_success = true; break; }
+                                if (++iter > 20) break;
+                                
+                                auto cA = extractCoeffs(currentA, var);
+                                auto cV = extractCoeffs(V_i, var);
+                                
+                                if (cA.empty() || cV.empty()) {
+                                    SymExpr B_term = simplifyCore(currentA / V_i);
+                                    if (simplifyCore(diff(B_term, var)).isZero()) {
+                                        B_i = B_i + B_term;
+                                        rde_success = true;
+                                    }
+                                    break;
+                                }
+                                
+                                int degA = static_cast<int>(cA.size()) - 1;
+                                int degV = static_cast<int>(cV.size()) - 1;
+                                if (degA < degV) break;
+                                
+                                int degB = degA - degV;
+                                SymExpr leadB = simplifyCore(cA.back() / cV.back());
+                                SymExpr B_term = simplifyCore(leadB * (SymExpr::makeVar(var) ^ SymExpr(BigInt(degB))));
+                                
+                                B_i = B_i + B_term;
+                                SymExpr B_term_deriv = simplifyCore(diff(B_term, var));
+                                currentA = simplifyCore(expand(currentA - B_term_deriv - V_i * B_term, 500));
+                            }
+                            
+                            if (rde_success) {
+                                SymExpr B_i_t = field.rewrite(B_i);
+                                result = result + B_i_t * (t_sym ^ SymExpr(BigInt(i)));
                             } else {
-                                // 猜测失败，尝试分部积分形式的启发式
                                 success = false;
                                 break;
                             }
                         }
                     }
                     
-                    if (success) return simplifyCore(result);
+                    if (success) return simplifyCore(backSubstitute(result));
                 }
             }
         }
@@ -456,7 +517,7 @@ namespace jc {
         }
         debugInfo += "Rewritten integrand: " + rewritten.toString();
         
-        throw std::runtime_error("Calculus Error: Risch Algorithm Step 1 completed.\n" + debugInfo);
+        throw std::runtime_error("Calculus Error: Integral is non-elementary or requires advanced Risch steps.\n" + debugInfo);
     }
 
     // =================================================================
@@ -853,6 +914,117 @@ namespace jc {
                 }
             }
 
+            // --- 1.95 高次二项式分式积分 (Binomial Fraction Integration) ---
+            if (varPart.ptr->getType() == SymType::POW) {
+                auto powNode = std::static_pointer_cast<SymPow>(varPart.ptr);
+                if (powNode->exp->getType() == SymType::NUM) {
+                    auto [isIntExp, expVal] = extractExactInt(std::static_pointer_cast<SymNum>(powNode->exp)->value);
+                    if (isIntExp && expVal == -1) {
+                        auto coeffs = extractCoeffs(SymExpr(powNode->base), var);
+                        if (coeffs.size() > 2) {
+                            bool isBinomial = true;
+                            int n = static_cast<int>(coeffs.size()) - 1;
+                            for (int i = 1; i < n; ++i) {
+                                if (!coeffs[i].isZero()) { isBinomial = false; break; }
+                            }
+                            if (isBinomial && !coeffs[n].isZero() && !coeffs[0].isZero()) {
+                                SymExpr A = coeffs[n];
+                                SymExpr B = coeffs[0];
+                                
+                                SymExpr C = simplifyCore(A / B);
+                                bool isPos = false;
+                                bool isNeg = false;
+                                if (C.ptr->getType() == SymType::NUM) {
+                                    isNeg = isCasNegative(std::static_pointer_cast<SymNum>(C.ptr)->value);
+                                    isPos = !isNeg && !C.isZero();
+                                } else if (C.ptr->getType() == SymType::MUL) {
+                                    auto mul = std::static_pointer_cast<SymMul>(C.ptr);
+                                    if (!mul->args.empty() && mul->args[0]->getType() == SymType::NUM) {
+                                        isNeg = isCasNegative(std::static_pointer_cast<SymNum>(mul->args[0])->value);
+                                        isPos = !isNeg;
+                                    } else {
+                                        isPos = true;
+                                    }
+                                } else {
+                                    isPos = true;
+                                }
+                                
+                                SymExpr absC = isNeg ? simplifyCore(-C) : C;
+                                SymExpr u_coeff = simplifyCore(absC ^ SymExpr(Fraction(1, n)));
+                                SymExpr u = simplifyCore(u_coeff * SymExpr::makeVar(var));
+                                SymExpr du_dx = u_coeff;
+                                
+                                SymExpr n_sym = SymExpr(BigInt(n));
+                                SymExpr res(BigInt(0));
+                                SymExpr PI = SymExpr::makeVar("PI");
+                                
+                                auto makeCos = [&](SymExpr theta) {
+                                    return SymExpr(std::make_shared<SymFunc>("cos", std::vector<std::shared_ptr<SymNode>>{theta.ptr}));
+                                };
+                                auto makeSin = [&](SymExpr theta) {
+                                    return SymExpr(std::make_shared<SymFunc>("sin", std::vector<std::shared_ptr<SymNode>>{theta.ptr}));
+                                };
+                                auto makeLog = [&](SymExpr arg) {
+                                    return SymExpr(std::make_shared<SymFunc>("log", std::vector<std::shared_ptr<SymNode>>{arg.ptr}));
+                                };
+                                auto makeAtan = [&](SymExpr arg) {
+                                    return SymExpr(std::make_shared<SymFunc>("atan", std::vector<std::shared_ptr<SymNode>>{arg.ptr}));
+                                };
+                                
+                                if (isPos) {
+                                    if (n % 2 != 0) {
+                                        res = res + (SymExpr(BigInt(1)) / n_sym) * makeLog(u + SymExpr(BigInt(1)));
+                                        for (int k = 1; k <= (n - 1) / 2; ++k) {
+                                            SymExpr theta = simplifyCore((SymExpr(BigInt(2 * k - 1)) * PI) / n_sym);
+                                            SymExpr cos_th = makeCos(theta);
+                                            SymExpr sin_th = makeSin(theta);
+                                            SymExpr log_arg = simplifyCore((u ^ SymExpr(BigInt(2))) - SymExpr(BigInt(2)) * u * cos_th + SymExpr(BigInt(1)));
+                                            SymExpr atan_arg = simplifyCore((u - cos_th) / sin_th);
+                                            res = res - (cos_th / n_sym) * makeLog(log_arg) + (SymExpr(BigInt(2)) * sin_th / n_sym) * makeAtan(atan_arg);
+                                        }
+                                    } else {
+                                        for (int k = 1; k <= n / 2; ++k) {
+                                            SymExpr theta = simplifyCore((SymExpr(BigInt(2 * k - 1)) * PI) / n_sym);
+                                            SymExpr cos_th = makeCos(theta);
+                                            SymExpr sin_th = makeSin(theta);
+                                            SymExpr log_arg = simplifyCore((u ^ SymExpr(BigInt(2))) - SymExpr(BigInt(2)) * u * cos_th + SymExpr(BigInt(1)));
+                                            SymExpr atan_arg = simplifyCore((u - cos_th) / sin_th);
+                                            res = res - (cos_th / n_sym) * makeLog(log_arg) + (SymExpr(BigInt(2)) * sin_th / n_sym) * makeAtan(atan_arg);
+                                        }
+                                    }
+                                } else {
+                                    SymExpr res_minus(BigInt(0));
+                                    if (n % 2 != 0) {
+                                        res_minus = res_minus + (SymExpr(BigInt(1)) / n_sym) * makeLog(u - SymExpr(BigInt(1)));
+                                        for (int k = 1; k <= (n - 1) / 2; ++k) {
+                                            SymExpr phi = simplifyCore((SymExpr(BigInt(2 * k)) * PI) / n_sym);
+                                            SymExpr cos_ph = makeCos(phi);
+                                            SymExpr sin_ph = makeSin(phi);
+                                            SymExpr log_arg = simplifyCore((u ^ SymExpr(BigInt(2))) - SymExpr(BigInt(2)) * u * cos_ph + SymExpr(BigInt(1)));
+                                            SymExpr atan_arg = simplifyCore((u - cos_ph) / sin_ph);
+                                            res_minus = res_minus + (cos_ph / n_sym) * makeLog(log_arg) - (SymExpr(BigInt(2)) * sin_ph / n_sym) * makeAtan(atan_arg);
+                                        }
+                                    } else {
+                                        res_minus = res_minus + (SymExpr(BigInt(1)) / n_sym) * makeLog(u - SymExpr(BigInt(1))) - (SymExpr(BigInt(1)) / n_sym) * makeLog(u + SymExpr(BigInt(1)));
+                                        for (int k = 1; k <= n / 2 - 1; ++k) {
+                                            SymExpr phi = simplifyCore((SymExpr(BigInt(2 * k)) * PI) / n_sym);
+                                            SymExpr cos_ph = makeCos(phi);
+                                            SymExpr sin_ph = makeSin(phi);
+                                            SymExpr log_arg = simplifyCore((u ^ SymExpr(BigInt(2))) - SymExpr(BigInt(2)) * u * cos_ph + SymExpr(BigInt(1)));
+                                            SymExpr atan_arg = simplifyCore((u - cos_ph) / sin_ph);
+                                            res_minus = res_minus + (cos_ph / n_sym) * makeLog(log_arg) - (SymExpr(BigInt(2)) * sin_ph / n_sym) * makeAtan(atan_arg);
+                                        }
+                                    }
+                                    res = -res_minus;
+                                }
+                                
+                                return coeff * simplifyCore(res / (B * du_dx));
+                            }
+                        }
+                    }
+                }
+            }
+
             // --- 2. 有理分式积分引擎 (Rational Function Integration) ---
             SymExpr num(BigInt(1)), den(BigInt(1));
             bool isFraction = false;
@@ -900,110 +1072,17 @@ namespace jc {
                 // ★ 只有当分子和分母都是多项式时，才使用有理分式积分引擎
                 if (degD >= 0 && (degN >= 0 || !containsVar(num_expanded.ptr, var))) {
                     try {
-                        SymExpr polyE(BigInt(0));
-                        SymExpr R = num_expanded;
+                        auto [ratPart, polyPart, cA, cD] = hermiteReduce(num_expanded, den_expanded, var);
+                        SymExpr res = ratPart;
                         
-                        if (degN >= degD && degD > 0) {
-                            auto [q, r] = polyDiv(num_expanded, den_expanded, var);
-                            polyE = q;
-                            R = r;
+                        if (!polyPart.isZero()) {
+                            res = res + doInteg(polyPart, depth);
                         }
                         
-                        SymExpr res(BigInt(0));
-                        if (!polyE.isZero()) {
-                            res = doInteg(polyE, depth);
+                        if (!cA.isZero()) {
+                            res = res + rothsteinTrager(cA, cD, var);
                         }
                         
-                        if (!R.isZero()) {
-                            SymExpr factD = factorReal(den);
-                            std::vector<std::pair<SymExpr, int>> denFactors;
-                            auto process = [&](const SymExpr& f) {
-                                if (!containsVar(f.ptr, var)) return;
-                                if (f.ptr->getType() == SymType::POW) {
-                                    auto powNode = std::static_pointer_cast<SymPow>(f.ptr);
-                                    if (powNode->exp->getType() == SymType::NUM) {
-                                        auto [isInt, n] = extractExactInt(std::static_pointer_cast<SymNum>(powNode->exp)->value);
-                                        if (isInt && n > 0) {
-                                            denFactors.push_back({SymExpr(powNode->base), static_cast<int>(n)});
-                                            return;
-                                        }
-                                    }
-                                }
-                                denFactors.push_back({f, 1});
-                            };
-                            if (factD.ptr->getType() == SymType::MUL) {
-                                for (auto& arg : std::static_pointer_cast<SymMul>(factD.ptr)->args) process(SymExpr(arg));
-                            } else {
-                                process(factD);
-                            }
-                            
-                            if (denFactors.empty()) {
-                                throw std::runtime_error("Calculus Error: Failed to factorize denominator for partial fraction decomposition.");
-                            } else {
-                                SymExpr remaining_N = R;
-                                SymExpr remaining_D(BigInt(1));
-                                for (auto& f : denFactors) remaining_D = simplifyCore(expand(remaining_D * (f.first ^ SymExpr(BigInt(f.second))), 500));
-                                
-                                SymExpr D_expanded = den_expanded;
-                                auto coeffs_D = extractCoeffs(D_expanded, var);
-                                auto coeffs_rem = extractCoeffs(remaining_D, var);
-                                if (coeffs_D.empty() || coeffs_rem.empty()) {
-                                    throw std::runtime_error("Calculus Error: Denominator is not a polynomial.");
-                                }
-                                auto lead_D = coeffs_D.back();
-                                auto lead_rem = coeffs_rem.back();
-                                SymExpr const_factor = simplifyCore(lead_D / lead_rem);
-                                remaining_N = simplifyCore(expand(remaining_N / const_factor, 500));
-                                
-                                std::vector<std::pair<SymExpr, SymExpr>> partialFractions;
-                                for (size_t i = 0; i < denFactors.size(); ++i) {
-                                    if (i == denFactors.size() - 1) {
-                                        partialFractions.push_back({remaining_N, remaining_D});
-                                        break;
-                                    }
-                                    SymExpr D1 = simplifyCore(expand(denFactors[i].first ^ SymExpr(BigInt(denFactors[i].second)), 500));
-                                    SymExpr D2(BigInt(1));
-                                    for (size_t j = i + 1; j < denFactors.size(); ++j) {
-                                        D2 = simplifyCore(expand(D2 * (denFactors[j].first ^ SymExpr(BigInt(denFactors[j].second))), 500));
-                                    }
-                                    
-                                    try {
-                                        auto [gcd, S, T] = polyEGCD(D1, D2, var);
-                                        SymExpr N_T = simplifyCore(expand((remaining_N * T) / gcd, 500));
-                                        SymExpr N_S = simplifyCore(expand((remaining_N * S) / gcd, 500));
-                                        
-                                        auto [q1, r1] = polyDiv(N_T, D1, var);
-                                        partialFractions.push_back({r1, D1});
-                                        
-                                        remaining_N = simplifyCore(expand(N_S + q1 * D2, 500));
-                                        remaining_D = D2;
-                                    } catch (const std::runtime_error& e) {
-                                        throw std::runtime_error(std::string("Calculus Error: Partial fraction decomposition failed. ") + e.what());
-                                    }
-                                }
-                                
-                                SymExpr polyPart(BigInt(0));
-                                for (size_t i = 0; i < partialFractions.size(); ++i) {
-                                    SymExpr curr_N = partialFractions[i].first;
-                                    SymExpr base_D = denFactors[i].first;
-                                    int k = denFactors[i].second;
-                                    
-                                    for (int j = k; j >= 1; --j) {
-                                        try {
-                                            auto [q, r] = polyDiv(curr_N, base_D, var);
-                                            res = res + integratePartialFraction(r, base_D, j, var);
-                                            curr_N = q;
-                                        } catch (const std::runtime_error& e) {
-                                            throw std::runtime_error(std::string("Calculus Error: Integration of partial fraction failed. ") + e.what());
-                                        }
-                                    }
-                                    polyPart = polyPart + curr_N;
-                                }
-                                if (!polyPart.isZero()) {
-                                    res = res + doInteg(polyPart, depth);
-                                }
-                            }
-                        }
                         return coeff * res;
                     } catch (...) {
                         // 有理分式积分失败，静默吞没，继续尝试后续方法（如 Risch 算法）
@@ -1050,71 +1129,87 @@ namespace jc {
                 });
 
                 for (size_t i : indices) {
-                    SymExpr u = factors[i];
-                    SymExpr dv(BigInt(1));
+                    // Try 1: u = factors[i], dv = rest
+                    SymExpr u1 = factors[i];
+                    SymExpr dv1(BigInt(1));
                     for (size_t j = 0; j < factors.size(); ++j) {
-                        if (j != i) dv = dv * factors[j];
+                        if (j != i) dv1 = dv1 * factors[j];
                     }
 
-                    SymExpr du = simplifyCore(diff(u, var));
-                    try {
-                        SymExpr v = doInteg(dv, depth + 1);
-                        SymExpr v_du = simplifyCore(v * du);
-                        
-                        // 循环分部积分检测 (1-step cycle)
-                        SymExpr ratio1 = simplifyCore(v_du / varPart);
-                        if (!containsVar(ratio1.ptr, var) && !ratio1.isZero()) {
-                            SymExpr k = ratio1;
-                            SymExpr one_plus_k = simplifyCore(SymExpr(BigInt(1)) + k);
-                            if (!one_plus_k.isZero()) {
-                                // 修复：分部积分循环时，必须确保 u*v 不会被错误化简
-                                return coeff * simplify(expand((u * v) / one_plus_k, 500));
-                            }
-                        }
-                        
-                        // 循环分部积分检测 (2-step cycle)
-                        if (v_du.ptr->getType() == SymType::MUL) {
-                            auto mul2 = std::static_pointer_cast<SymMul>(v_du.ptr);
-                            std::vector<SymExpr> factors2;
-                            for (auto& arg : mul2->args) factors2.push_back(SymExpr(arg));
-                            
-                            std::vector<size_t> indices2(factors2.size());
-                            std::iota(indices2.begin(), indices2.end(), 0);
-                            std::sort(indices2.begin(), indices2.end(), [&](size_t a, size_t b) {
-                                return getPriority(factors2[a]) < getPriority(factors2[b]);
-                            });
-                            
-                            bool found_2step = false;
-                            SymExpr result_2step;
-                            for (size_t i2 : indices2) {
-                                SymExpr u2 = factors2[i2];
-                                SymExpr dv2(BigInt(1));
-                                for (size_t j2 = 0; j2 < factors2.size(); ++j2) {
-                                    if (j2 != i2) dv2 = dv2 * factors2[j2];
-                                }
-                                SymExpr du2 = simplifyCore(diff(u2, var));
-                                try {
-                                    SymExpr v2 = doInteg(dv2, depth + 2);
-                                    SymExpr v2_du2 = simplifyCore(v2 * du2);
-                                    
-                                    SymExpr ratio2 = simplifyCore(v2_du2 / varPart);
-                                    if (!containsVar(ratio2.ptr, var) && !ratio2.isZero()) {
-                                        SymExpr k = ratio2;
-                                        SymExpr one_minus_k = simplifyCore(SymExpr(BigInt(1)) - k);
-                                        if (!one_minus_k.isZero()) {
-                                            result_2step = coeff * simplifyCore((u * v - u2 * v2) / one_minus_k);
-                                            found_2step = true;
-                                            break;
-                                        }
-                                    }
-                                } catch (...) {}
-                            }
-                            if (found_2step) return result_2step;
-                        }
+                    // Try 2: dv = factors[i], u = rest
+                    SymExpr dv2 = factors[i];
+                    SymExpr u2(BigInt(1));
+                    for (size_t j = 0; j < factors.size(); ++j) {
+                        if (j != i) u2 = u2 * factors[j];
+                    }
 
-                        SymExpr int_v_du = doInteg(v_du, depth + 1);
-                        return coeff * simplifyCore(u * v - int_v_du);
-                    } catch (...) {}
+                    auto tryPartsWith = [&](SymExpr u, SymExpr dv) -> std::pair<bool, SymExpr> {
+                        SymExpr du = simplifyCore(diff(u, var));
+                        try {
+                            SymExpr v = doInteg(dv, depth + 1);
+                            SymExpr v_du = simplifyCore(v * du);
+                            
+                            // 循环分部积分检测 (1-step cycle)
+                            SymExpr ratio1 = simplifyCore(v_du / varPart);
+                            if (!containsVar(ratio1.ptr, var) && !ratio1.isZero()) {
+                                SymExpr k = ratio1;
+                                SymExpr one_plus_k = simplifyCore(SymExpr(BigInt(1)) + k);
+                                if (!one_plus_k.isZero()) {
+                                    return {true, coeff * simplify(expand((u * v) / one_plus_k, 500))};
+                                } else {
+                                    throw std::runtime_error("Calculus Error: Integration by parts failed due to zero denominator.");
+                                }
+                            }
+                            
+                            // 循环分部积分检测 (2-step cycle)
+                            if (v_du.ptr->getType() == SymType::MUL) {
+                                auto mul2 = std::static_pointer_cast<SymMul>(v_du.ptr);
+                                std::vector<SymExpr> factors2;
+                                for (auto& arg : mul2->args) factors2.push_back(SymExpr(arg));
+                                
+                                std::vector<size_t> indices2(factors2.size());
+                                std::iota(indices2.begin(), indices2.end(), 0);
+                                std::sort(indices2.begin(), indices2.end(), [&](size_t a, size_t b) {
+                                    return getPriority(factors2[a]) < getPriority(factors2[b]);
+                                });
+                                
+                                for (size_t i2 : indices2) {
+                                    SymExpr u2_inner = factors2[i2];
+                                    SymExpr dv2_inner(BigInt(1));
+                                    for (size_t j2 = 0; j2 < factors2.size(); ++j2) {
+                                        if (j2 != i2) dv2_inner = dv2_inner * factors2[j2];
+                                    }
+                                    SymExpr du2_inner = simplifyCore(diff(u2_inner, var));
+                                    try {
+                                        SymExpr v2_inner = doInteg(dv2_inner, depth + 2);
+                                        SymExpr v2_du2 = simplifyCore(v2_inner * du2_inner);
+                                        
+                                        SymExpr ratio2 = simplifyCore(v2_du2 / varPart);
+                                        if (!containsVar(ratio2.ptr, var) && !ratio2.isZero()) {
+                                            SymExpr k = ratio2;
+                                            SymExpr one_minus_k = simplifyCore(SymExpr(BigInt(1)) - k);
+                                            if (!one_minus_k.isZero()) {
+                                                return {true, coeff * simplifyCore((u * v - u2_inner * v2_inner) / one_minus_k)};
+                                            } else {
+                                                throw std::runtime_error("Calculus Error: Integration by parts failed due to zero denominator.");
+                                            }
+                                        }
+                                    } catch (...) {}
+                                }
+                            }
+
+                            SymExpr int_v_du = doInteg(v_du, depth + 1);
+                            return {true, coeff * simplifyCore(u * v - int_v_du)};
+                        } catch (...) {
+                            return {false, SymExpr(BigInt(0))};
+                        }
+                    };
+
+                    auto [ok1, res1] = tryPartsWith(u1, dv1);
+                    if (ok1) return res1;
+
+                    auto [ok2, res2] = tryPartsWith(u2, dv2);
+                    if (ok2) return res2;
                 }
             }
 
@@ -1232,11 +1327,28 @@ namespace jc {
                 if (expanded.toString() != expr.toString()) {
                     try {
                         return simplify(doInteg(expanded, 0));
+                    } catch (const std::runtime_error& e2) {
+                        std::string msg2 = e2.what();
+                        // 如果展开后再次失败，保留新的错误信息
+                        if (msg2.find("Risch Field") != std::string::npos || 
+                            msg2.find("Hermite Reduction") != std::string::npos ||
+                            msg2.find("Integration depth limit exceeded") != std::string::npos ||
+                            msg2.find("Calculus Error:") == 0) {
+                            msg = msg2;
+                        }
                     } catch (...) {}
                 }
                 
                 // 如果是 Risch 算法抛出的进度信息，直接向外传递
-                if (msg.find("Risch Algorithm") != std::string::npos) throw;
+                if (msg.find("Risch Field") != std::string::npos || 
+                    msg.find("Hermite Reduction") != std::string::npos || 
+                    msg.find("Integration depth limit exceeded") != std::string::npos) {
+                    throw std::runtime_error(msg);
+                }
+                
+                if (msg.find("Calculus Error:") == 0) {
+                    throw std::runtime_error(msg);
+                }
                 
                 throw std::runtime_error("Calculus Error: Function integration not supported or complex power. (" + msg + ")");
             } catch (...) {
