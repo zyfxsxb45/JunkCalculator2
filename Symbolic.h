@@ -13,6 +13,7 @@
 #include <functional>
 #include <type_traits>
 #include <tuple>
+#include <set>
 
 namespace jc {
     class Value;
@@ -34,14 +35,22 @@ namespace jc {
     class SymNode {
     protected:
         mutable std::string cachedStr;
+        mutable std::string cachedSig;
     public:
         virtual ~SymNode() = default;
         virtual SymType getType() const = 0;
+        
         std::string toString() const {
             if (cachedStr.empty()) cachedStr = computeString();
             return cachedStr;
         }
         virtual std::string computeString() const = 0;
+
+        std::string getSignature() const {
+            if (cachedSig.empty()) cachedSig = computeSignature();
+            return cachedSig;
+        }
+        virtual std::string computeSignature() const = 0;
 
         virtual bool isZero() const { return false; }
         virtual bool isOne() const { return false; }
@@ -88,7 +97,7 @@ namespace jc {
         bool operator==(const SymExpr& other) const {
             if (ptr == other.ptr) return true;
             if (!ptr || !other.ptr) return false;
-            return ptr->toString() == other.ptr->toString();
+            return ptr->getSignature() == other.ptr->getSignature();
         }
         bool operator!=(const SymExpr& other) const {
             return !(*this == other);
@@ -114,11 +123,6 @@ namespace jc {
     int getAstNodeCount(const SymExpr& expr);
     SymExpr contract(const SymExpr& expr);
     SymExpr simplify(const SymExpr& expr);
-
-    // 因式分解
-    SymExpr factor(const SymExpr& expr, int depth = 0);
-    // 实数域完全因式分解
-    SymExpr factorReal(const SymExpr& expr);
 
     // 获取多项式最高次幂
     int getDegree(const SymExpr& expr, const std::string& var);
@@ -150,6 +154,9 @@ namespace jc {
 
     // 内部工具暴露给 Integration 模块
     std::pair<bool, int64_t> extractExactInt(const CASVal& cval);
+    bool isCasNegative(const CASVal& v);
+    void collectAllVars(const std::shared_ptr<SymNode>& node, std::set<std::string>& vars);
+    std::pair<bool, SymExpr> trySquareRoot(const SymExpr& expr, bool allowPartial = false);
     bool containsVar(const std::shared_ptr<SymNode>& node, const std::string& var);
     bool matchAST(const std::shared_ptr<SymNode>& node, const std::shared_ptr<SymNode>& pat, std::map<std::string, SymExpr>& captures);
     SymExpr substituteCaptures(const SymExpr& target, const std::map<std::string, SymExpr>& captures);
@@ -166,6 +173,7 @@ namespace jc {
         explicit SymNum(CASVal v) : value(std::move(v)) {}
         SymType getType() const override { return SymType::NUM; }
         std::string computeString() const override { return casToString(value); }
+        std::string computeSignature() const override { return "N:" + casToString(value); }
         bool isZero() const override { return isCasZero(value); }
         bool isOne() const override { return isCasOne(value); }
     };
@@ -176,6 +184,7 @@ namespace jc {
         explicit SymVar(std::string n) : name(std::move(n)) {}
         SymType getType() const override { return SymType::VAR; }
         std::string computeString() const override { return name; }
+        std::string computeSignature() const override { return "V:" + name; }
     };
 
     class SymAdd : public SymNode {
@@ -184,6 +193,7 @@ namespace jc {
         explicit SymAdd(std::vector<std::shared_ptr<SymNode>> a) : args(std::move(a)) {}
         SymType getType() const override { return SymType::ADD; }
         std::string computeString() const override;
+        std::string computeSignature() const override;
     };
 
     class SymMul : public SymNode {
@@ -192,6 +202,7 @@ namespace jc {
         explicit SymMul(std::vector<std::shared_ptr<SymNode>> a) : args(std::move(a)) {}
         SymType getType() const override { return SymType::MUL; }
         std::string computeString() const override;
+        std::string computeSignature() const override;
     };
 
     class SymPow : public SymNode {
@@ -201,6 +212,7 @@ namespace jc {
         SymPow(std::shared_ptr<SymNode> b, std::shared_ptr<SymNode> e) : base(std::move(b)), exp(std::move(e)) {}
         SymType getType() const override { return SymType::POW; }
         std::string computeString() const override;
+        std::string computeSignature() const override;
     };
 
     class SymFunc : public SymNode {
@@ -212,6 +224,7 @@ namespace jc {
         }
         SymType getType() const override { return SymType::FUNC; }
         std::string computeString() const override;
+        std::string computeSignature() const override;
     };
 
     // 模板构造函数实现 (必须在 SymNum 完整定义之后)

@@ -1,6 +1,7 @@
 #include "BuiltinRegistry.h"
 #include "SymEval.h"
 #include "Integration.h"
+#include "Factorization.h"
 #include "Highlight.h"          // ★ highlightCode(), colorsEnabled
 #include "Module.h"
 #include "VM.h"

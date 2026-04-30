@@ -10,19 +10,6 @@
 namespace jc {
 
     // =================================================================
-    // 内部辅助函数 (Internal Helpers)
-    // =================================================================
-    static bool isCasNegative(const CASVal& v) {
-        return std::visit([](auto&& arg) -> bool {
-            using T = std::decay_t<decltype(arg)>;
-            if constexpr (std::is_same_v<T, BigInt>) return arg.isNegative();
-            else if constexpr (std::is_same_v<T, Fraction>) return arg.getNum().isNegative() != arg.getDen().isNegative();
-            else if constexpr (std::is_same_v<T, double>) return arg < 0.0;
-            else return false;
-        }, v);
-    }
-
-    // =================================================================
     // 提取有理分式的分子和分母 (Get Numerator and Denominator)
     // =================================================================
     static std::pair<SymExpr, SymExpr> getFraction(const SymExpr& expr) {
@@ -222,7 +209,7 @@ namespace jc {
                     for (const auto& ext : field.tower) {
                         if ((ext.type == RischExtType::LOG && f->name == "log") ||
                             (ext.type == RischExtType::EXP && f->name == "exp")) {
-                            if (ext.arg.toString() == arg.toString()) {
+                            if (ext.arg == arg) {
                                 exists = true;
                                 break;
                             }
@@ -380,7 +367,7 @@ namespace jc {
                 if (intPart.isZero()) return ratPart;
                 
                 try {
-                    if (intPart.toString() == expr.toString()) throw std::runtime_error("Loop");
+                    if (intPart == expr) throw std::runtime_error("Loop");
                     if (getAstNodeCount(intPart) >= getAstNodeCount(expr)) throw std::runtime_error("Complexity increased");
                     SymExpr intRes = integrate(intPart, var);
                     return ratPart + intRes;
@@ -669,7 +656,7 @@ namespace jc {
                 SymExpr u_sym = SymExpr::makeVar(u_var);
                 std::function<SymExpr(const SymExpr&)> replaceNode = [&](const SymExpr& expr_node) -> SymExpr {
                     if (!expr_node.ptr) return expr_node;
-                    if (expr_node.toString() == sub_u.toString()) return u_sym;
+                    if (expr_node == sub_u) return u_sym;
                     switch (expr_node.ptr->getType()) {
                         case SymType::ADD: {
                             SymExpr res(BigInt(0));
@@ -733,7 +720,7 @@ namespace jc {
                     SymExpr u_sym = SymExpr::makeVar(u_var);
                     std::function<SymExpr(const SymExpr&)> replaceU = [&](const SymExpr& expr_node) -> SymExpr {
                         if (!expr_node.ptr) return expr_node;
-                        if (expr_node.toString() == u.toString()) return u_sym;
+                        if (expr_node == u) return u_sym;
                         switch (expr_node.ptr->getType()) {
                             case SymType::ADD: {
                                 SymExpr res(BigInt(0));
@@ -1389,7 +1376,7 @@ namespace jc {
                 try { expanded = expand(expr, 1000); } catch (...) { expanded = expr; }
                 
                 // 严格防死锁：只有当展开后的表达式确实发生了变化，才允许重置 depth=0 再次尝试
-                if (expanded.toString() != expr.toString()) {
+                if (expanded != expr) {
                     try {
                         return simplify(doInteg(expanded, 0));
                     } catch (const std::runtime_error& e2) {

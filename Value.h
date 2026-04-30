@@ -547,7 +547,7 @@ namespace jc {
                 if (std::holds_alternative<BaseNum>(lhs.data))
                     return std::get<BaseNum>(lhs.data).getValue() == std::get<BaseNum>(rhs.data).getValue();
                 if (std::holds_alternative<SymExpr>(lhs.data))
-                    return std::get<SymExpr>(lhs.data).toString() == std::get<SymExpr>(rhs.data).toString();
+                    return std::get<SymExpr>(lhs.data) == std::get<SymExpr>(rhs.data);
 
                 if (std::holds_alternative<RealMatrix>(lhs.data)) {
                     const auto& a = std::get<RealMatrix>(lhs.data);
