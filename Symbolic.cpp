@@ -14,6 +14,7 @@
 
 #include <unordered_map>
 #include <unordered_set>
+#include <cstdint>
 
 namespace jc {
 
@@ -272,40 +273,40 @@ namespace jc {
     }
 
     std::string SymAdd::computeSignature() const {
-        std::vector<std::string> sigs;
-        sigs.reserve(args.size());
-        for (auto& arg : args) sigs.push_back(arg->getSignature());
-        std::sort(sigs.begin(), sigs.end());
+        std::vector<uintptr_t> ptrs;
+        ptrs.reserve(args.size());
+        for (auto& arg : args) ptrs.push_back(reinterpret_cast<uintptr_t>(arg.get()));
+        std::sort(ptrs.begin(), ptrs.end());
         std::string res = "A:[";
-        for (size_t i = 0; i < sigs.size(); ++i) {
+        for (size_t i = 0; i < ptrs.size(); ++i) {
             if (i > 0) res += ",";
-            res += sigs[i];
+            res += std::to_string(ptrs[i]);
         }
         return res + "]";
     }
 
     std::string SymMul::computeSignature() const {
-        std::vector<std::string> sigs;
-        sigs.reserve(args.size());
-        for (auto& arg : args) sigs.push_back(arg->getSignature());
-        std::sort(sigs.begin(), sigs.end());
+        std::vector<uintptr_t> ptrs;
+        ptrs.reserve(args.size());
+        for (auto& arg : args) ptrs.push_back(reinterpret_cast<uintptr_t>(arg.get()));
+        std::sort(ptrs.begin(), ptrs.end());
         std::string res = "M:[";
-        for (size_t i = 0; i < sigs.size(); ++i) {
+        for (size_t i = 0; i < ptrs.size(); ++i) {
             if (i > 0) res += ",";
-            res += sigs[i];
+            res += std::to_string(ptrs[i]);
         }
         return res + "]";
     }
 
     std::string SymPow::computeSignature() const {
-        return "P:(" + base->getSignature() + "," + exp->getSignature() + ")";
+        return "P:(" + std::to_string(reinterpret_cast<uintptr_t>(base.get())) + "," + std::to_string(reinterpret_cast<uintptr_t>(exp.get())) + ")";
     }
 
     std::string SymFunc::computeSignature() const {
         std::string res = "F:" + name + "(";
         for (size_t i = 0; i < args.size(); ++i) {
             if (i > 0) res += ",";
-            res += args[i]->getSignature();
+            res += std::to_string(reinterpret_cast<uintptr_t>(args[i].get()));
         }
         return res + ")";
     }
@@ -916,6 +917,30 @@ namespace jc {
         return false;
     }
 
+    // 检查节点子树中是否包含万能通配符
+    static bool hasWildcard(const std::shared_ptr<SymNode>& node) {
+        if (!node) return false;
+        if (node->getType() == SymType::VAR) {
+            std::string name = std::static_pointer_cast<SymVar>(node)->name;
+            return !name.empty() && name[0] == '_';
+        }
+        switch (node->getType()) {
+            case SymType::ADD:
+                for (auto& a : std::static_pointer_cast<SymAdd>(node)->args) if (hasWildcard(a)) return true;
+                break;
+            case SymType::MUL:
+                for (auto& a : std::static_pointer_cast<SymMul>(node)->args) if (hasWildcard(a)) return true;
+                break;
+            case SymType::POW:
+                return hasWildcard(std::static_pointer_cast<SymPow>(node)->base) || hasWildcard(std::static_pointer_cast<SymPow>(node)->exp);
+            case SymType::FUNC:
+                for (auto& a : std::static_pointer_cast<SymFunc>(node)->args) if (hasWildcard(a)) return true;
+                break;
+            default: break;
+        }
+        return false;
+    }
+
     // 精确匹配 AST 并记录捕获变量 (支持 ADD/MUL 的全排列交换律检测)
     bool matchAST(const std::shared_ptr<SymNode>& node, const std::shared_ptr<SymNode>& pat, std::map<std::string, SymExpr>& captures) {
         if (!node || !pat) return false;
@@ -969,25 +994,52 @@ namespace jc {
                 
                 if (nArgs.size() != pArgs.size()) return false;
                 
-                std::vector<size_t> indices(nArgs.size());
-                std::iota(indices.begin(), indices.end(), 0);
-                
-                do {
-                    std::map<std::string, SymExpr> tempCaptures = captures;
-                    bool allMatch = true;
-                    for (size_t i = 0; i < nArgs.size(); ++i) {
-                        if (!matchAST(nArgs[indices[i]], pArgs[i], tempCaptures)) {
-                            allMatch = false;
-                            break;
+                // 预处理：精确匹配抵消 (剔除不含通配符的相同项)
+                std::vector<bool> nUsed(nArgs.size(), false);
+                std::vector<bool> pUsed(pArgs.size(), false);
+                int matchCount = 0;
+
+                for (size_t j = 0; j < pArgs.size(); ++j) {
+                    if (!hasWildcard(pArgs[j])) {
+                        for (size_t i = 0; i < nArgs.size(); ++i) {
+                            if (!nUsed[i] && nArgs[i] == pArgs[j]) {
+                                nUsed[i] = true;
+                                pUsed[j] = true;
+                                matchCount++;
+                                break;
+                            }
                         }
                     }
-                    if (allMatch) {
-                        captures = tempCaptures;
-                        return true;
+                }
+
+                if (matchCount == nArgs.size()) return true;
+
+                // 提取剩余的待匹配项
+                std::vector<std::shared_ptr<SymNode>> remN, remP;
+                for (size_t i = 0; i < nArgs.size(); ++i) if (!nUsed[i]) remN.push_back(nArgs[i]);
+                for (size_t j = 0; j < pArgs.size(); ++j) if (!pUsed[j]) remP.push_back(pArgs[j]);
+
+                // DFS 回溯匹配剩余项 (带剪枝)
+                std::vector<bool> remNUsed(remN.size(), false);
+                std::function<bool(size_t, std::map<std::string, SymExpr>&)> dfs = [&](size_t pIdx, std::map<std::string, SymExpr>& curCaps) -> bool {
+                    if (pIdx == remP.size()) return true;
+                    for (size_t i = 0; i < remN.size(); ++i) {
+                        if (!remNUsed[i]) {
+                            std::map<std::string, SymExpr> nextCaps = curCaps;
+                            if (matchAST(remN[i], remP[pIdx], nextCaps)) {
+                                remNUsed[i] = true;
+                                if (dfs(pIdx + 1, nextCaps)) {
+                                    curCaps = nextCaps;
+                                    return true;
+                                }
+                                remNUsed[i] = false;
+                            }
+                        }
                     }
-                } while (std::next_permutation(indices.begin(), indices.end()));
-                
-                return false;
+                    return false;
+                };
+
+                return dfs(0, captures);
             }
         }
         return false;
@@ -1115,50 +1167,66 @@ namespace jc {
             size_t K = pArgs.size();
             
             if (N > K) {
-                std::vector<bool> v(N);
-                std::fill(v.end() - K, v.end(), true);
-                
-                do {
-                    std::vector<std::shared_ptr<SymNode>> selected;
-                    std::vector<std::shared_ptr<SymNode>> remaining;
-                    for (size_t i = 0; i < N; ++i) {
-                        if (v[i]) selected.push_back(cArgs[i]);
-                        else remaining.push_back(cArgs[i]);
-                    }
-                    
-                    std::vector<size_t> indices(K);
-                    std::iota(indices.begin(), indices.end(), 0);
-                    bool subsetMatched = false;
-                    std::map<std::string, SymExpr> subCaptures;
-                    
-                    do {
-                        subCaptures.clear();
-                        bool allMatch = true;
-                        for (size_t i = 0; i < K; ++i) {
-                            if (!matchAST(selected[indices[i]], pArgs[i], subCaptures)) {
-                                allMatch = false;
+                // 预处理：精确匹配抵消
+                std::vector<bool> cUsed(N, false);
+                std::vector<bool> pUsed(K, false);
+
+                for (size_t j = 0; j < K; ++j) {
+                    if (!hasWildcard(pArgs[j])) {
+                        for (size_t i = 0; i < N; ++i) {
+                            if (!cUsed[i] && cArgs[i] == pArgs[j]) {
+                                cUsed[i] = true;
+                                pUsed[j] = true;
                                 break;
                             }
                         }
-                        if (allMatch) {
-                            subsetMatched = true;
-                            break;
-                        }
-                    } while (std::next_permutation(indices.begin(), indices.end()));
-                    
-                    if (subsetMatched) {
-                        SymExpr replaced = substituteCaptures(target, subCaptures);
-                        if (current.ptr->getType() == SymType::ADD) {
-                            SymExpr res = replaced;
-                            for (auto& rem : remaining) res = res + SymExpr(rem);
-                            return res;
-                        } else {
-                            SymExpr res = replaced;
-                            for (auto& rem : remaining) res = res * SymExpr(rem);
-                            return res;
+                    }
+                }
+
+                std::vector<std::shared_ptr<SymNode>> remP;
+                for (size_t j = 0; j < K; ++j) if (!pUsed[j]) remP.push_back(pArgs[j]);
+
+                std::map<std::string, SymExpr> finalCaptures;
+                std::vector<bool> finalCUsed;
+
+                // DFS 回溯寻找子集匹配
+                std::function<bool(size_t, std::map<std::string, SymExpr>&, std::vector<bool>&)> dfsSubset = 
+                    [&](size_t pIdx, std::map<std::string, SymExpr>& curCaps, std::vector<bool>& curCUsed) -> bool {
+                    if (pIdx == remP.size()) {
+                        finalCaptures = curCaps;
+                        finalCUsed = curCUsed;
+                        return true;
+                    }
+                    for (size_t i = 0; i < N; ++i) {
+                        if (!curCUsed[i]) {
+                            std::map<std::string, SymExpr> nextCaps = curCaps;
+                            if (matchAST(cArgs[i], remP[pIdx], nextCaps)) {
+                                curCUsed[i] = true;
+                                if (dfsSubset(pIdx + 1, nextCaps, curCUsed)) return true;
+                                curCUsed[i] = false;
+                            }
                         }
                     }
-                } while (std::next_permutation(v.begin(), v.end()));
+                    return false;
+                };
+
+                std::map<std::string, SymExpr> initialCaps;
+                if (dfsSubset(0, initialCaps, cUsed)) {
+                    SymExpr replaced = substituteCaptures(target, finalCaptures);
+                    std::vector<std::shared_ptr<SymNode>> remaining;
+                    for (size_t i = 0; i < N; ++i) {
+                        if (!finalCUsed[i]) remaining.push_back(cArgs[i]);
+                    }
+                    if (current.ptr->getType() == SymType::ADD) {
+                        SymExpr res = replaced;
+                        for (auto& rem : remaining) res = res + SymExpr(rem);
+                        return res;
+                    } else {
+                        SymExpr res = replaced;
+                        for (auto& rem : remaining) res = res * SymExpr(rem);
+                        return res;
+                    }
+                }
             }
         }
         
