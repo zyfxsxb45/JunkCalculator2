@@ -1146,8 +1146,15 @@ void BuiltinRegistry::registerSystemUtils() {
             d.set("maxDepth", Value(static_cast<double>(SymConfig::maxDepth)));
             return Value(d);
         }
+        if (std::holds_alternative<std::string>(args[0].data) && std::get<std::string>(args[0].data) == "default") {
+            SymConfig::maxExpandTerms = 5000;
+            SymConfig::maxAstNodes = 50000;
+            SymConfig::maxIterations = 1000;
+            SymConfig::maxDepth = 20;
+            return Value::none();
+        }
         if (!std::holds_alternative<Dict>(args[0].data)) {
-            throw std::runtime_error("Type Error: symconfig() expects a Dict.");
+            throw std::runtime_error("Type Error: symconfig() expects a Dict or \"default\".");
         }
         Dict d = std::get<Dict>(args[0].data);
         if (d.has("maxExpandTerms")) SymConfig::maxExpandTerms = static_cast<int64_t>(std::any_cast<Value>(*d.get("maxExpandTerms")).asDouble());
@@ -1157,10 +1164,31 @@ void BuiltinRegistry::registerSystemUtils() {
         return Value::none();
         });
 
-    reg("setSymLimit", { 2 }, [](const std::vector<Value>& args) -> Value {
+    reg("setSymLimit", { 1, 2 }, [](const std::vector<Value>& args) -> Value {
         if (!std::holds_alternative<std::string>(args[0].data))
             throw std::runtime_error("Type Error: setSymLimit() expects a string key.");
         std::string key = std::get<std::string>(args[0].data);
+        
+        if (args.size() == 1) {
+            if (key == "default") {
+                SymConfig::maxExpandTerms = 5000;
+                SymConfig::maxAstNodes = 50000;
+                SymConfig::maxIterations = 1000;
+                SymConfig::maxDepth = 20;
+                return Value::none();
+            }
+            throw std::runtime_error("Runtime Error: setSymLimit() expects 2 arguments unless resetting with \"default\".");
+        }
+
+        if (std::holds_alternative<std::string>(args[1].data) && std::get<std::string>(args[1].data) == "default") {
+            if (key == "maxExpandTerms") SymConfig::maxExpandTerms = 5000;
+            else if (key == "maxAstNodes") SymConfig::maxAstNodes = 50000;
+            else if (key == "maxIterations") SymConfig::maxIterations = 1000;
+            else if (key == "maxDepth") SymConfig::maxDepth = 20;
+            else throw std::runtime_error("Runtime Error: Unknown SymConfig key '" + key + "'.");
+            return Value::none();
+        }
+
         double val = args[1].asDouble();
         if (key == "maxExpandTerms") SymConfig::maxExpandTerms = static_cast<int64_t>(val);
         else if (key == "maxAstNodes") SymConfig::maxAstNodes = static_cast<int>(val);
