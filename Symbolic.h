@@ -161,6 +161,7 @@ namespace jc {
     SymExpr limit(const SymExpr& expr, const std::string& var, const SymExpr& val);
     SymExpr trigsimp(const SymExpr& expr);
     SymExpr taylor(const SymExpr& expr, const std::string& var, const SymExpr& a, int order); // 泰勒展开
+    SymExpr rischNormalize(const SymExpr& expr); // 刘维尔域规范化 (Risch 算法前置)
 
     // 内部工具暴露给 Integration 模块
     std::pair<bool, int64_t> extractExactInt(const CASVal& cval);

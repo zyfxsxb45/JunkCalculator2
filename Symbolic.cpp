@@ -3451,6 +3451,187 @@ namespace jc {
     }
 
     // =================================================================
+    // 🚀 刘维尔域规范化 (Liouvillian Field Normalization)
+    // =================================================================
+    static Fraction gcdFraction(const Fraction& f1, const Fraction& f2) {
+        if (f1.getNum().isZero()) return f2;
+        if (f2.getNum().isZero()) return f1;
+        BigInt num = BigInt::gcd(f1.getNum(), f2.getNum());
+        BigInt den = BigInt::lcm(f1.getDen(), f2.getDen());
+        return Fraction(num, den);
+    }
+
+    static std::pair<Fraction, SymExpr> extractRationalCoeff(const SymExpr& expr) {
+        if (expr.ptr->getType() == SymType::NUM) {
+            auto num = std::static_pointer_cast<SymNum>(expr.ptr);
+            if (std::holds_alternative<BigInt>(num->value)) {
+                return {Fraction(std::get<BigInt>(num->value), BigInt(1)), SymExpr(BigInt(1))};
+            } else if (std::holds_alternative<Fraction>(num->value)) {
+                return {std::get<Fraction>(num->value), SymExpr(BigInt(1))};
+            }
+        } else if (expr.ptr->getType() == SymType::MUL) {
+            auto mul = std::static_pointer_cast<SymMul>(expr.ptr);
+            BigInt num_val(1);
+            BigInt den_val(1);
+            std::vector<std::shared_ptr<SymNode>> rest;
+            for (auto& arg : mul->args) {
+                if (arg->getType() == SymType::NUM) {
+                    auto num = std::static_pointer_cast<SymNum>(arg);
+                    if (std::holds_alternative<BigInt>(num->value)) {
+                        num_val = num_val * std::get<BigInt>(num->value);
+                    } else if (std::holds_alternative<Fraction>(num->value)) {
+                        Fraction f = std::get<Fraction>(num->value);
+                        num_val = num_val * f.getNum();
+                        den_val = den_val * f.getDen();
+                    } else {
+                        rest.push_back(arg);
+                    }
+                } else {
+                    rest.push_back(arg);
+                }
+            }
+            Fraction q(num_val, den_val);
+            if (rest.empty()) return {q, SymExpr(BigInt(1))};
+            if (rest.size() == 1) return {q, SymExpr(rest[0])};
+            return {q, SymExpr(std::make_shared<SymMul>(rest))};
+        }
+        return {Fraction(BigInt(1), BigInt(1)), expr};
+    }
+
+    static SymExpr flattenLogExp(const SymExpr& expr) {
+        if (!expr.ptr) return expr;
+        switch (expr.ptr->getType()) {
+            case SymType::ADD: {
+                SymExpr res(BigInt(0));
+                for (auto& arg : std::static_pointer_cast<SymAdd>(expr.ptr)->args)
+                    res = res + flattenLogExp(SymExpr(arg));
+                return res;
+            }
+            case SymType::MUL: {
+                SymExpr res(BigInt(1));
+                for (auto& arg : std::static_pointer_cast<SymMul>(expr.ptr)->args)
+                    res = res * flattenLogExp(SymExpr(arg));
+                return res;
+            }
+            case SymType::POW: {
+                auto powNode = std::static_pointer_cast<SymPow>(expr.ptr);
+                return flattenLogExp(SymExpr(powNode->base)) ^ flattenLogExp(SymExpr(powNode->exp));
+            }
+            case SymType::FUNC: {
+                auto func = std::static_pointer_cast<SymFunc>(expr.ptr);
+                if (func->name == "log" && func->args.size() == 1) {
+                    SymExpr inner = flattenLogExp(SymExpr(func->args[0]));
+                    if (inner.ptr->getType() == SymType::MUL) {
+                        SymExpr res(BigInt(0));
+                        for (auto& arg : std::static_pointer_cast<SymMul>(inner.ptr)->args) {
+                            res = res + flattenLogExp(SymExpr(std::make_shared<SymFunc>("log", std::vector<std::shared_ptr<SymNode>>{arg})));
+                        }
+                        return res;
+                    }
+                    if (inner.ptr->getType() == SymType::POW) {
+                        auto powNode = std::static_pointer_cast<SymPow>(inner.ptr);
+                        SymExpr baseLog = flattenLogExp(SymExpr(std::make_shared<SymFunc>("log", std::vector<std::shared_ptr<SymNode>>{powNode->base})));
+                        return SymExpr(powNode->exp) * baseLog;
+                    }
+                    return SymExpr(std::make_shared<SymFunc>("log", std::vector<std::shared_ptr<SymNode>>{inner.ptr}));
+                }
+                if (func->name == "exp" && func->args.size() == 1) {
+                    SymExpr inner = flattenLogExp(SymExpr(func->args[0]));
+                    if (inner.ptr->getType() == SymType::ADD) {
+                        SymExpr res(BigInt(1));
+                        for (auto& arg : std::static_pointer_cast<SymAdd>(inner.ptr)->args) {
+                            res = res * flattenLogExp(SymExpr(std::make_shared<SymFunc>("exp", std::vector<std::shared_ptr<SymNode>>{arg})));
+                        }
+                        return res;
+                    }
+                    return SymExpr(std::make_shared<SymFunc>("exp", std::vector<std::shared_ptr<SymNode>>{inner.ptr}));
+                }
+                std::vector<std::shared_ptr<SymNode>> newArgs;
+                for (auto& arg : func->args) newArgs.push_back(flattenLogExp(SymExpr(arg)).ptr);
+                return SymExpr(std::make_shared<SymFunc>(func->name, std::move(newArgs)));
+            }
+            default: return expr;
+        }
+    }
+
+    SymExpr rischNormalize(const SymExpr& expr) {
+        SymExpr flat = flattenLogExp(expand(expr, SymConfig::maxExpandTerms));
+        
+        std::vector<SymExpr> allExps;
+        std::function<void(const SymExpr&)> collectExps = [&](const SymExpr& e) {
+            if (!e.ptr) return;
+            if (e.ptr->getType() == SymType::FUNC) {
+                auto func = std::static_pointer_cast<SymFunc>(e.ptr);
+                if (func->name == "exp" && func->args.size() == 1) {
+                    allExps.push_back(e);
+                }
+                for (auto& arg : func->args) collectExps(SymExpr(arg));
+            } else if (e.ptr->getType() == SymType::ADD) {
+                for (auto& arg : std::static_pointer_cast<SymAdd>(e.ptr)->args) collectExps(SymExpr(arg));
+            } else if (e.ptr->getType() == SymType::MUL) {
+                for (auto& arg : std::static_pointer_cast<SymMul>(e.ptr)->args) collectExps(SymExpr(arg));
+            } else if (e.ptr->getType() == SymType::POW) {
+                auto powNode = std::static_pointer_cast<SymPow>(e.ptr);
+                collectExps(SymExpr(powNode->base));
+                collectExps(SymExpr(powNode->exp));
+            }
+        };
+        collectExps(flat);
+
+        std::map<std::string, std::pair<SymExpr, Fraction>> expGroups;
+        for (const auto& expNode : allExps) {
+            auto func = std::static_pointer_cast<SymFunc>(expNode.ptr);
+            SymExpr inner(func->args[0]);
+            auto [q, prim] = extractRationalCoeff(inner);
+            std::string sig = prim.ptr->getSignature();
+            if (expGroups.count(sig)) {
+                expGroups[sig].second = gcdFraction(expGroups[sig].second, q);
+            } else {
+                expGroups[sig] = {prim, q};
+            }
+        }
+
+        std::function<SymExpr(const SymExpr&)> replaceExps = [&](const SymExpr& e) -> SymExpr {
+            if (!e.ptr) return e;
+            if (e.ptr->getType() == SymType::FUNC) {
+                auto func = std::static_pointer_cast<SymFunc>(e.ptr);
+                if (func->name == "exp" && func->args.size() == 1) {
+                    SymExpr inner = replaceExps(SymExpr(func->args[0]));
+                    auto [q, prim] = extractRationalCoeff(inner);
+                    std::string sig = prim.ptr->getSignature();
+                    if (expGroups.count(sig)) {
+                        Fraction g = expGroups[sig].second;
+                        if (g.getNum() > BigInt(0)) {
+                            Fraction power(q.getNum() * g.getDen(), q.getDen() * g.getNum());
+                            SymExpr baseExp(std::make_shared<SymFunc>("exp", std::vector<std::shared_ptr<SymNode>>{(SymExpr(g) * prim).ptr}));
+                            if (power.getNum() == power.getDen()) return baseExp;
+                            return baseExp ^ SymExpr(power);
+                        }
+                    }
+                    return SymExpr(std::make_shared<SymFunc>("exp", std::vector<std::shared_ptr<SymNode>>{inner.ptr}));
+                }
+                std::vector<std::shared_ptr<SymNode>> newArgs;
+                for (auto& arg : func->args) newArgs.push_back(replaceExps(SymExpr(arg)).ptr);
+                return SymExpr(std::make_shared<SymFunc>(func->name, std::move(newArgs)));
+            } else if (e.ptr->getType() == SymType::ADD) {
+                SymExpr res(BigInt(0));
+                for (auto& arg : std::static_pointer_cast<SymAdd>(e.ptr)->args) res = res + replaceExps(SymExpr(arg));
+                return res;
+            } else if (e.ptr->getType() == SymType::MUL) {
+                SymExpr res(BigInt(1));
+                for (auto& arg : std::static_pointer_cast<SymMul>(e.ptr)->args) res = res * replaceExps(SymExpr(arg));
+                return res;
+            } else if (e.ptr->getType() == SymType::POW) {
+                auto powNode = std::static_pointer_cast<SymPow>(e.ptr);
+                return replaceExps(SymExpr(powNode->base)) ^ replaceExps(SymExpr(powNode->exp));
+            }
+            return e;
+        };
+
+        return replaceExps(flat);
+    }
+
+    // =================================================================
 // 快速数值求值 (C++ 原生 Double 极限狂飙 + 依赖注入解耦)
 // =================================================================
     double fastEval(const std::shared_ptr<SymNode>& node, const std::map<std::string, double>& env, const SymbolicFuncResolver& resolver) {

@@ -261,9 +261,12 @@ namespace jc {
     // 🚀 Risch 算法入口 (Risch Algorithm Entry Point)
     // =================================================================
     SymExpr rischIntegrate(const SymExpr& expr, const std::string& var) {
+        // Step 0 - 刘维尔域规范化 (Liouvillian Field Normalization)
+        SymExpr normalizedExpr = rischNormalize(expr);
+
         // Step 1 - 构建微分域与刘维尔扩张
-        RischDiffField field = buildRischDifferentialField(expr, var);
-        SymExpr rewritten = field.rewrite(expr);
+        RischDiffField field = buildRischDifferentialField(normalizedExpr, var);
+        SymExpr rewritten = field.rewrite(normalizedExpr);
         
         // Step 1.5 - 单一扩张的变量代换降维打击 (Change of Variables for Single Extension)
         if (field.tower.size() == 1) {
@@ -310,20 +313,20 @@ namespace jc {
                 if (intPart.isZero()) return ratPart;
                 
                 try {
-                    if (intPart == expr) throw std::runtime_error("Loop");
-                    if (getAstNodeCount(intPart) >= getAstNodeCount(expr)) throw std::runtime_error("Complexity increased");
+                    if (intPart == normalizedExpr) throw std::runtime_error("Loop");
+                    if (getAstNodeCount(intPart) >= getAstNodeCount(normalizedExpr)) throw std::runtime_error("Complexity increased");
                     SymExpr intRes = integrate(intPart, var);
                     return ratPart + intRes;
                 } catch (const std::exception& e) {
                     std::string debugInfo = "Hermite Reduction completed, but remaining integral is non-elementary.\n";
-                    debugInfo += "Original: " + expr.toString() + "\n";
+                    debugInfo += "Original: " + normalizedExpr.toString() + "\n";
                     debugInfo += "Rational Part: " + ratPart.toString() + "\n";
                     debugInfo += "Remaining Integral: \\int (" + intPart.toString() + ") d" + var + "\n";
                     debugInfo += "Reason: " + std::string(e.what()) + "\n";
                     throw std::runtime_error("Calculus Error: " + debugInfo);
                 } catch (...) {
                     std::string debugInfo = "Hermite Reduction completed, but remaining integral is non-elementary.\n";
-                    debugInfo += "Original: " + expr.toString() + "\n";
+                    debugInfo += "Original: " + normalizedExpr.toString() + "\n";
                     debugInfo += "Rational Part: " + ratPart.toString() + "\n";
                     debugInfo += "Remaining Integral: \\int (" + intPart.toString() + ") d" + var + "\n";
                     throw std::runtime_error("Calculus Error: " + debugInfo);
