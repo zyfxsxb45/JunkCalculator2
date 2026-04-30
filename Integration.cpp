@@ -5,6 +5,7 @@
 #include <numeric>
 #include <vector>
 #include <map>
+#include <unordered_map>
 #include <functional>
 #include <optional>
 
@@ -503,7 +504,10 @@ namespace jc {
         // 从规则库获取静态积分规则
         const auto& rules = getStaticIntegRules();
 
-        std::function<std::optional<SymExpr>(const SymExpr&, int)> doInteg = [&](const SymExpr& e, int depth) -> std::optional<SymExpr> {
+        std::unordered_map<std::string, std::optional<SymExpr>> integCache;
+        std::function<std::optional<SymExpr>(const SymExpr&, int)> doInteg;
+
+        auto doIntegImpl = [&](const SymExpr& e, int depth) -> std::optional<SymExpr> {
             if (depth > SymConfig::maxDepth / 3) return std::nullopt;
 
             if (!containsVar(e.ptr, var)) {
@@ -1284,6 +1288,17 @@ namespace jc {
                 if (depth == 0) throw;
                 return std::nullopt;
             }
+        };
+
+        doInteg = [&](const SymExpr& e, int depth) -> std::optional<SymExpr> {
+            if (!e.ptr) return std::nullopt;
+            std::string sig = e.ptr->getSignature();
+            auto it = integCache.find(sig);
+            if (it != integCache.end()) return it->second;
+            
+            auto res = doIntegImpl(e, depth);
+            integCache[sig] = res;
+            return res;
         };
 
         auto tryInteg = [&]() -> SymExpr {

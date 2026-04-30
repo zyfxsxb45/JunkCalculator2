@@ -15,6 +15,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <cstdint>
+#include <optional>
 
 namespace jc {
 
@@ -2464,13 +2465,16 @@ namespace jc {
 
     // =================================================================
     // 轻量化多项式探针 (Polynomial Probe)
+    // 机制说明：如果含有非积分变量 (如 y, z)，由于它们不等于 var，
+    // 且 containsVar(..., var) 会返回 false，因此它们会被自然地
+    // 视为常数 (0次多项式)，从而完美支持多元多项式的判定。
     // =================================================================
     bool isPolynomialIn(const SymExpr& expr, const std::string& var) {
         if (!expr.ptr) return false;
         switch (expr.ptr->getType()) {
             case SymType::NUM:
             case SymType::VAR:
-                return true;
+                return true; // 非 var 的其他变量 (如 y) 在这里返回 true，视为常数
             case SymType::ADD: {
                 auto add = std::static_pointer_cast<SymAdd>(expr.ptr);
                 for (auto& arg : add->args) {
@@ -2520,6 +2524,8 @@ namespace jc {
         std::map<int, SymExpr> degreeMap;
 
         auto processTerm = [&](const SymExpr& term) -> bool {
+            // 如果该项完全不包含目标变量 (例如 y^2, sin(y), 或纯数字)，
+            // 则整体作为 0 次项系数 (常数项)
             if (!containsVar(term.ptr, var)) {
                 degreeMap[0] = degreeMap.count(0) ? degreeMap[0] + term : term;
                 return true;
@@ -2550,7 +2556,7 @@ namespace jc {
                 bool foundVarPart = false;
 
                 for (auto& f : mul->args) {
-                    // 如果该因子不包含 x，视为系数
+                    // 如果该因子不包含 x (例如 y, z^2, sin(y))，视为系数乘入
                     if (!containsVar(f, var)) {
                         coeff = coeff * SymExpr(f);
                     }
@@ -3394,6 +3400,87 @@ namespace jc {
     }
 
     // =================================================================
+    // 静默代入 (Quiet Substitution) - 避免除零异常的控制流开销
+    // =================================================================
+    static std::optional<SymExpr> trySubsQuiet(const SymExpr& expr, const std::string& var, const SymExpr& val) {
+        if (!expr.ptr) return expr;
+
+        switch (expr.ptr->getType()) {
+        case SymType::NUM:
+            return expr;
+
+        case SymType::VAR: {
+            auto v = std::static_pointer_cast<SymVar>(expr.ptr);
+            return (v->name == var) ? val : expr;
+        }
+
+        case SymType::ADD: {
+            auto add = std::static_pointer_cast<SymAdd>(expr.ptr);
+            SymExpr result(BigInt(0));
+            for (auto& arg : add->args) {
+                auto subArg = trySubsQuiet(SymExpr(arg), var, val);
+                if (!subArg) return std::nullopt;
+                result = result + *subArg;
+            }
+            return result;
+        }
+
+        case SymType::MUL: {
+            auto mul = std::static_pointer_cast<SymMul>(expr.ptr);
+            SymExpr result(BigInt(1));
+            for (auto& arg : mul->args) {
+                auto subArg = trySubsQuiet(SymExpr(arg), var, val);
+                if (!subArg) return std::nullopt;
+                result = result * *subArg;
+            }
+            return result;
+        }
+
+        case SymType::POW: {
+            auto pow = std::static_pointer_cast<SymPow>(expr.ptr);
+            auto baseSub = trySubsQuiet(SymExpr(pow->base), var, val);
+            if (!baseSub) return std::nullopt;
+            auto expSub = trySubsQuiet(SymExpr(pow->exp), var, val);
+            if (!expSub) return std::nullopt;
+
+            auto [bOk, bVal] = tryEvalConst(*baseSub);
+            auto [eOk, eVal] = tryEvalConst(*expSub);
+            bool bIsZero = baseSub->isZero() || (bOk && !bVal.truthy());
+            bool eIsZero = expSub->isZero() || (eOk && !eVal.truthy());
+
+            if (bIsZero) {
+                if (eIsZero) return std::nullopt; // 0^0
+                bool eIsNeg = false;
+                if (eOk) {
+                    try { eIsNeg = eVal.asDouble() < 0.0; } catch(...) {}
+                } else if (expSub->ptr->getType() == SymType::NUM) {
+                    eIsNeg = isCasNegative(std::static_pointer_cast<SymNum>(expSub->ptr)->value);
+                }
+                if (eIsNeg) return std::nullopt; // Division by zero
+            }
+            
+            try {
+                return (*baseSub) ^ (*expSub);
+            } catch (...) {
+                return std::nullopt;
+            }
+        }
+
+        case SymType::FUNC: {
+            auto func = std::static_pointer_cast<SymFunc>(expr.ptr);
+            std::vector<std::shared_ptr<SymNode>> newArgs;
+            for (auto& arg : func->args) {
+                auto subArg = trySubsQuiet(SymExpr(arg), var, val);
+                if (!subArg) return std::nullopt;
+                newArgs.push_back(subArg->ptr);
+            }
+            return SymExpr(std::make_shared<SymFunc>(func->name, std::move(newArgs)));
+        }
+        }
+        return expr;
+    }
+
+    // =================================================================
     // 🚀 泰勒展开 (Taylor Series)
     // =================================================================
     SymExpr taylor(const SymExpr& expr, const std::string& var, const SymExpr& a, int order) {
@@ -3410,9 +3497,13 @@ namespace jc {
                 fact = fact * BigInt(n);
             }
             SymExpr coeff;
-            try {
-                coeff = simplify(subs(current_deriv, var, a));
-            } catch (...) {
+            if (auto subbed = trySubsQuiet(current_deriv, var, a)) {
+                try {
+                    coeff = simplify(*subbed);
+                } catch (...) {
+                    throw std::runtime_error("Math Error: Cannot compute Taylor expansion (derivative undefined at expansion point).");
+                }
+            } else {
                 throw std::runtime_error("Math Error: Cannot compute Taylor expansion (derivative undefined at expansion point).");
             }
             
@@ -3434,17 +3525,18 @@ namespace jc {
         if (depth > SymConfig::maxDepth) throw std::runtime_error("Calculus Error: Limit evaluation depth exceeded.");
         if (!expr.ptr) return expr;
 
-        // 尝试直接代入
-        try {
-            SymExpr subbed = subs(expr, var, val);
-            SymExpr simp = simplify(subbed);
-            // 如果没有抛出除零异常，且结果中不再包含该变量，说明代入成功
-            if (!containsVar(simp.ptr, var)) return simp;
-        } catch (const std::runtime_error& e) {
-            std::string msg = e.what();
-            if (msg.find("Division by zero") == std::string::npos && 
-                msg.find("0^0") == std::string::npos) {
-                throw;
+        // 尝试直接代入 (静默模式，不抛出除零异常)
+        if (auto subbed = trySubsQuiet(expr, var, val)) {
+            try {
+                SymExpr simp = simplify(*subbed);
+                // 如果结果中不再包含该变量，说明代入成功
+                if (!containsVar(simp.ptr, var)) return simp;
+            } catch (const std::runtime_error& e) {
+                std::string msg = e.what();
+                if (msg.find("Division by zero") == std::string::npos && 
+                    msg.find("0^0") == std::string::npos) {
+                    throw;
+                }
             }
         }
 
@@ -3453,13 +3545,20 @@ namespace jc {
 
         if (den.isOne()) {
             // 不是分式，但代入失败，可能含有复杂奇点，直接返回化简后的代入形式
-            try { return simplify(subs(expr, var, val)); } catch (...) { return expr; }
+            if (auto subbed = trySubsQuiet(expr, var, val)) {
+                try { return simplify(*subbed); } catch (...) { return *subbed; }
+            }
+            return expr;
         }
 
         // 检查是否为 0/0 型
         bool numZero = false, denZero = false;
-        try { numZero = simplify(subs(num, var, val)).isZero(); } catch (...) {}
-        try { denZero = simplify(subs(den, var, val)).isZero(); } catch (...) {}
+        if (auto subNum = trySubsQuiet(num, var, val)) {
+            try { numZero = simplify(*subNum).isZero(); } catch (...) {}
+        }
+        if (auto subDen = trySubsQuiet(den, var, val)) {
+            try { denZero = simplify(*subDen).isZero(); } catch (...) {}
+        }
 
         if (numZero && denZero) {
             if (depth > 3) {
@@ -3470,12 +3569,16 @@ namespace jc {
                 int orderNum = -1, orderDen = -1;
                 
                 for (int i = 0; i <= 10; ++i) {
-                    try { coeffNum = simplify(subs(dNum, var, val)); } catch (...) {}
+                    if (auto subNum = trySubsQuiet(dNum, var, val)) {
+                        try { coeffNum = simplify(*subNum); } catch (...) {}
+                    }
                     if (!coeffNum.isZero()) { orderNum = i; break; }
                     dNum = diff(dNum, var);
                 }
                 for (int i = 0; i <= 10; ++i) {
-                    try { coeffDen = simplify(subs(dDen, var, val)); } catch (...) {}
+                    if (auto subDen = trySubsQuiet(dDen, var, val)) {
+                        try { coeffDen = simplify(*subDen); } catch (...) {}
+                    }
                     if (!coeffDen.isZero()) { orderDen = i; break; }
                     dDen = diff(dDen, var);
                 }
@@ -3500,7 +3603,10 @@ namespace jc {
             throw std::runtime_error("Math Error: Limit is infinite (division by zero).");
         }
 
-        return simplify(subs(expr, var, val));
+        if (auto subbed = trySubsQuiet(expr, var, val)) {
+            try { return simplify(*subbed); } catch (...) { return *subbed; }
+        }
+        return expr;
     }
 
     SymExpr limit(const SymExpr& expr, const std::string& var, const SymExpr& val) {
