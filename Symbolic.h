@@ -169,6 +169,7 @@ namespace jc {
     void collectAllVars(const std::shared_ptr<SymNode>& node, std::set<std::string>& vars);
     std::pair<bool, SymExpr> trySquareRoot(const SymExpr& expr, bool allowPartial = false);
     bool containsVar(const std::shared_ptr<SymNode>& node, const std::string& var);
+    bool isPolynomialIn(const SymExpr& expr, const std::string& var);
     bool matchAST(const std::shared_ptr<SymNode>& node, const std::shared_ptr<SymNode>& pat, std::map<std::string, SymExpr>& captures);
     SymExpr substituteCaptures(const SymExpr& target, const std::map<std::string, SymExpr>& captures);
     SymExpr simplifyCore(const SymExpr& expr);

@@ -9,18 +9,20 @@
 namespace jc {
 
     // =================================================================
-    // 积分规则字典表 (动态生成，绑定特定的积分变量 var)
+    // 积分规则字典表 (静态缓存，使用通配符 _x)
     // =================================================================
-    inline std::vector<std::pair<SymExpr, SymExpr>> getIntegRules(const std::string& var) {
-        SymExpr x = SymExpr::makeVar(var);
-        SymExpr _n = SymExpr::makeVar("_n");
-        SymExpr _a = SymExpr::makeVar("_a");
+    inline const std::vector<std::pair<SymExpr, SymExpr>>& getStaticIntegRules() {
+        static std::vector<std::pair<SymExpr, SymExpr>> rules;
+        if (rules.empty()) {
+            SymExpr x = SymExpr::makeVar("_x");
+            SymExpr _n = SymExpr::makeVar("_n");
+            SymExpr _a = SymExpr::makeVar("_a");
 
-        auto func = [](const std::string& name, const SymExpr& arg) {
-            return SymExpr(std::make_shared<SymFunc>(name, std::vector<std::shared_ptr<SymNode>>{arg.ptr}));
-        };
+            auto func = [](const std::string& name, const SymExpr& arg) {
+                return SymExpr(std::make_shared<SymFunc>(name, std::vector<std::shared_ptr<SymNode>>{arg.ptr}));
+            };
 
-        return {
+            rules = {
             // 幂函数与对数
             { x ^ SymExpr(-1), func("log", x) },
             { x ^ _n, (SymExpr(1) / (_n + SymExpr(1))) * (x ^ (_n + SymExpr(1))) },
@@ -88,7 +90,9 @@ namespace jc {
             { func("cos", x) / x, func("Ci", x) },
             { func("exp", x) / x, func("Ei", x) },
             { SymExpr(1) / func("log", x), func("Li", x) }
-        };
+            };
+        }
+        return rules;
     }
 
     // =================================================================

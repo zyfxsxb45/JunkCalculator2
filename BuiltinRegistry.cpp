@@ -230,57 +230,75 @@ void BuiltinRegistry::registerMath() {
     reg("e", { 0 }, [](const std::vector<Value>&) -> Value { return Value(2.71828182845904523536); });
     reg("i", { 0 }, [](const std::vector<Value>&) -> Value { return Value(Complex(0.0, 1.0)); });
     reg("none", { 0 }, [](const std::vector<Value>&) -> Value { return Value::none(); });
-    reg("complex", { 1, 2 }, [](const std::vector<Value>& args) -> Value {
+    reg("complex", { 1, 2 }, [this](const std::vector<Value>& args) -> Value {
+        auto evalIfSym = [this](Value v) {
+            if (v.isSymbolic()) {
+                auto it = builtins.find("evalf");
+                if (it != builtins.end()) return it->second({v});
+            }
+            return v;
+        };
         if (args.size() == 1) {
+            Value val = evalIfSym(args[0]);
             // complex(x) → Complex(x, 0) 或保留已有复数
-            if (std::holds_alternative<Complex>(args[0].data))
-                return args[0];
-            return Value(Complex(args[0].asDouble(), 0.0));
+            if (std::holds_alternative<Complex>(val.data))
+                return val;
+            return Value(Complex(val.asDouble(), 0.0));
         }
         // complex(a, b) → Complex(a, b)
-        return Value(Complex(args[0].asDouble(), args[1].asDouble()));
+        return Value(Complex(evalIfSym(args[0]).asDouble(), evalIfSym(args[1]).asDouble()));
         });
 
-    reg("double", { 1 }, [](const std::vector<Value>& args) -> Value {
+    reg("double", { 1 }, [this](const std::vector<Value>& args) -> Value {
+        Value val = args[0];
+        if (val.isSymbolic()) {
+            auto it = builtins.find("evalf");
+            if (it != builtins.end()) val = it->second({val});
+        }
         // 任意数值类型 → double（复数仅虚部为 0 时允许）
-        if (std::holds_alternative<Complex>(args[0].data)) {
-            const auto& c = std::get<Complex>(args[0].data);
+        if (std::holds_alternative<Complex>(val.data)) {
+            const auto& c = std::get<Complex>(val.data);
             if (!Tol::isEq(c.imag, 0.0))
                 throw std::runtime_error("Type Error: Cannot convert complex with nonzero imaginary part to double.");
             return Value(c.real);
         }
-        return Value(args[0].asDouble());
+        return Value(val.asDouble());
         });
 
-    reg("int", { 1 }, [](const std::vector<Value>& args) -> Value {
+    reg("int", { 1 }, [this](const std::vector<Value>& args) -> Value {
+        Value val = args[0];
+        if (val.isSymbolic()) {
+            auto it = builtins.find("evalf");
+            if (it != builtins.end()) val = it->second({val});
+        }
         // 截断取整（向零方向）
-        if (std::holds_alternative<BigInt>(args[0].data))
-            return args[0];
-        if (std::holds_alternative<Fraction>(args[0].data)) {
-            const auto& f = std::get<Fraction>(args[0].data);
+        if (std::holds_alternative<BigInt>(val.data))
+            return val;
+        if (std::holds_alternative<Fraction>(val.data)) {
+            const auto& f = std::get<Fraction>(val.data);
             return Value(f.getNum() / f.getDen());  // BigInt 除法自动截断
         }
-        if (std::holds_alternative<Complex>(args[0].data)) {
-            const auto& c = std::get<Complex>(args[0].data);
+        if (std::holds_alternative<Complex>(val.data)) {
+            const auto& c = std::get<Complex>(val.data);
             if (!Tol::isEq(c.imag, 0.0))
                 throw std::runtime_error("Type Error: Cannot convert complex with nonzero imaginary part to int.");
             return Value(BigInt(static_cast<int64_t>(std::trunc(c.real))));
         }
-        if (std::holds_alternative<double>(args[0].data)) {
-            double v = std::get<double>(args[0].data);
+        if (std::holds_alternative<double>(val.data)) {
+            double v = std::get<double>(val.data);
             if (!std::isfinite(v))
                 throw std::runtime_error("Type Error: Cannot convert non-finite value to int.");
             return Value(BigInt(static_cast<int64_t>(std::trunc(v))));
         }
-        if (std::holds_alternative<std::string>(args[0].data)) {
+        if (std::holds_alternative<std::string>(val.data)) {
             // 字符串解析为整数
-            const auto& s = std::get<std::string>(args[0].data);
+            const auto& s = std::get<std::string>(val.data);
             try { return Value(BigInt(s)); }
             catch (...) {
                 throw std::runtime_error("Type Error: Cannot parse '" + s + "' as integer.");
             }
         }
-        return Value(args[0].asBigInt());
+        return Value(val.asBigInt());
         });
 
     reg("matrix", {}, [](const std::vector<Value>& args) -> Value {

@@ -353,28 +353,67 @@ namespace jc {
     // 表达式排序比较器 (Higher power first, smaller lexicographical first)
     // ==========================================
     static int compareSymNodes(const std::shared_ptr<SymNode>& a, const std::shared_ptr<SymNode>& b) {
-        auto getBaseExp = [](const std::shared_ptr<SymNode>& n) -> std::pair<std::shared_ptr<SymNode>, double> {
-            if (n->getType() == SymType::POW) {
-                auto p = std::static_pointer_cast<SymPow>(n);
+        auto getCore = [](const std::shared_ptr<SymNode>& n) -> std::tuple<std::string, double, double> {
+            std::shared_ptr<SymNode> core = n;
+            if (n->getType() == SymType::MUL) {
+                auto mul = std::static_pointer_cast<SymMul>(n);
+                std::vector<std::shared_ptr<SymNode>> vars;
+                for (auto& arg : mul->args) {
+                    if (arg->getType() != SymType::NUM) vars.push_back(arg);
+                }
+                if (vars.empty()) return {"", 0.0, 0.0}; // 纯常数
+                if (vars.size() == 1) core = vars[0];
+                else {
+                    std::string s;
+                    double totalExp = 0.0;
+                    for (auto& v : vars) {
+                        s += v->toString() + "*";
+                        if (v->getType() == SymType::POW) {
+                            auto p = std::static_pointer_cast<SymPow>(v);
+                            if (p->exp->getType() == SymType::NUM) {
+                                try { totalExp += casValToValue(std::static_pointer_cast<SymNum>(p->exp)->value).asDouble(); } catch(...) { totalExp += 1.0; }
+                            } else totalExp += 1.0;
+                        } else {
+                            totalExp += 1.0;
+                        }
+                    }
+                    return {s, 1.0, totalExp};
+                }
+            } else if (n->getType() == SymType::NUM) {
+                return {"", 0.0, 0.0};
+            }
+
+            if (core->getType() == SymType::POW) {
+                auto p = std::static_pointer_cast<SymPow>(core);
                 if (p->exp->getType() == SymType::NUM) {
                     try {
-                        return {p->base, casValToValue(std::static_pointer_cast<SymNum>(p->exp)->value).asDouble()};
+                        double e = casValToValue(std::static_pointer_cast<SymNum>(p->exp)->value).asDouble();
+                        return {p->base->toString(), e, e};
                     } catch(...) {}
                 }
             }
-            return {n, 1.0};
+            return {core->toString(), 1.0, 1.0};
         };
 
-        auto [baseA, expA] = getBaseExp(a);
-        auto [baseB, expB] = getBaseExp(b);
+        auto [baseA, expA, totA] = getCore(a);
+        auto [baseB, expB, totB] = getCore(b);
 
-        std::string strA = baseA->toString();
-        std::string strB = baseB->toString();
+        // 纯常数排在最后
+        if (baseA.empty() && !baseB.empty()) return 1;
+        if (!baseA.empty() && baseB.empty()) return -1;
+        if (baseA.empty() && baseB.empty()) return 0;
 
-        if (strA != strB) {
-            return strA < strB ? -1 : 1;
+        // 总指数高的排在前面 (降幂排列)
+        if (totA != totB) {
+            return totA > totB ? -1 : 1;
         }
 
+        // 字典序比较
+        if (baseA != baseB) {
+            return baseA < baseB ? -1 : 1;
+        }
+
+        // 单变量同底数，指数高的排在前面
         if (expA != expB) {
             return expA > expB ? -1 : 1;
         }
@@ -1619,12 +1658,16 @@ namespace jc {
 
         auto [ok, val] = tryEvalConst(expr);
         if (ok) {
-            if (val.isComplex()) {
-                Complex c = val.asComplex();
-                if (Tol::isEq(c.imag, 0.0)) return SymExpr(c.real);
-                return SymExpr(c);
-            } else {
-                return SymExpr(val.asDouble());
+            try {
+                if (val.isComplex()) {
+                    Complex c = val.asComplex();
+                    if (Tol::isEq(c.imag, 0.0)) return SymExpr(c.real);
+                    return SymExpr(c);
+                } else {
+                    return SymExpr(val.asDouble());
+                }
+            } catch (...) {
+                // 如果 asDouble 失败（例如 val 是 Symbolic 符号表达式），则回退到 AST 遍历
             }
         }
 
@@ -2420,9 +2463,56 @@ namespace jc {
 
 
     // =================================================================
+    // 轻量化多项式探针 (Polynomial Probe)
+    // =================================================================
+    bool isPolynomialIn(const SymExpr& expr, const std::string& var) {
+        if (!expr.ptr) return false;
+        switch (expr.ptr->getType()) {
+            case SymType::NUM:
+            case SymType::VAR:
+                return true;
+            case SymType::ADD: {
+                auto add = std::static_pointer_cast<SymAdd>(expr.ptr);
+                for (auto& arg : add->args) {
+                    if (!isPolynomialIn(SymExpr(arg), var)) return false;
+                }
+                return true;
+            }
+            case SymType::MUL: {
+                auto mul = std::static_pointer_cast<SymMul>(expr.ptr);
+                for (auto& arg : mul->args) {
+                    if (!isPolynomialIn(SymExpr(arg), var)) return false;
+                }
+                return true;
+            }
+            case SymType::POW: {
+                auto powNode = std::static_pointer_cast<SymPow>(expr.ptr);
+                if (containsVar(powNode->exp, var)) return false;
+                if (containsVar(powNode->base, var)) {
+                    if (powNode->exp->getType() != SymType::NUM) return false;
+                    auto [isInt, n] = extractExactInt(std::static_pointer_cast<SymNum>(powNode->exp)->value);
+                    if (!isInt || n < 0) return false;
+                }
+                return isPolynomialIn(SymExpr(powNode->base), var);
+            }
+            case SymType::FUNC: {
+                auto func = std::static_pointer_cast<SymFunc>(expr.ptr);
+                for (auto& arg : func->args) {
+                    if (containsVar(arg, var)) return false;
+                }
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // =================================================================
     // 动态多项式系数提取器：无限次 (消除 int64_t 转型警告修正版)
     // =================================================================
     std::vector<SymExpr> extractCoeffs(const SymExpr& expr, const std::string& var) {
+        // 探针拦截：如果根本不是多项式，直接拒绝进入昂贵的 expand 展开
+        if (!isPolynomialIn(expr, var)) return {};
+
         SymExpr expanded;
         try { expanded = expand(expr, SymConfig::maxExpandTerms); }
         catch (const std::runtime_error&) { return {}; }
