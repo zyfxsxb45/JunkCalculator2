@@ -367,7 +367,18 @@ namespace jc {
   Trigonometric & Hyperbolic  (also accept Complex & Matrix)
   ──────────────────────
     sin  cos  tan       asin  acos  atan  atan2(y, x)
-    sinh  cosh  tanh
+    sinh  cosh  tanh    asinh  acosh  atanh
+    cot  sec  csc
+
+  Special Math Functions
+  ──────────────────────
+    erf(x)              Error function
+    fresnel_s(x)        Fresnel sine integral
+    fresnel_c(x)        Fresnel cosine integral
+    Si(x)               Sine integral
+    Ci(x)               Cosine integral
+    Ei(x)               Exponential integral
+    Li(x)               Logarithmic integral
 
   Rounding & Sign  (scalar / Complex / Matrix)
   ──────────────────────
@@ -379,9 +390,12 @@ namespace jc {
 
   Formatting & I/O
   ──────────────────────
+    print(...)          Print arguments separated by space
+    println(...)        Alias for print
     format(fmt, ...)    Python-style string formatting
                           format("{:>10.2f}", PI)
     input()             Read a line from stdin
+    input("prompt")     Print prompt and read a line
     clock()             High-resolution timer (seconds since epoch)
     sleep(seconds)      Pause execution
 
@@ -565,7 +579,8 @@ namespace jc {
 
   Dimensions & Element Access
   ──────────────────────
-    row(A) / cols(A)    Number of rows / columns
+    row(A) / rows(A)    Number of rows
+    col(A) / cols(A)    Number of columns
     len(A)              Total element count
     
     A[i, j]             Read/Write element at row i, col j
@@ -730,6 +745,7 @@ namespace jc {
   ──────────────────────
     seq(a, b)           Produces column vectors for math use.
                           seq(1, 3)    → [1; 2; 3]
+    seq(a, step, b)     With custom step.
 
   Properties
   ──────────────────────
@@ -813,9 +829,17 @@ namespace jc {
   ──────────────────────
     expand((x+1)^3)              → x^3 + 3*x^2 + 3*x + 1
     factor(x^2 - 4)              → (x - 2) * (x + 2)
+    factorReal(x^2 + 1)          → Factor over reals
     simplify(expr)               Smart heuristic simplification
     contract(2*log(x) + log(y))  → log(x^2 * y)
     trigsimp(sin(x)^2 + cos(x)^2)→ 1
+    replaceRule(expr, pat, tgt)  Pattern matching replacement
+
+  Polynomial Operations
+  ──────────────────────
+    polyDiv(A, B, "x")           Polynomial division → [quotient, remainder]
+    polyGCD(A, B, "x")           Polynomial greatest common divisor
+    resultant(A, B, "x")         Sylvester resultant of two polynomials
 
   Calculus (Exact Symbolic)
   ──────────────────────
@@ -884,6 +908,8 @@ namespace jc {
       diff(f, x0)          Derivative f′(x₀)  (5-point central difference)
       integ(f, a, b)       Definite integral   (Simpson's 1/3, 100000 slices)
       integ(f, a, b, n)    Custom slice count n
+      limit(f, x0)         Two-sided numerical limit at x₀
+      limit(f, x0, dir)    One-sided limit (dir > 0 for right, dir < 0 for left)
       solveE(f, x0)        Find a root of f(x) = 0 near x₀  (Newton-Raphson)
 
   Tabulation (multivariate supported)
@@ -1168,6 +1194,12 @@ namespace jc {
     gc(true)              Aggressive sweep (clears the 'ANS' variable first to 
                           prevent it from shielding dead objects from collection)
 
+  CAS Configuration
+  ──────────────────────
+    symconfig()                  Returns current CAS limits as a Dict
+    symconfig("default")         Reset CAS limits to default
+    setSymLimit("maxDepth", 50)  Set specific CAS limit
+
   Workspace & Path Management
   ──────────────────────
     All workspace operations are function-based:
@@ -1241,9 +1273,12 @@ namespace jc {
     Truthy: Everything else (non-empty strings, matrices, classes, instances)
     bool(x)             Explicit conversion to 1.0 or 0.0
 
-  Logical Operators
+  Logical Operators & Functions
   ──────────────────────
     && (short-circuit AND), || (short-circuit OR), !expr (NOT)
+    not(x)              Logical NOT (Function form)
+    and(a, b)           Logical AND (Function form, no short-circuit)
+    or(a, b)            Logical OR (Function form, no short-circuit)
 
   If / Else
   ──────────────────────
@@ -1574,6 +1609,7 @@ namespace jc {
   Generation
   ──────────────────────
     range(n)            [0, 1, ..., n-1]
+    range(a, b)         [a, a+1, ..., b-1]
     range(a, b, step)   Custom stepping
     fill(val, n)        n copies of val
     linspace(a, b, n)   n evenly-spaced points from a to b
@@ -1814,9 +1850,10 @@ namespace jc {
     discard(d, "key")                   Removes the key (silent if absent)
     clear(d)                            Erases all entries
 
-    len(d) / dictSize(d)                Number of key-value entries
+    len(d) / dictSize(d) / size(d)      Number of key-value entries
     type(d)                             Returns "Dict"
-    hasKey(d, "key")                    Returns 1 if the key exists
+    hasKey(d, "key") / has(d, "key")    Returns 1 if the key exists
+    removeKey(d, "key")                 Removes the key (throws error if absent)
     keys(d)                             Returns all keys as a StringMatrix row
     values(d)                           Returns all values
     dictPairs(d)                        Returns an N×2 StringMatrix of [key, value] rows
@@ -2168,6 +2205,7 @@ namespace jc {
     isfloat(x)          double type specifically?
     isnumeric(x)        Any numeric type? (double, BigInt, Fraction, 
                         Complex, BaseNum)
+    isbase(x)           BaseNum type specifically?
     iscomplex(x)        Complex type specifically?
     isreal(x)           Real number? (double, BigInt, Fraction, BaseNum,
                         or Complex with imaginary part ≈ 0)
@@ -2438,6 +2476,8 @@ namespace jc {
         Draws cartesian coordinate axes mapped to the specified range.
     im.scatter(x_matrix, y_matrix, xMin, xMax, yMin, yMax [, color])
         Projects data points from two matrices onto the image canvas.
+    imgPlot(im, f, xMin, xMax, yMin, yMax, color [, thick=2])
+        Plot a function f(x) onto the image canvas.
 
   I/O & Network Streaming
   ──────────────────────

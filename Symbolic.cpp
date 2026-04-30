@@ -13,6 +13,7 @@
 #include <map>
 
 #include <unordered_map>
+#include <unordered_set>
 
 namespace jc {
 
@@ -319,18 +320,18 @@ namespace jc {
             using T = std::decay_t<decltype(arg)>;
 
             if constexpr (std::is_same_v<T, BigInt>) {
-                // 仅支持 64 位整数范围的大整数，避免强制转换溢出
-                if (arg >= BigInt(std::numeric_limits<int64_t>::min()) &&
-                    arg <= BigInt(std::numeric_limits<int64_t>::max())) {
-                    return { true, static_cast<int64_t>(arg.toDouble()) };
+                try {
+                    return { true, arg.toInt64() };
+                } catch (...) {
+                    return { false, 0 };
                 }
             }
             else if constexpr (std::is_same_v<T, Fraction>) {
                 if (arg.getDen() == BigInt(1)) {
-                    BigInt num = arg.getNum();
-                    if (num >= BigInt(std::numeric_limits<int64_t>::min()) &&
-                        num <= BigInt(std::numeric_limits<int64_t>::max())) {
-                        return { true, static_cast<int64_t>(num.toDouble()) };
+                    try {
+                        return { true, arg.getNum().toInt64() };
+                    } catch (...) {
+                        return { false, 0 };
                     }
                 }
             }
@@ -868,25 +869,26 @@ namespace jc {
     // =================================================================
     // AST 体积计算器
     // =================================================================
-    static int countNodes(const std::shared_ptr<SymNode>& node) {
+    static int countNodes(const std::shared_ptr<SymNode>& node, std::unordered_set<const SymNode*>& visited) {
         if (!node) return 0;
+        if (!visited.insert(node.get()).second) return 0;
         int count = 1;
         switch (node->getType()) {
         case SymType::ADD:
             for (auto& arg : std::static_pointer_cast<SymAdd>(node)->args)
-                count += countNodes(arg);
+                count += countNodes(arg, visited);
             break;
         case SymType::MUL:
             for (auto& arg : std::static_pointer_cast<SymMul>(node)->args)
-                count += countNodes(arg);
+                count += countNodes(arg, visited);
             break;
         case SymType::POW:
-            count += countNodes(std::static_pointer_cast<SymPow>(node)->base);
-            count += countNodes(std::static_pointer_cast<SymPow>(node)->exp);
+            count += countNodes(std::static_pointer_cast<SymPow>(node)->base, visited);
+            count += countNodes(std::static_pointer_cast<SymPow>(node)->exp, visited);
             break;
         case SymType::FUNC:
             for (auto& arg : std::static_pointer_cast<SymFunc>(node)->args)
-                count += countNodes(arg);
+                count += countNodes(arg, visited);
             break;
         default: break;
         }
@@ -894,7 +896,8 @@ namespace jc {
     }
 
     int getAstNodeCount(const SymExpr& expr) {
-        return countNodes(expr.ptr);
+        std::unordered_set<const SymNode*> visited;
+        return countNodes(expr.ptr, visited);
     }
 
     // =================================================================
@@ -2004,54 +2007,66 @@ namespace jc {
     // =================================================================
 // 检测 AST 中是否包含指定变量
 // =================================================================
-    bool containsVar(const std::shared_ptr<SymNode>& node, const std::string& var) {
+    static bool containsVarImpl(const std::shared_ptr<SymNode>& node, const std::string& var, std::unordered_set<const SymNode*>& visited) {
         if (!node) return false;
+        if (!visited.insert(node.get()).second) return false;
         switch (node->getType()) {
         case SymType::NUM:  return false;
         case SymType::VAR:  return std::static_pointer_cast<SymVar>(node)->name == var;
         case SymType::ADD:
             for (auto& a : std::static_pointer_cast<SymAdd>(node)->args)
-                if (containsVar(a, var)) return true;
+                if (containsVarImpl(a, var, visited)) return true;
             return false;
         case SymType::MUL:
             for (auto& a : std::static_pointer_cast<SymMul>(node)->args)
-                if (containsVar(a, var)) return true;
+                if (containsVarImpl(a, var, visited)) return true;
             return false;
         case SymType::POW:
-            return containsVar(std::static_pointer_cast<SymPow>(node)->base, var) ||
-                containsVar(std::static_pointer_cast<SymPow>(node)->exp, var);
+            return containsVarImpl(std::static_pointer_cast<SymPow>(node)->base, var, visited) ||
+                containsVarImpl(std::static_pointer_cast<SymPow>(node)->exp, var, visited);
         case SymType::FUNC:
             for (auto& a : std::static_pointer_cast<SymFunc>(node)->args)
-                if (containsVar(a, var)) return true;
+                if (containsVarImpl(a, var, visited)) return true;
             return false;
         }
         return false;
     }
 
+    bool containsVar(const std::shared_ptr<SymNode>& node, const std::string& var) {
+        std::unordered_set<const SymNode*> visited;
+        return containsVarImpl(node, var, visited);
+    }
+
     // =================================================================
 // 收集 AST 中出现的所有变量名
 // =================================================================
-    void collectAllVars(const std::shared_ptr<SymNode>& node, std::set<std::string>& vars) {
+    static void collectAllVarsImpl(const std::shared_ptr<SymNode>& node, std::set<std::string>& vars, std::unordered_set<const SymNode*>& visited) {
         if (!node) return;
+        if (!visited.insert(node.get()).second) return;
         switch (node->getType()) {
         case SymType::NUM: break;
         case SymType::VAR:
             vars.insert(std::static_pointer_cast<SymVar>(node)->name);
             break;
         case SymType::ADD:
-            for (auto& a : std::static_pointer_cast<SymAdd>(node)->args) collectAllVars(a, vars);
+            for (auto& a : std::static_pointer_cast<SymAdd>(node)->args) collectAllVarsImpl(a, vars, visited);
             break;
         case SymType::MUL:
-            for (auto& a : std::static_pointer_cast<SymMul>(node)->args) collectAllVars(a, vars);
+            for (auto& a : std::static_pointer_cast<SymMul>(node)->args) collectAllVarsImpl(a, vars, visited);
             break;
         case SymType::POW:
-            collectAllVars(std::static_pointer_cast<SymPow>(node)->base, vars);
-            collectAllVars(std::static_pointer_cast<SymPow>(node)->exp, vars);
+            collectAllVarsImpl(std::static_pointer_cast<SymPow>(node)->base, vars, visited);
+            collectAllVarsImpl(std::static_pointer_cast<SymPow>(node)->exp, vars, visited);
             break;
         case SymType::FUNC:
-            for (auto& a : std::static_pointer_cast<SymFunc>(node)->args) collectAllVars(a, vars);
+            for (auto& a : std::static_pointer_cast<SymFunc>(node)->args) collectAllVarsImpl(a, vars, visited);
             break;
         }
+    }
+
+    void collectAllVars(const std::shared_ptr<SymNode>& node, std::set<std::string>& vars) {
+        std::unordered_set<const SymNode*> visited;
+        collectAllVarsImpl(node, vars, visited);
     }
 
     // =================================================================
