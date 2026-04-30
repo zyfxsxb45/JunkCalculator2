@@ -2275,6 +2275,70 @@ namespace jc {
     // =================================================================
     // 多项式代数底座 (Polynomial Algebra)
     // =================================================================
+    static void trimCoeffs(std::vector<SymExpr>& a) {
+        while (!a.empty() && a.back().isZero()) a.pop_back();
+    }
+
+    static std::pair<std::vector<SymExpr>, std::vector<SymExpr>> polyDivCoeffs(std::vector<SymExpr> A, const std::vector<SymExpr>& B) {
+        trimCoeffs(A);
+        if (B.empty()) throw std::runtime_error("Math Error: Division by zero polynomial.");
+        int degA = static_cast<int>(A.size()) - 1;
+        int degB = static_cast<int>(B.size()) - 1;
+        
+        if (degA < degB) return {{}, A};
+        
+        std::vector<SymExpr> Q(degA - degB + 1, SymExpr(BigInt(0)));
+        SymExpr leadB = B.back();
+        
+        for (int i = degA - degB; i >= 0; --i) {
+            if (A[i + degB].isZero()) continue;
+            SymExpr q = simplifyCore(expand(A[i + degB] / leadB, 100));
+            Q[i] = q;
+            for (int j = 0; j <= degB; ++j) {
+                A[i + j] = simplifyCore(expand(A[i + j] - q * B[j], 100));
+            }
+        }
+        trimCoeffs(Q);
+        trimCoeffs(A);
+        return {Q, A};
+    }
+
+    static std::vector<SymExpr> polyPseudoRemCoeffs(std::vector<SymExpr> A, const std::vector<SymExpr>& B) {
+        trimCoeffs(A);
+        if (B.empty()) throw std::runtime_error("Math Error: Division by zero polynomial.");
+        int degA = static_cast<int>(A.size()) - 1;
+        int degB = static_cast<int>(B.size()) - 1;
+        
+        int d = degA - degB + 1;
+        if (d <= 0) return A;
+        
+        SymExpr leadB = B.back();
+        
+        while (degA >= degB) {
+            SymExpr leadA = A.back();
+            
+            for (int i = 0; i <= degA; ++i) {
+                A[i] = simplifyCore(expand(A[i] * leadB, 100));
+            }
+            
+            int shift = degA - degB;
+            for (int i = 0; i <= degB; ++i) {
+                A[i + shift] = simplifyCore(expand(A[i + shift] - B[i] * leadA, 100));
+            }
+            
+            trimCoeffs(A);
+            degA = static_cast<int>(A.size()) - 1;
+            d--;
+        }
+        
+        if (d > 0) {
+            SymExpr multiplier = simplifyCore(expand(leadB ^ SymExpr(BigInt(d)), 100));
+            for (auto& c : A) c = simplifyCore(expand(c * multiplier, 100));
+        }
+        
+        return A;
+    }
+
     int getDegree(const SymExpr& expr, const std::string& var) {
         auto coeffs = extractCoeffs(expr, var);
         if (coeffs.empty()) return -1;
@@ -2282,151 +2346,111 @@ namespace jc {
     }
 
     std::pair<SymExpr, SymExpr> polyDiv(const SymExpr& dividend, const SymExpr& divisor, const std::string& var) {
-        SymExpr Q(BigInt(0));
-        SymExpr R = dividend;
+        auto coeffsA = extractCoeffs(dividend, var);
+        auto coeffsB = extractCoeffs(divisor, var);
         
-        auto divCoeffs = extractCoeffs(divisor, var);
-        if (divCoeffs.empty()) throw std::runtime_error("Math Error: Divisor is not a polynomial in " + var);
-        int degDiv = static_cast<int>(divCoeffs.size()) - 1;
-        SymExpr leadDiv = divCoeffs.back();
-        if (leadDiv.isZero()) throw std::runtime_error("Math Error: Division by zero polynomial.");
-
-        SymExpr X = SymExpr::makeVar(var);
-        int lastDegR = -1;
-        int iter = 0;
-
-        while (!R.isZero()) {
-            if (++iter > 100) {
-                throw std::runtime_error("Math Error: polyDiv infinite loop detected.");
+        if (coeffsB.empty()) throw std::runtime_error("Math Error: Divisor is not a polynomial in " + var);
+        if (coeffsA.empty()) return {SymExpr(BigInt(0)), dividend};
+        
+        auto [coeffsQ, coeffsR] = polyDivCoeffs(coeffsA, coeffsB);
+        
+        auto toExpr = [&](const std::vector<SymExpr>& coeffs) {
+            SymExpr res(BigInt(0));
+            SymExpr X = SymExpr::makeVar(var);
+            for (size_t i = 0; i < coeffs.size(); ++i) {
+                if (!coeffs[i].isZero()) {
+                    if (i == 0) res = res + coeffs[i];
+                    else if (i == 1) res = res + coeffs[i] * X;
+                    else res = res + coeffs[i] * (X ^ SymExpr(BigInt(i)));
+                }
             }
-            auto rCoeffs = extractCoeffs(R, var);
-            if (rCoeffs.empty()) break; // R 不是多项式，无法继续除
-            int degR = static_cast<int>(rCoeffs.size()) - 1;
-            if (degR < degDiv) break;
-            
-            if (degR == lastDegR) {
-                // 发生系数无法完全相消的代数死锁，强制截断抛出异常
-                throw std::runtime_error("Math Error: Polynomial division failed due to unsimplified algebraic coefficients.");
-            }
-            lastDegR = degR;
-
-            SymExpr leadR = rCoeffs.back();
-            SymExpr termCoeff = simplifyCore(expand(leadR / leadDiv, 100)); // 强制展开以消除分母中的隐藏根式
-            
-            if (getAstNodeCount(termCoeff) > 5000) {
-                throw std::runtime_error("Math Error: Polynomial division failed due to coefficient explosion.");
-            }
-            
-            SymExpr term = termCoeff;
-            if (degR - degDiv > 0) {
-                term = term * (X ^ SymExpr(BigInt(degR - degDiv)));
-            }
-
-            Q = Q + term;
-            R = simplifyCore(expand(R - term * divisor, 500));
-            
-            if (getAstNodeCount(R) > 5000) {
-                throw std::runtime_error("Math Error: Polynomial division failed due to remainder explosion.");
-            }
-        }
-
-        return { simplifyCore(expand(Q, 100)), simplifyCore(expand(R, 100)) };
+            return res;
+        };
+        
+        return {toExpr(coeffsQ), toExpr(coeffsR)};
     }
 
     SymExpr polyPseudoRem(const SymExpr& dividend, const SymExpr& divisor, const std::string& var) {
-        SymExpr R = dividend;
+        auto coeffsA = extractCoeffs(dividend, var);
+        auto coeffsB = extractCoeffs(divisor, var);
         
-        auto divCoeffs = extractCoeffs(divisor, var);
-        if (divCoeffs.empty()) throw std::runtime_error("Math Error: Divisor is not a polynomial in " + var);
-        int degDiv = static_cast<int>(divCoeffs.size()) - 1;
-        SymExpr leadDiv = divCoeffs.back();
-        if (leadDiv.isZero()) throw std::runtime_error("Math Error: Division by zero polynomial.");
-
-        auto rCoeffs = extractCoeffs(R, var);
-        int degR = rCoeffs.empty() ? -1 : static_cast<int>(rCoeffs.size()) - 1;
+        if (coeffsB.empty()) throw std::runtime_error("Math Error: Divisor is not a polynomial in " + var);
+        if (coeffsA.empty()) return dividend;
         
-        int d = degR - degDiv + 1;
-        if (d <= 0) return R;
+        auto coeffsR = polyPseudoRemCoeffs(coeffsA, coeffsB);
         
+        SymExpr res(BigInt(0));
         SymExpr X = SymExpr::makeVar(var);
-        int iter = 0;
-
-        while (!R.isZero()) {
-            if (++iter > 100) throw std::runtime_error("Math Error: polyPseudoRem infinite loop detected.");
-            rCoeffs = extractCoeffs(R, var);
-            if (rCoeffs.empty()) break;
-            degR = static_cast<int>(rCoeffs.size()) - 1;
-            if (degR < degDiv) break;
-            
-            SymExpr leadR = rCoeffs.back();
-            SymExpr term = leadR;
-            if (degR - degDiv > 0) {
-                term = term * (X ^ SymExpr(BigInt(degR - degDiv)));
+        for (size_t i = 0; i < coeffsR.size(); ++i) {
+            if (!coeffsR[i].isZero()) {
+                if (i == 0) res = res + coeffsR[i];
+                else if (i == 1) res = res + coeffsR[i] * X;
+                else res = res + coeffsR[i] * (X ^ SymExpr(BigInt(i)));
             }
-
-            R = simplifyCore(expand(R * leadDiv - term * divisor, 500));
-            d--;
         }
-        
-        if (d > 0) {
-            SymExpr multiplier = simplifyCore(expand(leadDiv ^ SymExpr(BigInt(d)), 500));
-            R = simplifyCore(expand(R * multiplier, 500));
-        }
-
-        return R;
+        return res;
     }
 
     SymExpr polyGCD(const SymExpr& a, const SymExpr& b, const std::string& var) {
         if (a.isZero()) return b;
         if (b.isZero()) return a;
 
-        SymExpr u = a;
-        SymExpr v = b;
+        auto coeffsA = extractCoeffs(a, var);
+        auto coeffsB = extractCoeffs(b, var);
         
-        int degU = getDegree(u, var);
-        int degV = getDegree(v, var);
+        if (coeffsA.empty() || coeffsB.empty()) return SymExpr(BigInt(1));
         
-        if (degU < degV) {
-            std::swap(u, v);
-            std::swap(degU, degV);
+        if (coeffsA.size() < coeffsB.size()) {
+            std::swap(coeffsA, coeffsB);
         }
 
         SymExpr g(BigInt(1));
         SymExpr h(BigInt(1));
         
-        int iter = 0;
-        while (!v.isZero()) {
-            if (++iter > 100) throw std::runtime_error("Math Error: polyGCD infinite loop detected.");
+        while (!coeffsB.empty()) {
+            int degA = static_cast<int>(coeffsA.size()) - 1;
+            int degB = static_cast<int>(coeffsB.size()) - 1;
+            int delta = degA - degB;
             
-            degU = getDegree(u, var);
-            degV = getDegree(v, var);
-            int delta = degU - degV;
+            auto coeffsR = polyPseudoRemCoeffs(coeffsA, coeffsB);
+            if (coeffsR.empty()) {
+                coeffsA = coeffsB;
+                break;
+            }
             
-            SymExpr r = polyPseudoRem(u, v, var);
-            if (r.isZero()) break;
+            SymExpr leadB = coeffsB.back();
             
-            SymExpr leadV = extractCoeffs(v, var).back();
+            SymExpr divisor = simplifyCore(expand(g * (h ^ SymExpr(BigInt(delta))), 100));
             
-            SymExpr divisor = simplifyCore(expand(g * (h ^ SymExpr(BigInt(delta))), 500));
-            u = v;
-            v = simplifyCore(expand(r / divisor, 500));
+            coeffsA = coeffsB;
+            coeffsB = coeffsR;
+            for (auto& c : coeffsB) c = simplifyCore(expand(c / divisor, 100));
+            trimCoeffs(coeffsB);
             
-            g = leadV;
+            g = leadB;
             if (delta > 0) {
-                SymExpr h_pow = simplifyCore(expand(h ^ SymExpr(BigInt(delta - 1)), 500));
-                h = simplifyCore(expand((g ^ SymExpr(BigInt(delta))) / h_pow, 500));
+                SymExpr h_pow = simplifyCore(expand(h ^ SymExpr(BigInt(delta - 1)), 100));
+                h = simplifyCore(expand((g ^ SymExpr(BigInt(delta))) / h_pow, 100));
             }
         }
 
-        // 首一化 (Monic)
-        auto coeffs = extractCoeffs(v, var);
-        if (!coeffs.empty()) {
-            SymExpr lead = coeffs.back();
+        if (!coeffsA.empty()) {
+            SymExpr lead = coeffsA.back();
             if (!lead.isZero() && !lead.isOne()) {
-                v = simplifyCore(expand(v / lead, 500));
+                for (auto& c : coeffsA) c = simplifyCore(expand(c / lead, 100));
             }
         }
-        return v;
+        
+        SymExpr res(BigInt(0));
+        SymExpr X = SymExpr::makeVar(var);
+        for (size_t i = 0; i < coeffsA.size(); ++i) {
+            if (!coeffsA[i].isZero()) {
+                if (i == 0) res = res + coeffsA[i];
+                else if (i == 1) res = res + coeffsA[i] * X;
+                else res = res + coeffsA[i] * (X ^ SymExpr(BigInt(i)));
+            }
+        }
+        return res;
     }
 
     std::vector<std::pair<SymExpr, int>> polySquareFree(const SymExpr& p, const std::string& var) {
@@ -2514,60 +2538,60 @@ namespace jc {
     }
 
     SymExpr polyResultant(const SymExpr& a, const SymExpr& b, const std::string& var) {
-        int degA = getDegree(a, var);
-        int degB = getDegree(b, var);
+        auto coeffsA = extractCoeffs(a, var);
+        auto coeffsB = extractCoeffs(b, var);
         
-        if (degA < 0 || degB < 0) return SymExpr(BigInt(0));
+        if (coeffsA.empty() || coeffsB.empty()) return SymExpr(BigInt(0));
+        
+        int degA = static_cast<int>(coeffsA.size()) - 1;
+        int degB = static_cast<int>(coeffsB.size()) - 1;
         
         if (degA < degB) {
             SymExpr res = polyResultant(b, a, var);
-            if ((degA * degB) % 2 != 0) return simplifyCore(expand(-res, 500));
+            if ((degA * degB) % 2 != 0) return simplifyCore(expand(-res, 100));
             return res;
         }
         
         if (degB == 0) {
-            auto coeffsB = extractCoeffs(b, var);
-            SymExpr leadB = coeffsB.empty() ? b : coeffsB[0];
-            return simplifyCore(expand(leadB ^ SymExpr(BigInt(degA)), 500));
+            SymExpr leadB = coeffsB[0];
+            return simplifyCore(expand(leadB ^ SymExpr(BigInt(degA)), 100));
         }
         
-        SymExpr u = a;
-        SymExpr v = b;
         SymExpr g(BigInt(1));
         SymExpr h(BigInt(1));
         
-        int iter = 0;
         while (true) {
-            if (++iter > 100) throw std::runtime_error("Math Error: polyResultant infinite loop detected.");
+            degA = static_cast<int>(coeffsA.size()) - 1;
+            degB = static_cast<int>(coeffsB.size()) - 1;
+            if (degB < 0) return SymExpr(BigInt(0));
             
-            int degU = getDegree(u, var);
-            int degV = getDegree(v, var);
-            if (degV < 0) return SymExpr(BigInt(0));
+            int delta = degA - degB;
             
-            int delta = degU - degV;
-            
-            if (degV == 0) {
+            if (degB == 0) {
                 if (delta == 0) {
-                    return v;
+                    return coeffsB[0];
                 } else {
-                    SymExpr divisor = simplifyCore(expand(h ^ SymExpr(BigInt(delta - 1)), 500));
-                    return simplifyCore(expand((v ^ SymExpr(BigInt(delta))) / divisor, 500));
+                    SymExpr divisor = simplifyCore(expand(h ^ SymExpr(BigInt(delta - 1)), 100));
+                    return simplifyCore(expand((coeffsB[0] ^ SymExpr(BigInt(delta))) / divisor, 100));
                 }
             }
             
-            SymExpr r = polyPseudoRem(u, v, var);
-            if (r.isZero()) return SymExpr(BigInt(0));
+            auto coeffsR = polyPseudoRemCoeffs(coeffsA, coeffsB);
+            if (coeffsR.empty()) return SymExpr(BigInt(0));
             
-            SymExpr leadV = extractCoeffs(v, var).back();
+            SymExpr leadB = coeffsB.back();
             
-            SymExpr divisor = simplifyCore(expand(g * (h ^ SymExpr(BigInt(delta))), 500));
-            u = v;
-            v = simplifyCore(expand(r / divisor, 500));
+            SymExpr divisor = simplifyCore(expand(g * (h ^ SymExpr(BigInt(delta))), 100));
             
-            g = leadV;
+            coeffsA = coeffsB;
+            coeffsB = coeffsR;
+            for (auto& c : coeffsB) c = simplifyCore(expand(c / divisor, 100));
+            trimCoeffs(coeffsB);
+            
+            g = leadB;
             if (delta > 0) {
-                SymExpr h_pow = simplifyCore(expand(h ^ SymExpr(BigInt(delta - 1)), 500));
-                h = simplifyCore(expand((g ^ SymExpr(BigInt(delta))) / h_pow, 500));
+                SymExpr h_pow = simplifyCore(expand(h ^ SymExpr(BigInt(delta - 1)), 100));
+                h = simplifyCore(expand((g ^ SymExpr(BigInt(delta))) / h_pow, 100));
             }
         }
     }
@@ -3608,6 +3632,29 @@ namespace jc {
             }
             
             if (!den.isOne()) {
+                std::set<std::string> vars;
+                collectAllVars(num.ptr, vars);
+                collectAllVars(den.ptr, vars);
+                
+                if (vars.size() == 1) {
+                    std::string var = *vars.begin();
+                    SymExpr numExp = simplifyCore(expand(num, 500));
+                    SymExpr denExp = simplifyCore(expand(den, 500));
+                    
+                    if (getDegree(numExp, var) >= 0 && getDegree(denExp, var) >= 0) {
+                        SymExpr g = polyGCD(numExp, denExp, var);
+                        if (!g.isOne() && !g.isZero()) {
+                            SymExpr newNum = polyDiv(numExp, g, var).first;
+                            SymExpr newDen = polyDiv(denExp, g, var).first;
+                            
+                            SymExpr canceled = simplifyCore(newNum / newDen);
+                            if (canceled.toString() != expr.toString()) {
+                                return canceled;
+                            }
+                        }
+                    }
+                }
+                
                 SymExpr factNum = factorReal(num);
                 SymExpr factDen = factorReal(den);
                 SymExpr canceled = simplifyCore(factNum / factDen);
