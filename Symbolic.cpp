@@ -11,7 +11,25 @@
 #include <numeric>
 #include <map>
 
+#include <unordered_map>
+
 namespace jc {
+
+    // ==========================================
+    // 全局表达式内存池 (DAG Interning Pool)
+    // ==========================================
+    static std::unordered_map<std::string, std::weak_ptr<SymNode>> g_symPool;
+
+    std::shared_ptr<SymNode> SymExpr::intern(const std::shared_ptr<SymNode>& node) {
+        if (!node) return nullptr;
+        std::string key = node->toString();
+        auto& weakRef = g_symPool[key];
+        if (auto shared = weakRef.lock()) {
+            return shared;
+        }
+        weakRef = node;
+        return node;
+    }
 
     // ==========================================
     // CASVal ↔ Value 桥接（全局单一权威）
@@ -86,7 +104,7 @@ namespace jc {
     // 加法节点排版：原教旨安全版 
     // a + (-b) 自动识别首个字符转为 a - b
     // ==========================================
-    std::string SymAdd::toString() const {
+    std::string SymAdd::computeString() const {
         if (args.empty()) return "0";
         std::string res = "";
 
@@ -115,7 +133,7 @@ namespace jc {
     // 乘法节点排版：原教旨安全版 
     // 自动拦截开头的负系数，且绝不误伤内部括号
     // ==========================================
-    std::string SymMul::toString() const {
+    std::string SymMul::computeString() const {
         if (args.empty()) return "1";
         std::string res;
 
@@ -155,7 +173,7 @@ namespace jc {
         return res;
     }
 
-    std::string SymPow::toString() const {
+    std::string SymPow::computeString() const {
         // ==========================================
         // 排版拦截：检测是否为纯分数指数 1/n
         // ==========================================
@@ -224,7 +242,7 @@ namespace jc {
         return bStr + "^" + eStr;
     }
 
-    std::string SymFunc::toString() const {
+    std::string SymFunc::computeString() const {
         std::string res = name + "(";
         for (size_t i = 0; i < args.size(); ++i) {
             if (i > 0) res += ", ";
@@ -274,25 +292,25 @@ namespace jc {
     // ==========================================
     // SymExpr 构造
     // ==========================================
-    SymExpr::SymExpr() : ptr(std::make_shared<SymNum>(BigInt(0))) {}
-    SymExpr::SymExpr(double v) : ptr(std::make_shared<SymNum>(v)) {}
-    SymExpr::SymExpr(const BigInt& v) : ptr(std::make_shared<SymNum>(v)) {}
-    SymExpr::SymExpr(const Fraction& v) : ptr(std::make_shared<SymNum>(v)) {}
+    SymExpr::SymExpr() : ptr(intern(std::make_shared<SymNum>(BigInt(0)))) {}
+    SymExpr::SymExpr(double v) : ptr(intern(std::make_shared<SymNum>(v))) {}
+    SymExpr::SymExpr(const BigInt& v) : ptr(intern(std::make_shared<SymNum>(v))) {}
+    SymExpr::SymExpr(const Fraction& v) : ptr(intern(std::make_shared<SymNum>(v))) {}
     SymExpr::SymExpr(const Complex& v) {
         if (Tol::isEq(v.imag, 0.0)) {
-            ptr = std::make_shared<SymNum>(v.real);
+            ptr = intern(std::make_shared<SymNum>(v.real));
         } else if (Tol::isEq(v.real, 0.0)) {
             SymExpr imagPart(v.imag);
             SymExpr iVar = SymExpr::makeVar("i");
-            ptr = (imagPart * iVar).ptr;
+            ptr = intern((imagPart * iVar).ptr);
         } else {
             SymExpr realPart(v.real);
             SymExpr imagPart(v.imag);
             SymExpr iVar = SymExpr::makeVar("i");
-            ptr = (realPart + imagPart * iVar).ptr;
+            ptr = intern((realPart + imagPart * iVar).ptr);
         }
     }
-    SymExpr::SymExpr(const CASVal& v) : ptr(std::make_shared<SymNum>(v)) {}
+    SymExpr::SymExpr(const CASVal& v) : ptr(intern(std::make_shared<SymNum>(v))) {}
 
     SymExpr SymExpr::makeVar(const std::string& name) {
         return SymExpr(std::make_shared<SymVar>(name));
@@ -361,7 +379,7 @@ namespace jc {
         // ★ 纯净输出：不做任何负号提取，直接组装 ADD 节点
         std::vector<std::shared_ptr<SymNode>> newArgs;
         if (!isCasZero(sumConst))
-            newArgs.push_back(std::make_shared<SymNum>(sumConst));
+            newArgs.push_back(SymExpr(sumConst).ptr);
         for (auto& [key, data] : symTerms) {
             if (isCasZero(data.coeff)) continue;
             if (isCasOne(data.coeff)) {
@@ -369,7 +387,7 @@ namespace jc {
             }
             else {
                 std::vector<std::shared_ptr<SymNode>> mArgs;
-                mArgs.push_back(std::make_shared<SymNum>(data.coeff));
+                mArgs.push_back(SymExpr(data.coeff).ptr);
                 if (data.baseNode->getType() == SymType::MUL) {
                     auto inner = std::static_pointer_cast<SymMul>(data.baseNode);
                     mArgs.insert(mArgs.end(), inner->args.begin(), inner->args.end());
@@ -377,7 +395,7 @@ namespace jc {
                 else {
                     mArgs.push_back(data.baseNode);
                 }
-                newArgs.push_back(std::make_shared<SymMul>(mArgs));
+                newArgs.push_back(SymExpr(std::make_shared<SymMul>(mArgs)).ptr);
             }
         }
         if (newArgs.empty()) return SymExpr(BigInt(0));
@@ -534,7 +552,7 @@ namespace jc {
         }
         if (isCasZero(prodConst)) return SymExpr(BigInt(0));
         if (!isCasOne(prodConst) || newArgs.empty()) {
-            newArgs.insert(newArgs.begin(), std::make_shared<SymNum>(prodConst));
+            newArgs.insert(newArgs.begin(), SymExpr(prodConst).ptr);
         }
         if (newArgs.size() == 1) return SymExpr(newArgs[0]);
         return SymExpr(std::make_shared<SymMul>(std::move(newArgs)));

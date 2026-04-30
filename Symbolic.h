@@ -32,10 +32,16 @@ namespace jc {
     enum class SymType { NUM, VAR, ADD, MUL, POW, FUNC };
 
     class SymNode {
+    protected:
+        mutable std::string cachedStr;
     public:
         virtual ~SymNode() = default;
         virtual SymType getType() const = 0;
-        virtual std::string toString() const = 0;
+        std::string toString() const {
+            if (cachedStr.empty()) cachedStr = computeString();
+            return cachedStr;
+        }
+        virtual std::string computeString() const = 0;
 
         virtual bool isZero() const { return false; }
         virtual bool isOne() const { return false; }
@@ -48,8 +54,10 @@ namespace jc {
     public:
         std::shared_ptr<SymNode> ptr;
 
+        static std::shared_ptr<SymNode> intern(const std::shared_ptr<SymNode>& node);
+
         SymExpr();
-        explicit SymExpr(std::shared_ptr<SymNode> p) : ptr(std::move(p)) {}
+        explicit SymExpr(std::shared_ptr<SymNode> p) : ptr(intern(std::move(p))) {}
 
         // 隐式升维构造
         SymExpr(double v);
@@ -77,7 +85,9 @@ namespace jc {
         SymExpr operator-() const;
 
         bool operator==(const SymExpr& other) const {
-            return toString() == other.toString();
+            if (ptr == other.ptr) return true;
+            if (!ptr || !other.ptr) return false;
+            return ptr->toString() == other.ptr->toString();
         }
         bool operator!=(const SymExpr& other) const {
             return !(*this == other);
@@ -154,7 +164,7 @@ namespace jc {
         CASVal value;
         explicit SymNum(CASVal v) : value(std::move(v)) {}
         SymType getType() const override { return SymType::NUM; }
-        std::string toString() const override { return casToString(value); }
+        std::string computeString() const override { return casToString(value); }
         bool isZero() const override { return isCasZero(value); }
         bool isOne() const override { return isCasOne(value); }
     };
@@ -164,7 +174,7 @@ namespace jc {
         std::string name;
         explicit SymVar(std::string n) : name(std::move(n)) {}
         SymType getType() const override { return SymType::VAR; }
-        std::string toString() const override { return name; }
+        std::string computeString() const override { return name; }
     };
 
     class SymAdd : public SymNode {
@@ -172,7 +182,7 @@ namespace jc {
         std::vector<std::shared_ptr<SymNode>> args;
         explicit SymAdd(std::vector<std::shared_ptr<SymNode>> a) : args(std::move(a)) {}
         SymType getType() const override { return SymType::ADD; }
-        std::string toString() const override;
+        std::string computeString() const override;
     };
 
     class SymMul : public SymNode {
@@ -180,7 +190,7 @@ namespace jc {
         std::vector<std::shared_ptr<SymNode>> args;
         explicit SymMul(std::vector<std::shared_ptr<SymNode>> a) : args(std::move(a)) {}
         SymType getType() const override { return SymType::MUL; }
-        std::string toString() const override;
+        std::string computeString() const override;
     };
 
     class SymPow : public SymNode {
@@ -189,7 +199,7 @@ namespace jc {
         std::shared_ptr<SymNode> exp;
         SymPow(std::shared_ptr<SymNode> b, std::shared_ptr<SymNode> e) : base(std::move(b)), exp(std::move(e)) {}
         SymType getType() const override { return SymType::POW; }
-        std::string toString() const override;
+        std::string computeString() const override;
     };
 
     class SymFunc : public SymNode {
@@ -200,12 +210,12 @@ namespace jc {
             : name(n == "ln" ? "log" : std::move(n)), args(std::move(a)) {
         }
         SymType getType() const override { return SymType::FUNC; }
-        std::string toString() const override;
+        std::string computeString() const override;
     };
 
     // 模板构造函数实现 (必须在 SymNum 完整定义之后)
     template<typename T, std::enable_if_t<std::is_integral_v<T>, int>>
-    SymExpr::SymExpr(T v) : ptr(std::make_shared<SymNum>(BigInt(static_cast<int64_t>(v)))) {}
+    SymExpr::SymExpr(T v) : ptr(intern(std::make_shared<SymNum>(BigInt(static_cast<int64_t>(v))))) {}
 
 } // namespace jc
 
