@@ -348,6 +348,39 @@ namespace jc {
     }
 
     // ==========================================
+    // 表达式排序比较器 (Higher power first, smaller lexicographical first)
+    // ==========================================
+    static int compareSymNodes(const std::shared_ptr<SymNode>& a, const std::shared_ptr<SymNode>& b) {
+        auto getBaseExp = [](const std::shared_ptr<SymNode>& n) -> std::pair<std::shared_ptr<SymNode>, double> {
+            if (n->getType() == SymType::POW) {
+                auto p = std::static_pointer_cast<SymPow>(n);
+                if (p->exp->getType() == SymType::NUM) {
+                    try {
+                        return {p->base, casValToValue(std::static_pointer_cast<SymNum>(p->exp)->value).asDouble()};
+                    } catch(...) {}
+                }
+            }
+            return {n, 1.0};
+        };
+
+        auto [baseA, expA] = getBaseExp(a);
+        auto [baseB, expB] = getBaseExp(b);
+
+        std::string strA = baseA->toString();
+        std::string strB = baseB->toString();
+
+        if (strA != strB) {
+            return strA < strB ? -1 : 1;
+        }
+
+        if (expA != expB) {
+            return expA > expB ? -1 : 1;
+        }
+
+        return 0;
+    }
+
+    // ==========================================
     // SymExpr 构造
     // ==========================================
     SymExpr::SymExpr() : ptr(intern(std::make_shared<SymNum>(BigInt(0)))) {}
@@ -435,10 +468,13 @@ namespace jc {
             }
         }
         // ★ 纯净输出：不做任何负号提取，直接组装 ADD 节点
+        std::vector<std::pair<std::string, TermData>> sortedTerms(symTerms.begin(), symTerms.end());
+        std::sort(sortedTerms.begin(), sortedTerms.end(), [](const auto& lhs, const auto& rhs) {
+            return compareSymNodes(lhs.second.baseNode, rhs.second.baseNode) < 0;
+        });
+
         std::vector<std::shared_ptr<SymNode>> newArgs;
-        if (!isCasZero(sumConst))
-            newArgs.push_back(SymExpr(sumConst).ptr);
-        for (auto& [key, data] : symTerms) {
+        for (auto& [key, data] : sortedTerms) {
             if (isCasZero(data.coeff)) continue;
             if (isCasOne(data.coeff)) {
                 newArgs.push_back(data.baseNode);
@@ -456,6 +492,9 @@ namespace jc {
                 newArgs.push_back(SymExpr(std::make_shared<SymMul>(mArgs)).ptr);
             }
         }
+        if (!isCasZero(sumConst))
+            newArgs.push_back(SymExpr(sumConst).ptr);
+
         if (newArgs.empty()) return SymExpr(BigInt(0));
         if (newArgs.size() == 1) return SymExpr(newArgs[0]);
         return SymExpr(std::make_shared<SymAdd>(std::move(newArgs)));
@@ -588,8 +627,13 @@ namespace jc {
             }
         }
 
+        std::vector<std::pair<std::string, FactorData>> sortedFactors(symFactors.begin(), symFactors.end());
+        std::sort(sortedFactors.begin(), sortedFactors.end(), [](const auto& lhs, const auto& rhs) {
+            return compareSymNodes(lhs.second.baseNode, rhs.second.baseNode) < 0;
+        });
+
         std::vector<std::shared_ptr<SymNode>> newArgs;
-        for (auto& [key, data] : symFactors) {
+        for (auto& [key, data] : sortedFactors) {
             if (isCasZero(data.exp)) continue;
             
             SymExpr term = SymExpr(data.baseNode) ^ SymExpr(data.exp);
@@ -1253,6 +1297,9 @@ namespace jc {
                             }
 
                             // 极速组装：一口气将几十上百个节点封入一把加法树中，省去全部树并排开销！
+                            std::sort(finalTerms.begin(), finalTerms.end(), [](const auto& a, const auto& b) {
+                                return compareSymNodes(a, b) < 0;
+                            });
                             if (finalTerms.size() == 1) return SymExpr(finalTerms[0]);
                             return SymExpr(std::make_shared<SymAdd>(std::move(finalTerms)));
                         }
