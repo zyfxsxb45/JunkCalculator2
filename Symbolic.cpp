@@ -668,12 +668,17 @@ namespace jc {
     SymExpr SymExpr::operator-() const { return (*this) * SymExpr(-1); }
     SymExpr operator-(const SymExpr& a, const SymExpr& b) { return a + (-b); }
 
+    static std::pair<bool, Value> tryEvalConst(const SymExpr& expr);
+
     // ==========================================
     // operator/（除法 → 委托 Value 求倒数）
     // ==========================================
     SymExpr operator/(const SymExpr& a, const SymExpr& b) {
         if (!a.ptr) return SymExpr(BigInt(0));
         if (!b.ptr || b.isZero()) throw std::runtime_error("CAS Error: Division by zero.");
+
+        auto [bOk, bVal] = tryEvalConst(b);
+        if (bOk && !bVal.truthy()) throw std::runtime_error("CAS Error: Division by zero.");
 
         if (b.ptr->getType() == SymType::NUM) {
             auto numNode = std::static_pointer_cast<SymNum>(b.ptr);
@@ -693,14 +698,24 @@ namespace jc {
     SymExpr operator^(const SymExpr& a, const SymExpr& b) {
         if (!a.ptr) return SymExpr(BigInt(0));
         if (!b.ptr) return SymExpr(BigInt(1));
-        if (a.isZero()) {
-            if (b.isZero()) throw std::runtime_error("CAS Error: 0^0 is undefined.");
-            if (b.ptr->getType() == SymType::NUM && isCasNegative(std::static_pointer_cast<SymNum>(b.ptr)->value)) {
-                throw std::runtime_error("CAS Error: Division by zero.");
+
+        auto [aOk, aVal] = tryEvalConst(a);
+        auto [bOk, bVal] = tryEvalConst(b);
+        bool aIsZero = a.isZero() || (aOk && !aVal.truthy());
+        bool bIsZero = b.isZero() || (bOk && !bVal.truthy());
+
+        if (aIsZero) {
+            if (bIsZero) throw std::runtime_error("CAS Error: 0^0 is undefined.");
+            bool bIsNeg = false;
+            if (bOk) {
+                try { bIsNeg = bVal.asDouble() < 0.0; } catch(...) {}
+            } else if (b.ptr->getType() == SymType::NUM) {
+                bIsNeg = isCasNegative(std::static_pointer_cast<SymNum>(b.ptr)->value);
             }
+            if (bIsNeg) throw std::runtime_error("CAS Error: Division by zero.");
             return SymExpr(0);
         }
-        if (a.isOne() || b.isZero()) return SymExpr(BigInt(1));
+        if (a.isOne() || bIsZero) return SymExpr(BigInt(1));
         if (b.isOne()) return a;
 
         // 常数折叠: NUM^NUM → 委托 Value（Value 内部会自动决定精确/符号/浮点）
@@ -2865,6 +2880,14 @@ namespace jc {
                     if (outside > 1) {
                         return { true, SymExpr(BigInt(outside)) * (SymExpr(BigInt(inside)) ^ SymExpr(Fraction(1, 2))) };
                     }
+                }
+            } else if (std::holds_alternative<Fraction>(numNode->value)) {
+                Fraction f = std::get<Fraction>(numNode->value);
+                if (f.getNum().isNegative()) return { false, expr };
+                auto [numOk, numSqrt] = trySquareRoot(SymExpr(f.getNum()), allowPartial);
+                auto [denOk, denSqrt] = trySquareRoot(SymExpr(f.getDen()), allowPartial);
+                if (numOk && denOk) {
+                    return { true, numSqrt / denSqrt };
                 }
             }
             return { false, expr };
