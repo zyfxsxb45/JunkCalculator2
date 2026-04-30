@@ -3411,7 +3411,7 @@ void BuiltinRegistry::registerCAS() {
         });
 
     reg("simplify", { 1 }, [](const std::vector<Value>& args) -> Value {
-        return Value(simplify(args[0].asSymbolic()));
+        return Value(full_simplify(args[0].asSymbolic()));
         });
 
     reg("contract", { 1 }, [](const std::vector<Value>& args) -> Value {

@@ -1064,123 +1064,7 @@ namespace jc {
                 }
             }
 
-            // --- 3. 启发式分部积分 (Integration by Parts) ---
-            bool tryParts = false;
-            std::vector<SymExpr> factors;
-            if (varPart.ptr->getType() == SymType::MUL) {
-                auto mul = std::static_pointer_cast<SymMul>(varPart.ptr);
-                for (auto& arg : mul->args) factors.push_back(SymExpr(arg));
-                tryParts = true;
-            } else if (varPart.ptr->getType() == SymType::FUNC || varPart.ptr->getType() == SymType::POW) {
-                factors.push_back(varPart);
-                factors.push_back(SymExpr(BigInt(1)));
-                tryParts = true;
-            }
-
-            if (tryParts) {
-                auto getPriority = [&](const SymExpr& f) -> int {
-                    if (f.ptr->getType() == SymType::FUNC) {
-                        auto fn = std::static_pointer_cast<SymFunc>(f.ptr);
-                        if (fn->name == "log" || fn->name == "asin" || fn->name == "acos" || fn->name == "atan") return 1;
-                    }
-                    if (f.ptr->getType() == SymType::POW) {
-                        auto p = std::static_pointer_cast<SymPow>(f.ptr);
-                        if (p->base->getType() == SymType::VAR && std::static_pointer_cast<SymVar>(p->base)->name == var) {
-                            if (p->exp->getType() == SymType::NUM) {
-                                auto [isInt, n] = extractExactInt(std::static_pointer_cast<SymNum>(p->exp)->value);
-                                if (isInt && n > 0) return 2;
-                            }
-                        }
-                    }
-                    if (f.ptr->getType() == SymType::VAR && std::static_pointer_cast<SymVar>(f.ptr)->name == var) return 2;
-                    return 3;
-                };
-
-                std::vector<size_t> indices(factors.size());
-                std::iota(indices.begin(), indices.end(), 0);
-                std::sort(indices.begin(), indices.end(), [&](size_t a, size_t b) {
-                    return getPriority(factors[a]) < getPriority(factors[b]);
-                });
-
-                for (size_t i : indices) {
-                    // Try 1: u = factors[i], dv = rest
-                    SymExpr u1 = factors[i];
-                    SymExpr dv1(BigInt(1));
-                    for (size_t j = 0; j < factors.size(); ++j) {
-                        if (j != i) dv1 = dv1 * factors[j];
-                    }
-
-                    // Try 2: dv = factors[i], u = rest
-                    SymExpr dv2 = factors[i];
-                    SymExpr u2(BigInt(1));
-                    for (size_t j = 0; j < factors.size(); ++j) {
-                        if (j != i) u2 = u2 * factors[j];
-                    }
-
-                    auto tryPartsWith = [&](SymExpr u, SymExpr dv) -> std::optional<SymExpr> {
-                        SymExpr du = simplifyCore(diff(u, var));
-                        auto opt_v = doInteg(dv, depth + 1);
-                        if (!opt_v) return std::nullopt;
-                        SymExpr v = *opt_v;
-                        SymExpr v_du = simplifyCore(v * du);
-                        
-                        // 循环分部积分检测 (1-step cycle)
-                        SymExpr ratio1 = simplifyCore(v_du / varPart);
-                        if (!containsVar(ratio1.ptr, var) && !ratio1.isZero()) {
-                            SymExpr k = ratio1;
-                            SymExpr one_plus_k = simplifyCore(SymExpr(BigInt(1)) + k);
-                            if (!one_plus_k.isZero()) {
-                                return coeff * simplify(expand((u * v) / one_plus_k, SymConfig::maxExpandTerms));
-                            }
-                        }
-                        
-                        // 循环分部积分检测 (2-step cycle)
-                        if (v_du.ptr->getType() == SymType::MUL) {
-                            auto mul2 = std::static_pointer_cast<SymMul>(v_du.ptr);
-                            std::vector<SymExpr> factors2;
-                            for (auto& arg : mul2->args) factors2.push_back(SymExpr(arg));
-                            
-                            std::vector<size_t> indices2(factors2.size());
-                            std::iota(indices2.begin(), indices2.end(), 0);
-                            std::sort(indices2.begin(), indices2.end(), [&](size_t a, size_t b) {
-                                return getPriority(factors2[a]) < getPriority(factors2[b]);
-                            });
-                            
-                            for (size_t i2 : indices2) {
-                                SymExpr u2_inner = factors2[i2];
-                                SymExpr dv2_inner(BigInt(1));
-                                for (size_t j2 = 0; j2 < factors2.size(); ++j2) {
-                                    if (j2 != i2) dv2_inner = dv2_inner * factors2[j2];
-                                }
-                                SymExpr du2_inner = simplifyCore(diff(u2_inner, var));
-                                auto opt_v2_inner = doInteg(dv2_inner, depth + 2);
-                                if (opt_v2_inner) {
-                                    SymExpr v2_inner = *opt_v2_inner;
-                                    SymExpr v2_du2 = simplifyCore(v2_inner * du2_inner);
-                                    
-                                    SymExpr ratio2 = simplifyCore(v2_du2 / varPart);
-                                    if (!containsVar(ratio2.ptr, var) && !ratio2.isZero()) {
-                                        SymExpr k = ratio2;
-                                        SymExpr one_minus_k = simplifyCore(SymExpr(BigInt(1)) - k);
-                                        if (!one_minus_k.isZero()) {
-                                            return coeff * simplifyCore((u * v - u2_inner * v2_inner) / one_minus_k);
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        auto opt_int_v_du = doInteg(v_du, depth + 1);
-                        if (!opt_int_v_du) return std::nullopt;
-                        return coeff * simplifyCore(u * v - *opt_int_v_du);
-                    };
-
-                    if (auto res1 = tryPartsWith(u1, dv1)) return *res1;
-                    if (auto res2 = tryPartsWith(u2, dv2)) return *res2;
-                }
-            }
-
-            // --- 4. 万能公式换元 (Weierstrass Substitution) ---
+            // --- 3. 万能公式换元 (Weierstrass Substitution) ---
             bool hasTrig = false;
             std::function<bool(const std::shared_ptr<SymNode>&)> isRationalTrig = [&](const std::shared_ptr<SymNode>& node) -> bool {
                 if (!node) return true;
@@ -1277,6 +1161,141 @@ namespace jc {
                         return coeff * simplifyCore(subs(*opt_integrated_var, var, back_sub));
                     }
                 } catch (...) {}
+            }
+
+            // --- 4. 启发式分部积分 (Integration by Parts) ---
+            bool tryParts = false;
+            std::vector<SymExpr> factors;
+            if (varPart.ptr->getType() == SymType::MUL) {
+                auto mul = std::static_pointer_cast<SymMul>(varPart.ptr);
+                for (auto& arg : mul->args) factors.push_back(SymExpr(arg));
+                tryParts = true;
+            } else if (varPart.ptr->getType() == SymType::FUNC || varPart.ptr->getType() == SymType::POW) {
+                factors.push_back(varPart);
+                factors.push_back(SymExpr(BigInt(1)));
+                tryParts = true;
+            }
+
+            if (tryParts) {
+                auto getPriority = [&](const SymExpr& f) -> int {
+                    if (f.ptr->getType() == SymType::FUNC) {
+                        auto fn = std::static_pointer_cast<SymFunc>(f.ptr);
+                        if (fn->name == "log" || fn->name == "asin" || fn->name == "acos" || fn->name == "atan") return 1;
+                    }
+                    if (f.ptr->getType() == SymType::POW) {
+                        auto p = std::static_pointer_cast<SymPow>(f.ptr);
+                        if (p->base->getType() == SymType::VAR && std::static_pointer_cast<SymVar>(p->base)->name == var) {
+                            if (p->exp->getType() == SymType::NUM) {
+                                auto [isInt, n] = extractExactInt(std::static_pointer_cast<SymNum>(p->exp)->value);
+                                if (isInt && n > 0) return 2;
+                            }
+                        }
+                    }
+                    if (f.ptr->getType() == SymType::VAR && std::static_pointer_cast<SymVar>(f.ptr)->name == var) return 2;
+                    return 3;
+                };
+
+                std::vector<size_t> indices(factors.size());
+                std::iota(indices.begin(), indices.end(), 0);
+                std::sort(indices.begin(), indices.end(), [&](size_t a, size_t b) {
+                    return getPriority(factors[a]) < getPriority(factors[b]);
+                });
+
+                auto getIbpCandidates = [&](const std::vector<SymExpr>& facs, const std::vector<size_t>& idxs) {
+                    std::vector<std::pair<SymExpr, SymExpr>> cands;
+                    auto addCand = [&](SymExpr u, SymExpr dv) {
+                        for (const auto& c : cands) if (c.first == u && c.second == dv) return;
+                        cands.push_back({u, dv});
+                    };
+                    // 1. 选取优先级最高（最适合求导）的 1~2 个因子作为 u
+                    for (size_t k = 0; k < std::min<size_t>(2, idxs.size()); ++k) {
+                        size_t i = idxs[k];
+                        SymExpr u = facs[i];
+                        SymExpr dv(BigInt(1));
+                        for (size_t j = 0; j < facs.size(); ++j) if (j != i) dv = dv * facs[j];
+                        addCand(u, dv);
+                    }
+                    // 2. 选取优先级最低（最适合积分）的 1~2 个因子作为 dv
+                    for (size_t k = 0; k < std::min<size_t>(2, idxs.size()); ++k) {
+                        size_t i = idxs[idxs.size() - 1 - k];
+                        SymExpr dv = facs[i];
+                        SymExpr u(BigInt(1));
+                        for (size_t j = 0; j < facs.size(); ++j) if (j != i) u = u * facs[j];
+                        addCand(u, dv);
+                    }
+                    return cands;
+                };
+
+                auto tryPartsWith = [&](SymExpr u, SymExpr dv) -> std::optional<SymExpr> {
+                    SymExpr du = simplifyCore(diff(u, var));
+                    if (du.isZero()) return std::nullopt; // 剪枝：常数求导为0，分部积分无意义
+
+                    auto opt_v = doInteg(dv, depth + 1);
+                    if (!opt_v) return std::nullopt;
+                    SymExpr v = *opt_v;
+
+                    // 剪枝：如果积分出来的 v 极其复杂（体积膨胀过大），及时止损
+                    if (getAstNodeCount(v) > getAstNodeCount(dv) * 4 + 10) {
+                        return std::nullopt;
+                    }
+
+                    SymExpr v_du = simplifyCore(v * du);
+                    
+                    // 循环分部积分检测 (1-step cycle)
+                    SymExpr ratio1 = simplifyCore(v_du / varPart);
+                    if (!containsVar(ratio1.ptr, var) && !ratio1.isZero()) {
+                        SymExpr k = ratio1;
+                        SymExpr one_plus_k = simplifyCore(SymExpr(BigInt(1)) + k);
+                        if (!one_plus_k.isZero()) {
+                            return coeff * simplify(expand((u * v) / one_plus_k, SymConfig::maxExpandTerms));
+                        }
+                    }
+                    
+                    // 循环分部积分检测 (2-step cycle)
+                    if (v_du.ptr->getType() == SymType::MUL) {
+                        auto mul2 = std::static_pointer_cast<SymMul>(v_du.ptr);
+                        std::vector<SymExpr> factors2;
+                        for (auto& arg : mul2->args) factors2.push_back(SymExpr(arg));
+                        
+                        std::vector<size_t> indices2(factors2.size());
+                        std::iota(indices2.begin(), indices2.end(), 0);
+                        std::sort(indices2.begin(), indices2.end(), [&](size_t a, size_t b) {
+                            return getPriority(factors2[a]) < getPriority(factors2[b]);
+                        });
+                        
+                        auto candidates2 = getIbpCandidates(factors2, indices2);
+                        for (const auto& cand2 : candidates2) {
+                            SymExpr u2_inner = cand2.first;
+                            SymExpr dv2_inner = cand2.second;
+                            SymExpr du2_inner = simplifyCore(diff(u2_inner, var));
+                            if (du2_inner.isZero()) continue;
+
+                            auto opt_v2_inner = doInteg(dv2_inner, depth + 2);
+                            if (opt_v2_inner) {
+                                SymExpr v2_inner = *opt_v2_inner;
+                                SymExpr v2_du2 = simplifyCore(v2_inner * du2_inner);
+                                
+                                SymExpr ratio2 = simplifyCore(v2_du2 / varPart);
+                                if (!containsVar(ratio2.ptr, var) && !ratio2.isZero()) {
+                                    SymExpr k = ratio2;
+                                    SymExpr one_minus_k = simplifyCore(SymExpr(BigInt(1)) - k);
+                                    if (!one_minus_k.isZero()) {
+                                        return coeff * simplifyCore((u * v - u2_inner * v2_inner) / one_minus_k);
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    auto opt_int_v_du = doInteg(v_du, depth + 1);
+                    if (!opt_int_v_du) return std::nullopt;
+                    return coeff * simplifyCore(u * v - *opt_int_v_du);
+                };
+
+                auto candidates = getIbpCandidates(factors, indices);
+                for (const auto& cand : candidates) {
+                    if (auto res = tryPartsWith(cand.first, cand.second)) return *res;
+                }
             }
 
             // 启发式方法全部失效，移交 Risch 算法处理

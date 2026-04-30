@@ -133,6 +133,7 @@ namespace jc {
     int getAstNodeCount(const SymExpr& expr);
     SymExpr contract(const SymExpr& expr);
     SymExpr simplify(const SymExpr& expr);
+    SymExpr full_simplify(const SymExpr& expr);
 
     // 获取多项式最高次幂
     int getDegree(const SymExpr& expr, const std::string& var);

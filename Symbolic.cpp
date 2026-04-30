@@ -758,6 +758,28 @@ namespace jc {
         if (a.isOne() || bIsZero) return SymExpr(BigInt(1));
         if (b.isOne()) return a;
 
+        // 常数折叠: 尝试对可求值的常数进行折叠 (如 i^-1 -> -i)
+        if (aOk && bOk) {
+            // 仅当底数和指数都是精确类型 (非浮点) 时，才进行折叠，以防 PI^2 变成浮点数
+            bool aExact = a.ptr->getType() == SymType::NUM ? !std::holds_alternative<double>(std::static_pointer_cast<SymNum>(a.ptr)->value) : true;
+            bool bExact = b.ptr->getType() == SymType::NUM ? !std::holds_alternative<double>(std::static_pointer_cast<SymNum>(b.ptr)->value) : true;
+            
+            if (aExact && bExact) {
+                // 避免无限递归：如果 a 和 b 都是 NUM，说明我们已经在处理最底层的常数了，
+                // 此时不应该再调用 Value::operator^，因为 Value::operator^ 遇到算不尽的数会再次调用 SymExpr::operator^。
+                // 实际上，如果 a 和 b 都是 NUM，下面的 NUM^NUM 逻辑会安全地处理它。
+                if (!(a.ptr->getType() == SymType::NUM && b.ptr->getType() == SymType::NUM)) {
+                    try {
+                        Value result = aVal ^ bVal;
+                        // 如果结果是精确的复数或整数/分数，则接受折叠
+                        if (result.isComplex() || std::holds_alternative<BigInt>(result.data) || std::holds_alternative<Fraction>(result.data)) {
+                            return result.asSymbolic();
+                        }
+                    } catch (...) {}
+                }
+            }
+        }
+
         // 常数折叠: NUM^NUM → 委托 Value（Value 内部会自动决定精确/符号/浮点）
         if (a.ptr->getType() == SymType::NUM && b.ptr->getType() == SymType::NUM) {
             auto baseNum = std::static_pointer_cast<SymNum>(a.ptr);
@@ -1575,6 +1597,12 @@ namespace jc {
                     if (!ok) return {false, Value()};
                     sum = sum + v;
                 }
+                if (!std::holds_alternative<double>(sum.data) &&
+                    !std::holds_alternative<BigInt>(sum.data) &&
+                    !std::holds_alternative<Fraction>(sum.data) &&
+                    !sum.isComplex()) {
+                    return {false, Value()};
+                }
                 return {true, sum};
             }
             case SymType::MUL: {
@@ -1583,6 +1611,12 @@ namespace jc {
                     auto [ok, v] = tryEvalConst(SymExpr(arg));
                     if (!ok) return {false, Value()};
                     prod = prod * v;
+                }
+                if (!std::holds_alternative<double>(prod.data) &&
+                    !std::holds_alternative<BigInt>(prod.data) &&
+                    !std::holds_alternative<Fraction>(prod.data) &&
+                    !prod.isComplex()) {
+                    return {false, Value()};
                 }
                 return {true, prod};
             }
@@ -1593,7 +1627,14 @@ namespace jc {
                 auto [ok2, e] = tryEvalConst(SymExpr(p->exp));
                 if (!ok2) return {false, Value()};
                 try {
-                    return {true, b ^ e};
+                    Value res = b ^ e;
+                    if (!std::holds_alternative<double>(res.data) &&
+                        !std::holds_alternative<BigInt>(res.data) &&
+                        !std::holds_alternative<Fraction>(res.data) &&
+                        !res.isComplex()) {
+                        return {false, Value()};
+                    }
+                    return {true, res};
                 } catch (...) {
                     return {false, Value()};
                 }
@@ -3128,7 +3169,7 @@ namespace jc {
     }
 
     // =================================================================
-// 智能启发式化简：多重宇宙博弈（含 factor 路线）
+// 轻量级启发式化简：多重宇宙博弈（剥离 factor 和 rational）
 // =================================================================
     SymExpr simplify(const SymExpr& expr) {
         if (!expr.ptr) return expr;
@@ -3139,30 +3180,20 @@ namespace jc {
         // 强制进行一次三角化简，消除反三角嵌套等，将超越函数转化为代数式
         try { current = trigsimp(current); } catch (...) {}
 
-        // 第二阶段：多重宇宙博弈
+        // 第二阶段：多重宇宙博弈 (轻量级)
         SymExpr c_expand = current;
         SymExpr c_contract = current;
-        SymExpr c_factor = current;
         SymExpr c_both = current;
-        SymExpr c_factor_expand = current;
-        SymExpr c_rational = current;
 
         try { c_expand = expand(current, 30); }
-        catch (const std::runtime_error&) {}
-
-        try { c_rational = simplifyRational(current); }
         catch (const std::runtime_error&) {}
 
         try { c_contract = contract(current); }
         catch (const std::runtime_error&) {}
 
-        try { c_factor = factor(current); }
-        catch (const std::runtime_error&) {}
-
         try {
             if (c_expand.ptr != current.ptr) {
                 c_both = contract(c_expand);
-                c_factor_expand = factor(c_expand);
             }
         }
         catch (const std::runtime_error&) {}
@@ -3181,10 +3212,54 @@ namespace jc {
 
         tryCandidate(c_expand);
         tryCandidate(c_contract);
-        tryCandidate(c_factor);
         tryCandidate(c_both);
-        tryCandidate(c_factor_expand);
+
+        return best;
+    }
+
+    // =================================================================
+// 深度启发式化简：包含 factor 和 rational 的重型多重宇宙博弈
+// =================================================================
+    SymExpr full_simplify(const SymExpr& expr) {
+        if (!expr.ptr) return expr;
+
+        // 第一阶段：先进行一次轻量级化简
+        SymExpr current = simplify(expr);
+
+        // 第二阶段：重型多重宇宙博弈
+        SymExpr c_factor = current;
+        SymExpr c_rational = current;
+        SymExpr c_factor_expand = current;
+
+        try { c_rational = simplifyRational(current); }
+        catch (const std::runtime_error&) {}
+
+        try { c_factor = factor(current); }
+        catch (const std::runtime_error&) {}
+
+        try {
+            SymExpr c_expand = expand(current, 30);
+            if (c_expand.ptr != current.ptr) {
+                c_factor_expand = factor(c_expand);
+            }
+        }
+        catch (const std::runtime_error&) {}
+
+        // 选出体积最小的宇宙
+        SymExpr best = current;
+        int minSize = getAstNodeCount(current);
+
+        auto tryCandidate = [&](const SymExpr& cand) {
+            int sz = getAstNodeCount(cand);
+            if (sz < minSize) {
+                minSize = sz;
+                best = cand;
+            }
+            };
+
+        tryCandidate(c_factor);
         tryCandidate(c_rational);
+        tryCandidate(c_factor_expand);
 
         return best;
     }
