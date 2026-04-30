@@ -113,7 +113,9 @@ namespace jc {
     int getDegree(const SymExpr& expr, const std::string& var);
     // 多项式带余除法：返回 {商 (Quotient), 余数 (Remainder)}
     std::pair<SymExpr, SymExpr> polyDiv(const SymExpr& dividend, const SymExpr& divisor, const std::string& var);
-    // 多项式最大公约数 (基于欧几里得算法)
+    // 多项式伪除法：返回伪余数 (Pseudo-Remainder)
+    SymExpr polyPseudoRem(const SymExpr& dividend, const SymExpr& divisor, const std::string& var);
+    // 多项式最大公约数 (基于子结式余式序列)
     SymExpr polyGCD(const SymExpr& a, const SymExpr& b, const std::string& var);
     // 多项式扩展欧几里得算法 (EEA)
     std::tuple<SymExpr, SymExpr, SymExpr> polyEGCD(const SymExpr& a, const SymExpr& b, const std::string& var);

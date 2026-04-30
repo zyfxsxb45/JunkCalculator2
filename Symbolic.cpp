@@ -2333,27 +2333,100 @@ namespace jc {
         return { simplifyCore(expand(Q, 100)), simplifyCore(expand(R, 100)) };
     }
 
+    SymExpr polyPseudoRem(const SymExpr& dividend, const SymExpr& divisor, const std::string& var) {
+        SymExpr R = dividend;
+        
+        auto divCoeffs = extractCoeffs(divisor, var);
+        if (divCoeffs.empty()) throw std::runtime_error("Math Error: Divisor is not a polynomial in " + var);
+        int degDiv = static_cast<int>(divCoeffs.size()) - 1;
+        SymExpr leadDiv = divCoeffs.back();
+        if (leadDiv.isZero()) throw std::runtime_error("Math Error: Division by zero polynomial.");
+
+        auto rCoeffs = extractCoeffs(R, var);
+        int degR = rCoeffs.empty() ? -1 : static_cast<int>(rCoeffs.size()) - 1;
+        
+        int d = degR - degDiv + 1;
+        if (d <= 0) return R;
+        
+        SymExpr X = SymExpr::makeVar(var);
+        int iter = 0;
+
+        while (!R.isZero()) {
+            if (++iter > 100) throw std::runtime_error("Math Error: polyPseudoRem infinite loop detected.");
+            rCoeffs = extractCoeffs(R, var);
+            if (rCoeffs.empty()) break;
+            degR = static_cast<int>(rCoeffs.size()) - 1;
+            if (degR < degDiv) break;
+            
+            SymExpr leadR = rCoeffs.back();
+            SymExpr term = leadR;
+            if (degR - degDiv > 0) {
+                term = term * (X ^ SymExpr(BigInt(degR - degDiv)));
+            }
+
+            R = simplifyCore(expand(R * leadDiv - term * divisor, 500));
+            d--;
+        }
+        
+        if (d > 0) {
+            SymExpr multiplier = simplifyCore(expand(leadDiv ^ SymExpr(BigInt(d)), 500));
+            R = simplifyCore(expand(R * multiplier, 500));
+        }
+
+        return R;
+    }
+
     SymExpr polyGCD(const SymExpr& a, const SymExpr& b, const std::string& var) {
+        if (a.isZero()) return b;
+        if (b.isZero()) return a;
+
         SymExpr u = a;
         SymExpr v = b;
+        
+        int degU = getDegree(u, var);
+        int degV = getDegree(v, var);
+        
+        if (degU < degV) {
+            std::swap(u, v);
+            std::swap(degU, degV);
+        }
 
+        SymExpr g(BigInt(1));
+        SymExpr h(BigInt(1));
+        
         int iter = 0;
         while (!v.isZero()) {
             if (++iter > 100) throw std::runtime_error("Math Error: polyGCD infinite loop detected.");
-            auto [q, r] = polyDiv(u, v, var);
+            
+            degU = getDegree(u, var);
+            degV = getDegree(v, var);
+            int delta = degU - degV;
+            
+            SymExpr r = polyPseudoRem(u, v, var);
+            if (r.isZero()) break;
+            
+            SymExpr leadV = extractCoeffs(v, var).back();
+            
+            SymExpr divisor = simplifyCore(expand(g * (h ^ SymExpr(BigInt(delta))), 500));
             u = v;
-            v = r;
+            v = simplifyCore(expand(r / divisor, 500));
+            
+            g = leadV;
+            if (delta > 0) {
+                SymExpr h_pow = simplifyCore(expand(h ^ SymExpr(BigInt(delta - 1)), 500));
+                h = simplifyCore(expand((g ^ SymExpr(BigInt(delta))) / h_pow, 500));
+            }
         }
 
         // 首一化 (Monic)
-        auto coeffs = extractCoeffs(u, var);
+        auto coeffs = extractCoeffs(v, var);
         if (!coeffs.empty()) {
             SymExpr lead = coeffs.back();
             if (!lead.isZero() && !lead.isOne()) {
-                u = simplifyCore(expand(u / lead, 500));
+                v = simplifyCore(expand(v / lead, 500));
             }
         }
-        return u;
+        return v;
     }
 
     std::vector<std::pair<SymExpr, int>> polySquareFree(const SymExpr& p, const std::string& var) {
@@ -2458,17 +2531,45 @@ namespace jc {
             return simplifyCore(expand(leadB ^ SymExpr(BigInt(degA)), 500));
         }
         
-        auto coeffsB = extractCoeffs(b, var);
-        SymExpr leadB = coeffsB.back();
+        SymExpr u = a;
+        SymExpr v = b;
+        SymExpr g(BigInt(1));
+        SymExpr h(BigInt(1));
         
-        auto [q, r] = polyDiv(a, b, var);
-        if (r.isZero()) return SymExpr(BigInt(0));
-        
-        int degR = getDegree(r, var);
-        SymExpr resBR = polyResultant(b, r, var);
-        
-        SymExpr factor = simplifyCore(expand(leadB ^ SymExpr(BigInt(degA - degR)), 500));
-        return simplifyCore(expand(factor * resBR, 500));
+        int iter = 0;
+        while (true) {
+            if (++iter > 100) throw std::runtime_error("Math Error: polyResultant infinite loop detected.");
+            
+            int degU = getDegree(u, var);
+            int degV = getDegree(v, var);
+            if (degV < 0) return SymExpr(BigInt(0));
+            
+            int delta = degU - degV;
+            
+            if (degV == 0) {
+                if (delta == 0) {
+                    return v;
+                } else {
+                    SymExpr divisor = simplifyCore(expand(h ^ SymExpr(BigInt(delta - 1)), 500));
+                    return simplifyCore(expand((v ^ SymExpr(BigInt(delta))) / divisor, 500));
+                }
+            }
+            
+            SymExpr r = polyPseudoRem(u, v, var);
+            if (r.isZero()) return SymExpr(BigInt(0));
+            
+            SymExpr leadV = extractCoeffs(v, var).back();
+            
+            SymExpr divisor = simplifyCore(expand(g * (h ^ SymExpr(BigInt(delta))), 500));
+            u = v;
+            v = simplifyCore(expand(r / divisor, 500));
+            
+            g = leadV;
+            if (delta > 0) {
+                SymExpr h_pow = simplifyCore(expand(h ^ SymExpr(BigInt(delta - 1)), 500));
+                h = simplifyCore(expand((g ^ SymExpr(BigInt(delta))) / h_pow, 500));
+            }
+        }
     }
 
     // =================================================================
