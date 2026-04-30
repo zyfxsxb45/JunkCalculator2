@@ -2721,12 +2721,380 @@ namespace jc {
     }
 
     // =================================================================
+    // 有限域多项式运算与 Cantor-Zassenhaus 因式分解
+    // =================================================================
+    using PolyZp = std::vector<BigInt>;
+
+    static BigInt centerModP(BigInt a, const BigInt& p) {
+        BigInt r = a % p;
+        if (r.isNegative()) r = r + p;
+        BigInt half = p / BigInt(2);
+        if (r > half) r = r - p;
+        return r;
+    }
+
+    static BigInt invModP(BigInt a, const BigInt& p) {
+        BigInt t(0), newt(1);
+        BigInt r = p, newr = a % p;
+        if (newr.isNegative()) newr = newr + p;
+        while (!newr.isZero()) {
+            BigInt quotient = r / newr;
+            BigInt temp_t = t - quotient * newt;
+            t = newt; newt = temp_t;
+            BigInt temp_r = r - quotient * newr;
+            r = newr; newr = temp_r;
+        }
+        if (r > BigInt(1)) throw std::runtime_error("Math Error: Not invertible in Zp");
+        if (t.isNegative()) {
+            t = t % p;
+            if (t.isNegative()) t = t + p;
+        }
+        return t;
+    }
+
+    static BigInt powModInt(BigInt base, BigInt exp, BigInt mod) {
+        BigInt res(1);
+        base = base % mod;
+        if (base.isNegative()) base = base + mod;
+        while (!exp.isZero()) {
+            if (!(exp % BigInt(2)).isZero()) res = (res * base) % mod;
+            base = (base * base) % mod;
+            exp = exp / BigInt(2);
+        }
+        return res;
+    }
+
+    static void trimP(PolyZp& a) {
+        while (!a.empty() && a.back().isZero()) a.pop_back();
+    }
+
+    static PolyZp addP(const PolyZp& a, const PolyZp& b, const BigInt& p) {
+        PolyZp res(std::max(a.size(), b.size()), BigInt(0));
+        for (size_t i = 0; i < res.size(); ++i) {
+            BigInt va = i < a.size() ? a[i] : BigInt(0);
+            BigInt vb = i < b.size() ? b[i] : BigInt(0);
+            BigInt sum = (va + vb) % p;
+            if (sum.isNegative()) sum = sum + p;
+            res[i] = sum;
+        }
+        trimP(res);
+        return res;
+    }
+
+    static PolyZp subP(const PolyZp& a, const PolyZp& b, const BigInt& p) {
+        PolyZp res(std::max(a.size(), b.size()), BigInt(0));
+        for (size_t i = 0; i < res.size(); ++i) {
+            BigInt va = i < a.size() ? a[i] : BigInt(0);
+            BigInt vb = i < b.size() ? b[i] : BigInt(0);
+            BigInt diff = (va - vb) % p;
+            if (diff.isNegative()) diff = diff + p;
+            res[i] = diff;
+        }
+        trimP(res);
+        return res;
+    }
+
+    static PolyZp mulP(const PolyZp& a, const PolyZp& b, const BigInt& p) {
+        if (a.empty() || b.empty()) return {};
+        PolyZp res(a.size() + b.size() - 1, BigInt(0));
+        for (size_t i = 0; i < a.size(); ++i) {
+            if (a[i].isZero()) continue;
+            for (size_t j = 0; j < b.size(); ++j) {
+                BigInt term = (a[i] * b[j]) % p;
+                res[i+j] = (res[i+j] + term) % p;
+            }
+        }
+        for (auto& x : res) {
+            if (x.isNegative()) x = x + p;
+        }
+        trimP(res);
+        return res;
+    }
+
+    static std::pair<PolyZp, PolyZp> divP(PolyZp a, const PolyZp& b, const BigInt& p) {
+        if (b.empty()) throw std::runtime_error("Math Error: Division by zero poly in Zp");
+        trimP(a);
+        if (a.size() < b.size()) return {{}, a};
+        PolyZp q(a.size() - b.size() + 1, BigInt(0));
+        BigInt invLead = invModP(b.back(), p);
+        for (int i = (int)a.size() - (int)b.size(); i >= 0; --i) {
+            if (a[i + b.size() - 1].isZero()) continue;
+            BigInt factor = (a[i + b.size() - 1] * invLead) % p;
+            if (factor.isNegative()) factor = factor + p;
+            q[i] = factor;
+            for (size_t j = 0; j < b.size(); ++j) {
+                BigInt term = (factor * b[j]) % p;
+                a[i+j] = (a[i+j] - term) % p;
+                if (a[i+j].isNegative()) a[i+j] = a[i+j] + p;
+            }
+        }
+        trimP(q);
+        trimP(a);
+        return {q, a};
+    }
+
+    static PolyZp gcdP(PolyZp a, PolyZp b, const BigInt& p) {
+        while (!b.empty()) {
+            auto [q, r] = divP(a, b, p);
+            a = b;
+            b = r;
+        }
+        if (!a.empty()) {
+            BigInt invL = invModP(a.back(), p);
+            for (auto& x : a) {
+                x = (x * invL) % p;
+                if (x.isNegative()) x = x + p;
+            }
+        }
+        return a;
+    }
+
+    static PolyZp powModP(PolyZp base, BigInt exp, const PolyZp& modPoly, const BigInt& p) {
+        PolyZp res = {BigInt(1)};
+        base = divP(base, modPoly, p).second;
+        while (!exp.isZero()) {
+            BigInt rem = exp % BigInt(2);
+            if (!rem.isZero()) {
+                res = divP(mulP(res, base, p), modPoly, p).second;
+            }
+            base = divP(mulP(base, base, p), modPoly, p).second;
+            exp = exp / BigInt(2);
+        }
+        return res;
+    }
+
+    static PolyZp derivP(const PolyZp& a, const BigInt& p) {
+        if (a.size() <= 1) return {};
+        PolyZp res(a.size() - 1, BigInt(0));
+        for (size_t i = 1; i < a.size(); ++i) {
+            res[i-1] = (a[i] * BigInt(i)) % p;
+            if (res[i-1].isNegative()) res[i-1] = res[i-1] + p;
+        }
+        trimP(res);
+        return res;
+    }
+
+    static std::vector<PolyZp> czEDF(const PolyZp& f, int d, const BigInt& p) {
+        int n = f.size() - 1;
+        if (n == d) return {f};
+        std::vector<PolyZp> factors = {f};
+        
+        int seed = 1;
+        auto randPoly = [&](int deg) {
+            PolyZp r(deg, BigInt(0));
+            for (int i = 0; i < deg; ++i) {
+                seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+                r[i] = BigInt(seed) % p;
+            }
+            trimP(r);
+            return r;
+        };
+
+        BigInt exp = p;
+        for (int i = 1; i < d; ++i) exp = exp * p;
+        exp = (exp - BigInt(1)) / BigInt(2);
+
+        while (factors.size() < (size_t)(n / d)) {
+            PolyZp a = randPoly(n);
+            PolyZp b = powModP(a, exp, f, p);
+            b = subP(b, {BigInt(1)}, p);
+            
+            std::vector<PolyZp> nextFactors;
+            for (const auto& u : factors) {
+                if ((int)u.size() - 1 == d) {
+                    nextFactors.push_back(u);
+                    continue;
+                }
+                PolyZp g = gcdP(b, u, p);
+                if (!g.empty() && g.size() > 1 && g.size() < u.size()) {
+                    nextFactors.push_back(g);
+                    nextFactors.push_back(divP(u, g, p).first);
+                } else {
+                    nextFactors.push_back(u);
+                }
+            }
+            factors = nextFactors;
+        }
+        return factors;
+    }
+
+    static std::vector<PolyZp> cantorZassenhaus(const PolyZp& f, const BigInt& p) {
+        std::vector<PolyZp> factors;
+        PolyZp f_star = f;
+        PolyZp h = {BigInt(0), BigInt(1)}; // x
+        int d = 1;
+        
+        while ((int)f_star.size() - 1 >= 2 * d) {
+            h = powModP(h, p, f_star, p);
+            PolyZp h_minus_x = subP(h, {BigInt(0), BigInt(1)}, p);
+            PolyZp g = gcdP(h_minus_x, f_star, p);
+            
+            if (g.size() > 1) {
+                auto edfFactors = czEDF(g, d, p);
+                for (auto& fact : edfFactors) factors.push_back(fact);
+                f_star = divP(f_star, g, p).first;
+                h = divP(h, f_star, p).second;
+            }
+            d++;
+        }
+        if (f_star.size() > 1) {
+            factors.push_back(f_star);
+        }
+        return factors;
+    }
+
+    static SymExpr factorPolynomialCZ(const SymExpr& expr, int depth) {
+        if (depth > 5) return expr;
+        std::set<std::string> vars;
+        collectAllVars(expr.ptr, vars);
+        if (vars.size() != 1) return expr;
+        
+        std::string var = *vars.begin();
+        auto sqFree = polySquareFree(expr, var);
+        if (sqFree.empty()) return expr;
+        
+        SymExpr result(BigInt(1));
+        bool changed = false;
+        
+        for (const auto& [part, power] : sqFree) {
+            if (part.ptr->getType() == SymType::NUM) {
+                result = result * (part ^ SymExpr(BigInt(power)));
+                continue;
+            }
+            
+            auto coeffs = extractCoeffs(part, var);
+            if (coeffs.size() <= 2) {
+                result = result * (part ^ SymExpr(BigInt(power)));
+                continue;
+            }
+            
+            std::vector<BigInt> intCoeffs;
+            bool allInt = true;
+            for (const auto& c : coeffs) {
+                if (c.ptr->getType() == SymType::NUM) {
+                    auto numVal = std::static_pointer_cast<SymNum>(c.ptr)->value;
+                    if (std::holds_alternative<BigInt>(numVal)) {
+                        intCoeffs.push_back(std::get<BigInt>(numVal));
+                    } else if (std::holds_alternative<Fraction>(numVal) && std::get<Fraction>(numVal).getDen() == BigInt(1)) {
+                        intCoeffs.push_back(std::get<Fraction>(numVal).getNum());
+                    } else if (std::holds_alternative<double>(numVal)) {
+                        double d = std::get<double>(numVal);
+                        if (std::floor(d) == d) intCoeffs.push_back(BigInt(static_cast<int64_t>(d)));
+                        else { allInt = false; break; }
+                    } else {
+                        allInt = false; break;
+                    }
+                } else {
+                    allInt = false; break;
+                }
+            }
+            
+            if (!allInt) {
+                result = result * (part ^ SymExpr(BigInt(power)));
+                continue;
+            }
+            
+            BigInt content(0);
+            for (const auto& c : intCoeffs) {
+                if (!c.isZero()) content = BigInt::gcd(content, c.abs());
+            }
+            if (content > BigInt(1)) {
+                for (auto& c : intCoeffs) c = c / content;
+            }
+            
+            int n = intCoeffs.size() - 1;
+            BigInt an = intCoeffs.back();
+            
+            // 转换为首一多项式 g(y) = a_n^{n-1} f(y/a_n)
+            std::vector<BigInt> g_coeffs(n + 1);
+            BigInt an_pow(1);
+            for (int i = n; i >= 0; --i) {
+                g_coeffs[i] = intCoeffs[i] * an_pow;
+                if (i > 0) an_pow = an_pow * an;
+            }
+            
+            // 计算 Mignotte 边界 B = 2^n * sum(|g_i|)
+            BigInt sumAbs(0);
+            for (const auto& c : g_coeffs) sumAbs = sumAbs + c.abs();
+            BigInt B = sumAbs;
+            for (int i = 0; i < n; ++i) B = B * BigInt(2);
+            
+            // 选取大素数 p > 2B
+            BigInt p = (B * BigInt(2)).nextPrime();
+            
+            PolyZp g_mod;
+            while (true) {
+                g_mod = g_coeffs;
+                for (auto& x : g_mod) {
+                    x = x % p;
+                    if (x.isNegative()) x = x + p;
+                }
+                trimP(g_mod);
+                PolyZp g_deriv = derivP(g_mod, p);
+                PolyZp gcd = gcdP(g_mod, g_deriv, p);
+                if (gcd.size() <= 1) break; // 确保在 Zp 上无平方
+                p = p.nextPrime();
+            }
+            
+            std::vector<PolyZp> factorsZp = cantorZassenhaus(g_mod, p);
+            
+            if (factorsZp.size() == 1) {
+                SymExpr factoredPart = part;
+                if (content > BigInt(1)) factoredPart = SymExpr(content) * part;
+                result = result * (factoredPart ^ SymExpr(BigInt(power)));
+                continue;
+            }
+            
+            changed = true;
+            SymExpr partResult(BigInt(1));
+            
+            for (const auto& fZp : factorsZp) {
+                std::vector<BigInt> H_coeffs(fZp.size());
+                for (size_t i = 0; i < fZp.size(); ++i) {
+                    H_coeffs[i] = centerModP(fZp[i], p);
+                }
+                
+                // 还原代换 y = a_n x
+                std::vector<BigInt> Hx_coeffs(H_coeffs.size());
+                BigInt an_i(1);
+                BigInt Hx_content(0);
+                for (size_t i = 0; i < H_coeffs.size(); ++i) {
+                    Hx_coeffs[i] = H_coeffs[i] * an_i;
+                    if (!Hx_coeffs[i].isZero()) Hx_content = BigInt::gcd(Hx_content, Hx_coeffs[i].abs());
+                    an_i = an_i * an;
+                }
+                
+                SymExpr factorExpr(BigInt(0));
+                SymExpr X = SymExpr::makeVar(var);
+                for (size_t i = 0; i < Hx_coeffs.size(); ++i) {
+                    if (Hx_coeffs[i].isZero()) continue;
+                    BigInt c = Hx_coeffs[i] / Hx_content;
+                    if (i == 0) factorExpr = factorExpr + SymExpr(c);
+                    else if (i == 1) factorExpr = factorExpr + SymExpr(c) * X;
+                    else factorExpr = factorExpr + SymExpr(c) * (X ^ SymExpr(BigInt(i)));
+                }
+                
+                partResult = partResult * factorExpr;
+            }
+            
+            if (content > BigInt(1)) partResult = SymExpr(content) * partResult;
+            
+            result = result * (partResult ^ SymExpr(BigInt(power)));
+        }
+        
+        return changed ? result : expr;
+    }
+
+    // =================================================================
     // 因式分解主入口
     // =================================================================
     SymExpr factor(const SymExpr& expr, int depth) {      // 增加 depth 签名
         if (!expr.ptr || depth > 10) return expr;          // 极限保险
         SymExpr quadResult = multivariatePolynomialFactor(expr, depth);  // 接入 depth
         if (quadResult.ptr != expr.ptr) return quadResult;
+        
+        SymExpr czResult = factorPolynomialCZ(expr, depth);
+        if (czResult.ptr != expr.ptr) return czResult;
         // ══════════════════════════════════════════
         // 递归处理非加法节点
         // ══════════════════════════════════════════
