@@ -1157,6 +1157,19 @@ void BuiltinRegistry::registerSystemUtils() {
         return Value::none();
         });
 
+    reg("setSymLimit", { 2 }, [](const std::vector<Value>& args) -> Value {
+        if (!std::holds_alternative<std::string>(args[0].data))
+            throw std::runtime_error("Type Error: setSymLimit() expects a string key.");
+        std::string key = std::get<std::string>(args[0].data);
+        double val = args[1].asDouble();
+        if (key == "maxExpandTerms") SymConfig::maxExpandTerms = static_cast<int64_t>(val);
+        else if (key == "maxAstNodes") SymConfig::maxAstNodes = static_cast<int>(val);
+        else if (key == "maxIterations") SymConfig::maxIterations = static_cast<int>(val);
+        else if (key == "maxDepth") SymConfig::maxDepth = static_cast<int>(val);
+        else throw std::runtime_error("Runtime Error: Unknown SymConfig key '" + key + "'.");
+        return Value::none();
+        });
+
     reg("__register_help", { 2 }, [](const std::vector<Value>& args) -> Value {
         if (!std::holds_alternative<std::string>(args[0].data) ||
             !std::holds_alternative<std::string>(args[1].data)) {
