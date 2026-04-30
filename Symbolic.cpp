@@ -2752,33 +2752,8 @@ namespace jc {
         return t;
     }
 
-    static BigInt powModInt(BigInt base, BigInt exp, BigInt mod) {
-        BigInt res(1);
-        base = base % mod;
-        if (base.isNegative()) base = base + mod;
-        while (!exp.isZero()) {
-            if (!(exp % BigInt(2)).isZero()) res = (res * base) % mod;
-            base = (base * base) % mod;
-            exp = exp / BigInt(2);
-        }
-        return res;
-    }
-
     static void trimP(PolyZp& a) {
         while (!a.empty() && a.back().isZero()) a.pop_back();
-    }
-
-    static PolyZp addP(const PolyZp& a, const PolyZp& b, const BigInt& p) {
-        PolyZp res(std::max(a.size(), b.size()), BigInt(0));
-        for (size_t i = 0; i < res.size(); ++i) {
-            BigInt va = i < a.size() ? a[i] : BigInt(0);
-            BigInt vb = i < b.size() ? b[i] : BigInt(0);
-            BigInt sum = (va + vb) % p;
-            if (sum.isNegative()) sum = sum + p;
-            res[i] = sum;
-        }
-        trimP(res);
-        return res;
     }
 
     static PolyZp subP(const PolyZp& a, const PolyZp& b, const BigInt& p) {
@@ -2875,7 +2850,7 @@ namespace jc {
     }
 
     static std::vector<PolyZp> czEDF(const PolyZp& f, int d, const BigInt& p) {
-        int n = f.size() - 1;
+        int n = static_cast<int>(f.size()) - 1;
         if (n == d) return {f};
         std::vector<PolyZp> factors = {f};
         
@@ -3002,7 +2977,7 @@ namespace jc {
                 for (auto& c : intCoeffs) c = c / content;
             }
             
-            int n = intCoeffs.size() - 1;
+            int n = static_cast<int>(intCoeffs.size()) - 1;
             BigInt an = intCoeffs.back();
             
             // 转换为首一多项式 g(y) = a_n^{n-1} f(y/a_n)
