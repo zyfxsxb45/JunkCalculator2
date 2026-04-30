@@ -45,6 +45,15 @@ Native C++ extensions exposed to the execution context:
 - `window`: Native GUI window rendering engine. Supports Mouse-Look pointer capturing and independent IME toggling (Win32).
 - `latex`: Bi-directional LaTeX engine. Serializes JC2 objects to LaTeX, and parses raw LaTeX formulas into executable closures.
 
+JC2 standard libraries loaded via `import`:
+- `collections`: Data structures including `Stack`, `Queue`, `Deque`, `PriorityQueue` (Heap), and Search Trees.
+- `regex`: Object-Oriented NFA regex engine with capture groups, alternation, and quantifiers.
+- `discrete`: Discrete mathematics toolkit covering combinatorics, binary relations, and graph traversal.
+- `engine`: Game framework abstraction over the `window` module for render loops and event state management.
+- `net`: OOP wrapper for TCP streams (`TcpSocket` and `TcpServer`).
+- `http`: HTTP/1.1 client supporting URL parsing and GET/POST requests.
+- `buffer`: Binary manipulation API with cursor support.
+
 ---
 
 ## What's New in v2.3.1.0
