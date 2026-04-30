@@ -3096,7 +3096,12 @@ namespace jc {
             }
 
             auto coeffs = extractCoeffs(f, var);
-            if (coeffs.empty()) return;
+            if (coeffs.empty()) {
+                if (containsVar(f.ptr, var)) {
+                    throw std::runtime_error("Solver Error: Transcendental or non-polynomial equation is not supported yet.");
+                }
+                return;
+            }
 
             int degree = static_cast<int>(coeffs.size()) - 1;
             if (degree == 1) {
