@@ -13,7 +13,7 @@ namespace jc {
     // 包含: 二次求解 + N次完全平方式提取
     // =================================================================
     static SymExpr multivariatePolynomialFactor(const SymExpr& expr, int depth) {
-        if (depth > 4) return expr; // 极限深度保护，防止复杂多元死锁
+        if (depth > SymConfig::maxDepth / 2) return expr; // 极限深度保护，防止复杂多元死锁
 
         std::set<std::string> vars;
         collectAllVars(expr.ptr, vars);
@@ -41,7 +41,7 @@ namespace jc {
             SymExpr checkZero;
             try { checkZero = simplifyCore(expr - rawCandidate); }
             catch (...) { checkZero = SymExpr(BigInt(1)); }
-            try { checkZero = simplifyCore(expand(checkZero, 500)); }
+            try { checkZero = simplifyCore(expand(checkZero, SymConfig::maxExpandTerms)); }
             catch (...) {}
 
             if (checkZero.isZero()) {
@@ -283,7 +283,7 @@ namespace jc {
     }
 
     static SymExpr factorPolynomialCZ(const SymExpr& expr, int depth) {
-        if (depth > 5) return expr;
+        if (depth > SymConfig::maxDepth / 2) return expr;
         std::set<std::string> vars;
         collectAllVars(expr.ptr, vars);
         if (vars.size() != 1) return expr;
@@ -493,7 +493,7 @@ namespace jc {
     // 因式分解主入口
     // =================================================================
     SymExpr factor(const SymExpr& expr, int depth) {      // 增加 depth 签名
-        if (!expr.ptr || depth > 10) return expr;          // 极限保险
+        if (!expr.ptr || depth > SymConfig::maxDepth) return expr;          // 极限保险
         SymExpr quadResult = multivariatePolynomialFactor(expr, depth);  // 接入 depth
         if (quadResult.ptr != expr.ptr) return quadResult;
         
@@ -917,7 +917,7 @@ namespace jc {
                                 SymExpr factorX = X - r;
                                 int divIter = 0;
                                 while (true) {
-                                    if (++divIter > 20) break;
+                                    if (++divIter > SymConfig::maxIterations) break;
                                     auto [q, rem_new] = polyDiv(rem, factorX, var);
                                     if (rem_new.isZero()) {
                                         res = res * factorX;

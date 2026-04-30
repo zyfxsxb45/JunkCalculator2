@@ -1137,6 +1137,26 @@ void BuiltinRegistry::registerSystemUtils() {
         return Value::none();
         });
 
+    reg("symconfig", { 0, 1 }, [](const std::vector<Value>& args) -> Value {
+        if (args.empty()) {
+            Dict d;
+            d.set("maxExpandTerms", Value(static_cast<double>(SymConfig::maxExpandTerms)));
+            d.set("maxAstNodes", Value(static_cast<double>(SymConfig::maxAstNodes)));
+            d.set("maxIterations", Value(static_cast<double>(SymConfig::maxIterations)));
+            d.set("maxDepth", Value(static_cast<double>(SymConfig::maxDepth)));
+            return Value(d);
+        }
+        if (!std::holds_alternative<Dict>(args[0].data)) {
+            throw std::runtime_error("Type Error: symconfig() expects a Dict.");
+        }
+        Dict d = std::get<Dict>(args[0].data);
+        if (d.has("maxExpandTerms")) SymConfig::maxExpandTerms = static_cast<int64_t>(std::any_cast<Value>(*d.get("maxExpandTerms")).asDouble());
+        if (d.has("maxAstNodes")) SymConfig::maxAstNodes = static_cast<int>(std::any_cast<Value>(*d.get("maxAstNodes")).asDouble());
+        if (d.has("maxIterations")) SymConfig::maxIterations = static_cast<int>(std::any_cast<Value>(*d.get("maxIterations")).asDouble());
+        if (d.has("maxDepth")) SymConfig::maxDepth = static_cast<int>(std::any_cast<Value>(*d.get("maxDepth")).asDouble());
+        return Value::none();
+        });
+
     reg("__register_help", { 2 }, [](const std::vector<Value>& args) -> Value {
         if (!std::holds_alternative<std::string>(args[0].data) ||
             !std::holds_alternative<std::string>(args[1].data)) {

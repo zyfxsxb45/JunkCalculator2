@@ -28,6 +28,16 @@ namespace jc {
     std::string casToString(const CASVal& v);
 
     // ==========================================
+    // 符号计算全局动态限制配置
+    // ==========================================
+    struct SymConfig {
+        static inline int64_t maxExpandTerms = 5000;
+        static inline int maxAstNodes = 50000;
+        static inline int maxIterations = 1000;
+        static inline int maxDepth = 20;
+    };
+
+    // ==========================================
     // AST 节点定义
     // ==========================================
     enum class SymType { NUM, VAR, ADD, MUL, POW, FUNC };
@@ -114,7 +124,7 @@ namespace jc {
     // ==========================================
     // CAS 操作函数
     // ==========================================
-    SymExpr expand(const SymExpr& expr, int64_t maxPowTerms = static_cast<int64_t>(1e5));
+    SymExpr expand(const SymExpr& expr, int64_t maxPowTerms = 0);
     SymExpr subs(const SymExpr& expr, const std::string& var, const SymExpr& val);
     SymExpr evalFloat(const SymExpr& expr);   // 已有：全部转 double
     SymExpr evalValue(const SymExpr& expr);   // 新增：保留 Complex 等精确类型
@@ -162,6 +172,7 @@ namespace jc {
     SymExpr substituteCaptures(const SymExpr& target, const std::map<std::string, SymExpr>& captures);
     SymExpr simplifyCore(const SymExpr& expr);
     std::vector<SymExpr> extractCoeffs(const SymExpr& expr, const std::string& var);
+    std::pair<SymExpr, SymExpr> getFraction(const SymExpr& expr);
 
     // ==========================================
     // 派生数学节点

@@ -10,70 +10,13 @@
 namespace jc {
 
     // =================================================================
-    // 提取有理分式的分子和分母 (Get Numerator and Denominator)
-    // =================================================================
-    static std::pair<SymExpr, SymExpr> getFraction(const SymExpr& expr) {
-        if (!expr.ptr) return {expr, SymExpr(BigInt(1))};
-        switch (expr.ptr->getType()) {
-            case SymType::NUM:
-            case SymType::VAR:
-                return {expr, SymExpr(BigInt(1))};
-            case SymType::ADD: {
-                auto add = std::static_pointer_cast<SymAdd>(expr.ptr);
-                std::vector<std::pair<SymExpr, SymExpr>> nds;
-                for (auto& arg : add->args) nds.push_back(getFraction(SymExpr(arg)));
-                SymExpr den(BigInt(1));
-                for (auto& nd : nds) den = simplifyCore(den * nd.second);
-                SymExpr num(BigInt(0));
-                for (size_t i = 0; i < nds.size(); ++i) {
-                    SymExpr termNum = nds[i].first;
-                    for (size_t j = 0; j < nds.size(); ++j) {
-                        if (i != j) termNum = simplifyCore(expand(termNum * nds[j].second, 500));
-                    }
-                    num = simplifyCore(expand(num + termNum, 500));
-                }
-                return {num, den};
-            }
-            case SymType::MUL: {
-                auto mul = std::static_pointer_cast<SymMul>(expr.ptr);
-                SymExpr num(BigInt(1));
-                SymExpr den(BigInt(1));
-                for (auto& arg : mul->args) {
-                    auto nd = getFraction(SymExpr(arg));
-                    num = simplifyCore(expand(num * nd.first, 500));
-                    den = simplifyCore(den * nd.second);
-                }
-                return {num, den};
-            }
-            case SymType::POW: {
-                auto powNode = std::static_pointer_cast<SymPow>(expr.ptr);
-                if (powNode->exp->getType() == SymType::NUM) {
-                    auto [isInt, n] = extractExactInt(std::static_pointer_cast<SymNum>(powNode->exp)->value);
-                    if (isInt) {
-                        auto nd = getFraction(SymExpr(powNode->base));
-                        if (n >= 0) {
-                            return {simplifyCore(expand(nd.first ^ SymExpr(BigInt(n)), 500)), simplifyCore(nd.second ^ SymExpr(BigInt(n)))};
-                        } else {
-                            return {simplifyCore(expand(nd.second ^ SymExpr(BigInt(-n)), 500)), simplifyCore(nd.first ^ SymExpr(BigInt(-n)))};
-                        }
-                    }
-                }
-                return {expr, SymExpr(BigInt(1))};
-            }
-            case SymType::FUNC:
-                return {expr, SymExpr(BigInt(1))};
-        }
-        return {expr, SymExpr(BigInt(1))};
-    }
-
-    // =================================================================
     // Rothstein-Trager 算法 (Rothstein-Trager Algorithm)
     // 用于积分 A/D，其中 D 无平方，deg(A) < deg(D)
     // =================================================================
     static SymExpr rothsteinTrager(SymExpr A, SymExpr D, const std::string& var) {
         SymExpr z = SymExpr::makeVar("_z");
         SymExpr dD = diff(D, var);
-        SymExpr P = simplifyCore(expand(A - z * dD, 500));
+        SymExpr P = simplifyCore(expand(A - z * dD, SymConfig::maxExpandTerms));
         
         SymExpr R_z = polyResultant(P, D, var);
         R_z = getFraction(R_z).first; // 提取分子，消除伪除法引入的 z 分母
@@ -88,7 +31,7 @@ namespace jc {
         
         SymExpr result(BigInt(0));
         for (const auto& root : roots) {
-            SymExpr P_i = simplifyCore(expand(subs(P, "_z", root), 500));
+            SymExpr P_i = simplifyCore(expand(subs(P, "_z", root), SymConfig::maxExpandTerms));
             SymExpr v_i = polyGCD(P_i, D, var);
             
             // 首一化 v_i，保持对数内部整洁
@@ -96,7 +39,7 @@ namespace jc {
             if (!coeffs.empty()) {
                 SymExpr lead = coeffs.back();
                 if (!lead.isZero() && !lead.isOne()) {
-                    v_i = simplifyCore(expand(v_i / lead, 500));
+                    v_i = simplifyCore(expand(v_i / lead, SymConfig::maxExpandTerms));
                 }
             }
             
@@ -257,8 +200,8 @@ namespace jc {
     // 🚀 Risch 算法 Step 2: Hermite 约化 (Hermite Reduction)
     // =================================================================
     static std::tuple<SymExpr, SymExpr, SymExpr, SymExpr> hermiteReduce(SymExpr A, SymExpr D, const std::string& var) {
-        A = simplifyCore(expand(A, 500));
-        D = simplifyCore(expand(D, 500));
+        A = simplifyCore(expand(A, SymConfig::maxExpandTerms));
+        D = simplifyCore(expand(D, SymConfig::maxExpandTerms));
         
         auto [Q, R] = polyDiv(A, D, var);
         SymExpr rationalPart(0);
@@ -281,30 +224,30 @@ namespace jc {
             }
             if (getDegree(V, var) <= 0) continue;
 
-            SymExpr Vi = simplifyCore(expand(V ^ SymExpr(i), 500));
+            SymExpr Vi = simplifyCore(expand(V ^ SymExpr(i), SymConfig::maxExpandTerms));
             SymExpr U = polyDiv(currentD, Vi, var).first;
 
             SymExpr dV = diff(V, var);
-            SymExpr U_dV = simplifyCore(expand(U * dV, 500));
+            SymExpr U_dV = simplifyCore(expand(U * dV, SymConfig::maxExpandTerms));
 
             auto [gcd, S, T] = polyEGCD(U_dV, V, var);
-            SymExpr factor = simplifyCore(expand(currentA / gcd, 500));
-            SymExpr B = simplifyCore(expand(S * factor, 500));
-            SymExpr C = simplifyCore(expand(T * factor, 500));
+            SymExpr factor = simplifyCore(expand(currentA / gcd, SymConfig::maxExpandTerms));
+            SymExpr B = simplifyCore(expand(S * factor, SymConfig::maxExpandTerms));
+            SymExpr C = simplifyCore(expand(T * factor, SymConfig::maxExpandTerms));
 
             auto [q, r] = polyDiv(B, V, var);
             B = r;
-            C = simplifyCore(expand(C + q * U_dV, 500));
+            C = simplifyCore(expand(C + q * U_dV, SymConfig::maxExpandTerms));
 
-            SymExpr V_im1 = simplifyCore(expand(V ^ SymExpr(i - 1), 500));
-            SymExpr denom = simplifyCore(expand(SymExpr(i - 1) * V_im1, 500));
-            rationalPart = rationalPart + simplifyCore(expand(-B / denom, 500));
+            SymExpr V_im1 = simplifyCore(expand(V ^ SymExpr(i - 1), SymConfig::maxExpandTerms));
+            SymExpr denom = simplifyCore(expand(SymExpr(i - 1) * V_im1, SymConfig::maxExpandTerms));
+            rationalPart = rationalPart + simplifyCore(expand(-B / denom, SymConfig::maxExpandTerms));
 
             SymExpr dB = diff(B, var);
-            SymExpr term2 = simplifyCore(expand((dB * U) / SymExpr(i - 1), 500));
-            currentA = simplifyCore(expand(C + term2, 500));
+            SymExpr term2 = simplifyCore(expand((dB * U) / SymExpr(i - 1), SymConfig::maxExpandTerms));
+            currentA = simplifyCore(expand(C + term2, SymConfig::maxExpandTerms));
             
-            currentD = simplifyCore(expand(U * V_im1, 500));
+            currentD = simplifyCore(expand(U * V_im1, SymConfig::maxExpandTerms));
             
             for (auto& p : sqFree) {
                 if (p.second == i) p.second = i - 1;
@@ -360,9 +303,9 @@ namespace jc {
             auto [num, den] = getFraction(rewritten);
             if (getDegree(den, var) > 0) {
                 auto [ratPart, polyPart, cA, cD] = hermiteReduce(num, den, var);
-                
+            
                 SymExpr intPart = polyPart;
-                if (!cA.isZero()) intPart = intPart + simplifyCore(expand(cA / cD, 500));
+                if (!cA.isZero()) intPart = intPart + simplifyCore(expand(cA / cD, SymConfig::maxExpandTerms));
                 
                 if (intPart.isZero()) return ratPart;
                 
@@ -489,7 +432,7 @@ namespace jc {
                             int iter = 0;
                             while (true) {
                                 if (currentA.isZero()) { rde_success = true; break; }
-                                if (++iter > 20) break;
+                                if (++iter > SymConfig::maxIterations) break;
                                 
                                 auto cA = extractCoeffs(currentA, var);
                                 auto cV = extractCoeffs(V_i, var);
@@ -514,7 +457,7 @@ namespace jc {
                                 
                                 B_i = B_i + B_term;
                                 SymExpr B_term_deriv = simplifyCore(diff(B_term, var));
-                                currentA = simplifyCore(expand(currentA - B_term_deriv - V_i * B_term, 500));
+                                currentA = simplifyCore(expand(currentA - B_term_deriv - V_i * B_term, SymConfig::maxExpandTerms));
                             }
                             
                             if (rde_success) {
@@ -557,7 +500,7 @@ namespace jc {
         std::vector<std::pair<SymExpr, SymExpr>> rules = getIntegRules(var);
 
         std::function<SymExpr(const SymExpr&, int)> doInteg = [&](const SymExpr& e, int depth) -> SymExpr {
-            if (depth > 3) throw std::runtime_error("Calculus Error: Integration depth limit exceeded.");
+            if (depth > SymConfig::maxDepth / 3) throw std::runtime_error("Calculus Error: Integration depth limit exceeded.");
 
             if (!containsVar(e.ptr, var)) {
                 return e * x; // ∫ c dx = c * x
@@ -686,7 +629,7 @@ namespace jc {
                 if (!containsVar(f_u.ptr, var)) {
                     try {
                         SymExpr f_var = subs(f_u, u_var, SymExpr::makeVar(var));
-                        SymExpr int_var = doInteg(simplify(expand(f_var / sub_a, 500)), depth + 1);
+                        SymExpr int_var = doInteg(simplify(expand(f_var / sub_a, SymConfig::maxExpandTerms)), depth + 1);
                         SymExpr res = subs(int_var, var, sub_u);
                         return coeff * res;
                     } catch (...) {}
@@ -801,7 +744,7 @@ namespace jc {
                                         default: return node;
                                     }
                                 };
-                                rem_u = simplify(expand(replaceXn(rem_u), 500));
+                                rem_u = simplify(expand(replaceXn(rem_u), SymConfig::maxExpandTerms));
                             }
                         }
                     }
@@ -809,7 +752,7 @@ namespace jc {
                     if (!containsVar(rem_u.ptr, var)) {
                         try {
                             SymExpr f_var = subs(rem_u, u_var, SymExpr::makeVar(var));
-                            SymExpr int_var = doInteg(simplify(expand(f_var, 500)), depth + 1);
+                            SymExpr int_var = doInteg(simplify(expand(f_var, SymConfig::maxExpandTerms)), depth + 1);
                             SymExpr res = subs(int_var, var, u);
                             return coeff * res;
                         } catch (...) {}
@@ -829,7 +772,7 @@ namespace jc {
                             if (n % 2 == 0) {
                                 SymExpr _C = SymExpr::makeVar("_C");
                                 SymExpr halfAngle = (SymExpr(BigInt(1)) - _C) / SymExpr(BigInt(2));
-                                SymExpr expanded = expand(halfAngle ^ SymExpr(BigInt(n / 2)), 500);
+                                SymExpr expanded = expand(halfAngle ^ SymExpr(BigInt(n / 2)), SymConfig::maxExpandTerms);
                                 SymExpr cos2x = SymExpr(std::make_shared<SymFunc>("cos", std::vector<std::shared_ptr<SymNode>>{(SymExpr(BigInt(2)) * arg).ptr}));
                                 expanded = subs(expanded, "_C", cos2x);
                                 try { return coeff * doInteg(expanded, depth + 1); } catch (...) {}
@@ -837,7 +780,7 @@ namespace jc {
                                 SymExpr _C = SymExpr::makeVar("_C");
                                 SymExpr cosSq = SymExpr(BigInt(1)) - (_C ^ SymExpr(BigInt(2)));
                                 SymExpr rem = SymExpr(std::make_shared<SymFunc>("sin", std::vector<std::shared_ptr<SymNode>>{arg.ptr})) * (cosSq ^ SymExpr(BigInt((n - 1) / 2)));
-                                SymExpr expanded = expand(rem, 500);
+                                SymExpr expanded = expand(rem, SymConfig::maxExpandTerms);
                                 SymExpr cosx = SymExpr(std::make_shared<SymFunc>("cos", std::vector<std::shared_ptr<SymNode>>{arg.ptr}));
                                 expanded = subs(expanded, "_C", cosx);
                                 try { return coeff * doInteg(expanded, depth + 1); } catch (...) {}
@@ -846,7 +789,7 @@ namespace jc {
                             if (n % 2 == 0) {
                                 SymExpr _C = SymExpr::makeVar("_C");
                                 SymExpr halfAngle = (SymExpr(BigInt(1)) + _C) / SymExpr(BigInt(2));
-                                SymExpr expanded = expand(halfAngle ^ SymExpr(BigInt(n / 2)), 500);
+                                SymExpr expanded = expand(halfAngle ^ SymExpr(BigInt(n / 2)), SymConfig::maxExpandTerms);
                                 SymExpr cos2x = SymExpr(std::make_shared<SymFunc>("cos", std::vector<std::shared_ptr<SymNode>>{(SymExpr(BigInt(2)) * arg).ptr}));
                                 expanded = subs(expanded, "_C", cos2x);
                                 try { return coeff * doInteg(expanded, depth + 1); } catch (...) {}
@@ -854,7 +797,7 @@ namespace jc {
                                 SymExpr _S = SymExpr::makeVar("_S");
                                 SymExpr sinSq = SymExpr(BigInt(1)) - (_S ^ SymExpr(BigInt(2)));
                                 SymExpr rem = SymExpr(std::make_shared<SymFunc>("cos", std::vector<std::shared_ptr<SymNode>>{arg.ptr})) * (sinSq ^ SymExpr(BigInt((n - 1) / 2)));
-                                SymExpr expanded = expand(rem, 500);
+                                SymExpr expanded = expand(rem, SymConfig::maxExpandTerms);
                                 SymExpr sinx = SymExpr(std::make_shared<SymFunc>("sin", std::vector<std::shared_ptr<SymNode>>{arg.ptr}));
                                 expanded = subs(expanded, "_S", sinx);
                                 try { return coeff * doInteg(expanded, depth + 1); } catch (...) {}
@@ -1070,45 +1013,12 @@ namespace jc {
             }
 
             // --- 2. 有理分式积分引擎 (Rational Function Integration) ---
-            SymExpr num(BigInt(1)), den(BigInt(1));
-            bool isFraction = false;
-            if (varPart.ptr->getType() == SymType::MUL) {
-                auto mul = std::static_pointer_cast<SymMul>(varPart.ptr);
-                for (auto& arg : mul->args) {
-                    if (arg->getType() == SymType::POW) {
-                        auto powNode = std::static_pointer_cast<SymPow>(arg);
-                        if (powNode->exp->getType() == SymType::NUM) {
-                            auto [isInt, n] = extractExactInt(std::static_pointer_cast<SymNum>(powNode->exp)->value);
-                            if (isInt && n < 0) {
-                                den = den * (SymExpr(powNode->base) ^ SymExpr(BigInt(-n)));
-                                isFraction = true;
-                                continue;
-                            }
-                        }
-                    }
-                    num = num * SymExpr(arg);
-                }
-            } else if (varPart.ptr->getType() == SymType::POW) {
-                auto powNode = std::static_pointer_cast<SymPow>(varPart.ptr);
-                if (powNode->exp->getType() == SymType::NUM) {
-                    auto [isInt, n] = extractExactInt(std::static_pointer_cast<SymNum>(powNode->exp)->value);
-                    if (isInt && n < 0) {
-                        den = SymExpr(powNode->base) ^ SymExpr(BigInt(-n));
-                        num = SymExpr(BigInt(1));
-                        isFraction = true;
-                    } else {
-                        num = varPart;
-                    }
-                } else {
-                    num = varPart;
-                }
-            } else {
-                num = varPart;
-            }
+            auto [num, den] = getFraction(varPart);
+            bool isFraction = !den.isOne();
 
             if (isFraction && containsVar(den.ptr, var)) {
-                SymExpr num_expanded = simplifyCore(expand(num, 500));
-                SymExpr den_expanded = simplifyCore(expand(den, 500));
+                SymExpr num_expanded = simplifyCore(expand(num, SymConfig::maxExpandTerms));
+                SymExpr den_expanded = simplifyCore(expand(den, SymConfig::maxExpandTerms));
                 
                 int degN = getDegree(num_expanded, var);
                 int degD = getDegree(den_expanded, var);
@@ -1199,7 +1109,7 @@ namespace jc {
                                 SymExpr k = ratio1;
                                 SymExpr one_plus_k = simplifyCore(SymExpr(BigInt(1)) + k);
                                 if (!one_plus_k.isZero()) {
-                                    return {true, coeff * simplify(expand((u * v) / one_plus_k, 500))};
+                                    return {true, coeff * simplify(expand((u * v) / one_plus_k, SymConfig::maxExpandTerms))};
                                 } else {
                                     throw std::runtime_error("Calculus Error: Integration by parts failed due to zero denominator.");
                                 }
@@ -1355,7 +1265,7 @@ namespace jc {
                         den_t = polyDiv(den_t, gcd_t, t_var).first;
                     }
                     
-                    SymExpr rational_t = simplifyCore(expand(num_t / den_t, 500));
+                    SymExpr rational_t = simplifyCore(expand(num_t / den_t, SymConfig::maxExpandTerms));
                     SymExpr rational_var = subs(rational_t, t_var, SymExpr::makeVar(var));
                     SymExpr integrated_var = doInteg(rational_var, depth + 1);
                     SymExpr back_sub = SymExpr(std::make_shared<SymFunc>("tan", std::vector<std::shared_ptr<SymNode>>{(SymExpr::makeVar(var) / SymExpr(BigInt(2))).ptr}));
@@ -1373,7 +1283,7 @@ namespace jc {
             } catch (const std::runtime_error& e) {
                 std::string msg = e.what();
                 SymExpr expanded;
-                try { expanded = expand(expr, 1000); } catch (...) { expanded = expr; }
+                try { expanded = expand(expr, SymConfig::maxExpandTerms * 2); } catch (...) { expanded = expr; }
                 
                 // 严格防死锁：只有当展开后的表达式确实发生了变化，才允许重置 depth=0 再次尝试
                 if (expanded != expr) {
