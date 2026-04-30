@@ -55,6 +55,7 @@ namespace jc {
         std::shared_ptr<SymNode> ptr;
 
         static std::shared_ptr<SymNode> intern(const std::shared_ptr<SymNode>& node);
+        static void cleanupPool(); // 清理全局池中失效的弱引用
 
         SymExpr();
         explicit SymExpr(std::shared_ptr<SymNode> p) : ptr(intern(std::move(p))) {}

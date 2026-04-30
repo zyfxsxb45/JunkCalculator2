@@ -20,8 +20,26 @@ namespace jc {
     // ==========================================
     static std::unordered_map<std::string, std::weak_ptr<SymNode>> g_symPool;
 
+    void SymExpr::cleanupPool() {
+        for (auto it = g_symPool.begin(); it != g_symPool.end(); ) {
+            if (it->second.expired()) {
+                it = g_symPool.erase(it);
+            } else {
+                ++it;
+            }
+        }
+    }
+
     std::shared_ptr<SymNode> SymExpr::intern(const std::shared_ptr<SymNode>& node) {
         if (!node) return nullptr;
+        
+        // 启发式自动清理：每驻留 10000 个新节点，清理一次失效的弱引用
+        static int pruneCounter = 0;
+        if (++pruneCounter > 10000) {
+            pruneCounter = 0;
+            cleanupPool();
+        }
+
         std::string key = node->toString();
         auto& weakRef = g_symPool[key];
         if (auto shared = weakRef.lock()) {

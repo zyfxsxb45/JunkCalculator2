@@ -1108,6 +1108,9 @@ void BuiltinRegistry::registerSystemUtils() {
     reg("mountPrimes", { 1 }, [](const std::vector<Value>& args) -> Value { if (!std::holds_alternative<std::string>(args[0].data)) throw std::runtime_error("Runtime Error: mountPrimes(\"path\") expects a string."); BigInt::setPrimeFilePath(std::get<std::string>(args[0].data)); return Value::none(); });
     reg("sysinfo", { 0 }, [](const std::vector<Value>&) -> Value { std::cout << "--- Junk Calculator System Info ---\n" << "Prime DB: " << (BigInt::getPrimeFilePath().empty() ? "(Dynamic Computation)" : BigInt::getPrimeFilePath()) << "\n" << "Indexed:  " << BigInt::totalPrimesInFile << " primes\n"; if (BigInt::totalPrimesInFile > 0) std::cout << "Max:      " << BigInt::largestPrimeInFile << "\n"; std::cout << "-----------------------------------" << std::endl; return Value::none(); });
     reg("gc", { 0, 1 }, [](const std::vector<Value>& args) -> Value {
+        // 1. 清理符号表达式的弱引用池
+        jc::SymExpr::cleanupPool();
+
         if (!VM::activeVM) return Value(0.0);
 
         // ★ gc(true) = 激进模式：先清掉 ANS 避免它充当隐形保护伞
