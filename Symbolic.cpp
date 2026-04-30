@@ -1257,27 +1257,58 @@ namespace jc {
         case SymType::MUL: {
             auto mulNode = std::static_pointer_cast<SymMul>(expr.ptr);
             SymExpr result(BigInt(1));
+            
             for (auto& arg : mulNode->args) {
                 SymExpr factor = expand(SymExpr(arg), maxPowTerms);
-
+                
+                std::vector<std::shared_ptr<SymNode>> leftTerms;
                 if (result.ptr->getType() == SymType::ADD) {
-                    auto addNode = std::static_pointer_cast<SymAdd>(result.ptr);
-                    SymExpr distributedSum(BigInt(0));
-                    for (auto& addTerm : addNode->args) {
-                        distributedSum = distributedSum + expand(SymExpr(addTerm) * factor, maxPowTerms);
-                    }
-                    result = distributedSum;
+                    for (auto& a : std::static_pointer_cast<SymAdd>(result.ptr)->args) leftTerms.push_back(a);
+                } else if (!result.isZero()) {
+                    leftTerms.push_back(result.ptr);
                 }
-                else if (factor.ptr->getType() == SymType::ADD) {
-                    auto addNode = std::static_pointer_cast<SymAdd>(factor.ptr);
-                    SymExpr distributedSum(BigInt(0));
-                    for (auto& addTerm : addNode->args) {
-                        distributedSum = distributedSum + expand(result * SymExpr(addTerm), maxPowTerms);
-                    }
-                    result = distributedSum;
+                
+                std::vector<std::shared_ptr<SymNode>> rightTerms;
+                if (factor.ptr->getType() == SymType::ADD) {
+                    for (auto& a : std::static_pointer_cast<SymAdd>(factor.ptr)->args) rightTerms.push_back(a);
+                } else if (!factor.isZero()) {
+                    rightTerms.push_back(factor.ptr);
                 }
-                else {
-                    result = result * factor;
+                
+                if (leftTerms.empty() || rightTerms.empty()) {
+                    result = SymExpr(BigInt(0));
+                    continue;
+                }
+                
+                std::vector<std::shared_ptr<SymNode>> nextTerms;
+                nextTerms.reserve(leftTerms.size() * rightTerms.size());
+                for (auto& l : leftTerms) {
+                    for (auto& r : rightTerms) {
+                        nextTerms.push_back((SymExpr(l) * SymExpr(r)).ptr);
+                    }
+                }
+                
+                if (nextTerms.size() > static_cast<size_t>(maxPowTerms)) {
+                    throw std::runtime_error("Math Error: Expansion exceeded max terms limit.");
+                }
+                
+                // 过滤零项并利用 operator+ 的展平与合并机制，一次性合并所有项！
+                std::vector<std::shared_ptr<SymNode>> nonZeroTerms;
+                nonZeroTerms.reserve(nextTerms.size());
+                for (auto& t : nextTerms) {
+                    if (!SymExpr(t).isZero()) nonZeroTerms.push_back(t);
+                }
+                
+                if (nonZeroTerms.empty()) {
+                    result = SymExpr(BigInt(0));
+                } else if (nonZeroTerms.size() == 1) {
+                    result = SymExpr(nonZeroTerms[0]);
+                } else {
+                    SymExpr firstTerm(nonZeroTerms[0]);
+                    nonZeroTerms.erase(nonZeroTerms.begin());
+                    SymExpr restAdd(std::make_shared<SymAdd>(std::move(nonZeroTerms)));
+                    // 强制触发 operator+ 的 O(N) 同类项合并
+                    result = firstTerm + restAdd;
                 }
             }
             return result;
