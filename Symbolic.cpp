@@ -2983,9 +2983,10 @@ namespace jc {
             // 转换为首一多项式 g(y) = a_n^{n-1} f(y/a_n)
             std::vector<BigInt> g_coeffs(n + 1);
             BigInt an_pow(1);
-            for (int i = n; i >= 0; --i) {
+            g_coeffs[n] = BigInt(1);
+            for (int i = n - 1; i >= 0; --i) {
                 g_coeffs[i] = intCoeffs[i] * an_pow;
-                if (i > 0) an_pow = an_pow * an;
+                an_pow = an_pow * an;
             }
             
             // 计算 Mignotte 边界 B = 2^n * sum(|g_i|)
@@ -3013,7 +3014,76 @@ namespace jc {
             
             std::vector<PolyZp> factorsZp = cantorZassenhaus(g_mod, p);
             
-            if (factorsZp.size() == 1) {
+            std::vector<std::vector<BigInt>> trueFactorsZ;
+            std::vector<PolyZp> currentFactors = factorsZp;
+            std::vector<BigInt> currentG = g_coeffs;
+            
+            int r_factors = static_cast<int>(currentFactors.size());
+            for (int d = 1; d <= r_factors / 2; ) {
+                bool found = false;
+                std::vector<char> bitmask(d, 1);
+                bitmask.resize(r_factors, 0);
+                
+                do {
+                    std::vector<int> indices;
+                    for (int i = 0; i < r_factors; ++i) {
+                        if (bitmask[i]) indices.push_back(i);
+                    }
+                    
+                    PolyZp prodZp = {BigInt(1)};
+                    for (int idx : indices) prodZp = mulP(prodZp, currentFactors[idx], p);
+                    
+                    std::vector<BigInt> candZ = prodZp;
+                    for (auto& x : candZ) x = centerModP(x, p);
+                    
+                    std::vector<BigInt> a = currentG;
+                    std::vector<BigInt> b = candZ;
+                    bool exact = true;
+                    std::vector<BigInt> q;
+                    
+                    if (b.empty() || a.size() < b.size()) {
+                        exact = false;
+                    } else {
+                        q.resize(a.size() - b.size() + 1, BigInt(0));
+                        BigInt leadB = b.back();
+                        
+                        for (int i = (int)a.size() - (int)b.size(); i >= 0; --i) {
+                            if (a[i + b.size() - 1].isZero()) continue;
+                            BigInt quot = a[i + b.size() - 1] / leadB;
+                            BigInt rem = a[i + b.size() - 1] % leadB;
+                            if (!rem.isZero()) { exact = false; break; }
+                            q[i] = quot;
+                            for (size_t j = 0; j < b.size(); ++j) {
+                                a[i+j] = a[i+j] - quot * b[j];
+                            }
+                        }
+                        trimP(a);
+                    }
+                    
+                    if (exact && a.empty()) {
+                        trueFactorsZ.push_back(candZ);
+                        currentG = q;
+                        std::vector<PolyZp> nextFactors;
+                        for (int i = 0; i < r_factors; ++i) {
+                            if (!bitmask[i]) nextFactors.push_back(currentFactors[i]);
+                        }
+                        currentFactors = nextFactors;
+                        r_factors = static_cast<int>(currentFactors.size());
+                        found = true;
+                        break;
+                    }
+                } while (std::prev_permutation(bitmask.begin(), bitmask.end()));
+                
+                if (!found) {
+                    d++;
+                }
+            }
+            
+            if (currentG.size() > 1) {
+                trueFactorsZ.push_back(currentG);
+            }
+            
+            if (trueFactorsZ.size() == 1) {
                 SymExpr factoredPart = part;
                 if (content > BigInt(1)) factoredPart = SymExpr(content) * part;
                 result = result * (factoredPart ^ SymExpr(BigInt(power)));
@@ -3023,12 +3093,7 @@ namespace jc {
             changed = true;
             SymExpr partResult(BigInt(1));
             
-            for (const auto& fZp : factorsZp) {
-                std::vector<BigInt> H_coeffs(fZp.size());
-                for (size_t i = 0; i < fZp.size(); ++i) {
-                    H_coeffs[i] = centerModP(fZp[i], p);
-                }
-                
+            for (const auto& H_coeffs : trueFactorsZ) {
                 // 还原代换 y = a_n x
                 std::vector<BigInt> Hx_coeffs(H_coeffs.size());
                 BigInt an_i(1);
