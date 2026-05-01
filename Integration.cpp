@@ -107,7 +107,12 @@ namespace jc {
         SymExpr result(BigInt(0));
         for (const auto& root : roots) {
             SymExpr P_i = simplifyCore(expand(subs(P, "_z", root), SymConfig::maxExpandTerms));
-            SymExpr v_i = polyGCD(P_i, D, var);
+            SymExpr v_i;
+            if (getDegree(P_i, var) == 1) {
+                v_i = P_i; // 降次短路：一次多项式必定是其自身的公因式，跳过易因代数数失效的 polyGCD
+            } else {
+                v_i = polyGCD(P_i, D, var);
+            }
             
             // 首一化 v_i，保持对数内部整洁
             auto coeffs = extractCoeffs(v_i, var);
@@ -1181,10 +1186,44 @@ namespace jc {
                 }
             }
 
-            // --- 2. 有理分式积分引擎 (Rational Function Integration) ---
+            // --- 1.98 二次配方法启发式 (Inverse Quadratic Integration) ---
             auto [num, den] = getFraction(varPart);
             bool isFraction = !den.isOne();
 
+            if (isFraction && !containsVar(num.ptr, var)) {
+                auto coeffs = extractCoeffs(den, var);
+                if (coeffs.size() == 3 && !coeffs[2].isZero()) {
+                    SymExpr A = coeffs[2];
+                    SymExpr B = coeffs[1];
+                    SymExpr C = coeffs[0];
+                    
+                    SymExpr Delta = simplifyCore((B ^ SymExpr(BigInt(2))) - SymExpr(BigInt(4)) * A * C);
+                    
+                    bool isDeltaNeg = false;
+                    if (Delta.ptr->getType() == SymType::NUM) {
+                        isDeltaNeg = isCasNegative(std::static_pointer_cast<SymNum>(Delta.ptr)->value);
+                    } else if (Delta.ptr->getType() == SymType::MUL) {
+                        auto mul = std::static_pointer_cast<SymMul>(Delta.ptr);
+                        if (!mul->args.empty() && mul->args[0]->getType() == SymType::NUM) {
+                            isDeltaNeg = isCasNegative(std::static_pointer_cast<SymNum>(mul->args[0])->value);
+                        }
+                    }
+                    
+                    if (isDeltaNeg) {
+                        debugPrint(current_depth, "Trying Inverse Quadratic Integration");
+                        SymExpr negDelta = simplifyCore(-Delta);
+                        SymExpr sqrtNegDelta = simplifyCore(negDelta ^ SymExpr(Fraction(1, 2)));
+                        
+                        SymExpr atan_arg = simplifyCore((SymExpr(BigInt(2)) * A * SymExpr::makeVar(var) + B) / sqrtNegDelta);
+                        SymExpr atan_term = SymExpr(std::make_shared<SymFunc>("atan", std::vector<std::shared_ptr<SymNode>>{atan_arg.ptr}));
+                        
+                        SymExpr res = simplifyCore((SymExpr(BigInt(2)) * num / sqrtNegDelta) * atan_term);
+                        return coeff * res;
+                    }
+                }
+            }
+
+            // --- 2. 有理分式积分引擎 (Rational Function Integration) ---
             if (isFraction && containsVar(den.ptr, var)) {
                 // 参数化常数提取与隔离黑盒 (Symbolic Constant Blackboxing)
                 std::map<std::string, SymExpr> constDict;
