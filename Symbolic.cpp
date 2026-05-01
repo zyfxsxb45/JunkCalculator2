@@ -17,6 +17,7 @@
 #include <unordered_set>
 #include <cstdint>
 #include <optional>
+#include <complex>
 
 namespace jc {
 
@@ -1796,6 +1797,21 @@ namespace jc {
 
         case SymType::FUNC: {
             auto func = std::static_pointer_cast<SymFunc>(expr.ptr);
+            if ((func->name == "RootOf" || func->name == "RootSum") && func->args.size() == 3) {
+                if (func->args[1]->getType() == SymType::VAR) {
+                    std::string dummy = std::static_pointer_cast<SymVar>(func->args[1])->name;
+                    if (var == dummy) return expr;
+                }
+                std::vector<std::shared_ptr<SymNode>> newArgs;
+                newArgs.push_back(subs(SymExpr(func->args[0]), var, val).ptr);
+                newArgs.push_back(func->args[1]);
+                if (func->name == "RootSum") {
+                    newArgs.push_back(subs(SymExpr(func->args[2]), var, val).ptr);
+                } else {
+                    newArgs.push_back(func->args[2]);
+                }
+                return SymExpr(std::make_shared<SymFunc>(func->name, std::move(newArgs)));
+            }
             std::vector<std::shared_ptr<SymNode>> newArgs;
             for (auto& arg : func->args)
                 newArgs.push_back(subs(SymExpr(arg), var, val).ptr);
@@ -1806,8 +1822,96 @@ namespace jc {
     }
 
     // ==========================================
-// evalFloat: 全部强转 double（evalf 语义）
-// ==========================================
+    // 代数数节点数值求值引擎 (Durand-Kerner Method)
+    // ==========================================
+    static Value evaluateRootNode(const std::shared_ptr<SymFunc>& func, std::function<Value(const SymExpr&)> evalCb) {
+        bool isRootOf = (func->name == "RootOf");
+        SymExpr P = isRootOf ? SymExpr(func->args[0]) : SymExpr(func->args[2]);
+        std::string dummy = std::static_pointer_cast<SymVar>(func->args[1])->name;
+
+        auto coeffs = extractCoeffs(P, dummy);
+        if (coeffs.empty()) throw std::runtime_error("Numerical Error: Polynomial extraction failed for Root node.");
+
+        std::vector<std::complex<double>> numCoeffs;
+        for (const auto& c : coeffs) {
+            Value cVal = evalCb(c);
+            if (cVal.isComplex()) {
+                auto cx = cVal.asComplex();
+                numCoeffs.push_back({cx.real, cx.imag});
+            } else {
+                numCoeffs.push_back({cVal.asDouble(), 0.0});
+            }
+        }
+
+        int n = static_cast<int>(numCoeffs.size()) - 1;
+        if (n < 1) throw std::runtime_error("Numerical Error: Degree < 1 in Root node.");
+        if (std::abs(numCoeffs[n]) < 1e-15) throw std::runtime_error("Numerical Error: Leading coefficient evaluated to zero.");
+
+        // Durand-Kerner (Weierstrass) 方法同时求所有复根
+        std::vector<std::complex<double>> roots(n);
+        std::complex<double> r(0.4, 0.9);
+        std::complex<double> current(1.0, 0.0);
+        for (int i = 0; i < n; ++i) {
+            roots[i] = current;
+            current *= r;
+        }
+
+        const int max_iter = 2000;
+        for (int iter = 0; iter < max_iter; ++iter) {
+            double max_diff = 0.0;
+            for (int i = 0; i < n; ++i) {
+                std::complex<double> p_val = 0.0;
+                std::complex<double> z = roots[i];
+                for (int j = n; j >= 0; --j) p_val = p_val * z + numCoeffs[j];
+                if (std::abs(p_val) < 1e-15) continue;
+
+                std::complex<double> den = numCoeffs[n];
+                for (int j = 0; j < n; ++j) {
+                    if (i != j) den *= (z - roots[j]);
+                }
+                if (std::abs(den) < 1e-15) continue;
+
+                std::complex<double> diff = p_val / den;
+                roots[i] -= diff;
+                max_diff = std::max(max_diff, std::abs(diff));
+            }
+            if (max_diff < 1e-14) break;
+        }
+
+        // 排序保证 RootOf(..., k) 的稳定性 (先实部后虚部)
+        std::sort(roots.begin(), roots.end(), [](const std::complex<double>& a, const std::complex<double>& b) {
+            if (std::abs(a.real() - b.real()) > 1e-10) return a.real() < b.real();
+            return a.imag() < b.imag();
+        });
+
+        if (isRootOf) {
+            int k = 1;
+            if (func->args[2]->getType() == SymType::NUM) {
+                auto [isInt, val] = extractExactInt(std::static_pointer_cast<SymNum>(func->args[2])->value);
+                if (isInt) k = static_cast<int>(val);
+            }
+            if (k < 1 || k > n) throw std::runtime_error("Numerical Error: Root index out of bounds.");
+            auto root = roots[k - 1];
+            if (std::abs(root.imag()) < 1e-12) return Value(root.real());
+            return Value(Complex(root.real(), root.imag()));
+        } else {
+            SymExpr expr = SymExpr(func->args[0]);
+            Value sum(0.0);
+            for (int i = 0; i < n; ++i) {
+                Value rootVal;
+                if (std::abs(roots[i].imag()) < 1e-12) rootVal = Value(roots[i].real());
+                else rootVal = Value(Complex(roots[i].real(), roots[i].imag()));
+                
+                auto subbed = subs(expr, dummy, rootVal.asSymbolic());
+                sum = sum + evalCb(subbed);
+            }
+            return sum;
+        }
+    }
+
+    // ==========================================
+    // evalFloat: 全部强转 double（evalf 语义）
+    // ==========================================
     SymExpr evalFloat(const SymExpr& expr) {
         if (!expr.ptr) return expr;
 
@@ -1865,6 +1969,17 @@ namespace jc {
 
         case SymType::FUNC: {
             auto func = std::static_pointer_cast<SymFunc>(expr.ptr);
+            if ((func->name == "RootOf" || func->name == "RootSum") && func->args.size() == 3) {
+                Value v = evaluateRootNode(func, [](const SymExpr& e) {
+                    SymExpr f = evalFloat(e);
+                    if (f.ptr->getType() == SymType::NUM) {
+                        return casValToValue(std::static_pointer_cast<SymNum>(f.ptr)->value);
+                    }
+                    throw std::runtime_error("Numerical Error: Cannot evaluate Root node dependencies to float.");
+                });
+                if (v.isComplex()) return SymExpr(v.asComplex());
+                return SymExpr(v.asDouble());
+            }
             std::vector<std::shared_ptr<SymNode>> newArgs;
             for (auto& arg : func->args)
                 newArgs.push_back(evalFloat(SymExpr(arg)).ptr);
@@ -1917,6 +2032,16 @@ namespace jc {
 
         case SymType::FUNC: {
             auto func = std::static_pointer_cast<SymFunc>(expr.ptr);
+            if ((func->name == "RootOf" || func->name == "RootSum") && func->args.size() == 3) {
+                Value v = evaluateRootNode(func, [](const SymExpr& e) {
+                    SymExpr f = evalValue(e);
+                    if (f.ptr->getType() == SymType::NUM) {
+                        return casValToValue(std::static_pointer_cast<SymNum>(f.ptr)->value);
+                    }
+                    throw std::runtime_error("Numerical Error: Cannot evaluate Root node dependencies to value.");
+                });
+                return v.asSymbolic();
+            }
             std::vector<std::shared_ptr<SymNode>> newArgs;
             for (auto& arg : func->args)
                 newArgs.push_back(evalValue(SymExpr(arg)).ptr);
@@ -2116,6 +2241,38 @@ namespace jc {
                 if (name == "Li") {
                     SymExpr log_u(std::make_shared<SymFunc>("log", std::vector<std::shared_ptr<SymNode>>{u.ptr}));
                     return du / log_u;
+                }
+            }
+            // =========================================================
+            // 代数数节点求导 (RootOf / RootSum)
+            // =========================================================
+            else if (arity == 3 && (name == "RootOf" || name == "RootSum")) {
+                if (func->args[1]->getType() == SymType::VAR) {
+                    std::string dummy = std::static_pointer_cast<SymVar>(func->args[1])->name;
+                    if (name == "RootOf") {
+                        SymExpr P(func->args[0]);
+                        SymExpr dP_dv = diff(P, var);
+                        if (dP_dv.isZero()) return SymExpr(BigInt(0));
+                        SymExpr dP_dz = diff(P, dummy);
+                        SymExpr res = -dP_dv / dP_dz;
+                        return simplifyCore(subs(res, dummy, expr));
+                    } else if (name == "RootSum") {
+                        SymExpr E(func->args[0]);
+                        SymExpr P(func->args[2]);
+                        SymExpr dE_dv = diff(E, var);
+                        SymExpr dE_da = diff(E, dummy);
+                        SymExpr dP_dv = diff(P, var);
+                        SymExpr dP_da = diff(P, dummy);
+                        
+                        SymExpr da_dv = -dP_dv / dP_da;
+                        SymExpr inner_diff = simplifyCore(dE_dv + dE_da * da_dv);
+                        
+                        if (inner_diff.isZero()) return SymExpr(BigInt(0));
+                        
+                        return SymExpr(std::make_shared<SymFunc>("RootSum", std::vector<std::shared_ptr<SymNode>>{
+                            inner_diff.ptr, func->args[1], P.ptr
+                        }));
+                    }
                 }
             }
             // =========================================================
@@ -2336,10 +2493,20 @@ namespace jc {
         case SymType::POW:
             return containsVarImpl(std::static_pointer_cast<SymPow>(node)->base, var, visited) ||
                 containsVarImpl(std::static_pointer_cast<SymPow>(node)->exp, var, visited);
-        case SymType::FUNC:
-            for (auto& a : std::static_pointer_cast<SymFunc>(node)->args)
+        case SymType::FUNC: {
+            auto func = std::static_pointer_cast<SymFunc>(node);
+            if ((func->name == "RootOf" || func->name == "RootSum") && func->args.size() == 3) {
+                if (func->args[1]->getType() == SymType::VAR) {
+                    std::string dummy = std::static_pointer_cast<SymVar>(func->args[1])->name;
+                    if (var == dummy) return false;
+                }
+                if (func->name == "RootOf") return containsVarImpl(func->args[0], var, visited);
+                return containsVarImpl(func->args[0], var, visited) || containsVarImpl(func->args[2], var, visited);
+            }
+            for (auto& a : func->args)
                 if (containsVarImpl(a, var, visited)) return true;
             return false;
+        }
         }
         return false;
     }
@@ -2370,9 +2537,21 @@ namespace jc {
             collectAllVarsImpl(std::static_pointer_cast<SymPow>(node)->base, vars, visited);
             collectAllVarsImpl(std::static_pointer_cast<SymPow>(node)->exp, vars, visited);
             break;
-        case SymType::FUNC:
-            for (auto& a : std::static_pointer_cast<SymFunc>(node)->args) collectAllVarsImpl(a, vars, visited);
+        case SymType::FUNC: {
+            auto func = std::static_pointer_cast<SymFunc>(node);
+            if ((func->name == "RootOf" || func->name == "RootSum") && func->args.size() == 3) {
+                std::set<std::string> subVars;
+                collectAllVarsImpl(func->args[0], subVars, visited);
+                if (func->name == "RootSum") collectAllVarsImpl(func->args[2], subVars, visited);
+                if (func->args[1]->getType() == SymType::VAR) {
+                    subVars.erase(std::static_pointer_cast<SymVar>(func->args[1])->name);
+                }
+                vars.insert(subVars.begin(), subVars.end());
+                break;
+            }
+            for (auto& a : func->args) collectAllVarsImpl(a, vars, visited);
             break;
+        }
         }
     }
 
@@ -2407,7 +2586,31 @@ namespace jc {
         }
         case SymType::POW: {
             auto pow = std::static_pointer_cast<SymPow>(expr.ptr);
-            newNode = (simplifyCore(SymExpr(pow->base)) ^ simplifyCore(SymExpr(pow->exp))).ptr;
+            SymExpr base = simplifyCore(SymExpr(pow->base));
+            SymExpr exp = simplifyCore(SymExpr(pow->exp));
+            
+            // 代数数降幂 (Algebraic Number Power Reduction)
+            if (base.ptr->getType() == SymType::FUNC && exp.ptr->getType() == SymType::NUM) {
+                auto func = std::static_pointer_cast<SymFunc>(base.ptr);
+                if (func->name == "RootOf" && func->args.size() == 3) {
+                    auto [isInt, n] = extractExactInt(std::static_pointer_cast<SymNum>(exp.ptr)->value);
+                    if (isInt && n > 0) {
+                        if (func->args[1]->getType() == SymType::VAR) {
+                            std::string dummy = std::static_pointer_cast<SymVar>(func->args[1])->name;
+                            SymExpr P(func->args[0]);
+                            int deg = getDegree(P, dummy);
+                            if (deg > 0 && n >= deg) {
+                                SymExpr dummyVar = SymExpr::makeVar(dummy);
+                                SymExpr targetPow = dummyVar ^ SymExpr(BigInt(n));
+                                SymExpr rem = polyDiv(targetPow, P, dummy).second;
+                                return simplifyCore(subs(rem, dummy, base));
+                            }
+                        }
+                    }
+                }
+            }
+            
+            newNode = (base ^ exp).ptr;
             break;
         }
         case SymType::FUNC: {
@@ -2570,6 +2773,70 @@ namespace jc {
                     return inner ^ SymExpr(Fraction(BigInt(1), BigInt(3)));
                 }
             }
+            
+            if (nArgs.size() == 3 && (func->name == "RootOf" || func->name == "RootSum")) {
+                if (nArgs[1]->getType() == SymType::VAR) {
+                    std::string dummy = std::static_pointer_cast<SymVar>(nArgs[1])->name;
+                    SymExpr P = (func->name == "RootOf") ? SymExpr(nArgs[0]) : SymExpr(nArgs[2]);
+                    int deg = getDegree(P, dummy);
+                    if (deg >= 1) {
+                        auto coeffs = extractCoeffs(P, dummy);
+                        if (deg == 1) {
+                            SymExpr root = simplifyCore(-coeffs[0] / coeffs[1]);
+                            if (func->name == "RootOf") return root;
+                            if (func->name == "RootSum") return simplifyCore(subs(SymExpr(nArgs[0]), dummy, root));
+                        } else if (func->name == "RootSum") {
+                            SymExpr E(nArgs[0]);
+                            // 1. 加法分配律: RootSum(A + B) -> RootSum(A) + RootSum(B)
+                            if (E.ptr->getType() == SymType::ADD) {
+                                SymExpr res(BigInt(0));
+                                for (auto& arg : std::static_pointer_cast<SymAdd>(E.ptr)->args) {
+                                    res = res + SymExpr(std::make_shared<SymFunc>("RootSum", std::vector<std::shared_ptr<SymNode>>{
+                                        arg, nArgs[1], nArgs[2]
+                                    }));
+                                }
+                                return simplifyCore(res);
+                            }
+                            // 2. 常数提取: RootSum(c * A) -> c * RootSum(A)
+                            if (E.ptr->getType() == SymType::MUL) {
+                                SymExpr c(BigInt(1));
+                                SymExpr rest(BigInt(1));
+                                for (auto& arg : std::static_pointer_cast<SymMul>(E.ptr)->args) {
+                                    if (!containsVar(arg, dummy)) c = c * SymExpr(arg);
+                                    else rest = rest * SymExpr(arg);
+                                }
+                                if (!c.isOne()) {
+                                    SymExpr newSum(std::make_shared<SymFunc>("RootSum", std::vector<std::shared_ptr<SymNode>>{
+                                        rest.ptr, nArgs[1], nArgs[2]
+                                    }));
+                                    return simplifyCore(c * newSum);
+                                }
+                            }
+                            // 3. 韦达定理 (Vieta's formulas) 降维打击
+                            if (!containsVar(E.ptr, dummy)) {
+                                return simplifyCore(E * SymExpr(BigInt(deg)));
+                            }
+                            if (E.ptr->getType() == SymType::VAR && std::static_pointer_cast<SymVar>(E.ptr)->name == dummy) {
+                                return simplifyCore(-coeffs[deg - 1] / coeffs[deg]);
+                            }
+                            if (E.ptr->getType() == SymType::POW) {
+                                auto powNode = std::static_pointer_cast<SymPow>(E.ptr);
+                                if (powNode->base->getType() == SymType::VAR && std::static_pointer_cast<SymVar>(powNode->base)->name == dummy) {
+                                    if (powNode->exp->getType() == SymType::NUM) {
+                                        auto [isInt, p] = extractExactInt(std::static_pointer_cast<SymNum>(powNode->exp)->value);
+                                        if (isInt && p == 2 && deg >= 2) {
+                                            SymExpr sum1 = -coeffs[deg - 1] / coeffs[deg];
+                                            SymExpr sum2 = coeffs[deg - 2] / coeffs[deg];
+                                            return simplifyCore(sum1 * sum1 - SymExpr(BigInt(2)) * sum2);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            
             newNode = SymExpr(std::make_shared<SymFunc>(func->name, std::move(nArgs))).ptr;
             break;
         }
@@ -3452,93 +3719,9 @@ namespace jc {
                     roots.push_back(simplify((-b + sqrtDelta) / twoA));
                     roots.push_back(simplify((-b - sqrtDelta) / twoA));
                 }
-            } else if (degree == 3) {
-                SymExpr a = coeffs[3];
-                SymExpr b = coeffs[2];
-                SymExpr c = coeffs[1];
-                SymExpr d = coeffs[0];
-                if (!a.isZero()) {
-                    SymExpr p = simplify((SymExpr(BigInt(3)) * a * c - b * b) / (SymExpr(BigInt(3)) * a * a));
-                    SymExpr q = simplify((SymExpr(BigInt(2)) * (b ^ SymExpr(BigInt(3))) - SymExpr(BigInt(9)) * a * b * c + SymExpr(BigInt(27)) * a * a * d) / (SymExpr(BigInt(27)) * (a ^ SymExpr(BigInt(3)))));
-                    SymExpr delta = simplify((q * q) / SymExpr(BigInt(4)) + (p ^ SymExpr(BigInt(3))) / SymExpr(BigInt(27)));
-                    
-                    SymExpr sqrtDelta = simplify(delta ^ SymExpr(Fraction(1, 2)));
-                    SymExpr u = simplify((-q / SymExpr(BigInt(2)) + sqrtDelta) ^ SymExpr(Fraction(1, 3)));
-                    SymExpr v = simplify((-q / SymExpr(BigInt(2)) - sqrtDelta) ^ SymExpr(Fraction(1, 3)));
-                    
-                    SymExpr I = SymExpr::makeVar("i");
-                    SymExpr sqrt3 = SymExpr(BigInt(3)) ^ SymExpr(Fraction(1, 2));
-                    SymExpr omega = simplify((SymExpr(BigInt(-1)) + I * sqrt3) / SymExpr(BigInt(2)));
-                    SymExpr omega2 = simplify((SymExpr(BigInt(-1)) - I * sqrt3) / SymExpr(BigInt(2)));
-                    
-                    SymExpr shift = simplify(b / (SymExpr(BigInt(3)) * a));
-                    
-                    roots.push_back(simplify(u + v - shift));
-                    roots.push_back(simplify(omega * u + omega2 * v - shift));
-                    roots.push_back(simplify(omega2 * u + omega * v - shift));
-                }
-            } else if (degree == 4) {
-                SymExpr a = coeffs[4];
-                SymExpr b = coeffs[3];
-                SymExpr c = coeffs[2];
-                SymExpr d = coeffs[1];
-                SymExpr e = coeffs[0];
-                if (!a.isZero()) {
-                    SymExpr p = simplify((SymExpr(BigInt(8)) * a * c - SymExpr(BigInt(3)) * (b ^ SymExpr(BigInt(2)))) / (SymExpr(BigInt(8)) * a * a));
-                    SymExpr q = simplify(((b ^ SymExpr(BigInt(3))) - SymExpr(BigInt(4)) * a * b * c + SymExpr(BigInt(8)) * a * a * d) / (SymExpr(BigInt(8)) * (a ^ SymExpr(BigInt(3)))));
-                    SymExpr r = simplify((SymExpr(BigInt(-3)) * (b ^ SymExpr(BigInt(4))) + SymExpr(BigInt(256)) * (a ^ SymExpr(BigInt(3))) * e - SymExpr(BigInt(64)) * a * a * b * d + SymExpr(BigInt(16)) * a * b * b * c) / (SymExpr(BigInt(256)) * (a ^ SymExpr(BigInt(4)))));
-                    
-                    SymExpr shift = simplify(b / (SymExpr(BigInt(4)) * a));
-                    
-                    if (q.isZero()) {
-                        SymExpr delta2 = simplify(p * p - SymExpr(BigInt(4)) * r);
-                        SymExpr sqrtDelta2 = simplify(delta2 ^ SymExpr(Fraction(1, 2)));
-                        SymExpr t2_1 = simplify((-p + sqrtDelta2) / SymExpr(BigInt(2)));
-                        SymExpr t2_2 = simplify((-p - sqrtDelta2) / SymExpr(BigInt(2)));
-                        
-                        SymExpr t1 = simplify(t2_1 ^ SymExpr(Fraction(1, 2)));
-                        SymExpr t2 = simplify(-t1);
-                        SymExpr t3 = simplify(t2_2 ^ SymExpr(Fraction(1, 2)));
-                        SymExpr t4 = simplify(-t3);
-                        
-                        roots.push_back(simplify(t1 - shift));
-                        roots.push_back(simplify(t2 - shift));
-                        roots.push_back(simplify(t3 - shift));
-                        roots.push_back(simplify(t4 - shift));
-                    } else {
-                        SymExpr A3 = SymExpr(BigInt(1));
-                        SymExpr B3 = SymExpr(BigInt(2)) * p;
-                        SymExpr C3 = p * p - SymExpr(BigInt(4)) * r;
-                        SymExpr D3 = -(q * q);
-                        
-                        SymExpr p3 = simplify((SymExpr(BigInt(3)) * A3 * C3 - B3 * B3) / (SymExpr(BigInt(3)) * A3 * A3));
-                        SymExpr q3 = simplify((SymExpr(BigInt(2)) * (B3 ^ SymExpr(BigInt(3))) - SymExpr(BigInt(9)) * A3 * B3 * C3 + SymExpr(BigInt(27)) * A3 * A3 * D3) / (SymExpr(BigInt(27)) * (A3 ^ SymExpr(BigInt(3)))));
-                        SymExpr delta3 = simplify((q3 * q3) / SymExpr(BigInt(4)) + (p3 ^ SymExpr(BigInt(3))) / SymExpr(BigInt(27)));
-                        
-                        SymExpr sqrtDelta3 = simplify(delta3 ^ SymExpr(Fraction(1, 2)));
-                        SymExpr u3 = simplify((-q3 / SymExpr(BigInt(2)) + sqrtDelta3) ^ SymExpr(Fraction(1, 3)));
-                        SymExpr v3 = simplify((-q3 / SymExpr(BigInt(2)) - sqrtDelta3) ^ SymExpr(Fraction(1, 3)));
-                        
-                        SymExpr y1 = simplify(u3 + v3 - B3 / (SymExpr(BigInt(3)) * A3));
-                        SymExpr sqrtY1 = simplify(y1 ^ SymExpr(Fraction(1, 2)));
-                        
-                        SymExpr C1 = simplify((p + y1 - q / sqrtY1) / SymExpr(BigInt(2)));
-                        SymExpr C2 = simplify((p + y1 + q / sqrtY1) / SymExpr(BigInt(2)));
-                        
-                        SymExpr delta1 = simplify(y1 - SymExpr(BigInt(4)) * C1);
-                        SymExpr delta2 = simplify(y1 - SymExpr(BigInt(4)) * C2);
-                        
-                        SymExpr sqrtDelta1 = simplify(delta1 ^ SymExpr(Fraction(1, 2)));
-                        SymExpr sqrtDelta2 = simplify(delta2 ^ SymExpr(Fraction(1, 2)));
-                        
-                        roots.push_back(simplify((-sqrtY1 + sqrtDelta1) / SymExpr(BigInt(2)) - shift));
-                        roots.push_back(simplify((-sqrtY1 - sqrtDelta1) / SymExpr(BigInt(2)) - shift));
-                        roots.push_back(simplify((sqrtY1 + sqrtDelta2) / SymExpr(BigInt(2)) - shift));
-                        roots.push_back(simplify((sqrtY1 - sqrtDelta2) / SymExpr(BigInt(2)) - shift));
-                    }
-                }
-            } else if (degree > 4) {
-                // 尝试求解高次二项式方程 ax^n + b = 0 (返回所有复数根)
+            } else if (degree >= 3) {
+                // 引入代数数节点 RootOf
+                // 对于 3 次及以上不可约多项式，直接返回 RootOf 节点，避免卡尔丹公式爆炸
                 bool isBinomial = true;
                 for (int i = 1; i < degree; ++i) {
                     if (!coeffs[i].isZero()) {
@@ -3564,6 +3747,18 @@ namespace jc {
                                 roots.push_back(simplify(principal * unity));
                             }
                         }
+                    }
+                } else {
+                    // 非二项式的高次不可约多项式，返回 RootOf 节点
+                    // 格式: RootOf(f(var), var, k)
+                    SymExpr f_monic = f;
+                    if (!coeffs[degree].isOne()) {
+                        f_monic = simplifyCore(expand(f / coeffs[degree], SymConfig::maxExpandTerms));
+                    }
+                    for (int k = 1; k <= degree; ++k) {
+                        roots.push_back(SymExpr(std::make_shared<SymFunc>("RootOf", std::vector<std::shared_ptr<SymNode>>{
+                            f_monic.ptr, SymExpr::makeVar(var).ptr, SymExpr(BigInt(k)).ptr
+                        })));
                     }
                 }
             }
@@ -3656,6 +3851,27 @@ namespace jc {
 
         case SymType::FUNC: {
             auto func = std::static_pointer_cast<SymFunc>(expr.ptr);
+            if ((func->name == "RootOf" || func->name == "RootSum") && func->args.size() == 3) {
+                if (func->args[1]->getType() == SymType::VAR) {
+                    std::string dummy = std::static_pointer_cast<SymVar>(func->args[1])->name;
+                    if (var == dummy) return expr;
+                }
+                auto sub0 = trySubsQuiet(SymExpr(func->args[0]), var, val);
+                if (!sub0) return std::nullopt;
+                
+                std::vector<std::shared_ptr<SymNode>> newArgs;
+                newArgs.push_back(sub0->ptr);
+                newArgs.push_back(func->args[1]);
+                
+                if (func->name == "RootSum") {
+                    auto sub2 = trySubsQuiet(SymExpr(func->args[2]), var, val);
+                    if (!sub2) return std::nullopt;
+                    newArgs.push_back(sub2->ptr);
+                } else {
+                    newArgs.push_back(func->args[2]);
+                }
+                return SymExpr(std::make_shared<SymFunc>(func->name, std::move(newArgs)));
+            }
             std::vector<std::shared_ptr<SymNode>> newArgs;
             for (auto& arg : func->args) {
                 auto subArg = trySubsQuiet(SymExpr(arg), var, val);
@@ -4050,6 +4266,12 @@ namespace jc {
         }
         case SymType::FUNC: {
             auto f = std::static_pointer_cast<SymFunc>(node);
+            if ((f->name == "RootOf" || f->name == "RootSum") && f->args.size() == 3) {
+                Value v = evaluateRootNode(f, [&](const SymExpr& e) {
+                    return Value(fastEval(e.ptr, env, resolver));
+                });
+                return v.asDouble();
+            }
             if (!resolver) throw std::runtime_error("JIT Error: No function resolver provided for '" + f->name + "'.");
 
             // 将双精度打包丢给 VM 宿主的注册表处理
@@ -4101,6 +4323,11 @@ namespace jc {
         }
         case SymType::FUNC: {
             auto f = std::static_pointer_cast<SymFunc>(node);
+            if ((f->name == "RootOf" || f->name == "RootSum") && f->args.size() == 3) {
+                return evaluateRootNode(f, [&](const SymExpr& e) {
+                    return evalUniversal(e.ptr, env, resolver);
+                });
+            }
             if (!resolver) throw std::runtime_error("Universal Error: No function resolver provided for '" + f->name + "'.");
 
             // 同构打包发送给宿主环境处理

@@ -123,13 +123,23 @@ namespace jc {
         }
 
         SymExpr result(BigInt(0));
+        std::map<std::string, std::vector<SymExpr>> rootOfGroups;
+        
         for (const auto& root : roots) {
+            if (root.ptr->getType() == SymType::FUNC) {
+                auto func = std::static_pointer_cast<SymFunc>(root.ptr);
+                if (func->name == "RootOf" && func->args.size() == 3) {
+                    std::string polySig = func->args[0]->getSignature();
+                    rootOfGroups[polySig].push_back(root);
+                    continue;
+                }
+            }
+            
             SymExpr P_i = simplifyCore(expand(subs(P, "_z", root), SymConfig::maxExpandTerms));
             SymExpr v_i;
             if (getDegree(P_i, var) == 1) {
-                v_i = P_i; // 降次短路：一次多项式必定是其自身的公因式，跳过易因代数数失效的 polyGCD
+                v_i = P_i; // 降次短路
             } else {
-                // 优先使用 Gröbner 基求得的通用 GCD 代入，若失效则回退到 polyGCD
                 SymExpr gb_vi = simplifyCore(expand(subs(universal_gcd, "_z", root), SymConfig::maxExpandTerms));
                 if (!gb_vi.isOne() && !gb_vi.isZero() && containsVar(gb_vi.ptr, var)) {
                     v_i = gb_vi;
@@ -138,7 +148,6 @@ namespace jc {
                 }
             }
             
-            // 首一化 v_i，保持对数内部整洁
             auto coeffs = extractCoeffs(v_i, var);
             if (!coeffs.empty()) {
                 SymExpr lead = coeffs.back();
@@ -150,6 +159,34 @@ namespace jc {
             SymExpr log_vi(std::make_shared<SymFunc>("log", std::vector<std::shared_ptr<SymNode>>{v_i.ptr}));
             result = result + root * log_vi;
         }
+        
+        // 处理 RootOf 组，将其折叠为优雅的 RootSum
+        for (const auto& [sig, group] : rootOfGroups) {
+            if (group.empty()) continue;
+            auto func = std::static_pointer_cast<SymFunc>(group[0].ptr);
+            SymExpr poly(func->args[0]);
+            SymExpr z_var(func->args[1]);
+            
+            // 构造 RootSum 内部表达式: _z * log(universal_gcd(x, _z))
+            SymExpr v_z = universal_gcd;
+            auto coeffs = extractCoeffs(v_z, var);
+            if (!coeffs.empty()) {
+                SymExpr lead = coeffs.back();
+                if (!lead.isZero() && !lead.isOne()) {
+                    v_z = simplifyCore(expand(v_z / lead, SymConfig::maxExpandTerms));
+                }
+            }
+            
+            SymExpr log_vz(std::make_shared<SymFunc>("log", std::vector<std::shared_ptr<SymNode>>{v_z.ptr}));
+            SymExpr expr_z = z_var * log_vz;
+            
+            SymExpr rootSum(std::make_shared<SymFunc>("RootSum", std::vector<std::shared_ptr<SymNode>>{
+                expr_z.ptr, z_var.ptr, poly.ptr
+            }));
+            
+            result = result + rootSum;
+        }
+        
         SymExpr finalRes = simplifyCore(result);
         markTainted(finalRes);
         return finalRes;
