@@ -9,7 +9,7 @@ namespace jc {
 
     const std::map<std::string, std::string> BuiltinHelp = {
         {"main", R"HELP(
-=================== Junk Calculator 2.3.1.0 — Help ===================
+=================== Junk Calculator 2.3.1.1 — Help ===================
 
   Session Commands
   ────────────────────────────────────────────────────────────────────
@@ -784,7 +784,7 @@ namespace jc {
     solve(a, b, c)               ax² + bx + c = 0       (quadratic)
     solve(a, b, c, d)            ax³ + … = 0            (Cardano)
     solve(a, b, c, d, e)         ax⁴ + … = 0            (Ferrari)
-    solveEq(expr, "x")           Exact symbolic solver (see: help cas)
+    solveEq(expr, x)             Exact symbolic solver (see: help cas)
     
   Examples
   ──────────────────────
@@ -822,8 +822,14 @@ namespace jc {
   ──────────────────────
     x = sym("x")                 Create a symbolic variable
     expr = x^2 + 2*x + 1         Build exact symbolic expressions
-    subs(expr, "x", 5)           Substitute x with 5 → 36
-    subs(x + y, ["x", "y"], [1, 2]) Multiple substitution
+    subs(expr, x, 5)             Substitute x with 5 → 36 (Strings like "x" also work!)
+    subs(x + y, [x, y], [1, 2])  Multiple substitution
+
+  ★ Variable Name Inputs
+  ──────────────────────
+    All CAS functions (diff, integ, limit, solveEq, taylor, polyDiv, etc.) now 
+    accept direct symbolic variables instead of just strings. 
+    Example: diff(x^2, x) is perfectly equivalent to diff(x^2, "x").
 
   Algebraic Manipulation
   ──────────────────────
@@ -837,22 +843,31 @@ namespace jc {
 
   Polynomial Operations
   ──────────────────────
-    polyDiv(A, B, "x")           Polynomial division → [quotient, remainder]
-    polyGCD(A, B, "x")           Polynomial greatest common divisor
-    resultant(A, B, "x")         Sylvester resultant of two polynomials
+    polyDiv(A, B, x)             Polynomial division → [quotient, remainder]
+    polyGCD(A, B, x)             Polynomial greatest common divisor
+    resultant(A, B, x)           Sylvester resultant of two polynomials
+
+  Algebraic Numbers (Implicit Roots)
+  ──────────────────────
+    RootOf(poly, x, k)           Represents the k-th exact root of the polynomial `poly` 
+                                 with respect to `x`. Used to express roots of high-degree 
+                                 polynomials (degree ≥ 5) that cannot be solved in radicals.
+    RootSum(expr, x, poly)       Represents the sum of `expr` evaluated over all roots `x` 
+                                 of the polynomial `poly`. Essential for exact symbolic 
+                                 integration of rational functions.
 
   Calculus (Exact Symbolic)
   ──────────────────────
-    diff(sin(x^2), "x")          → 2 * x * cos(x^2)
-    integ(x^2, "x")              → 1/3 * x^3
-    integ(x^2, "x", 0, 1)        → 1/3 (Definite integral)
-    limit(sin(x)/x, "x", 0)      → 1 (L'Hôpital's rule supported)
-    taylor(sin(x), "x", 0, 5)    → x - 1/6 * x^3 + 1/120 * x^5
+    diff(sin(x^2), x)            → 2 * x * cos(x^2)
+    integ(x^2, x)                → 1/3 * x^3
+    integ(x^2, x, 0, 1)          → 1/3 (Definite integral)
+    limit(sin(x)/x, x, 0)        → 1 (L'Hôpital's rule supported)
+    taylor(sin(x), x, 0, 5)      → x - 1/6 * x^3 + 1/120 * x^5
 
   Equation Solving
   ──────────────────────
-    solveEq(x^2 - 2, "x")        → [sqrt(2), -sqrt(2)] (Exact roots!)
-    solveEq(x^3 - 1, "x")        → [1, E^(2/3 * PI * i), E^(4/3 * PI * i)] (All complex roots!)
+    solveEq(x^2 - 2, x)          → [sqrt(2), -sqrt(2)] (Exact roots!)
+    solveEq(x^3 - 1, x)          → [1, E^(2/3 * PI * i), E^(4/3 * PI * i)] (All complex roots!)
 
     ★ Constants & Limitations:
     • PI and E are now parsed as exact symbolic constants in the CAS engine 
@@ -899,9 +914,9 @@ namespace jc {
     high-performance numerical approximations.
 
     Symbolic (Exact):
-      diff(x^2, "x")       → 2 * x
-      integ(x^2, "x")      → 1/3 * x^3
-      limit(sin(x)/x, "x", 0) → 1
+      diff(x^2, x)         → 2 * x
+      integ(x^2, x)        → 1/3 * x^3
+      limit(sin(x)/x, x, 0) → 1
       (See `help cas` for full symbolic features)
 
     Numerical (Approximation):

@@ -1,4 +1,4 @@
-# Junk Calculator 2.3.1.0
+# Junk Calculator 2.3.1.1
 
 A scripting language and computer algebra system (CAS) implemented in C++20. It relies on a custom bytecode compiler and a stack-based virtual machine, requiring no third-party dependencies.
 
@@ -53,6 +53,20 @@ JC2 standard libraries loaded via `import`:
 - `net`: OOP wrapper for TCP streams (`TcpSocket` and `TcpServer`).
 - `http`: HTTP/1.1 client supporting URL parsing and GET/POST requests.
 - `buffer`: Binary manipulation API with cursor support.
+
+---
+
+## What's New in v2.3.1.1
+
+Version 2.3.1.1 brings critical bug fixes and enhancements to the Computer Algebra System (CAS) integration engine and symbolic variable handling.
+
+- **Integration Engine Fixes:**
+  - Fixed stack overflow and infinite loop issues during complex symbolic integration.
+  - Fixed a bug where certain rational fraction integrals incorrectly returned 0.
+- **Algebraic Roots Representation:**
+  - Added `RootOf` and `RootSum` nodes to represent exact implicit roots of high-degree polynomials and their sums, essential for the Rothstein-Trager integration algorithm.
+- **Symbolic Variable Ergonomics:**
+  - All CAS functions (e.g., `diff`, `integ`, `limit`, `solveEq`) now natively support direct single symbol inputs (e.g., `diff(x^2, x)`) in addition to string variable names.
 
 ---
 
@@ -112,6 +126,7 @@ Requires a C++20 compliant compiler and CMake 3.15+.
     +-- SymRules.h                  Pre-defined integration and simplification rules
     +-- Integration.h/cpp           Symbolic integration and Risch algorithm
     +-- Factorization.h/cpp         Polynomial factorization logic
+    +-- Groebner.h/cpp              Groebner basis and multivariate polynomial division
     +-- SymEval.h                   Independent numerical evaluation bridge
     +-- Value.h                     std::variant Type System, Callables, Dict, List & Set
     +-- Expr.h                      AST Object Nodes
