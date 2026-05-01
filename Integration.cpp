@@ -1,5 +1,6 @@
 #include "Integration.h"
 #include "SymRules.h"
+#include "Factorization.h"
 #include <stdexcept>
 #include <algorithm>
 #include <numeric>
@@ -8,14 +9,86 @@
 #include <unordered_map>
 #include <functional>
 #include <optional>
+#include <iostream>
+#include <unordered_set>
 
 namespace jc {
+
+    static void debugPrint(int depth, const std::string& msg) {
+        for (int i = 0; i < depth; ++i) std::cout << "  ";
+        std::cout << "[Depth " << depth << "] " << msg << std::endl;
+    }
+
+    thread_local std::unordered_set<std::string> g_taintedSignatures;
+
+    static void markTainted(const SymExpr& expr) {
+        if (!expr.ptr) return;
+        g_taintedSignatures.insert(expr.ptr->getSignature());
+        switch (expr.ptr->getType()) {
+            case SymType::ADD:
+                for (auto& arg : std::static_pointer_cast<SymAdd>(expr.ptr)->args) markTainted(SymExpr(arg));
+                break;
+            case SymType::MUL:
+                for (auto& arg : std::static_pointer_cast<SymMul>(expr.ptr)->args) markTainted(SymExpr(arg));
+                break;
+            case SymType::POW:
+                markTainted(SymExpr(std::static_pointer_cast<SymPow>(expr.ptr)->base));
+                markTainted(SymExpr(std::static_pointer_cast<SymPow>(expr.ptr)->exp));
+                break;
+            case SymType::FUNC:
+                for (auto& arg : std::static_pointer_cast<SymFunc>(expr.ptr)->args) markTainted(SymExpr(arg));
+                break;
+            default: break;
+        }
+    }
+
+    static bool isTainted(const SymExpr& expr) {
+        if (!expr.ptr) return false;
+        if (g_taintedSignatures.count(expr.ptr->getSignature())) return true;
+        switch (expr.ptr->getType()) {
+            case SymType::ADD:
+                for (auto& arg : std::static_pointer_cast<SymAdd>(expr.ptr)->args) if (isTainted(SymExpr(arg))) return true;
+                break;
+            case SymType::MUL:
+                for (auto& arg : std::static_pointer_cast<SymMul>(expr.ptr)->args) if (isTainted(SymExpr(arg))) return true;
+                break;
+            case SymType::POW:
+                if (isTainted(SymExpr(std::static_pointer_cast<SymPow>(expr.ptr)->base))) return true;
+                if (isTainted(SymExpr(std::static_pointer_cast<SymPow>(expr.ptr)->exp))) return true;
+                break;
+            case SymType::FUNC:
+                for (auto& arg : std::static_pointer_cast<SymFunc>(expr.ptr)->args) if (isTainted(SymExpr(arg))) return true;
+                break;
+            default: break;
+        }
+        return false;
+    }
 
     // =================================================================
     // Rothstein-Trager 算法 (Rothstein-Trager Algorithm)
     // 用于积分 A/D，其中 D 无平方，deg(A) < deg(D)
     // =================================================================
     static SymExpr rothsteinTrager(SymExpr A, SymExpr D, const std::string& var) {
+        // 智能拦截：基于 Galois 群扩展度的 Rothstein-Trager 智能拦截
+        auto sqFree = polySquareFree(D, var);
+        for (const auto& p : sqFree) {
+            if (getDegree(p.first, var) > 4) {
+                SymExpr factored = factor(p.first);
+                auto checkDegree = [&](const SymExpr& f) {
+                    if (getDegree(f, var) > 4) {
+                        throw std::runtime_error("Non-integrable rational function: irreducible denominator factor degree exceeds solvability.");
+                    }
+                };
+                if (factored.ptr->getType() == SymType::MUL) {
+                    for (auto& arg : std::static_pointer_cast<SymMul>(factored.ptr)->args) checkDegree(SymExpr(arg));
+                } else if (factored.ptr->getType() == SymType::POW) {
+                    checkDegree(SymExpr(std::static_pointer_cast<SymPow>(factored.ptr)->base));
+                } else {
+                    checkDegree(factored);
+                }
+            }
+        }
+
         SymExpr z = SymExpr::makeVar("_z");
         SymExpr dD = diff(D, var);
         SymExpr P = simplifyCore(expand(A - z * dD, SymConfig::maxExpandTerms));
@@ -48,7 +121,9 @@ namespace jc {
             SymExpr log_vi(std::make_shared<SymFunc>("log", std::vector<std::shared_ptr<SymNode>>{v_i.ptr}));
             result = result + root * log_vi;
         }
-        return simplifyCore(result);
+        SymExpr finalRes = simplifyCore(result);
+        markTainted(finalRes);
+        return finalRes;
     }
 
     // =================================================================
@@ -262,7 +337,18 @@ namespace jc {
     // =================================================================
     // 🚀 Risch 算法入口 (Risch Algorithm Entry Point)
     // =================================================================
-    SymExpr rischIntegrate(const SymExpr& expr, const std::string& var) {
+    SymExpr rischIntegrate(const SymExpr& expr, const std::string& var, int depth) {
+        debugPrint(depth, "Entering rischIntegrate for: " + expr.toString() + " d" + var);
+        if (depth > SymConfig::maxDepth) {
+            debugPrint(depth, "Max depth exceeded in Risch, aborting.");
+            throw std::runtime_error("Integration depth limit exceeded in Risch algorithm.");
+        }
+
+        if (getAstNodeCount(expr) > 300) {
+            debugPrint(depth, "AST size too large in Risch, aborting.");
+            throw std::runtime_error("Integration AST size limit exceeded in Risch algorithm.");
+        }
+
         // Step 0 - 刘维尔域规范化 (Liouvillian Field Normalization)
         SymExpr normalizedExpr = rischNormalize(expr);
 
@@ -278,7 +364,8 @@ namespace jc {
             SymExpr F_t = simplifyCore(rewritten / ext.deriv);
             if (!containsVar(F_t.ptr, var)) {
                 try {
-                    SymExpr int_t = integrate(F_t, ext.name);
+                    debugPrint(depth, "Risch Step 1.5 (Form 1): Integrating F(t) dt");
+                    SymExpr int_t = integrate(F_t, ext.name, depth + 1);
                     SymExpr orig_ext;
                     if (ext.type == RischExtType::LOG) {
                         orig_ext = SymExpr(std::make_shared<SymFunc>("log", std::vector<std::shared_ptr<SymNode>>{ext.arg.ptr}));
@@ -294,8 +381,9 @@ namespace jc {
                 SymExpr u_deriv = simplifyCore(diff(ext.arg, var));
                 if (!containsVar(u_deriv.ptr, var) && !u_deriv.isZero()) {
                     try {
+                        debugPrint(depth, "Risch Step 1.5 (Form 2): Integrating F(e^(ax+b)) dx");
                         SymExpr integrand_t = simplifyCore(rewritten / (u_deriv * ext.t_var));
-                        SymExpr int_t = integrate(integrand_t, ext.name);
+                        SymExpr int_t = integrate(integrand_t, ext.name, depth + 1);
                         SymExpr orig_ext(std::make_shared<SymFunc>("exp", std::vector<std::shared_ptr<SymNode>>{ext.arg.ptr}));
                         return simplifyCore(subs(int_t, ext.name, orig_ext));
                     } catch (...) {}
@@ -317,7 +405,8 @@ namespace jc {
                 try {
                     if (intPart == normalizedExpr) throw std::runtime_error("Loop");
                     if (getAstNodeCount(intPart) >= getAstNodeCount(normalizedExpr)) throw std::runtime_error("Complexity increased");
-                    SymExpr intRes = integrate(intPart, var);
+                    debugPrint(depth, "Risch Step 2: Integrating polynomial part");
+                    SymExpr intRes = integrate(intPart, var, depth + 1);
                     return ratPart + intRes;
                 } catch (const std::exception& e) {
                     std::string debugInfo = "Hermite Reduction completed, but remaining integral is non-elementary.\n";
@@ -363,7 +452,11 @@ namespace jc {
 
                     try {
                         SymExpr intAn_x = backSubstitute(coeffs[n]);
-                        SymExpr intAn = integrate(intAn_x, var);
+                        if (getAstNodeCount(intAn_x) > getAstNodeCount(expr) * 3 + 50) {
+                            throw std::runtime_error("Risch Step 4: Leading coefficient expansion too large, aborting.");
+                        }
+                        debugPrint(depth, "Risch Step 4 (LOG): Integrating leading coefficient");
+                        SymExpr intAn = integrate(intAn_x, var, depth + 1);
                         SymExpr intAn_t = field.rewrite(intAn);
                         auto coeffs_intAn = extractCoeffs(intAn_t, topExt.name);
                         
@@ -385,7 +478,11 @@ namespace jc {
                         for (int i = n - 1; i >= 0; --i) {
                             SymExpr integrand = simplifyCore(coeffs[i] - SymExpr(BigInt(i + 1)) * B[i + 1] * t_deriv);
                             SymExpr integrand_x = backSubstitute(integrand);
-                            SymExpr int_i = integrate(integrand_x, var);
+                            if (getAstNodeCount(integrand_x) > getAstNodeCount(expr) * 3 + 50) {
+                                throw std::runtime_error("Risch Step 4: Lower coefficient expansion too large, aborting.");
+                            }
+                            debugPrint(depth, "Risch Step 4 (LOG): Integrating lower coefficient");
+                            SymExpr int_i = integrate(integrand_x, var, depth + 1);
                             SymExpr int_i_t = field.rewrite(int_i);
                             if (containsVar(int_i_t.ptr, topExt.name)) {
                                 throw std::runtime_error("Non-elementary integral.");
@@ -399,7 +496,9 @@ namespace jc {
                                 result = result + B[i] * (t_sym ^ SymExpr(BigInt(i)));
                             }
                         }
-                        return simplifyCore(backSubstitute(result));
+                        SymExpr finalRes = simplifyCore(backSubstitute(result));
+                        markTainted(finalRes);
+                        return finalRes;
                     } catch (...) {
                         // 失败则继续往下走，抛出调试信息
                     }
@@ -419,7 +518,11 @@ namespace jc {
                         if (i == 0) {
                             try {
                                 SymExpr integrand_x = backSubstitute(coeffs[0]);
-                                SymExpr int_0 = integrate(integrand_x, var);
+                                if (getAstNodeCount(integrand_x) > getAstNodeCount(expr) * 3 + 50) {
+                                    throw std::runtime_error("Risch Step 5: Constant term expansion too large, aborting.");
+                                }
+                                debugPrint(depth, "Risch Step 5 (EXP): Integrating constant term");
+                                SymExpr int_0 = integrate(integrand_x, var, depth + 1);
                                 result = result + field.rewrite(int_0);
                             } catch (...) {
                                 success = false;
@@ -475,7 +578,11 @@ namespace jc {
                         }
                     }
                     
-                    if (success) return simplifyCore(backSubstitute(result));
+                    if (success) {
+                        SymExpr finalRes = simplifyCore(backSubstitute(result));
+                        markTainted(finalRes);
+                        return finalRes;
+                    }
                 }
             }
         }
@@ -496,7 +603,11 @@ namespace jc {
     // =================================================================
     // 🚀 符号积分 (Symbolic Integration) - 基础多项式与初等函数
     // =================================================================
-    SymExpr integrate(const SymExpr& expr, const std::string& var) {
+    SymExpr integrate(const SymExpr& expr, const std::string& var, int start_depth) {
+        if (start_depth == 0) {
+            g_taintedSignatures.clear();
+        }
+
         if (!expr.ptr) return expr;
 
         SymExpr x = SymExpr::makeVar(var);
@@ -507,8 +618,41 @@ namespace jc {
         std::unordered_map<std::string, std::optional<SymExpr>> integCache;
         std::function<std::optional<SymExpr>(const SymExpr&, int)> doInteg;
 
-        auto doIntegImpl = [&](const SymExpr& e, int depth) -> std::optional<SymExpr> {
-            if (depth > SymConfig::maxDepth / 3) return std::nullopt;
+        int baseVarDepth = getVarDepth(expr, var);
+        int baseTransWeight = getTranscendentalWeight(expr, var);
+
+        auto doIntegImpl = [&](const SymExpr& e, int current_depth) -> std::optional<SymExpr> {
+            debugPrint(current_depth, "Entering doIntegImpl for: " + e.toString() + " d" + var);
+            if (current_depth > SymConfig::maxDepth) {
+                debugPrint(current_depth, "Max depth exceeded, aborting.");
+                return std::nullopt;
+            }
+
+            // 积分变量下沉检测 (Variable Submergence Check)
+            int currentVarDepth = getVarDepth(e, var);
+            if (currentVarDepth > baseVarDepth + 5) {
+                debugPrint(current_depth, "Variable submergence check failed, aborting.");
+                return std::nullopt;
+            }
+
+            // 超越函数嵌套惩罚 (Transcendental Extension Penalty)
+            int currentTransWeight = getTranscendentalWeight(e, var);
+            if (currentTransWeight > baseTransWeight + 20) {
+                debugPrint(current_depth, "Transcendental extension penalty exceeded, aborting.");
+                return std::nullopt;
+            }
+
+            // 绝对体积限制 (Absolute AST Size Limit)
+            if (getAstNodeCount(e) > 300) {
+                debugPrint(current_depth, "AST size too large (" + std::to_string(getAstNodeCount(e)) + "), aborting.");
+                return std::nullopt;
+            }
+
+            // 积分路径污染机制的黑盒锁 (Integration Path Taint Lock)
+            if (isTainted(e)) {
+                debugPrint(current_depth, "Taint lock triggered: expression contains algebraic extensions from lower engines.");
+                return std::nullopt;
+            }
 
             if (!containsVar(e.ptr, var)) {
                 return e * x; // ∫ c dx = c * x
@@ -518,7 +662,7 @@ namespace jc {
                 auto add = std::static_pointer_cast<SymAdd>(e.ptr);
                 SymExpr res(BigInt(0));
                 for (auto& arg : add->args) {
-                    auto partRes = doInteg(SymExpr(arg), depth);
+                    auto partRes = doInteg(SymExpr(arg), current_depth);
                     if (!partRes) return std::nullopt;
                     res = res + *partRes;
                 }
@@ -569,6 +713,7 @@ namespace jc {
             }
 
             if (matched) {
+                debugPrint(current_depth, "Matched static rule.");
                 return coeff * integratedPart;
             }
 
@@ -646,8 +791,9 @@ namespace jc {
                 
                 SymExpr f_u = replaceNode(varPart);
                 if (!containsVar(f_u.ptr, var)) {
+                    debugPrint(current_depth, "Trying Linear Substitution with u = " + sub_u.toString());
                     SymExpr f_var = subs(f_u, u_var, SymExpr::makeVar(var));
-                    if (auto int_var = doInteg(simplify(expand(f_var / sub_a, SymConfig::maxExpandTerms)), depth + 1)) {
+                    if (auto int_var = doInteg(simplify(expand(f_var / sub_a, SymConfig::maxExpandTerms)), current_depth + 1)) {
                         SymExpr res = subs(*int_var, var, sub_u);
                         return coeff * res;
                     }
@@ -768,8 +914,9 @@ namespace jc {
                     }
 
                     if (!containsVar(rem_u.ptr, var)) {
+                        debugPrint(current_depth, "Trying Generalized Substitution with u = " + u.toString());
                         SymExpr f_var = subs(rem_u, u_var, SymExpr::makeVar(var));
-                        if (auto int_var = doInteg(simplify(expand(f_var, SymConfig::maxExpandTerms)), depth + 1)) {
+                        if (auto int_var = doInteg(simplify(expand(f_var, SymConfig::maxExpandTerms)), current_depth + 1)) {
                             SymExpr res = subs(*int_var, var, u);
                             return coeff * res;
                         }
@@ -787,37 +934,41 @@ namespace jc {
                         SymExpr arg(func->args[0]);
                         if (func->name == "sin") {
                             if (n % 2 == 0) {
+                                debugPrint(current_depth, "Trying Trig Power Reduction (sin even)");
                                 SymExpr _C = SymExpr::makeVar("_C");
                                 SymExpr halfAngle = (SymExpr(BigInt(1)) - _C) / SymExpr(BigInt(2));
                                 SymExpr expanded = expand(halfAngle ^ SymExpr(BigInt(n / 2)), SymConfig::maxExpandTerms);
                                 SymExpr cos2x = SymExpr(std::make_shared<SymFunc>("cos", std::vector<std::shared_ptr<SymNode>>{(SymExpr(BigInt(2)) * arg).ptr}));
                                 expanded = subs(expanded, "_C", cos2x);
-                                if (auto res = doInteg(expanded, depth + 1)) return coeff * (*res);
+                                if (auto res = doInteg(expanded, current_depth + 1)) return coeff * (*res);
                             } else {
+                                debugPrint(current_depth, "Trying Trig Power Reduction (sin odd)");
                                 SymExpr _C = SymExpr::makeVar("_C");
                                 SymExpr cosSq = SymExpr(BigInt(1)) - (_C ^ SymExpr(BigInt(2)));
                                 SymExpr rem = SymExpr(std::make_shared<SymFunc>("sin", std::vector<std::shared_ptr<SymNode>>{arg.ptr})) * (cosSq ^ SymExpr(BigInt((n - 1) / 2)));
                                 SymExpr expanded = expand(rem, SymConfig::maxExpandTerms);
                                 SymExpr cosx = SymExpr(std::make_shared<SymFunc>("cos", std::vector<std::shared_ptr<SymNode>>{arg.ptr}));
                                 expanded = subs(expanded, "_C", cosx);
-                                if (auto res = doInteg(expanded, depth + 1)) return coeff * (*res);
+                                if (auto res = doInteg(expanded, current_depth + 1)) return coeff * (*res);
                             }
                         } else if (func->name == "cos") {
                             if (n % 2 == 0) {
+                                debugPrint(current_depth, "Trying Trig Power Reduction (cos even)");
                                 SymExpr _C = SymExpr::makeVar("_C");
                                 SymExpr halfAngle = (SymExpr(BigInt(1)) + _C) / SymExpr(BigInt(2));
                                 SymExpr expanded = expand(halfAngle ^ SymExpr(BigInt(n / 2)), SymConfig::maxExpandTerms);
                                 SymExpr cos2x = SymExpr(std::make_shared<SymFunc>("cos", std::vector<std::shared_ptr<SymNode>>{(SymExpr(BigInt(2)) * arg).ptr}));
                                 expanded = subs(expanded, "_C", cos2x);
-                                if (auto res = doInteg(expanded, depth + 1)) return coeff * (*res);
+                                if (auto res = doInteg(expanded, current_depth + 1)) return coeff * (*res);
                             } else {
+                                debugPrint(current_depth, "Trying Trig Power Reduction (cos odd)");
                                 SymExpr _S = SymExpr::makeVar("_S");
                                 SymExpr sinSq = SymExpr(BigInt(1)) - (_S ^ SymExpr(BigInt(2)));
                                 SymExpr rem = SymExpr(std::make_shared<SymFunc>("cos", std::vector<std::shared_ptr<SymNode>>{arg.ptr})) * (sinSq ^ SymExpr(BigInt((n - 1) / 2)));
                                 SymExpr expanded = expand(rem, SymConfig::maxExpandTerms);
                                 SymExpr sinx = SymExpr(std::make_shared<SymFunc>("sin", std::vector<std::shared_ptr<SymNode>>{arg.ptr}));
                                 expanded = subs(expanded, "_S", sinx);
-                                if (auto res = doInteg(expanded, depth + 1)) return coeff * (*res);
+                                if (auto res = doInteg(expanded, current_depth + 1)) return coeff * (*res);
                             }
                         }
                     }
@@ -907,9 +1058,10 @@ namespace jc {
                     }
                     
                     if (valid) {
+                        debugPrint(current_depth, "Trying Trig Substitution with x = " + x_sub.toString());
                         SymExpr subbed = simplifyCore(subs(varPart, var, x_sub) * dx_sub);
                         SymExpr subbed_var = subs(subbed, "_t", SymExpr::makeVar(var));
-                        if (auto int_var = doInteg(trigsimp(subbed_var), depth + 1)) {
+                        if (auto int_var = doInteg(trigsimp(subbed_var), current_depth + 1)) {
                             SymExpr res = subs(*int_var, var, t_back);
                             return coeff * res;
                         }
@@ -931,6 +1083,7 @@ namespace jc {
                                 if (!coeffs[i].isZero()) { isBinomial = false; break; }
                             }
                             if (isBinomial && !coeffs[n].isZero() && !coeffs[0].isZero()) {
+                                debugPrint(current_depth, "Trying Binomial Fraction Integration");
                                 SymExpr A = coeffs[n];
                                 SymExpr B = coeffs[0];
                                 
@@ -1033,20 +1186,64 @@ namespace jc {
             bool isFraction = !den.isOne();
 
             if (isFraction && containsVar(den.ptr, var)) {
-                SymExpr num_expanded = simplifyCore(expand(num, SymConfig::maxExpandTerms));
-                SymExpr den_expanded = simplifyCore(expand(den, SymConfig::maxExpandTerms));
+                // 参数化常数提取与隔离黑盒 (Symbolic Constant Blackboxing)
+                std::map<std::string, SymExpr> constDict;
+                int constCounter = 0;
+                std::function<SymExpr(const SymExpr&)> blackboxConstants = [&](const SymExpr& node) -> SymExpr {
+                    if (!node.ptr) return node;
+                    if (!containsVar(node.ptr, var)) {
+                        if (getAstNodeCount(node) > 5) {
+                            std::string cName = "_C_box" + std::to_string(++constCounter);
+                            constDict[cName] = node;
+                            return SymExpr::makeVar(cName);
+                        }
+                        return node;
+                    }
+                    switch (node.ptr->getType()) {
+                        case SymType::ADD: {
+                            SymExpr res(BigInt(0));
+                            for (auto& arg : std::static_pointer_cast<SymAdd>(node.ptr)->args) res = res + blackboxConstants(SymExpr(arg));
+                            return res;
+                        }
+                        case SymType::MUL: {
+                            SymExpr res(BigInt(1));
+                            for (auto& arg : std::static_pointer_cast<SymMul>(node.ptr)->args) res = res * blackboxConstants(SymExpr(arg));
+                            return res;
+                        }
+                        case SymType::POW: {
+                            auto p = std::static_pointer_cast<SymPow>(node.ptr);
+                            return blackboxConstants(SymExpr(p->base)) ^ blackboxConstants(SymExpr(p->exp));
+                        }
+                        case SymType::FUNC: {
+                            auto f = std::static_pointer_cast<SymFunc>(node.ptr);
+                            std::vector<std::shared_ptr<SymNode>> nArgs;
+                            for (auto& arg : f->args) nArgs.push_back(blackboxConstants(SymExpr(arg)).ptr);
+                            return SymExpr(std::make_shared<SymFunc>(f->name, std::move(nArgs)));
+                        }
+                        default: return node;
+                    }
+                };
+
+                SymExpr boxed_num = blackboxConstants(num);
+                SymExpr boxed_den = blackboxConstants(den);
+
+                SymExpr num_expanded = simplifyCore(expand(boxed_num, SymConfig::maxExpandTerms));
+                SymExpr den_expanded = simplifyCore(expand(boxed_den, SymConfig::maxExpandTerms));
                 
                 int degN = getDegree(num_expanded, var);
                 int degD = getDegree(den_expanded, var);
                 
                 // ★ 只有当分子和分母都是多项式时，才使用有理分式积分引擎
                 if (degD >= 0 && (degN >= 0 || !containsVar(num_expanded.ptr, var))) {
+                    debugPrint(current_depth, "Trying Rational Function Integration");
                     try {
                         auto [ratPart, polyPart, cA, cD] = hermiteReduce(num_expanded, den_expanded, var);
                         SymExpr res = ratPart;
                         
                         if (!polyPart.isZero()) {
-                            if (auto polyInt = doInteg(polyPart, depth)) {
+                            SymExpr unboxed_poly = polyPart;
+                            for (const auto& kv : constDict) unboxed_poly = subs(unboxed_poly, kv.first, kv.second);
+                            if (auto polyInt = doInteg(unboxed_poly, current_depth)) {
                                 res = res + *polyInt;
                             } else {
                                 throw std::runtime_error("polyPart integration failed");
@@ -1055,6 +1252,10 @@ namespace jc {
                         
                         if (!cA.isZero()) {
                             res = res + rothsteinTrager(cA, cD, var);
+                        }
+                        
+                        for (const auto& kv : constDict) {
+                            res = subs(res, kv.first, kv.second);
                         }
                         
                         return coeff * res;
@@ -1145,6 +1346,7 @@ namespace jc {
                 };
 
                 try {
+                    debugPrint(current_depth, "Trying Weierstrass Substitution");
                     SymExpr subbed = applyWeierstrass(varPart.ptr) * dt_sub;
                     auto [num_t, den_t] = getFraction(subbed);
                     
@@ -1156,7 +1358,7 @@ namespace jc {
                     
                     SymExpr rational_t = simplifyCore(expand(num_t / den_t, SymConfig::maxExpandTerms));
                     SymExpr rational_var = subs(rational_t, t_var, SymExpr::makeVar(var));
-                    if (auto opt_integrated_var = doInteg(rational_var, depth + 1)) {
+                    if (auto opt_integrated_var = doInteg(rational_var, current_depth + 1)) {
                         SymExpr back_sub = SymExpr(std::make_shared<SymFunc>("tan", std::vector<std::shared_ptr<SymNode>>{(SymExpr::makeVar(var) / SymExpr(BigInt(2))).ptr}));
                         return coeff * simplifyCore(subs(*opt_integrated_var, var, back_sub));
                     }
@@ -1227,10 +1429,20 @@ namespace jc {
                 };
 
                 auto tryPartsWith = [&](SymExpr u, SymExpr dv) -> std::optional<SymExpr> {
+                    debugPrint(current_depth, "Trying Integration by Parts with u = " + u.toString() + ", dv = " + dv.toString());
                     SymExpr du = simplifyCore(diff(u, var));
-                    if (du.isZero()) return std::nullopt; // 剪枝：常数求导为0，分部积分无意义
+                    if (du.isZero()) {
+                        debugPrint(current_depth, "IBP aborted: du is zero.");
+                        return std::nullopt; // 剪枝：常数求导为0，分部积分无意义
+                    }
 
-                    auto opt_v = doInteg(dv, depth + 1);
+                    // 导数膨胀率探测 (Derivative Swell Metric)
+                    if (getAstNodeCount(du) >= 2.5 * getAstNodeCount(u)) {
+                        debugPrint(current_depth, "IBP aborted: Derivative swell detected.");
+                        return std::nullopt;
+                    }
+
+                    auto opt_v = doInteg(dv, current_depth + 1);
                     if (!opt_v) return std::nullopt;
                     SymExpr v = *opt_v;
 
@@ -1264,13 +1476,22 @@ namespace jc {
                         });
                         
                         auto candidates2 = getIbpCandidates(factors2, indices2);
+                        int ibp2_attempts = 0;
                         for (const auto& cand2 : candidates2) {
+                            if (current_depth > SymConfig::maxDepth / 2 && ibp2_attempts > 0) {
+                                debugPrint(current_depth, "IBP 2-step aborted: Despair depth reached, pruning remaining combinations.");
+                                break;
+                            }
+                            ibp2_attempts++;
                             SymExpr u2_inner = cand2.first;
                             SymExpr dv2_inner = cand2.second;
                             SymExpr du2_inner = simplifyCore(diff(u2_inner, var));
                             if (du2_inner.isZero()) continue;
 
-                            auto opt_v2_inner = doInteg(dv2_inner, depth + 2);
+                            // 导数膨胀率探测 (Derivative Swell Metric)
+                            if (getAstNodeCount(du2_inner) >= 2.5 * getAstNodeCount(u2_inner)) continue;
+
+                            auto opt_v2_inner = doInteg(dv2_inner, current_depth + 2);
                             if (opt_v2_inner) {
                                 SymExpr v2_inner = *opt_v2_inner;
                                 SymExpr v2_du2 = simplifyCore(v2_inner * du2_inner);
@@ -1287,42 +1508,49 @@ namespace jc {
                         }
                     }
 
-                    auto opt_int_v_du = doInteg(v_du, depth + 1);
+                    auto opt_int_v_du = doInteg(v_du, current_depth + 1);
                     if (!opt_int_v_du) return std::nullopt;
                     return coeff * simplifyCore(u * v - *opt_int_v_du);
                 };
 
                 auto candidates = getIbpCandidates(factors, indices);
+                int ibp_attempts = 0;
                 for (const auto& cand : candidates) {
+                    if (current_depth > SymConfig::maxDepth / 2 && ibp_attempts > 0) {
+                        debugPrint(current_depth, "IBP aborted: Despair depth reached, pruning remaining combinations.");
+                        break;
+                    }
+                    ibp_attempts++;
                     if (auto res = tryPartsWith(cand.first, cand.second)) return *res;
                 }
             }
 
             // 启发式方法全部失效，移交 Risch 算法处理
+            debugPrint(current_depth, "All heuristics failed, falling back to Risch Algorithm");
             try {
-                return coeff * rischIntegrate(varPart, var);
+                return coeff * rischIntegrate(varPart, var, current_depth + 1);
             } catch (...) {
                 // 如果是在递归深层，静默返回 nullopt 让上层继续尝试其他分支
-                // 如果是在最外层 (depth == 0)，则抛出异常以保留详细的 Risch 失败信息
-                if (depth == 0) throw;
+                // 如果是在最外层 (current_depth == start_depth)，则抛出异常以保留详细的 Risch 失败信息
+                if (current_depth == start_depth) throw;
                 return std::nullopt;
             }
         };
 
-        doInteg = [&](const SymExpr& e, int depth) -> std::optional<SymExpr> {
+        doInteg = [&](const SymExpr& e, int current_depth) -> std::optional<SymExpr> {
             if (!e.ptr) return std::nullopt;
             std::string sig = e.ptr->getSignature();
             auto it = integCache.find(sig);
             if (it != integCache.end()) return it->second;
             
-            auto res = doIntegImpl(e, depth);
+            auto res = doIntegImpl(e, current_depth);
             integCache[sig] = res;
             return res;
         };
 
         auto tryInteg = [&]() -> SymExpr {
             try {
-                if (auto res = doInteg(expr, 0)) {
+                if (auto res = doInteg(expr, start_depth)) {
                     return simplify(*res);
                 }
                 throw std::runtime_error("Calculus Error: Function integration not supported or complex power.");
@@ -1331,10 +1559,10 @@ namespace jc {
                 SymExpr expanded;
                 try { expanded = expand(expr, SymConfig::maxExpandTerms * 2); } catch (...) { expanded = expr; }
                 
-                // 严格防死锁：只有当展开后的表达式确实发生了变化，才允许重置 depth=0 再次尝试
+                // 严格防死锁：只有当展开后的表达式确实发生了变化，才允许重置 depth 再次尝试
                 if (expanded != expr) {
                     try {
-                        if (auto res2 = doInteg(expanded, 0)) {
+                        if (auto res2 = doInteg(expanded, start_depth)) {
                             return simplify(*res2);
                         }
                     } catch (const std::runtime_error& e2) {

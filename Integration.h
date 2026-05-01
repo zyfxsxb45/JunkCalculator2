@@ -5,8 +5,8 @@
 #include <string>
 
 namespace jc {
-    SymExpr integrate(const SymExpr& expr, const std::string& var); // 符号积分
-    SymExpr rischIntegrate(const SymExpr& expr, const std::string& var); // Risch 算法入口
+    SymExpr integrate(const SymExpr& expr, const std::string& var, int depth = 0); // 符号积分
+    SymExpr rischIntegrate(const SymExpr& expr, const std::string& var, int depth = 0); // Risch 算法入口
 }
 
 #endif // JC2_INTEGRATION_H

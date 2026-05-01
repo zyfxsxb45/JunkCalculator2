@@ -979,6 +979,99 @@ namespace jc {
     }
 
     // =================================================================
+    // 变量深度探测器 (Variable Submergence Check)
+    // =================================================================
+    static int calcVarDepth(const std::shared_ptr<SymNode>& node, const std::string& var, int currentDepth) {
+        if (!node) return -1;
+        switch (node->getType()) {
+            case SymType::NUM: return -1;
+            case SymType::VAR: 
+                if (std::static_pointer_cast<SymVar>(node)->name == var) return currentDepth;
+                return -1;
+            case SymType::ADD: {
+                int maxD = -1;
+                for (auto& arg : std::static_pointer_cast<SymAdd>(node)->args) {
+                    maxD = std::max(maxD, calcVarDepth(arg, var, currentDepth + 1));
+                }
+                return maxD;
+            }
+            case SymType::MUL: {
+                int maxD = -1;
+                for (auto& arg : std::static_pointer_cast<SymMul>(node)->args) {
+                    maxD = std::max(maxD, calcVarDepth(arg, var, currentDepth + 1));
+                }
+                return maxD;
+            }
+            case SymType::POW: {
+                auto p = std::static_pointer_cast<SymPow>(node);
+                return std::max(calcVarDepth(p->base, var, currentDepth + 1), calcVarDepth(p->exp, var, currentDepth + 1));
+            }
+            case SymType::FUNC: {
+                int maxD = -1;
+                for (auto& arg : std::static_pointer_cast<SymFunc>(node)->args) {
+                    maxD = std::max(maxD, calcVarDepth(arg, var, currentDepth + 1));
+                }
+                return maxD;
+            }
+        }
+        return -1;
+    }
+
+    int getVarDepth(const SymExpr& expr, const std::string& var) {
+        return calcVarDepth(expr.ptr, var, 0);
+    }
+
+    // =================================================================
+    // 超越函数嵌套权重 (Transcendental Extension Penalty)
+    // =================================================================
+    static int calcTransWeight(const std::shared_ptr<SymNode>& node, const std::string& var, int currentNesting) {
+        if (!node) return 0;
+        if (!containsVar(node, var)) return 0;
+
+        switch (node->getType()) {
+            case SymType::NUM:
+            case SymType::VAR:
+                return 0;
+            case SymType::ADD: {
+                int w = 0;
+                for (auto& arg : std::static_pointer_cast<SymAdd>(node)->args) w += calcTransWeight(arg, var, currentNesting);
+                return w;
+            }
+            case SymType::MUL: {
+                int w = 0;
+                for (auto& arg : std::static_pointer_cast<SymMul>(node)->args) w += calcTransWeight(arg, var, currentNesting);
+                return w;
+            }
+            case SymType::POW: {
+                auto p = std::static_pointer_cast<SymPow>(node);
+                int w = 0;
+                if (containsVar(p->exp, var)) {
+                    w += (currentNesting + 1) * 2;
+                    w += calcTransWeight(p->base, var, currentNesting + 1);
+                    w += calcTransWeight(p->exp, var, currentNesting + 1);
+                } else {
+                    w += calcTransWeight(p->base, var, currentNesting);
+                    w += calcTransWeight(p->exp, var, currentNesting);
+                }
+                return w;
+            }
+            case SymType::FUNC: {
+                auto f = std::static_pointer_cast<SymFunc>(node);
+                int w = (currentNesting + 1) * 2;
+                for (auto& arg : f->args) {
+                    w += calcTransWeight(arg, var, currentNesting + 1);
+                }
+                return w;
+            }
+        }
+        return 0;
+    }
+
+    int getTranscendentalWeight(const SymExpr& expr, const std::string& var) {
+        return calcTransWeight(expr.ptr, var, 0);
+    }
+
+    // =================================================================
     // 代数重写引擎 (Pattern Matching Engine)
     // =================================================================
     

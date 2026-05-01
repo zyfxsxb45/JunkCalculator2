@@ -131,6 +131,8 @@ namespace jc {
     SymExpr diff(const SymExpr& expr, const std::string& var);
 
     int getAstNodeCount(const SymExpr& expr);
+    int getVarDepth(const SymExpr& expr, const std::string& var);
+    int getTranscendentalWeight(const SymExpr& expr, const std::string& var);
     SymExpr contract(const SymExpr& expr);
     SymExpr simplify(const SymExpr& expr);
     SymExpr full_simplify(const SymExpr& expr);
