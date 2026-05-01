@@ -1,6 +1,7 @@
 #include "Integration.h"
 #include "SymRules.h"
 #include "Factorization.h"
+#include "Groebner.h"
 #include <stdexcept>
 #include <algorithm>
 #include <numeric>
@@ -104,6 +105,23 @@ namespace jc {
             return SymExpr(BigInt(0));
         }
         
+        // 使用 Gröbner 基在 Q[x, _z] 上计算通用的 GCD (避免代数数运算失效)
+        std::vector<MultiPoly> generators;
+        generators.push_back(MultiPoly(P));
+        generators.push_back(MultiPoly(D));
+        generators.push_back(MultiPoly(R_z));
+        auto gb = computeGroebnerBasis(generators);
+        
+        SymExpr universal_gcd(BigInt(1));
+        for (const auto& poly : gb) {
+            SymExpr p_expr = poly.toSymExpr();
+            if (containsVar(p_expr.ptr, var)) {
+                if (universal_gcd.isOne() || getDegree(p_expr, var) < getDegree(universal_gcd, var)) {
+                    universal_gcd = p_expr;
+                }
+            }
+        }
+
         SymExpr result(BigInt(0));
         for (const auto& root : roots) {
             SymExpr P_i = simplifyCore(expand(subs(P, "_z", root), SymConfig::maxExpandTerms));
@@ -111,7 +129,13 @@ namespace jc {
             if (getDegree(P_i, var) == 1) {
                 v_i = P_i; // 降次短路：一次多项式必定是其自身的公因式，跳过易因代数数失效的 polyGCD
             } else {
-                v_i = polyGCD(P_i, D, var);
+                // 优先使用 Gröbner 基求得的通用 GCD 代入，若失效则回退到 polyGCD
+                SymExpr gb_vi = simplifyCore(expand(subs(universal_gcd, "_z", root), SymConfig::maxExpandTerms));
+                if (!gb_vi.isOne() && !gb_vi.isZero() && containsVar(gb_vi.ptr, var)) {
+                    v_i = gb_vi;
+                } else {
+                    v_i = polyGCD(P_i, D, var);
+                }
             }
             
             // 首一化 v_i，保持对数内部整洁

@@ -1,4 +1,5 @@
 #include "Factorization.h"
+#include "Tolerance.h"
 #include <vector>
 #include <set>
 #include <algorithm>
@@ -318,7 +319,7 @@ namespace jc {
                         intCoeffs.push_back(std::get<Fraction>(numVal).getNum());
                     } else if (std::holds_alternative<double>(numVal)) {
                         double d = std::get<double>(numVal);
-                        if (std::floor(d) == d) intCoeffs.push_back(BigInt(static_cast<int64_t>(d)));
+                        if (Tol::isEq(d, std::round(d))) intCoeffs.push_back(BigInt(static_cast<int64_t>(std::round(d))));
                         else { allInt = false; break; }
                     } else {
                         allInt = false; break;

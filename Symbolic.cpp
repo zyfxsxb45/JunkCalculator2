@@ -2,6 +2,7 @@
 #include "Symbolic.h"
 #include "Factorization.h"
 #include "Value.h"          // ★ 新增：统一走 Value 运算
+#include "Tolerance.h"
 #include "SymEval.h"
 #include "SymRules.h"
 #include <sstream>
@@ -111,8 +112,8 @@ namespace jc {
     static std::pair<bool, int> casToInt(const CASVal& v) {
         try {
             double d = casValToValue(v).asDouble();
-            if (d == std::floor(d) && std::abs(d) <= 1000)
-                return { true, static_cast<int>(d) };
+            if (Tol::isEq(d, std::round(d)) && std::abs(d) <= 1000)
+                return { true, static_cast<int>(std::round(d)) };
         }
         catch (...) {}
         return { false, 0 };
@@ -338,10 +339,10 @@ namespace jc {
                 }
             }
             else if constexpr (std::is_same_v<T, double>) {
-                if (std::isfinite(arg) && arg == std::floor(arg)) {
+                if (std::isfinite(arg) && Tol::isEq(arg, std::round(arg))) {
                     // C++ 浮点转整防御，最多精准到 53 位 (±9e15)
                     if (std::abs(arg) < 9e15) {
-                        return { true, static_cast<int64_t>(arg) };
+                        return { true, static_cast<int64_t>(std::round(arg)) };
                     }
                 }
             }
@@ -430,15 +431,24 @@ namespace jc {
     SymExpr::SymExpr(const BigInt& v) : ptr(intern(std::make_shared<SymNum>(v))) {}
     SymExpr::SymExpr(const Fraction& v) : ptr(intern(std::make_shared<SymNum>(v))) {}
     SymExpr::SymExpr(const Complex& v) {
+        // 终极防御：高斯整数吸附 (Gaussian Integer Snapping)
+        // 防止任何带有微小浮点误差的复数 (如 1.0 + 6.32e-16i) 污染纯符号 AST
+        auto makeExactIfPossible = [](double d) -> SymExpr {
+            if (Tol::isEq(d, std::round(d))) {
+                return SymExpr(BigInt(static_cast<int64_t>(std::round(d))));
+            }
+            return SymExpr(d);
+        };
+
         if (Tol::isEq(v.imag, 0.0)) {
-            ptr = intern(std::make_shared<SymNum>(v.real));
+            ptr = makeExactIfPossible(v.real).ptr;
         } else if (Tol::isEq(v.real, 0.0)) {
-            SymExpr imagPart(v.imag);
+            SymExpr imagPart = makeExactIfPossible(v.imag);
             SymExpr iVar = SymExpr::makeVar("i");
             ptr = intern((imagPart * iVar).ptr);
         } else {
-            SymExpr realPart(v.real);
-            SymExpr imagPart(v.imag);
+            SymExpr realPart = makeExactIfPossible(v.real);
+            SymExpr imagPart = makeExactIfPossible(v.imag);
             SymExpr iVar = SymExpr::makeVar("i");
             ptr = intern((realPart + imagPart * iVar).ptr);
         }
@@ -771,9 +781,19 @@ namespace jc {
                 if (!(a.ptr->getType() == SymType::NUM && b.ptr->getType() == SymType::NUM)) {
                     try {
                         Value result = aVal ^ bVal;
-                        // 如果结果是精确的复数或整数/分数，则接受折叠
-                        if (result.isComplex() || std::holds_alternative<BigInt>(result.data) || std::holds_alternative<Fraction>(result.data)) {
+                        // 如果结果是精确的整数/分数，则接受折叠 (复数底层是 double，会引入浮点误差，拒绝折叠)
+                        if (std::holds_alternative<BigInt>(result.data) || std::holds_alternative<Fraction>(result.data)) {
                             return result.asSymbolic();
+                        } else if (result.isComplex()) {
+                            Complex c = result.asComplex();
+                            // 仅当复数是精确的高斯整数时才折叠，过滤掉浮点噪音
+                            if (Tol::isEq(c.real, std::round(c.real)) && Tol::isEq(c.imag, std::round(c.imag))) {
+                                SymExpr res(BigInt(static_cast<int64_t>(std::round(c.real))));
+                                if (std::round(c.imag) != 0.0) {
+                                    res = res + SymExpr(BigInt(static_cast<int64_t>(std::round(c.imag)))) * SymExpr::makeVar("i");
+                                }
+                                return res;
+                            }
                         }
                     } catch (...) {}
                 }
