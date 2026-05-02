@@ -629,14 +629,19 @@ namespace jc {
                         auto coeffs_intAn = extractCoeffs(intAn_t, topExt.name);
                         
                         SymExpr c(BigInt(0));
-                        SymExpr B_n = intAn_t;
-                        if (coeffs_intAn.size() > 1) {
+                        SymExpr B_n(BigInt(0));
+                        if (coeffs_intAn.empty()) {
+                            if (!intAn_t.isZero()) throw std::runtime_error("Non-elementary integral.");
+                        } else if (coeffs_intAn.size() > 1) {
                             c = simplifyCore(coeffs_intAn[1] / SymExpr(BigInt(n + 1)));
                             B_n = coeffs_intAn[0];
                             if (coeffs_intAn.size() > 2) {
                                 throw std::runtime_error("Non-elementary integral.");
                             }
-                        } else if (coeffs_intAn.size() == 1) {
+                            if (containsVar(c.ptr, var)) {
+                                throw std::runtime_error("Non-elementary integral: residue is not constant.");
+                            }
+                        } else {
                             B_n = coeffs_intAn[0];
                         }
                         
@@ -651,10 +656,23 @@ namespace jc {
                             }
                             SymExpr int_i = integrate(integrand_x, var, depth + 1);
                             SymExpr int_i_t = field.rewrite(trigToExp(int_i));
-                            if (containsVar(int_i_t.ptr, topExt.name)) {
+                            
+                            auto coeffs_int_i = extractCoeffs(int_i_t, topExt.name);
+                            if (coeffs_int_i.empty()) {
+                                if (!int_i_t.isZero()) throw std::runtime_error("Non-elementary integral.");
+                                B[i] = SymExpr(BigInt(0));
+                            } else if (coeffs_int_i.size() > 2) {
                                 throw std::runtime_error("Non-elementary integral.");
+                            } else if (coeffs_int_i.size() == 2) {
+                                SymExpr c_i = coeffs_int_i[1];
+                                if (containsVar(c_i.ptr, var)) {
+                                    throw std::runtime_error("Non-elementary integral: residue is not constant.");
+                                }
+                                B[i + 1] = simplifyCore(B[i + 1] + c_i / SymExpr(BigInt(i + 1)));
+                                B[i] = coeffs_int_i[0];
+                            } else {
+                                B[i] = coeffs_int_i[0];
                             }
-                            B[i] = int_i_t;
                         }
                         
                         SymExpr result(BigInt(0));
