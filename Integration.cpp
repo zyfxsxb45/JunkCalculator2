@@ -1074,7 +1074,6 @@ namespace jc {
         int baseTransWeight = getTranscendentalWeight(expr, var);
 
         auto doIntegImpl = [&](const SymExpr& e, int current_depth) -> std::optional<SymExpr> {
-            std::cout << "[DEBUG] doIntegImpl depth=" << current_depth << " expr=" << e.toString() << std::endl;
             if (current_depth > SymConfig::maxDepth) {
                 return std::nullopt;
             }
@@ -1102,7 +1101,6 @@ namespace jc {
             }
 
             if (!containsVar(e.ptr, var)) {
-                std::cout << "[DEBUG] Constant integration: " << e.toString() << std::endl;
                 return e * x; // ∫ c dx = c * x
             }
 
@@ -1130,10 +1128,8 @@ namespace jc {
             } else {
                 varPart = e;
             }
-            std::cout << "[DEBUG] coeff=" << coeff.toString() << " varPart=" << varPart.toString() << std::endl;
 
             // --- 0. 查表匹配 (Pattern Matching) ---
-            std::cout << "[DEBUG] Trying Pattern Matching..." << std::endl;
             SymExpr integratedPart = varPart;
             bool matched = false;
             for (const auto& rule : rules) {
@@ -1163,12 +1159,10 @@ namespace jc {
             }
 
             if (matched) {
-                std::cout << "[DEBUG] Pattern matched!" << std::endl;
                 return coeff * integratedPart;
             }
 
             // --- 1. 线性换元法 (Linear Substitution) ---
-            std::cout << "[DEBUG] Trying Linear Substitution..." << std::endl;
             auto findLinearArg = [&](const std::shared_ptr<SymNode>& node, SymExpr& out_u, SymExpr& out_a) -> bool {
                 if (!node) return false;
                 if (node->getType() == SymType::FUNC) {
@@ -1251,7 +1245,6 @@ namespace jc {
             }
 
             // --- 1.5 广义换元法 (凑微分法) ---
-            std::cout << "[DEBUG] Trying Generalized Substitution..." << std::endl;
             if (varPart.ptr->getType() == SymType::MUL) {
                 auto mul = std::static_pointer_cast<SymMul>(varPart.ptr);
                 std::vector<SymExpr> candidate_us;
@@ -1375,7 +1368,6 @@ namespace jc {
             }
 
             // --- 1.6 根式整体换元 (Radical Substitution) ---
-            std::cout << "[DEBUG] Trying Radical Substitution..." << std::endl;
             SymExpr radicalBase;
             int radicalN = 0;
             bool foundRadical = false;
@@ -1492,7 +1484,6 @@ namespace jc {
             }
 
             // --- 1.8 三角函数高次幂降幂与拆分 ---
-            std::cout << "[DEBUG] Trying Trig Power Reduction..." << std::endl;
             if (varPart.ptr->getType() == SymType::POW) {
                 auto powNode = std::static_pointer_cast<SymPow>(varPart.ptr);
                 if (powNode->base->getType() == SymType::FUNC && powNode->exp->getType() == SymType::NUM) {
@@ -1540,7 +1531,6 @@ namespace jc {
             }
 
             // --- 1.9 二次根式三角换元 (Trigonometric Substitution) ---
-            std::cout << "[DEBUG] Trying Trig Substitution..." << std::endl;
             if (var != "_t" && var != "_weierstrass_t") {
                 SymExpr quadBase;
                 bool foundQuad = false;
@@ -1633,8 +1623,102 @@ namespace jc {
                 }
             }
 
+            // --- 1.94 双二次分式积分 (Biquadratic Fraction) ---
+            if (varPart.ptr->getType() == SymType::MUL || varPart.ptr->getType() == SymType::POW) {
+                SymExpr bqBase;
+                int bqM = 0;
+                bool isBq = false;
+                
+                if (varPart.ptr->getType() == SymType::POW) {
+                    auto powNode = std::static_pointer_cast<SymPow>(varPart.ptr);
+                    if (powNode->exp->getType() == SymType::NUM) {
+                        auto [isIntExp, expVal] = extractExactInt(std::static_pointer_cast<SymNum>(powNode->exp)->value);
+                        if (isIntExp && expVal == -1) {
+                            bqBase = SymExpr(powNode->base);
+                            bqM = 0;
+                            isBq = true;
+                        }
+                    }
+                } else if (varPart.ptr->getType() == SymType::MUL) {
+                    auto mul = std::static_pointer_cast<SymMul>(varPart.ptr);
+                    if (mul->args.size() == 2) {
+                        SymExpr arg1(mul->args[0]);
+                        SymExpr arg2(mul->args[1]);
+                        auto checkBq = [&](const SymExpr& p1, const SymExpr& p2) {
+                            if (p2.ptr->getType() == SymType::POW) {
+                                auto powNode = std::static_pointer_cast<SymPow>(p2.ptr);
+                                if (powNode->exp->getType() == SymType::NUM) {
+                                    auto [isIntExp, expVal] = extractExactInt(std::static_pointer_cast<SymNum>(powNode->exp)->value);
+                                    if (isIntExp && expVal == -1) {
+                                        if (p1.ptr->getType() == SymType::POW) {
+                                            auto p1Pow = std::static_pointer_cast<SymPow>(p1.ptr);
+                                            if (p1Pow->base->getType() == SymType::VAR && std::static_pointer_cast<SymVar>(p1Pow->base)->name == var) {
+                                                if (p1Pow->exp->getType() == SymType::NUM) {
+                                                    auto [isMInt, mVal] = extractExactInt(std::static_pointer_cast<SymNum>(p1Pow->exp)->value);
+                                                    if (isMInt && (mVal == 2)) {
+                                                        bqBase = SymExpr(powNode->base);
+                                                        bqM = 2;
+                                                        isBq = true;
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        };
+                        checkBq(arg1, arg2);
+                        if (!isBq) checkBq(arg2, arg1);
+                    }
+                }
+
+                if (isBq) {
+                    auto coeffs = extractCoeffs(bqBase, var);
+                    if (coeffs.size() == 5 && !coeffs[4].isZero() && coeffs[3].isZero() && coeffs[2].isZero() && coeffs[1].isZero() && !coeffs[0].isZero()) {
+                        SymExpr A = coeffs[4];
+                        SymExpr B = coeffs[0];
+                        
+                        auto isPos = [](const SymExpr& e) {
+                            if (e.ptr->getType() == SymType::NUM) return !isCasNegative(std::static_pointer_cast<SymNum>(e.ptr)->value) && !e.isZero();
+                            return false;
+                        };
+                        
+                        if (isPos(A) && isPos(B)) {
+                            SymExpr C = simplifyCore((B / A) ^ SymExpr(Fraction(1, 2)));
+                            SymExpr sqrt2C = simplifyCore((SymExpr(BigInt(2)) * C) ^ SymExpr(Fraction(1, 2)));
+                            SymExpr sqrtC_half = simplifyCore((C / SymExpr(BigInt(2))) ^ SymExpr(Fraction(1, 2)));
+                            
+                            SymExpr x_sym = SymExpr::makeVar(var);
+                            SymExpr x2 = x_sym * x_sym;
+                            
+                            SymExpr log_term1 = simplifyCore(x2 - sqrt2C * x_sym + C);
+                            SymExpr log_term2 = simplifyCore(x2 + sqrt2C * x_sym + C);
+                            
+                            SymExpr atan_arg1 = simplifyCore((x_sym - sqrtC_half) / sqrtC_half);
+                            SymExpr atan_arg2 = simplifyCore((x_sym + sqrtC_half) / sqrtC_half);
+                            
+                            SymExpr atan1(std::make_shared<SymFunc>("atan", std::vector<std::shared_ptr<SymNode>>{atan_arg1.ptr}));
+                            SymExpr atan2(std::make_shared<SymFunc>("atan", std::vector<std::shared_ptr<SymNode>>{atan_arg2.ptr}));
+                            SymExpr log1(std::make_shared<SymFunc>("log", std::vector<std::shared_ptr<SymNode>>{log_term1.ptr}));
+                            SymExpr log2(std::make_shared<SymFunc>("log", std::vector<std::shared_ptr<SymNode>>{log_term2.ptr}));
+                            
+                            if (bqM == 2) {
+                                SymExpr part1 = simplifyCore(SymExpr(BigInt(1)) / (SymExpr(BigInt(4)) * A * sqrt2C));
+                                SymExpr part2 = simplifyCore(SymExpr(BigInt(1)) / (SymExpr(BigInt(2)) * A * sqrt2C));
+                                SymExpr res = part1 * (log1 - log2) + part2 * (atan1 + atan2);
+                                return coeff * res;
+                            } else if (bqM == 0) {
+                                SymExpr part1 = simplifyCore(SymExpr(BigInt(1)) / (SymExpr(BigInt(4)) * A * C * sqrt2C));
+                                SymExpr part2 = simplifyCore(SymExpr(BigInt(1)) / (SymExpr(BigInt(2)) * A * C * sqrt2C));
+                                SymExpr res = part1 * (log2 - log1) + part2 * (atan1 + atan2);
+                                return coeff * res;
+                            }
+                        }
+                    }
+                }
+            }
+
             // --- 1.95 高次二项式分式积分 (Binomial Fraction Integration) ---
-            std::cout << "[DEBUG] Trying Binomial Fraction..." << std::endl;
             if (varPart.ptr->getType() == SymType::POW) {
                 auto powNode = std::static_pointer_cast<SymPow>(varPart.ptr);
                 if (powNode->exp->getType() == SymType::NUM) {
@@ -1746,7 +1830,6 @@ namespace jc {
             }
 
             // --- 1.98 二次配方法启发式 (Inverse Quadratic Integration) ---
-            std::cout << "[DEBUG] Trying Inverse Quadratic..." << std::endl;
             auto [num, den] = getFraction(varPart);
             bool isFraction = !den.isOne();
 
@@ -1783,7 +1866,6 @@ namespace jc {
             }
 
             // --- 2. 有理分式积分引擎 (Rational Function Integration) ---
-            std::cout << "[DEBUG] Trying Rational Function..." << std::endl;
             if (isFraction && containsVar(den.ptr, var)) {
                 // 参数化常数提取与隔离黑盒 (Symbolic Constant Blackboxing)
                 std::map<std::string, SymExpr> constDict;
@@ -1864,7 +1946,6 @@ namespace jc {
             }
 
             // --- 3. 万能公式换元 (Weierstrass Substitution) ---
-            std::cout << "[DEBUG] Trying Weierstrass..." << std::endl;
             bool hasTrig = false;
             std::function<bool(const std::shared_ptr<SymNode>&)> isRationalTrig = [&](const std::shared_ptr<SymNode>& node) -> bool {
                 if (!node) return true;
@@ -1970,7 +2051,6 @@ namespace jc {
             }
 
             // --- 4. 启发式分部积分 (Integration by Parts) ---
-            std::cout << "[DEBUG] Trying IBP..." << std::endl;
             bool tryParts = false;
             std::vector<SymExpr> factors;
             if (varPart.ptr->getType() == SymType::MUL) {
@@ -2167,7 +2247,6 @@ namespace jc {
             }
 
             // 启发式方法全部失效，移交 Risch 算法处理
-            std::cout << "[DEBUG] Trying Risch..." << std::endl;
             try {
                 return coeff * rischIntegrate(varPart, var, current_depth + 1);
             } catch (...) {
@@ -2236,6 +2315,52 @@ namespace jc {
         };
 
         return tryInteg();
+    }
+
+    // =================================================================
+    // 🚀 定积分 (Definite Integral) - 带有多值函数与支割线安全检查
+    // =================================================================
+    static bool hasMultiValuedFuncs(const SymExpr& expr) {
+        if (!expr.ptr) return false;
+        bool found = false;
+        std::function<void(const std::shared_ptr<SymNode>&)> check = [&](const std::shared_ptr<SymNode>& node) {
+            if (!node || found) return;
+            if (node->getType() == SymType::FUNC) {
+                auto func = std::static_pointer_cast<SymFunc>(node);
+                if (func->name == "RootOf" || func->name == "RootSum") {
+                    found = true;
+                    return;
+                }
+            } else if (node->getType() == SymType::VAR) {
+                auto varName = std::static_pointer_cast<SymVar>(node)->name;
+                if (varName == "i" || varName == "I") {
+                    found = true;
+                    return;
+                }
+            }
+            
+            if (node->getType() == SymType::ADD) {
+                for (auto& arg : std::static_pointer_cast<SymAdd>(node)->args) check(arg);
+            } else if (node->getType() == SymType::MUL) {
+                for (auto& arg : std::static_pointer_cast<SymMul>(node)->args) check(arg);
+            } else if (node->getType() == SymType::POW) {
+                auto powNode = std::static_pointer_cast<SymPow>(node);
+                check(powNode->base);
+                check(powNode->exp);
+            } else if (node->getType() == SymType::FUNC) {
+                for (auto& arg : std::static_pointer_cast<SymFunc>(node)->args) check(arg);
+            }
+        };
+        check(expr.ptr);
+        return found;
+    }
+
+    SymExpr defint(const SymExpr& expr, const std::string& var, const SymExpr& a, const SymExpr& b) {
+        SymExpr antideriv = integrate(expr, var);
+        if (hasMultiValuedFuncs(antideriv)) {
+            throw std::runtime_error("Calculus Error: Definite integral cannot be evaluated safely due to multi-valued functions (e.g., RootOf, RootSum) or complex branch cuts in the antiderivative.");
+        }
+        return simplify(subs(antideriv, var, b) - subs(antideriv, var, a));
     }
 
 } // namespace jc
