@@ -30,6 +30,7 @@ static std::atomic<int> g_sigintCount{0};
 static auto g_lastSigintTime = std::chrono::steady_clock::now();
 
 void sigintHandler(int signum) {
+    (void)signum;
     auto now = std::chrono::steady_clock::now();
     if (std::chrono::duration_cast<std::chrono::milliseconds>(now - g_lastSigintTime).count() < 1000) {
         g_sigintCount++;
