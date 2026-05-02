@@ -31,6 +31,7 @@ static auto g_lastSigintTime = std::chrono::steady_clock::now();
 
 void sigintHandler(int signum) {
     (void)signum;
+    std::signal(SIGINT, sigintHandler); // 重新注册，防止某些平台恢复默认处理
     auto now = std::chrono::steady_clock::now();
     if (std::chrono::duration_cast<std::chrono::milliseconds>(now - g_lastSigintTime).count() < 1000) {
         g_sigintCount++;
@@ -326,8 +327,16 @@ int main(int argc, char* argv[]) {
         std::string input;
         std::cout << "\n" << jc::col(jc::Ansi::BOLD) << jc::col(jc::Ansi::BRIGHT_CYAN) << "JC2> " << jc::col(jc::Ansi::RESET);
         if (!std::getline(std::cin, input)) {
-            if (std::cin.eof()) break; // 处理 Ctrl+D (EOF)
-            std::cin.clear();          // 清除 Ctrl+C 导致的错误状态
+            bool isInterrupt = jc::g_interruptRequested.load(std::memory_order_relaxed);
+            bool isEof = std::cin.eof();
+            std::cin.clear(); // 清除错误状态
+
+            if (isInterrupt) {
+                std::cout << "\n";
+                continue;
+            }
+            if (isEof) break; // 处理真正的 Ctrl+D (EOF)
+            
             std::cout << "\n";
             continue;
         }
@@ -344,15 +353,25 @@ int main(int argc, char* argv[]) {
             else if (c == '[') brackets++; else if (c == ']') brackets--;
         }
         bool inputAborted = false;
+        bool isEof = false;
         while (braces > 0 || parens > 0 || brackets > 0 || endsWithContinuation(input)) {
             std::string line;
             std::cout << jc::col(jc::Ansi::BRIGHT_CYAN) << "...  " << jc::col(jc::Ansi::RESET);
             if (!std::getline(std::cin, line)) {
-                if (std::cin.eof()) {
+                bool isInterrupt = jc::g_interruptRequested.load(std::memory_order_relaxed);
+                isEof = std::cin.eof();
+                std::cin.clear();
+
+                if (isInterrupt) {
+                    std::cout << "\n";
+                    isEof = false; // 忽略由 Ctrl+C 引起的 EOF
                     inputAborted = true;
                     break;
                 }
-                std::cin.clear();
+                if (isEof) {
+                    inputAborted = true;
+                    break;
+                }
                 std::cout << "\n";
                 inputAborted = true;
                 break;
@@ -364,7 +383,7 @@ int main(int argc, char* argv[]) {
                 else if (c == '[') brackets++; else if (c == ']') brackets--;
             }
         }
-        if (inputAborted && std::cin.eof()) break;
+        if (inputAborted && isEof) break;
         if (inputAborted) continue;
 
         if (input == "color on") { jc::colorsEnabled = true; continue; }
