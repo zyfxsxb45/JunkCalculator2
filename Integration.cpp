@@ -276,6 +276,42 @@ namespace jc {
                 } else {
                     buildRischFieldRec(SymExpr(p->base), x, field, counter);
                     buildRischFieldRec(SymExpr(p->exp), x, field, counter);
+                    
+                    if (p->exp->getType() == SymType::NUM && containsVar(p->base, x)) {
+                        auto numVal = std::static_pointer_cast<SymNum>(p->exp)->value;
+                        if (std::holds_alternative<Fraction>(numVal)) {
+                            Fraction frac = std::get<Fraction>(numVal);
+                            if (frac.getDen() > BigInt(1)) {
+                                // 构造极小多项式 _t^den - base^num = 0
+                                SymExpr base(p->base);
+                                SymExpr num_pow = base ^ SymExpr(frac.getNum());
+                                
+                                bool exists = false;
+                                for (const auto& ext : field.tower) {
+                                    if (ext.type == RischExtType::ALG && ext.arg == expr) {
+                                        exists = true;
+                                        break;
+                                    }
+                                }
+                                
+                                if (!exists) {
+                                    RischExtension ext;
+                                    ext.type = RischExtType::ALG;
+                                    ext.arg = SymExpr(expr);
+                                    ext.name = "_t" + std::to_string(++counter);
+                                    ext.t_var = SymExpr::makeVar(ext.name);
+                                    
+                                    ext.minPoly = (ext.t_var ^ SymExpr(frac.getDen())) - num_pow;
+                                    
+                                    SymExpr dP_dx = diff(ext.minPoly, x);
+                                    SymExpr dP_dt = diff(ext.minPoly, ext.name);
+                                    ext.deriv = simplifyCore(-dP_dx / dP_dt);
+                                    
+                                    field.tower.push_back(ext);
+                                }
+                            }
+                        }
+                    }
                 }
                 break;
             }
@@ -313,6 +349,35 @@ namespace jc {
                         } else {
                             ext.deriv = simplifyCore(du * ext.t_var);
                         }
+                        
+                        field.tower.push_back(ext);
+                    }
+                } else if (f->name == "RootOf" && f->args.size() == 3) {
+                    SymExpr minPoly(f->args[0]);
+                    SymExpr dummy(f->args[1]);
+                    
+                    if (!containsVar(minPoly.ptr, x)) break;
+                    
+                    bool exists = false;
+                    for (const auto& ext : field.tower) {
+                        if (ext.type == RischExtType::ALG && ext.arg == expr) {
+                            exists = true;
+                            break;
+                        }
+                    }
+                    
+                    if (!exists) {
+                        RischExtension ext;
+                        ext.type = RischExtType::ALG;
+                        ext.arg = SymExpr(expr);
+                        ext.name = "_t" + std::to_string(++counter);
+                        ext.t_var = SymExpr::makeVar(ext.name);
+                        
+                        ext.minPoly = subs(minPoly, std::static_pointer_cast<SymVar>(dummy.ptr)->name, ext.t_var);
+                        
+                        SymExpr dP_dx = diff(ext.minPoly, x);
+                        SymExpr dP_dt = diff(ext.minPoly, ext.name);
+                        ext.deriv = simplifyCore(-dP_dx / dP_dt);
                         
                         field.tower.push_back(ext);
                     }
@@ -803,6 +868,61 @@ namespace jc {
                     }
                     
                     if (success) {
+                        SymExpr finalRes = simplifyCore(backSubstitute(result));
+                        markTainted(finalRes);
+                        return finalRes;
+                    }
+                }
+            } else if (topExt.type == RischExtType::ALG) {
+                // Trager 算法 (1984) - 代数曲线伪化简 (Pseudo-reduction)
+                SymExpr minPoly = topExt.minPoly;
+                SymExpr t_sym = SymExpr::makeVar(topExt.name);
+                
+                auto [A, D] = getFraction(rewritten);
+                
+                // 1. 分母有理化 (Rationalize Denominator)
+                auto [gcd_D, U, V] = polyEGCD(D, minPoly, topExt.name);
+                SymExpr res_D = simplifyCore(expand(U * D + V * minPoly, SymConfig::maxExpandTerms));
+                
+                if (!res_D.isZero() && !containsVar(res_D.ptr, topExt.name)) {
+                    SymExpr newA = simplifyCore(expand(A * U, SymConfig::maxExpandTerms));
+                    SymExpr newD = res_D;
+                    
+                    // 2. 伪化简 (Pseudo-reduction) 降次
+                    auto [Q, R] = polyDiv(newA, minPoly, topExt.name);
+                    SymExpr A_red = R;
+                    SymExpr D_red = newD;
+                    
+                    // 3. 构造 Trager 结式 (Trager's Resultant) 提取对数留数
+                    SymExpr z = SymExpr::makeVar("_z");
+                    SymExpr dP_dx = diff(minPoly, var);
+                    SymExpr dP_dt = diff(minPoly, topExt.name);
+                    
+                    // Trager 核心方程: z * D_red * dP/dx - A_red * dP/dt
+                    SymExpr trager_poly = simplifyCore(expand(z * D_red * dP_dx - A_red * dP_dt, SymConfig::maxExpandTerms));
+                    SymExpr R_z = polyResultant(minPoly, trager_poly, topExt.name);
+                    
+                    // 提取分子，消除伪除法引入的分母
+                    R_z = getFraction(R_z).first;
+                    
+                    std::vector<SymExpr> roots = solveEq(R_z, "_z");
+                    if (!roots.empty()) {
+                        SymExpr result(BigInt(0));
+                        for (const auto& root : roots) {
+                            SymExpr v_i = simplifyCore(expand(subs(trager_poly, "_z", root), SymConfig::maxExpandTerms));
+                            
+                            // 降次短路与首一化
+                            auto coeffs_vi = extractCoeffs(v_i, topExt.name);
+                            if (!coeffs_vi.empty()) {
+                                SymExpr lead = coeffs_vi.back();
+                                if (!lead.isZero() && !lead.isOne()) {
+                                    v_i = simplifyCore(expand(v_i / lead, SymConfig::maxExpandTerms));
+                                }
+                            }
+                            
+                            SymExpr log_vi(std::make_shared<SymFunc>("log", std::vector<std::shared_ptr<SymNode>>{v_i.ptr}));
+                            result = result + root * log_vi;
+                        }
                         SymExpr finalRes = simplifyCore(backSubstitute(result));
                         markTainted(finalRes);
                         return finalRes;
