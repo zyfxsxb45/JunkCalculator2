@@ -16,24 +16,10 @@
 #include <set>
 #include <atomic>
 #include <stdexcept>
+#include "EngineInterrupt.h"
 
 namespace jc {
     class Value;
-
-    class EngineInterruptError : public std::exception {
-    public:
-        const char* what() const noexcept override {
-            return "KeyboardInterrupt";
-        }
-    };
-
-    extern std::atomic<bool> g_interruptRequested;
-
-    inline void checkInterrupt() {
-        if (g_interruptRequested.load(std::memory_order_relaxed)) {
-            throw EngineInterruptError();
-        }
-    }
 
     // ==========================================
     // 内部高精度数值载体 (隔离 VM)

@@ -2373,8 +2373,6 @@ namespace jc {
                 }
                 
                 throw std::runtime_error("Calculus Error: Function integration not supported or complex power. (" + msg + ")");
-            } catch (const EngineInterruptError&) {
-                throw;
             } catch (...) {
                 throw std::runtime_error("Calculus Error: Function integration not supported or complex power.");
             }

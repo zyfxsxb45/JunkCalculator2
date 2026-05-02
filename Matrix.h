@@ -8,10 +8,9 @@
 #include <sstream>
 #include <stdexcept>
 #include <vector>
+#include "EngineInterrupt.h"
 
 namespace jc {
-
-    extern void checkInterrupt();
 
     template <typename T>
     class Matrix {
