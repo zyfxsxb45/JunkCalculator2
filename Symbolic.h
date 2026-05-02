@@ -178,6 +178,7 @@ namespace jc {
     SymExpr simplifyCore(const SymExpr& expr);
     std::vector<SymExpr> extractCoeffs(const SymExpr& expr, const std::string& var);
     std::pair<SymExpr, SymExpr> getFraction(const SymExpr& expr);
+    SymExpr rationalizeDenominator(const SymExpr& expr);
 
     // ==========================================
     // 派生数学节点

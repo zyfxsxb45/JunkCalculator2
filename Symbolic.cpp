@@ -5,6 +5,7 @@
 #include "Tolerance.h"
 #include "SymEval.h"
 #include "SymRules.h"
+#include "Groebner.h"
 #include <sstream>
 #include <cmath>
 #include <algorithm>
@@ -3530,17 +3531,136 @@ namespace jc {
     }
 
     // =================================================================
+    // 复杂多重无理式分母有理化 (Rationalize Denominator via Gröbner Basis)
+    // =================================================================
+    SymExpr rationalizeDenominator(const SymExpr& expr) {
+        auto [A, D] = getFraction(expr);
+        if (D.isOne()) return expr;
+
+        std::map<std::string, std::string> exprToT;
+        std::map<std::string, std::pair<SymExpr, SymExpr>> tToMinPoly;
+        int t_counter = 0;
+
+        std::function<SymExpr(const SymExpr&)> replaceRadicals = [&](const SymExpr& e) -> SymExpr {
+            if (!e.ptr) return e;
+            switch (e.ptr->getType()) {
+                case SymType::ADD: {
+                    SymExpr res(BigInt(0));
+                    for (auto& arg : std::static_pointer_cast<SymAdd>(e.ptr)->args) res = res + replaceRadicals(SymExpr(arg));
+                    return res;
+                }
+                case SymType::MUL: {
+                    SymExpr res(BigInt(1));
+                    for (auto& arg : std::static_pointer_cast<SymMul>(e.ptr)->args) res = res * replaceRadicals(SymExpr(arg));
+                    return res;
+                }
+                case SymType::POW: {
+                    auto powNode = std::static_pointer_cast<SymPow>(e.ptr);
+                    SymExpr base = replaceRadicals(SymExpr(powNode->base));
+                    if (powNode->exp->getType() == SymType::NUM) {
+                        auto numVal = std::static_pointer_cast<SymNum>(powNode->exp)->value;
+                        if (std::holds_alternative<Fraction>(numVal)) {
+                            Fraction frac = std::get<Fraction>(numVal);
+                            if (frac.getDen() > BigInt(1)) {
+                                SymExpr newPow = base ^ SymExpr(frac);
+                                std::string sig = newPow.ptr->getSignature();
+                                if (exprToT.count(sig)) return SymExpr::makeVar(exprToT[sig]);
+                                // 使用 ~ 前缀确保在 Gröbner 基的字典序中优先级最高 (ASCII '~' > 'z' > 'x')
+                                std::string t_name = "~t_rad_" + std::to_string(++t_counter);
+                                exprToT[sig] = t_name;
+                                SymExpr t_var = SymExpr::makeVar(t_name);
+                                SymExpr minPoly = (t_var ^ SymExpr(frac.getDen())) - (base ^ SymExpr(frac.getNum()));
+                                tToMinPoly[t_name] = {newPow, minPoly};
+                                return t_var;
+                            }
+                        }
+                    }
+                    return base ^ replaceRadicals(SymExpr(powNode->exp));
+                }
+                case SymType::FUNC: {
+                    auto f = std::static_pointer_cast<SymFunc>(e.ptr);
+                    if (f->name == "RootOf" && f->args.size() == 3) {
+                        SymExpr poly = replaceRadicals(SymExpr(f->args[0]));
+                        SymExpr dummy(f->args[1]);
+                        std::string sig = e.ptr->getSignature();
+                        if (exprToT.count(sig)) return SymExpr::makeVar(exprToT[sig]);
+                        std::string t_name = "~t_rad_" + std::to_string(++t_counter);
+                        exprToT[sig] = t_name;
+                        SymExpr t_var = SymExpr::makeVar(t_name);
+                        SymExpr minPoly = subs(poly, std::static_pointer_cast<SymVar>(dummy.ptr)->name, t_var);
+                        tToMinPoly[t_name] = {e, minPoly};
+                        return t_var;
+                    }
+                    std::vector<std::shared_ptr<SymNode>> nArgs;
+                    for (auto& arg : f->args) nArgs.push_back(replaceRadicals(SymExpr(arg)).ptr);
+                    return SymExpr(std::make_shared<SymFunc>(f->name, std::move(nArgs)));
+                }
+                default: return e;
+            }
+        };
+
+        SymExpr D_prime = replaceRadicals(D);
+        if (tToMinPoly.empty()) return expr;
+
+        std::vector<MultiPoly> generators;
+        SymExpr z_inv = SymExpr::makeVar("~z_inv");
+        generators.push_back(MultiPoly(simplifyCore(expand(z_inv * D_prime - SymExpr(BigInt(1)), SymConfig::maxExpandTerms))));
+
+        for (const auto& kv : tToMinPoly) {
+            generators.push_back(MultiPoly(simplifyCore(expand(kv.second.second, SymConfig::maxExpandTerms))));
+        }
+
+        std::vector<MultiPoly> rgb;
+        try {
+            rgb = computeGroebnerBasis(generators);
+        } catch (...) {
+            return expr;
+        }
+
+        SymExpr invD(BigInt(0));
+        bool found = false;
+
+        for (const auto& poly : rgb) {
+            if (poly.isZero()) continue;
+            Term lt = poly.leadingTerm();
+            if (lt.mono.powers.count("~z_inv") > 0) {
+                SymExpr polyExpr = poly.toSymExpr();
+                auto coeffs = extractCoeffs(polyExpr, "~z_inv");
+                if (coeffs.size() == 2) {
+                    SymExpr c = coeffs[1];
+                    SymExpr U = coeffs[0];
+                    invD = simplifyCore(expand(-U / c, SymConfig::maxExpandTerms));
+                    found = true;
+                    break;
+                }
+            } else if (poly.terms.size() == 1 && poly.terms[0].mono.isOne()) {
+                throw std::runtime_error("Math Error: Division by zero (denominator is algebraically zero).");
+            }
+        }
+
+        if (!found) return expr;
+
+        SymExpr result = simplifyCore(expand(A * invD, SymConfig::maxExpandTerms));
+        for (auto it = tToMinPoly.rbegin(); it != tToMinPoly.rend(); ++it) {
+            result = subs(result, it->first, it->second.first);
+        }
+
+        return simplifyCore(result);
+    }
+
+    // =================================================================
     // 有理分式化简 (Rational Fraction Simplification)
     // =================================================================
     static SymExpr simplifyRational(const SymExpr& expr) {
         if (!expr.ptr) return expr;
         
-        auto [num, den] = getFraction(expr);
+        SymExpr rationalized = rationalizeDenominator(expr);
+        auto [num, den] = getFraction(rationalized);
         if (den.isOne()) {
             // 如果分母为 1，说明它本身就是多项式，但 getFraction 可能会展开它
             // 为了防止过度展开导致体积膨胀，我们比较一下体积
             if (getAstNodeCount(num) < getAstNodeCount(expr)) return num;
-            return expr;
+            return rationalized;
         }
 
         std::set<std::string> vars;
@@ -3559,7 +3679,7 @@ namespace jc {
                     SymExpr newDen = polyDiv(denExp, g, var).first;
                     
                     SymExpr canceled = simplifyCore(newNum / newDen);
-                    if (canceled != expr) {
+                    if (canceled != rationalized) {
                         return canceled;
                     }
                 }
@@ -3570,11 +3690,11 @@ namespace jc {
         SymExpr factDen = factorReal(den);
         SymExpr canceled = simplifyCore(factNum / factDen);
         
-        if (canceled != expr) {
+        if (canceled != rationalized) {
             return canceled;
         }
         
-        return expr;
+        return rationalized;
     }
 
     // =================================================================
