@@ -395,17 +395,132 @@ namespace jc {
     }
 
     // =================================================================
-    // 🚀 Risch 算法入口 (Risch Algorithm Entry Point)
+    // 三角函数与复指数双向转换 (Trig <-> Exp)
     // =================================================================
-    SymExpr rischIntegrate(const SymExpr& expr, const std::string& var, int depth) {
-        if (depth > SymConfig::maxDepth) {
-            throw std::runtime_error("Integration depth limit exceeded in Risch algorithm.");
+    static SymExpr trigToExp(const SymExpr& expr) {
+        if (!expr.ptr) return expr;
+        switch (expr.ptr->getType()) {
+            case SymType::ADD: {
+                SymExpr res(BigInt(0));
+                for (auto& arg : std::static_pointer_cast<SymAdd>(expr.ptr)->args) res = res + trigToExp(SymExpr(arg));
+                return res;
+            }
+            case SymType::MUL: {
+                SymExpr res(BigInt(1));
+                for (auto& arg : std::static_pointer_cast<SymMul>(expr.ptr)->args) res = res * trigToExp(SymExpr(arg));
+                return res;
+            }
+            case SymType::POW: {
+                auto p = std::static_pointer_cast<SymPow>(expr.ptr);
+                return trigToExp(SymExpr(p->base)) ^ trigToExp(SymExpr(p->exp));
+            }
+            case SymType::FUNC: {
+                auto f = std::static_pointer_cast<SymFunc>(expr.ptr);
+                std::vector<std::shared_ptr<SymNode>> nArgs;
+                for (auto& arg : f->args) nArgs.push_back(trigToExp(SymExpr(arg)).ptr);
+                
+                if (nArgs.size() == 1) {
+                    SymExpr arg(nArgs[0]);
+                    SymExpr I = SymExpr::makeVar("i");
+                    if (f->name == "sin") {
+                        SymExpr exp_ix(std::make_shared<SymFunc>("exp", std::vector<std::shared_ptr<SymNode>>{(I * arg).ptr}));
+                        SymExpr exp_mix(std::make_shared<SymFunc>("exp", std::vector<std::shared_ptr<SymNode>>{(-I * arg).ptr}));
+                        return (exp_ix - exp_mix) / (SymExpr(BigInt(2)) * I);
+                    }
+                    if (f->name == "cos") {
+                        SymExpr exp_ix(std::make_shared<SymFunc>("exp", std::vector<std::shared_ptr<SymNode>>{(I * arg).ptr}));
+                        SymExpr exp_mix(std::make_shared<SymFunc>("exp", std::vector<std::shared_ptr<SymNode>>{(-I * arg).ptr}));
+                        return (exp_ix + exp_mix) / SymExpr(BigInt(2));
+                    }
+                    if (f->name == "tan") {
+                        SymExpr exp_ix(std::make_shared<SymFunc>("exp", std::vector<std::shared_ptr<SymNode>>{(I * arg).ptr}));
+                        SymExpr exp_mix(std::make_shared<SymFunc>("exp", std::vector<std::shared_ptr<SymNode>>{(-I * arg).ptr}));
+                        return -I * (exp_ix - exp_mix) / (exp_ix + exp_mix);
+                    }
+                    if (f->name == "cot") {
+                        SymExpr exp_ix(std::make_shared<SymFunc>("exp", std::vector<std::shared_ptr<SymNode>>{(I * arg).ptr}));
+                        SymExpr exp_mix(std::make_shared<SymFunc>("exp", std::vector<std::shared_ptr<SymNode>>{(-I * arg).ptr}));
+                        return I * (exp_ix + exp_mix) / (exp_ix - exp_mix);
+                    }
+                    if (f->name == "sec") {
+                        SymExpr exp_ix(std::make_shared<SymFunc>("exp", std::vector<std::shared_ptr<SymNode>>{(I * arg).ptr}));
+                        SymExpr exp_mix(std::make_shared<SymFunc>("exp", std::vector<std::shared_ptr<SymNode>>{(-I * arg).ptr}));
+                        return SymExpr(BigInt(2)) / (exp_ix + exp_mix);
+                    }
+                    if (f->name == "csc") {
+                        SymExpr exp_ix(std::make_shared<SymFunc>("exp", std::vector<std::shared_ptr<SymNode>>{(I * arg).ptr}));
+                        SymExpr exp_mix(std::make_shared<SymFunc>("exp", std::vector<std::shared_ptr<SymNode>>{(-I * arg).ptr}));
+                        return (SymExpr(BigInt(2)) * I) / (exp_ix - exp_mix);
+                    }
+                    if (f->name == "sinh") {
+                        SymExpr exp_x(std::make_shared<SymFunc>("exp", std::vector<std::shared_ptr<SymNode>>{arg.ptr}));
+                        SymExpr exp_mx(std::make_shared<SymFunc>("exp", std::vector<std::shared_ptr<SymNode>>{(-arg).ptr}));
+                        return (exp_x - exp_mx) / SymExpr(BigInt(2));
+                    }
+                    if (f->name == "cosh") {
+                        SymExpr exp_x(std::make_shared<SymFunc>("exp", std::vector<std::shared_ptr<SymNode>>{arg.ptr}));
+                        SymExpr exp_mx(std::make_shared<SymFunc>("exp", std::vector<std::shared_ptr<SymNode>>{(-arg).ptr}));
+                        return (exp_x + exp_mx) / SymExpr(BigInt(2));
+                    }
+                    if (f->name == "tanh") {
+                        SymExpr exp_x(std::make_shared<SymFunc>("exp", std::vector<std::shared_ptr<SymNode>>{arg.ptr}));
+                        SymExpr exp_mx(std::make_shared<SymFunc>("exp", std::vector<std::shared_ptr<SymNode>>{(-arg).ptr}));
+                        return (exp_x - exp_mx) / (exp_x + exp_mx);
+                    }
+                }
+                return SymExpr(std::make_shared<SymFunc>(f->name, std::move(nArgs)));
+            }
+            default: return expr;
         }
+    }
 
-        if (getAstNodeCount(expr) > 300) {
-            throw std::runtime_error("Integration AST size limit exceeded in Risch algorithm.");
+    static SymExpr expToTrig(const SymExpr& expr) {
+        if (!expr.ptr) return expr;
+        switch (expr.ptr->getType()) {
+            case SymType::ADD: {
+                SymExpr res(BigInt(0));
+                for (auto& arg : std::static_pointer_cast<SymAdd>(expr.ptr)->args) res = res + expToTrig(SymExpr(arg));
+                return res;
+            }
+            case SymType::MUL: {
+                SymExpr res(BigInt(1));
+                for (auto& arg : std::static_pointer_cast<SymMul>(expr.ptr)->args) res = res * expToTrig(SymExpr(arg));
+                return res;
+            }
+            case SymType::POW: {
+                auto p = std::static_pointer_cast<SymPow>(expr.ptr);
+                return expToTrig(SymExpr(p->base)) ^ expToTrig(SymExpr(p->exp));
+            }
+            case SymType::FUNC: {
+                auto f = std::static_pointer_cast<SymFunc>(expr.ptr);
+                std::vector<std::shared_ptr<SymNode>> nArgs;
+                for (auto& arg : f->args) nArgs.push_back(expToTrig(SymExpr(arg)).ptr);
+                
+                if (f->name == "exp" && nArgs.size() == 1) {
+                    SymExpr arg(nArgs[0]);
+                    auto coeffs = extractCoeffs(arg, "i");
+                    if (coeffs.size() == 2) {
+                        SymExpr A = coeffs[0];
+                        SymExpr B = coeffs[1];
+                        SymExpr cos_B(std::make_shared<SymFunc>("cos", std::vector<std::shared_ptr<SymNode>>{B.ptr}));
+                        SymExpr sin_B(std::make_shared<SymFunc>("sin", std::vector<std::shared_ptr<SymNode>>{B.ptr}));
+                        SymExpr I = SymExpr::makeVar("i");
+                        SymExpr trig_part = cos_B + I * sin_B;
+                        if (A.isZero()) return trig_part;
+                        SymExpr exp_A(std::make_shared<SymFunc>("exp", std::vector<std::shared_ptr<SymNode>>{A.ptr}));
+                        return exp_A * trig_part;
+                    }
+                }
+                return SymExpr(std::make_shared<SymFunc>(f->name, std::move(nArgs)));
+            }
+            default: return expr;
         }
+    }
 
+    // =================================================================
+    // 🚀 Risch 算法核心 (Risch Algorithm Core)
+    // =================================================================
+    static SymExpr rischIntegrateCore(const SymExpr& expr, const std::string& var, int depth) {
         // Step 0 - 刘维尔域规范化 (Liouvillian Field Normalization)
         SymExpr normalizedExpr = rischNormalize(expr);
 
@@ -510,7 +625,7 @@ namespace jc {
                             throw std::runtime_error("Risch Step 4: Leading coefficient expansion too large, aborting.");
                         }
                         SymExpr intAn = integrate(intAn_x, var, depth + 1);
-                        SymExpr intAn_t = field.rewrite(intAn);
+                        SymExpr intAn_t = field.rewrite(trigToExp(intAn));
                         auto coeffs_intAn = extractCoeffs(intAn_t, topExt.name);
                         
                         SymExpr c(BigInt(0));
@@ -535,7 +650,7 @@ namespace jc {
                                 throw std::runtime_error("Risch Step 4: Lower coefficient expansion too large, aborting.");
                             }
                             SymExpr int_i = integrate(integrand_x, var, depth + 1);
-                            SymExpr int_i_t = field.rewrite(int_i);
+                            SymExpr int_i_t = field.rewrite(trigToExp(int_i));
                             if (containsVar(int_i_t.ptr, topExt.name)) {
                                 throw std::runtime_error("Non-elementary integral.");
                             }
@@ -574,7 +689,7 @@ namespace jc {
                                     throw std::runtime_error("Risch Step 5: Constant term expansion too large, aborting.");
                                 }
                                 SymExpr int_0 = integrate(integrand_x, var, depth + 1);
-                                result = result + field.rewrite(int_0);
+                                result = result + field.rewrite(trigToExp(int_0));
                             } catch (...) {
                                 success = false;
                                 break;
@@ -649,6 +764,28 @@ namespace jc {
         debugInfo += "Rewritten integrand: " + rewritten.toString();
         
         throw std::runtime_error("Calculus Error: Integral is non-elementary or requires advanced Risch steps.\n" + debugInfo);
+    }
+
+    // =================================================================
+    // 🚀 Risch 算法入口 (Risch Algorithm Entry Point)
+    // =================================================================
+    SymExpr rischIntegrate(const SymExpr& expr, const std::string& var, int depth) {
+        if (depth > SymConfig::maxDepth) {
+            throw std::runtime_error("Integration depth limit exceeded in Risch algorithm.");
+        }
+
+        if (getAstNodeCount(expr) > 300) {
+            throw std::runtime_error("Integration AST size limit exceeded in Risch algorithm.");
+        }
+
+        // Step -1 - 三角函数转复指数 (Trig to Exp)
+        SymExpr expExpr = trigToExp(expr);
+
+        SymExpr res = rischIntegrateCore(expExpr, var, depth);
+
+        // Step 6 - 复指数转回三角函数 (Exp to Trig)
+        SymExpr trigRes = expToTrig(res);
+        return simplify(trigRes);
     }
 
     // =================================================================
