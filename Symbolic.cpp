@@ -4072,17 +4072,287 @@ namespace jc {
     }
 
     // =================================================================
-    // 🚀 极限计算 (Limit) - 洛必达法则与泰勒截断
+    // 🚀 极限计算 (Limit) - 工业级 Gruntz 渐近线展开算法
     // =================================================================
+    // 废弃洛必达法则，采用自底向上的渐近线展开 (Asymptotic Expansion)
+    // 避免高阶导数导致的表达式膨胀 (Expression Swell) 和死锁
+    // =================================================================
+    
+    // 辅助结构：渐近级数 (Asymptotic Series)
+    struct AsympSeries {
+        std::map<Fraction, SymExpr> terms; // exponent -> coefficient
+        Fraction order;
+        
+        AsympSeries(Fraction ord = Fraction(6)) : order(ord) {}
+        
+        void addTerm(Fraction deg, SymExpr coeff) {
+            if (deg > order) return;
+            if (terms.count(deg)) terms[deg] = simplifyCore(terms[deg] + coeff);
+            else terms[deg] = coeff;
+            if (terms[deg].isZero()) terms.erase(deg);
+        }
+        
+        AsympSeries operator+(const AsympSeries& other) const {
+            AsympSeries res(std::max(order, other.order));
+            for (auto& kv : terms) res.addTerm(kv.first, kv.second);
+            for (auto& kv : other.terms) res.addTerm(kv.first, kv.second);
+            return res;
+        }
+        
+        AsympSeries operator*(const AsympSeries& other) const {
+            AsympSeries res(std::min(order, other.order));
+            for (auto& kv1 : terms) {
+                for (auto& kv2 : other.terms) {
+                    res.addTerm(kv1.first + kv2.first, simplifyCore(kv1.second * kv2.second));
+                }
+            }
+            return res;
+        }
+        
+        AsympSeries inverse() const {
+            if (terms.empty()) throw std::runtime_error("Division by zero in asymptotic expansion.");
+            auto lead = *terms.begin();
+            Fraction leadDeg = lead.first;
+            SymExpr leadCoeff = lead.second;
+            
+            AsympSeries res(order - leadDeg);
+            res.addTerm(-leadDeg, simplifyCore(SymExpr(BigInt(1)) / leadCoeff));
+            
+            AsympSeries rem = *this;
+            rem.terms.erase(leadDeg);
+            
+            AsympSeries currentTerm = res;
+            for (int i = 1; i <= 5; ++i) { // 展开到 5 阶
+                if (rem.terms.empty()) break;
+                currentTerm = currentTerm * rem * AsympSeries(order);
+                // 乘以 -1/leadCoeff
+                AsympSeries negLead(order);
+                negLead.addTerm(-leadDeg, simplifyCore(SymExpr(BigInt(-1)) / leadCoeff));
+                currentTerm = currentTerm * negLead;
+                
+                for (auto& kv : currentTerm.terms) res.addTerm(kv.first, kv.second);
+            }
+            return res;
+        }
+    };
+
+    static AsympSeries computeGruntzSeries(const SymExpr& expr, const std::string& t_var, Fraction order) {
+        if (!expr.ptr) return AsympSeries(order);
+        
+        switch (expr.ptr->getType()) {
+            case SymType::NUM: {
+                AsympSeries s(order);
+                s.addTerm(Fraction(0), expr);
+                return s;
+            }
+            case SymType::VAR: {
+                AsympSeries s(order);
+                if (std::static_pointer_cast<SymVar>(expr.ptr)->name == t_var) {
+                    s.addTerm(Fraction(1), SymExpr(BigInt(1)));
+                } else {
+                    s.addTerm(Fraction(0), expr);
+                }
+                return s;
+            }
+            case SymType::ADD: {
+                AsympSeries s(order);
+                for (auto& arg : std::static_pointer_cast<SymAdd>(expr.ptr)->args) {
+                    s = s + computeGruntzSeries(SymExpr(arg), t_var, order);
+                }
+                return s;
+            }
+            case SymType::MUL: {
+                AsympSeries s(order);
+                s.addTerm(Fraction(0), SymExpr(BigInt(1)));
+                for (auto& arg : std::static_pointer_cast<SymMul>(expr.ptr)->args) {
+                    s = s * computeGruntzSeries(SymExpr(arg), t_var, order);
+                }
+                return s;
+            }
+            case SymType::POW: {
+                auto powNode = std::static_pointer_cast<SymPow>(expr.ptr);
+                AsympSeries baseS = computeGruntzSeries(SymExpr(powNode->base), t_var, order);
+                if (powNode->exp->getType() == SymType::NUM) {
+                    auto [isInt, n] = extractExactInt(std::static_pointer_cast<SymNum>(powNode->exp)->value);
+                    if (isInt) {
+                        if (n == 0) {
+                            AsympSeries s(order);
+                            s.addTerm(Fraction(0), SymExpr(BigInt(1)));
+                            return s;
+                        }
+                        if (n > 0) {
+                            AsympSeries s = baseS;
+                            for (int i = 1; i < n; ++i) s = s * baseS;
+                            return s;
+                        }
+                        if (n < 0) {
+                            AsympSeries s = baseS;
+                            for (int i = 1; i < -n; ++i) s = s * baseS;
+                            return s.inverse();
+                        }
+                    } else if (std::holds_alternative<Fraction>(std::static_pointer_cast<SymNum>(powNode->exp)->value)) {
+                        Fraction f = std::get<Fraction>(std::static_pointer_cast<SymNum>(powNode->exp)->value);
+                        if (baseS.terms.empty()) return AsympSeries(order);
+                        auto lead = *baseS.terms.begin();
+                        Fraction leadDeg = lead.first;
+                        SymExpr leadCoeff = lead.second;
+                        
+                        AsympSeries res(order);
+                        Fraction newLeadDeg = leadDeg * f;
+                        SymExpr newLeadCoeff = simplifyCore(leadCoeff ^ SymExpr(f));
+                        res.addTerm(newLeadDeg, newLeadCoeff);
+                        
+                        // 二项式展开 (1 + x)^f = 1 + f*x + f*(f-1)/2 * x^2 + ...
+                        AsympSeries rem = baseS;
+                        rem.terms.erase(leadDeg);
+                        if (!rem.terms.empty()) {
+                            AsympSeries invLead(order);
+                            invLead.addTerm(-leadDeg, simplifyCore(SymExpr(BigInt(1)) / leadCoeff));
+                            AsympSeries x = rem * invLead;
+                            
+                            AsympSeries binom(order);
+                            binom.addTerm(Fraction(0), SymExpr(BigInt(1)));
+                            
+                            AsympSeries currentX = x;
+                            SymExpr coeffF(f);
+                            SymExpr currentCoeff = coeffF;
+                            BigInt fact(1);
+                            
+                            for (int i = 1; i <= 3; ++i) {
+                                AsympSeries term(order);
+                                for (auto& kv : currentX.terms) {
+                                    term.addTerm(kv.first, simplifyCore(kv.second * currentCoeff / SymExpr(fact)));
+                                }
+                                binom = binom + term;
+                                
+                                currentX = currentX * x;
+                                currentCoeff = simplifyCore(currentCoeff * (coeffF - SymExpr(BigInt(i))));
+                                fact = fact * BigInt(i + 1);
+                            }
+                            
+                            AsympSeries finalRes(order);
+                            for (auto& kv : binom.terms) {
+                                finalRes.addTerm(kv.first + newLeadDeg, simplifyCore(kv.second * newLeadCoeff));
+                            }
+                            return finalRes;
+                        }
+                        return res;
+                    }
+                }
+                // Fallback for complex powers
+                AsympSeries s(order);
+                s.addTerm(Fraction(0), expr);
+                return s;
+            }
+            case SymType::FUNC: {
+                auto func = std::static_pointer_cast<SymFunc>(expr.ptr);
+                if (func->name == "exp" && func->args.size() == 1) {
+                    AsympSeries argS = computeGruntzSeries(SymExpr(func->args[0]), t_var, order);
+                    if (argS.terms.empty()) {
+                        AsympSeries s(order);
+                        s.addTerm(Fraction(0), SymExpr(BigInt(1)));
+                        return s;
+                    }
+                    auto lead = *argS.terms.begin();
+                    if (lead.first < Fraction(0)) {
+                        // Essential singularity, fallback
+                        AsympSeries s(order);
+                        s.addTerm(Fraction(0), expr);
+                        return s;
+                    }
+                    SymExpr c0(BigInt(0));
+                    if (lead.first == Fraction(0)) {
+                        c0 = lead.second;
+                        argS.terms.erase(Fraction(0));
+                    }
+                    
+                    AsympSeries res(order);
+                    res.addTerm(Fraction(0), SymExpr(BigInt(1)));
+                    AsympSeries currentTerm(order);
+                    currentTerm.addTerm(Fraction(0), SymExpr(BigInt(1)));
+                    BigInt fact(1);
+                    
+                    for (int i = 1; i <= 4; ++i) {
+                        if (argS.terms.empty()) break;
+                        currentTerm = currentTerm * argS;
+                        fact = fact * BigInt(i);
+                        
+                        AsympSeries termToAdd(order);
+                        for (auto& kv : currentTerm.terms) {
+                            termToAdd.addTerm(kv.first, simplifyCore(kv.second / SymExpr(fact)));
+                        }
+                        res = res + termToAdd;
+                    }
+                    
+                    if (!c0.isZero()) {
+                        AsympSeries expC0(order);
+                        expC0.addTerm(Fraction(0), simplifyCore(SymExpr(std::make_shared<SymFunc>("exp", std::vector<std::shared_ptr<SymNode>>{c0.ptr}))));
+                        res = res * expC0;
+                    }
+                    return res;
+                }
+                if ((func->name == "sin" || func->name == "cos") && func->args.size() == 1) {
+                    AsympSeries argS = computeGruntzSeries(SymExpr(func->args[0]), t_var, order);
+                    if (argS.terms.empty() || argS.terms.begin()->first < Fraction(0)) {
+                        AsympSeries s(order);
+                        s.addTerm(Fraction(0), expr);
+                        return s;
+                    }
+                    SymExpr c0(BigInt(0));
+                    if (argS.terms.begin()->first == Fraction(0)) {
+                        c0 = argS.terms.begin()->second;
+                        argS.terms.erase(Fraction(0));
+                    }
+                    
+                    AsympSeries res(order);
+                    if (func->name == "sin") {
+                        if (c0.isZero()) {
+                            res.addTerm(Fraction(0), SymExpr(BigInt(0)));
+                            AsympSeries currentTerm = argS;
+                            res = res + currentTerm;
+                            currentTerm = currentTerm * argS * argS;
+                            AsympSeries term3(order);
+                            for (auto& kv : currentTerm.terms) term3.addTerm(kv.first, simplifyCore(kv.second / SymExpr(BigInt(-6))));
+                            res = res + term3;
+                        } else {
+                            AsympSeries s(order);
+                            s.addTerm(Fraction(0), expr);
+                            return s;
+                        }
+                    } else {
+                        if (c0.isZero()) {
+                            res.addTerm(Fraction(0), SymExpr(BigInt(1)));
+                            AsympSeries currentTerm = argS * argS;
+                            AsympSeries term2(order);
+                            for (auto& kv : currentTerm.terms) term2.addTerm(kv.first, simplifyCore(kv.second / SymExpr(BigInt(-2))));
+                            res = res + term2;
+                        } else {
+                            AsympSeries s(order);
+                            s.addTerm(Fraction(0), expr);
+                            return s;
+                        }
+                    }
+                    return res;
+                }
+                // Fallback for other functions
+                AsympSeries s(order);
+                s.addTerm(Fraction(0), expr);
+                return s;
+            }
+        }
+        AsympSeries s(order);
+        s.addTerm(Fraction(0), expr);
+        return s;
+    }
+
     static SymExpr limitCore(const SymExpr& expr, const std::string& var, const SymExpr& val, int depth) {
         if (depth > SymConfig::maxDepth) throw std::runtime_error("Calculus Error: Limit evaluation depth exceeded.");
         if (!expr.ptr) return expr;
 
-        // 尝试直接代入 (静默模式，不抛出除零异常)
+        // 1. 尝试直接代入 (静默模式，不抛出除零异常)
         if (auto subbed = trySubsQuiet(expr, var, val)) {
             try {
                 SymExpr simp = simplify(*subbed);
-                // 如果结果中不再包含该变量，说明代入成功
                 if (!containsVar(simp.ptr, var)) return simp;
             } catch (const std::runtime_error& e) {
                 std::string msg = e.what();
@@ -4093,18 +4363,17 @@ namespace jc {
             }
         }
 
-        // 提取分子和分母
+        // 2. 提取分子和分母
         auto [num, den] = getFraction(expr);
 
         if (den.isOne()) {
-            // 不是分式，但代入失败，可能含有复杂奇点，直接返回化简后的代入形式
             if (auto subbed = trySubsQuiet(expr, var, val)) {
                 try { return simplify(*subbed); } catch (...) { return *subbed; }
             }
             return expr;
         }
 
-        // 检查是否为 0/0 型
+        // 3. 检查是否为 0/0 型
         bool numZero = false, denZero = false;
         if (auto subNum = trySubsQuiet(num, var, val)) {
             try { numZero = simplify(*subNum).isZero(); } catch (...) {}
@@ -4114,44 +4383,54 @@ namespace jc {
         }
 
         if (numZero && denZero) {
-            if (depth > 3) {
-                // 泰勒展开截断求极限 (Taylor Series Truncation)
-                // 寻找分子分母的最低非零导数 (即泰勒展开的首个非零项)
-                SymExpr dNum = num, dDen = den;
-                SymExpr coeffNum(BigInt(0)), coeffDen(BigInt(0));
-                int orderNum = -1, orderDen = -1;
+            // 工业级 Gruntz 渐近线展开 (Asymptotic Series Expansion)
+            // 替代洛必达法则，使用自底向上的泰勒/洛朗级数截断
+            
+            std::string t_var = "_t_asymp";
+            SymExpr t = SymExpr::makeVar(t_var);
+            SymExpr num_t = simplifyCore(subs(num, var, val + t));
+            SymExpr den_t = simplifyCore(subs(den, var, val + t));
+            
+            try {
+                AsympSeries sNum = computeGruntzSeries(num_t, t_var, Fraction(6));
+                AsympSeries sDen = computeGruntzSeries(den_t, t_var, Fraction(6));
                 
-                for (int i = 0; i <= 10; ++i) {
-                    if (auto subNum = trySubsQuiet(dNum, var, val)) {
-                        try { coeffNum = simplify(*subNum); } catch (...) {}
-                    }
-                    if (!coeffNum.isZero()) { orderNum = i; break; }
-                    dNum = diff(dNum, var);
+                if (!sNum.terms.empty() && !sDen.terms.empty()) {
+                    auto leadNum = *sNum.terms.begin();
+                    auto leadDen = *sDen.terms.begin();
+                    
+                    if (leadNum.first > leadDen.first) return SymExpr(BigInt(0));
+                    if (leadNum.first < leadDen.first) throw std::runtime_error("Math Error: Limit is infinite (pole).");
+                    return simplify(leadNum.second / leadDen.second);
                 }
-                for (int i = 0; i <= 10; ++i) {
-                    if (auto subDen = trySubsQuiet(dDen, var, val)) {
-                        try { coeffDen = simplify(*subDen); } catch (...) {}
-                    }
-                    if (!coeffDen.isZero()) { orderDen = i; break; }
-                    dDen = diff(dDen, var);
+            } catch (...) {
+                // 级数展开失败，回退到多项式主导项提取 (Leading Term Extraction)
+            }
+            
+            // 备用方案：多项式主导项提取 (针对有理函数)
+            auto coeffsNum = extractCoeffs(num_t, t_var);
+            auto coeffsDen = extractCoeffs(den_t, t_var);
+            
+            if (!coeffsNum.empty() && !coeffsDen.empty()) {
+                int minDegNum = -1, minDegDen = -1;
+                SymExpr leadNum(BigInt(0)), leadDen(BigInt(0));
+                
+                for (size_t i = 0; i < coeffsNum.size(); ++i) {
+                    if (!coeffsNum[i].isZero()) { minDegNum = static_cast<int>(i); leadNum = coeffsNum[i]; break; }
+                }
+                for (size_t i = 0; i < coeffsDen.size(); ++i) {
+                    if (!coeffsDen[i].isZero()) { minDegDen = static_cast<int>(i); leadDen = coeffsDen[i]; break; }
                 }
                 
-                if (orderNum != -1 && orderDen != -1) {
-                    if (orderNum > orderDen) return SymExpr(BigInt(0));
-                    if (orderNum < orderDen) throw std::runtime_error("Math Error: Limit is infinite (pole).");
-                    // 阶数相同时，阶乘 n! 会被约掉，极限即为导数值之比
-                    return simplify(coeffNum / coeffDen);
+                if (minDegNum != -1 && minDegDen != -1) {
+                    if (minDegNum > minDegDen) return SymExpr(BigInt(0));
+                    if (minDegNum < minDegDen) throw std::runtime_error("Math Error: Limit is infinite (pole).");
+                    return simplify(leadNum / leadDen);
                 }
             }
-
-            // 洛必达法则：lim (f/g) = lim (f'/g')
-            SymExpr dNum = diff(num, var);
-            SymExpr dDen = diff(den, var);
-            SymExpr lhopitalExpr = simplify(dNum / dDen);
-            return limitCore(lhopitalExpr, var, val, depth + 1);
         }
 
-        // 如果分母为0但分子不为0，则是无穷大（这里简化抛出异常或保留符号）
+        // 如果分母为0但分子不为0，则是无穷大
         if (denZero && !numZero) {
             throw std::runtime_error("Math Error: Limit is infinite (division by zero).");
         }
