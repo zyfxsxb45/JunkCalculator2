@@ -21,6 +21,9 @@ namespace jc {
             auto func = [](const std::string& name, const SymExpr& arg) {
                 return SymExpr(std::make_shared<SymFunc>(name, std::vector<std::shared_ptr<SymNode>>{arg.ptr}));
             };
+            auto func2 = [](const std::string& name, const SymExpr& arg1, const SymExpr& arg2) {
+                return SymExpr(std::make_shared<SymFunc>(name, std::vector<std::shared_ptr<SymNode>>{arg1.ptr, arg2.ptr}));
+            };
 
             rules = {
             // 幂函数与对数
@@ -79,6 +82,10 @@ namespace jc {
             { ((x ^ SymExpr(2)) + SymExpr(1)) ^ SymExpr(Fraction(1, 2)), 
               (x * (((x ^ SymExpr(2)) + SymExpr(1)) ^ SymExpr(Fraction(1, 2))) / SymExpr(2)) + 
               (SymExpr(1) / SymExpr(2)) * func("log", x + (((x ^ SymExpr(2)) + SymExpr(1)) ^ SymExpr(Fraction(1, 2)))) },
+
+            // 椭圆积分 (Elliptic Integrals)
+            { SymExpr(1) / (((SymExpr(1) - (x ^ SymExpr(2))) * (SymExpr(1) - _a * (x ^ SymExpr(2)))) ^ SymExpr(Fraction(1, 2))), func2("EllipticF", x, _a) },
+            { ((SymExpr(1) - _a * (x ^ SymExpr(2))) / (SymExpr(1) - (x ^ SymExpr(2)))) ^ SymExpr(Fraction(1, 2)), func2("EllipticE", x, _a) },
 
             // 特殊函数 (误差函数与菲涅尔积分)
             { func("exp", -(x ^ SymExpr(2))), (SymExpr(Fraction(1, 2)) * (SymExpr::makeVar("PI") ^ SymExpr(Fraction(1, 2)))) * func("erf", x) },

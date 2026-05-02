@@ -933,14 +933,45 @@ namespace jc {
 
         // 调试输出：展示构建的微分域
         std::string debugInfo = "Risch Field over Q(" + var + "):\n";
+        bool isElliptic = false;
+        bool isHyperElliptic = false;
+        
         for (const auto& ext : field.tower) {
             debugInfo += "  " + ext.name + " = ";
-            if (ext.type == RischExtType::LOG) debugInfo += "log(" + ext.arg.toString() + ")";
-            else if (ext.type == RischExtType::EXP) debugInfo += "exp(" + ext.arg.toString() + ")";
-            else debugInfo += "RootOf(" + ext.minPoly.toString() + " = 0)";
+            if (ext.type == RischExtType::LOG) {
+                debugInfo += "log(" + ext.arg.toString() + ")";
+            } else if (ext.type == RischExtType::EXP) {
+                debugInfo += "exp(" + ext.arg.toString() + ")";
+            } else if (ext.type == RischExtType::ALG) {
+                debugInfo += "RootOf(" + ext.minPoly.toString() + " = 0)";
+                int degX = getDegree(ext.minPoly, var);
+                int degT = getDegree(ext.minPoly, ext.name);
+                if (degT == 2 && degX >= 3) {
+                    // 提取 P(x) 并检查是否无平方 (Square-free check)
+                    SymExpr P_neg = subs(ext.minPoly, ext.name, SymExpr(BigInt(0)));
+                    auto sqFree = polySquareFree(P_neg, var);
+                    bool hasMultipleRoots = false;
+                    for (const auto& factor : sqFree) {
+                        if (factor.second > 1 && getDegree(factor.first, var) > 0) {
+                            hasMultipleRoots = true;
+                            break;
+                        }
+                    }
+                    if (!hasMultipleRoots) {
+                        if (degX == 3 || degX == 4) isElliptic = true;
+                        else if (degX >= 5) isHyperElliptic = true;
+                    }
+                }
+            }
             debugInfo += ",  " + ext.name + "' = " + ext.deriv.toString() + "\n";
         }
         debugInfo += "Rewritten integrand: " + rewritten.toString();
+        
+        if (isElliptic) {
+            throw std::runtime_error("Calculus Error: Integral is non-elementary (Elliptic curve of genus g=1 detected).\n" + debugInfo);
+        } else if (isHyperElliptic) {
+            throw std::runtime_error("Calculus Error: Integral is non-elementary (Hyperelliptic curve of genus g>1 detected).\n" + debugInfo);
+        }
         
         throw std::runtime_error("Calculus Error: Integral is non-elementary or requires advanced Risch steps.\n" + debugInfo);
     }
