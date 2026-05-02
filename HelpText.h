@@ -140,6 +140,7 @@ namespace jc {
     try { 1/0 } catch (e) { e }    error handling
     // comment                     everything after // is ignored
     resetConst()                   restore PI, E, i, I, true, false
+    debugInteg("on")               enable integration debug trace
     pi()  e()  i()  none()         constant factory functions (always available)
     isint(x)  isstring(x)          type predicates (see: help typecheck)
     delete x                       remove any variable (including const)
@@ -863,6 +864,7 @@ namespace jc {
     integ(x^2, x, 0, 1)          → 1/3 (Definite integral)
     limit(sin(x)/x, x, 0)        → 1 (L'Hôpital's rule supported)
     taylor(sin(x), x, 0, 5)      → x - 1/6 * x^3 + 1/120 * x^5
+    debugInteg("on")             → Print detailed integration steps & Risch algorithm trace
 
   Equation Solving
   ──────────────────────
@@ -1214,6 +1216,7 @@ namespace jc {
     symconfig()                  Returns current CAS limits as a Dict
     symconfig("default")         Reset CAS limits to default
     setSymLimit("maxDepth", 50)  Set specific CAS limit
+    debugInteg("on") / ("off")   Enable/disable verbose integration debug output
 
   Workspace & Path Management
   ──────────────────────
