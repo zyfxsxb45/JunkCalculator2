@@ -88,7 +88,13 @@ namespace jc {
         SymExpr dD = diff(D, var);
         SymExpr P = simplifyCore(expand(A - z * dD, SymConfig::maxExpandTerms));
         
-        SymExpr R_z = polyResultant(P, D, var);
+        // 确保 polyResultant 的第一个参数次数 >= 第二个参数
+        SymExpr R_z;
+        if (getDegree(D, var) >= getDegree(P, var)) {
+            R_z = polyResultant(D, P, var);
+        } else {
+            R_z = polyResultant(P, D, var);
+        }
         R_z = getFraction(R_z).first; // 提取分子，消除伪除法引入的 z 分母
         
         std::vector<SymExpr> roots = solveEq(R_z, "_z");
@@ -913,12 +919,38 @@ namespace jc {
                     
                     // Trager 核心方程: z * D_red * dP/dx - A_red * dP/dt
                     SymExpr trager_poly = simplifyCore(expand(z * D_red * dP_dx - A_red * dP_dt, SymConfig::maxExpandTerms));
+                    trager_poly = getFraction(trager_poly).first; // 提前清除分母，防止结式计算时系数膨胀
                     SymExpr R_z = polyResultant(minPoly, trager_poly, topExt.name);
                     
                     // 提取分子，消除伪除法引入的分母
                     R_z = getFraction(R_z).first;
                     
-                    std::vector<SymExpr> roots = solveEq(R_z, "_z");
+                    std::set<std::string> vars_in_Rz;
+                    collectAllVars(R_z.ptr, vars_in_Rz);
+                    vars_in_Rz.erase("_z");
+                    
+                    SymExpr gcd_z(BigInt(0));
+                    if (vars_in_Rz.empty()) {
+                        gcd_z = R_z;
+                    } else {
+                        for (int pt = 1; pt <= 5; ++pt) {
+                            SymExpr eval_Rz = R_z;
+                            for (const auto& v : vars_in_Rz) {
+                                eval_Rz = simplifyCore(subs(eval_Rz, v, SymExpr(BigInt(pt))));
+                            }
+                            eval_Rz = getFraction(eval_Rz).first;
+                            if (eval_Rz.isZero()) continue;
+                            if (gcd_z.isZero()) gcd_z = eval_Rz;
+                            else gcd_z = polyGCD(gcd_z, eval_Rz, "_z");
+                            if (gcd_z.isOne()) break;
+                        }
+                    }
+                    
+                    std::vector<SymExpr> roots;
+                    if (!gcd_z.isZero() && getDegree(gcd_z, "_z") > 0) {
+                        roots = solveEq(gcd_z, "_z");
+                    }
+                    
                     if (!roots.empty()) {
                         bool allConstant = true;
                         for (const auto& root : roots) {
@@ -1042,6 +1074,7 @@ namespace jc {
         int baseTransWeight = getTranscendentalWeight(expr, var);
 
         auto doIntegImpl = [&](const SymExpr& e, int current_depth) -> std::optional<SymExpr> {
+            std::cout << "[DEBUG] doIntegImpl depth=" << current_depth << " expr=" << e.toString() << std::endl;
             if (current_depth > SymConfig::maxDepth) {
                 return std::nullopt;
             }
@@ -1069,6 +1102,7 @@ namespace jc {
             }
 
             if (!containsVar(e.ptr, var)) {
+                std::cout << "[DEBUG] Constant integration: " << e.toString() << std::endl;
                 return e * x; // ∫ c dx = c * x
             }
 
@@ -1096,8 +1130,10 @@ namespace jc {
             } else {
                 varPart = e;
             }
+            std::cout << "[DEBUG] coeff=" << coeff.toString() << " varPart=" << varPart.toString() << std::endl;
 
             // --- 0. 查表匹配 (Pattern Matching) ---
+            std::cout << "[DEBUG] Trying Pattern Matching..." << std::endl;
             SymExpr integratedPart = varPart;
             bool matched = false;
             for (const auto& rule : rules) {
@@ -1127,10 +1163,12 @@ namespace jc {
             }
 
             if (matched) {
+                std::cout << "[DEBUG] Pattern matched!" << std::endl;
                 return coeff * integratedPart;
             }
 
             // --- 1. 线性换元法 (Linear Substitution) ---
+            std::cout << "[DEBUG] Trying Linear Substitution..." << std::endl;
             auto findLinearArg = [&](const std::shared_ptr<SymNode>& node, SymExpr& out_u, SymExpr& out_a) -> bool {
                 if (!node) return false;
                 if (node->getType() == SymType::FUNC) {
@@ -1213,6 +1251,7 @@ namespace jc {
             }
 
             // --- 1.5 广义换元法 (凑微分法) ---
+            std::cout << "[DEBUG] Trying Generalized Substitution..." << std::endl;
             if (varPart.ptr->getType() == SymType::MUL) {
                 auto mul = std::static_pointer_cast<SymMul>(varPart.ptr);
                 std::vector<SymExpr> candidate_us;
@@ -1335,7 +1374,125 @@ namespace jc {
                 }
             }
 
+            // --- 1.6 根式整体换元 (Radical Substitution) ---
+            std::cout << "[DEBUG] Trying Radical Substitution..." << std::endl;
+            SymExpr radicalBase;
+            int radicalN = 0;
+            bool foundRadical = false;
+            std::function<void(const std::shared_ptr<SymNode>&)> findRadical = [&](const std::shared_ptr<SymNode>& node) {
+                if (!node || foundRadical) return;
+                if (node->getType() == SymType::POW) {
+                    auto powNode = std::static_pointer_cast<SymPow>(node);
+                    if (powNode->exp->getType() == SymType::NUM) {
+                        auto numVal = std::static_pointer_cast<SymNum>(powNode->exp)->value;
+                        if (std::holds_alternative<Fraction>(numVal)) {
+                            Fraction frac = std::get<Fraction>(numVal);
+                            if (frac.getDen() > BigInt(1) && containsVar(powNode->base, var)) {
+                                radicalBase = SymExpr(powNode->base);
+                                radicalN = static_cast<int>(frac.getDen().toDouble());
+                                foundRadical = true;
+                                return;
+                            }
+                        }
+                    }
+                }
+                if (node->getType() == SymType::ADD) {
+                    for (auto& arg : std::static_pointer_cast<SymAdd>(node)->args) findRadical(arg);
+                } else if (node->getType() == SymType::MUL) {
+                    for (auto& arg : std::static_pointer_cast<SymMul>(node)->args) findRadical(arg);
+                } else if (node->getType() == SymType::FUNC) {
+                    for (auto& arg : std::static_pointer_cast<SymFunc>(node)->args) findRadical(arg);
+                }
+            };
+            findRadical(varPart.ptr);
+
+            if (foundRadical && radicalN >= 2) {
+                auto invertFunction = [&](SymExpr f, SymExpr target, std::string v) -> std::optional<SymExpr> {
+                    int iters = 0;
+                    while (f.ptr->getType() != SymType::VAR && iters++ < 10) {
+                        if (f.ptr->getType() == SymType::ADD) {
+                            auto add = std::static_pointer_cast<SymAdd>(f.ptr);
+                            SymExpr withV(BigInt(0)), withoutV(BigInt(0));
+                            int countV = 0;
+                            for (auto& arg : add->args) {
+                                if (containsVar(arg, v)) { withV = SymExpr(arg); countV++; }
+                                else withoutV = withoutV + SymExpr(arg);
+                            }
+                            if (countV != 1) return std::nullopt;
+                            target = target - withoutV;
+                            f = withV;
+                        } else if (f.ptr->getType() == SymType::MUL) {
+                            auto mul = std::static_pointer_cast<SymMul>(f.ptr);
+                            SymExpr withV(BigInt(1)), withoutV(BigInt(1));
+                            int countV = 0;
+                            for (auto& arg : mul->args) {
+                                if (containsVar(arg, v)) { withV = SymExpr(arg); countV++; }
+                                else withoutV = withoutV * SymExpr(arg);
+                            }
+                            if (countV != 1) return std::nullopt;
+                            target = target / withoutV;
+                            f = withV;
+                        } else if (f.ptr->getType() == SymType::POW) {
+                            auto powNode = std::static_pointer_cast<SymPow>(f.ptr);
+                            bool baseHasV = containsVar(powNode->base, v);
+                            bool expHasV = containsVar(powNode->exp, v);
+                            if (baseHasV && !expHasV) {
+                                target = target ^ (SymExpr(BigInt(1)) / SymExpr(powNode->exp));
+                                f = SymExpr(powNode->base);
+                            } else if (!baseHasV && expHasV) {
+                                SymExpr log_target(std::make_shared<SymFunc>("log", std::vector<std::shared_ptr<SymNode>>{target.ptr}));
+                                SymExpr log_base(std::make_shared<SymFunc>("log", std::vector<std::shared_ptr<SymNode>>{powNode->base}));
+                                target = log_target / log_base;
+                                f = SymExpr(powNode->exp);
+                            } else {
+                                return std::nullopt;
+                            }
+                        } else if (f.ptr->getType() == SymType::FUNC) {
+                            auto func = std::static_pointer_cast<SymFunc>(f.ptr);
+                            if (func->args.size() != 1) return std::nullopt;
+                            SymExpr arg(func->args[0]);
+                            if (func->name == "sin") target = SymExpr(std::make_shared<SymFunc>("asin", std::vector<std::shared_ptr<SymNode>>{target.ptr}));
+                            else if (func->name == "cos") target = SymExpr(std::make_shared<SymFunc>("acos", std::vector<std::shared_ptr<SymNode>>{target.ptr}));
+                            else if (func->name == "tan") target = SymExpr(std::make_shared<SymFunc>("atan", std::vector<std::shared_ptr<SymNode>>{target.ptr}));
+                            else if (func->name == "asin") target = SymExpr(std::make_shared<SymFunc>("sin", std::vector<std::shared_ptr<SymNode>>{target.ptr}));
+                            else if (func->name == "acos") target = SymExpr(std::make_shared<SymFunc>("cos", std::vector<std::shared_ptr<SymNode>>{target.ptr}));
+                            else if (func->name == "atan") target = SymExpr(std::make_shared<SymFunc>("tan", std::vector<std::shared_ptr<SymNode>>{target.ptr}));
+                            else if (func->name == "exp") target = SymExpr(std::make_shared<SymFunc>("log", std::vector<std::shared_ptr<SymNode>>{target.ptr}));
+                            else if (func->name == "log") target = SymExpr(std::make_shared<SymFunc>("exp", std::vector<std::shared_ptr<SymNode>>{target.ptr}));
+                            else if (func->name == "sinh") target = SymExpr(std::make_shared<SymFunc>("asinh", std::vector<std::shared_ptr<SymNode>>{target.ptr}));
+                            else if (func->name == "cosh") target = SymExpr(std::make_shared<SymFunc>("acosh", std::vector<std::shared_ptr<SymNode>>{target.ptr}));
+                            else if (func->name == "tanh") target = SymExpr(std::make_shared<SymFunc>("atanh", std::vector<std::shared_ptr<SymNode>>{target.ptr}));
+                            else return std::nullopt;
+                            f = arg;
+                        } else {
+                            return std::nullopt;
+                        }
+                    }
+                    if (f.ptr->getType() == SymType::VAR && std::static_pointer_cast<SymVar>(f.ptr)->name == v) {
+                        return target;
+                    }
+                    return std::nullopt;
+                };
+
+                std::string u_var = "_u_rad";
+                SymExpr u_sym = SymExpr::makeVar(u_var);
+                SymExpr target = u_sym ^ SymExpr(BigInt(radicalN));
+                
+                if (auto x_sol = invertFunction(radicalBase, target, var)) {
+                    SymExpr dx_du = simplify(diff(*x_sol, u_var));
+                    if (!dx_du.isZero()) {
+                        SymExpr new_integrand = simplify(subs(varPart, var, *x_sol) * dx_du);
+                        SymExpr integrand_var = subs(new_integrand, u_var, SymExpr::makeVar(var));
+                        if (auto int_var = doInteg(integrand_var, current_depth + 1)) {
+                            SymExpr back_sub = radicalBase ^ SymExpr(Fraction(BigInt(1), BigInt(radicalN)));
+                            return coeff * simplify(subs(*int_var, var, back_sub));
+                        }
+                    }
+                }
+            }
+
             // --- 1.8 三角函数高次幂降幂与拆分 ---
+            std::cout << "[DEBUG] Trying Trig Power Reduction..." << std::endl;
             if (varPart.ptr->getType() == SymType::POW) {
                 auto powNode = std::static_pointer_cast<SymPow>(varPart.ptr);
                 if (powNode->base->getType() == SymType::FUNC && powNode->exp->getType() == SymType::NUM) {
@@ -1383,6 +1540,7 @@ namespace jc {
             }
 
             // --- 1.9 二次根式三角换元 (Trigonometric Substitution) ---
+            std::cout << "[DEBUG] Trying Trig Substitution..." << std::endl;
             if (var != "_t" && var != "_weierstrass_t") {
                 SymExpr quadBase;
                 bool foundQuad = false;
@@ -1476,6 +1634,7 @@ namespace jc {
             }
 
             // --- 1.95 高次二项式分式积分 (Binomial Fraction Integration) ---
+            std::cout << "[DEBUG] Trying Binomial Fraction..." << std::endl;
             if (varPart.ptr->getType() == SymType::POW) {
                 auto powNode = std::static_pointer_cast<SymPow>(varPart.ptr);
                 if (powNode->exp->getType() == SymType::NUM) {
@@ -1587,6 +1746,7 @@ namespace jc {
             }
 
             // --- 1.98 二次配方法启发式 (Inverse Quadratic Integration) ---
+            std::cout << "[DEBUG] Trying Inverse Quadratic..." << std::endl;
             auto [num, den] = getFraction(varPart);
             bool isFraction = !den.isOne();
 
@@ -1623,6 +1783,7 @@ namespace jc {
             }
 
             // --- 2. 有理分式积分引擎 (Rational Function Integration) ---
+            std::cout << "[DEBUG] Trying Rational Function..." << std::endl;
             if (isFraction && containsVar(den.ptr, var)) {
                 // 参数化常数提取与隔离黑盒 (Symbolic Constant Blackboxing)
                 std::map<std::string, SymExpr> constDict;
@@ -1703,6 +1864,7 @@ namespace jc {
             }
 
             // --- 3. 万能公式换元 (Weierstrass Substitution) ---
+            std::cout << "[DEBUG] Trying Weierstrass..." << std::endl;
             bool hasTrig = false;
             std::function<bool(const std::shared_ptr<SymNode>&)> isRationalTrig = [&](const std::shared_ptr<SymNode>& node) -> bool {
                 if (!node) return true;
@@ -1721,6 +1883,12 @@ namespace jc {
                         auto powNode = std::static_pointer_cast<SymPow>(node);
                         if (!isRationalTrig(powNode->base)) return false;
                         if (containsVar(powNode->exp, var)) return false;
+                        if (powNode->exp->getType() == SymType::NUM) {
+                            auto [isInt, n] = extractExactInt(std::static_pointer_cast<SymNum>(powNode->exp)->value);
+                            if (!isInt) return false;
+                        } else {
+                            return false;
+                        }
                         return true;
                     }
                     case SymType::FUNC: {
@@ -1802,6 +1970,7 @@ namespace jc {
             }
 
             // --- 4. 启发式分部积分 (Integration by Parts) ---
+            std::cout << "[DEBUG] Trying IBP..." << std::endl;
             bool tryParts = false;
             std::vector<SymExpr> factors;
             if (varPart.ptr->getType() == SymType::MUL) {
@@ -1809,9 +1978,22 @@ namespace jc {
                 for (auto& arg : mul->args) factors.push_back(SymExpr(arg));
                 tryParts = true;
             } else if (varPart.ptr->getType() == SymType::FUNC || varPart.ptr->getType() == SymType::POW) {
-                factors.push_back(varPart);
-                factors.push_back(SymExpr(BigInt(1)));
-                tryParts = true;
+                bool isGoodForIBP = false;
+                if (varPart.ptr->getType() == SymType::FUNC) {
+                    auto fn = std::static_pointer_cast<SymFunc>(varPart.ptr);
+                    if (fn->name == "log" || fn->name == "asin" || fn->name == "acos" || fn->name == "atan") isGoodForIBP = true;
+                } else if (varPart.ptr->getType() == SymType::POW) {
+                    auto p = std::static_pointer_cast<SymPow>(varPart.ptr);
+                    if (p->base->getType() == SymType::FUNC) {
+                        auto fn = std::static_pointer_cast<SymFunc>(p->base);
+                        if (fn->name == "log" || fn->name == "asin" || fn->name == "acos" || fn->name == "atan") isGoodForIBP = true;
+                    }
+                }
+                if (isGoodForIBP) {
+                    factors.push_back(varPart);
+                    factors.push_back(SymExpr(BigInt(1)));
+                    tryParts = true;
+                }
             }
 
             bool hasTranscendental = false;
@@ -1985,6 +2167,7 @@ namespace jc {
             }
 
             // 启发式方法全部失效，移交 Risch 算法处理
+            std::cout << "[DEBUG] Trying Risch..." << std::endl;
             try {
                 return coeff * rischIntegrate(varPart, var, current_depth + 1);
             } catch (...) {

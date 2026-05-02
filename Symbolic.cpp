@@ -829,31 +829,33 @@ namespace jc {
                     bool isNeg = baseInt.isNegative();
                     if (isNeg) baseInt = baseInt.abs();
                     
-                    auto factors = baseInt.factorize();
                     SymExpr outside(BigInt(1));
                     BigInt insideInt(1);
                     
-                    for (const auto& f : factors) {
-                        BigInt p = f.first;
-                        BigInt k(f.second);
-                        BigInt totalPow = k * m;
-                        
-                        BigInt q = totalPow / n_den;
-                        BigInt r = totalPow % n_den;
-                        if (r.isNegative()) {
-                            r = r + n_den;
-                            q = q - BigInt(1);
-                        }
-                        
-                        if (!q.isZero()) {
-                            SymExpr term = SymExpr(p) ^ SymExpr(q);
-                            if (outside.isOne()) outside = term;
-                            else outside = SymExpr(std::make_shared<SymMul>(std::vector<std::shared_ptr<SymNode>>{outside.ptr, term.ptr}));
-                        }
-                        if (!r.isZero()) {
-                            BigInt pr(1);
-                            for(BigInt i(0); i < r; i = i + BigInt(1)) pr = pr * p;
-                            insideInt = insideInt * pr;
+                    if (baseInt > BigInt(1)) {
+                        auto factors = baseInt.factorize();
+                        for (const auto& f : factors) {
+                            BigInt p = f.first;
+                            BigInt k(f.second);
+                            BigInt totalPow = k * m;
+                            
+                            BigInt q = totalPow / n_den;
+                            BigInt r = totalPow % n_den;
+                            if (r.isNegative()) {
+                                r = r + n_den;
+                                q = q - BigInt(1);
+                            }
+                            
+                            if (!q.isZero()) {
+                                SymExpr term = SymExpr(p) ^ SymExpr(q);
+                                if (outside.isOne()) outside = term;
+                                else outside = SymExpr(std::make_shared<SymMul>(std::vector<std::shared_ptr<SymNode>>{outside.ptr, term.ptr}));
+                            }
+                            if (!r.isZero()) {
+                                BigInt pr(1);
+                                for(BigInt i(0); i < r; i = i + BigInt(1)) pr = pr * p;
+                                insideInt = insideInt * pr;
+                            }
                         }
                     }
                     
@@ -910,13 +912,35 @@ namespace jc {
                     return numRes / denRes;
                 } else if (std::holds_alternative<double>(baseNum->value)) {
                     try {
-                        Value result = casValToValue(baseNum->value) ^ casValToValue(expNum->value);
+                        Value baseVal = casValToValue(baseNum->value);
+                        Value expVal = casValToValue(expNum->value);
+                        Value result = baseVal ^ expVal;
+                        
+                        if (std::holds_alternative<double>(result.data) && std::isnan(std::get<double>(result.data))) {
+                            std::complex<double> bc(baseVal.asDouble(), 0.0);
+                            std::complex<double> ec(expVal.asDouble(), 0.0);
+                            std::complex<double> cres = std::pow(bc, ec);
+                            if (Tol::isEq(cres.imag(), 0.0)) return SymExpr(cres.real());
+                            return SymExpr(Complex(cres.real(), cres.imag()));
+                        }
+                        
                         return result.asSymbolic();
                     } catch (...) {}
                 }
             } else if (std::holds_alternative<double>(expNum->value)) {
                 try {
-                    Value result = casValToValue(baseNum->value) ^ casValToValue(expNum->value);
+                    Value baseVal = casValToValue(baseNum->value);
+                    Value expVal = casValToValue(expNum->value);
+                    Value result = baseVal ^ expVal;
+                        
+                    if (std::holds_alternative<double>(result.data) && std::isnan(std::get<double>(result.data))) {
+                        std::complex<double> bc(baseVal.asDouble(), 0.0);
+                        std::complex<double> ec(expVal.asDouble(), 0.0);
+                        std::complex<double> cres = std::pow(bc, ec);
+                        if (Tol::isEq(cres.imag(), 0.0)) return SymExpr(cres.real());
+                        return SymExpr(Complex(cres.real(), cres.imag()));
+                    }
+                        
                     return result.asSymbolic();
                 } catch (...) {}
             }
@@ -1161,6 +1185,13 @@ namespace jc {
             case SymType::POW: {
                 auto pNode = std::static_pointer_cast<SymPow>(node);
                 auto pPat = std::static_pointer_cast<SymPow>(pat);
+                
+                // 严格限制：如果模板的指数是常数，目标表达式的指数必须完全一致
+                if (pPat->exp->getType() == SymType::NUM) {
+                    if (pNode->exp->getType() != SymType::NUM) return false;
+                    if (pNode->exp->toString() != pPat->exp->toString()) return false;
+                }
+                
                 std::map<std::string, SymExpr> tempCaptures = captures;
                 if (matchAST(pNode->base, pPat->base, tempCaptures) && matchAST(pNode->exp, pPat->exp, tempCaptures)) {
                     captures = tempCaptures;
@@ -1743,6 +1774,25 @@ namespace jc {
                 if (!ok2) return {false, Value()};
                 try {
                     Value res = b ^ e;
+                    if (std::holds_alternative<double>(res.data) && std::isnan(std::get<double>(res.data))) {
+                        double br = 0.0, bi = 0.0, er = 0.0, ei = 0.0;
+                        bool ok_cast = true;
+                        try {
+                            if (b.isComplex()) { br = b.asComplex().real; bi = b.asComplex().imag; }
+                            else { br = b.asDouble(); }
+                            if (e.isComplex()) { er = e.asComplex().real; ei = e.asComplex().imag; }
+                            else { er = e.asDouble(); }
+                        } catch (...) { ok_cast = false; }
+                        
+                        if (ok_cast) {
+                            std::complex<double> bc(br, bi);
+                            std::complex<double> ec(er, ei);
+                            std::complex<double> cres = std::pow(bc, ec);
+                            if (Tol::isEq(cres.imag(), 0.0)) res = Value(cres.real());
+                            else res = Value(Complex(cres.real(), cres.imag()));
+                        }
+                    }
+                    
                     if (!std::holds_alternative<double>(res.data) &&
                         !std::holds_alternative<BigInt>(res.data) &&
                         !std::holds_alternative<Fraction>(res.data) &&
@@ -3127,6 +3177,8 @@ namespace jc {
         int degA = static_cast<int>(A.size()) - 1;
         int degB = static_cast<int>(B.size()) - 1;
         
+        if (degB == 0) return {}; // 任何多项式对常数的伪余数均为 0
+        
         int d = degA - degB + 1;
         if (d <= 0) return A;
         
@@ -3225,7 +3277,11 @@ namespace jc {
         SymExpr g(BigInt(1));
         SymExpr h(BigInt(1));
         
+        int iter = 0;
         while (!coeffsB.empty()) {
+            if (++iter > SymConfig::maxIterations) {
+                throw std::runtime_error("Math Error: polyGCD infinite loop detected.");
+            }
             int degA = static_cast<int>(coeffsA.size()) - 1;
             int degB = static_cast<int>(coeffsB.size()) - 1;
             int delta = degA - degB;
@@ -3378,7 +3434,11 @@ namespace jc {
         SymExpr g(BigInt(1));
         SymExpr h(BigInt(1));
         
+        int iter = 0;
         while (true) {
+            if (++iter > SymConfig::maxIterations) {
+                throw std::runtime_error("Math Error: polyResultant infinite loop detected.");
+            }
             degA = static_cast<int>(coeffsA.size()) - 1;
             degB = static_cast<int>(coeffsB.size()) - 1;
             if (degB < 0) return SymExpr(BigInt(0));
@@ -4680,13 +4740,15 @@ namespace jc {
     // =================================================================
 // 快速数值求值 (C++ 原生 Double 极限狂飙 + 依赖注入解耦)
 // =================================================================
-    double fastEval(const std::shared_ptr<SymNode>& node, const std::map<std::string, double>& env, const SymbolicFuncResolver& resolver) {
+    static std::complex<double> fastEvalComplex(const std::shared_ptr<SymNode>& node, const std::map<std::string, double>& env, const SymbolicFuncResolver& resolver) {
         if (!node) return 0.0;
 
         switch (node->getType()) {
         case SymType::NUM: {
             auto num = std::static_pointer_cast<SymNum>(node);
-            return casValToValue(num->value).asDouble();
+            Value v = casValToValue(num->value);
+            if (v.isComplex()) return std::complex<double>(v.asComplex().real, v.asComplex().imag);
+            return v.asDouble();
         }
         case SymType::VAR: {
             auto varName = std::static_pointer_cast<SymVar>(node)->name;
@@ -4694,43 +4756,80 @@ namespace jc {
             if (it != env.end()) return it->second;
             if (varName == "PI") return 3.14159265358979323846;
             if (varName == "E") return 2.71828182845904523536;
+            if (varName == "i" || varName == "I") return std::complex<double>(0.0, 1.0);
             return 0.0;
         }
         case SymType::ADD: {
-            double sum = 0.0;
-            for (auto& arg : std::static_pointer_cast<SymAdd>(node)->args) sum += fastEval(arg, env, resolver);
+            std::complex<double> sum = 0.0;
+            for (auto& arg : std::static_pointer_cast<SymAdd>(node)->args) sum += fastEvalComplex(arg, env, resolver);
             return sum;
         }
         case SymType::MUL: {
-            double prod = 1.0;
-            for (auto& arg : std::static_pointer_cast<SymMul>(node)->args) prod *= fastEval(arg, env, resolver);
+            std::complex<double> prod = 1.0;
+            for (auto& arg : std::static_pointer_cast<SymMul>(node)->args) prod *= fastEvalComplex(arg, env, resolver);
             return prod;
         }
         case SymType::POW: {
             auto p = std::static_pointer_cast<SymPow>(node);
-            return std::pow(fastEval(p->base, env, resolver), fastEval(p->exp, env, resolver));
+            return std::pow(fastEvalComplex(p->base, env, resolver), fastEvalComplex(p->exp, env, resolver));
         }
         case SymType::FUNC: {
             auto f = std::static_pointer_cast<SymFunc>(node);
             if ((f->name == "RootOf" || f->name == "RootSum") && f->args.size() == 3) {
                 Value v = evaluateRootNode(f, [&](const SymExpr& e) {
-                    return Value(fastEval(e.ptr, env, resolver));
+                    std::complex<double> c = fastEvalComplex(e.ptr, env, resolver);
+                    if (Tol::isEq(c.imag(), 0.0)) return Value(c.real());
+                    return Value(Complex(c.real(), c.imag()));
                 });
+                if (v.isComplex()) return std::complex<double>(v.asComplex().real, v.asComplex().imag);
                 return v.asDouble();
             }
+            
+            // 内置常见数学函数，避免跨界调用开销并支持复数
+            if (f->args.size() == 1) {
+                std::complex<double> arg = fastEvalComplex(f->args[0], env, resolver);
+                if (f->name == "sqrt") return std::sqrt(arg);
+                if (f->name == "cbrt") return std::pow(arg, 1.0/3.0);
+                if (f->name == "exp") return std::exp(arg);
+                if (f->name == "log") return std::log(arg);
+                if (f->name == "sin") return std::sin(arg);
+                if (f->name == "cos") return std::cos(arg);
+                if (f->name == "tan") return std::tan(arg);
+                if (f->name == "asin") return std::asin(arg);
+                if (f->name == "acos") return std::acos(arg);
+                if (f->name == "atan") return std::atan(arg);
+                if (f->name == "sinh") return std::sinh(arg);
+                if (f->name == "cosh") return std::cosh(arg);
+                if (f->name == "tanh") return std::tanh(arg);
+                if (f->name == "abs") return std::abs(arg);
+            } else if (f->args.size() == 2) {
+                if (f->name == "root") {
+                    std::complex<double> base = fastEvalComplex(f->args[0], env, resolver);
+                    std::complex<double> n = fastEvalComplex(f->args[1], env, resolver);
+                    return std::pow(base, 1.0 / n);
+                }
+            }
+
             if (!resolver) throw std::runtime_error("JIT Error: No function resolver provided for '" + f->name + "'.");
 
-            // 将双精度打包丢给 VM 宿主的注册表处理
             std::vector<Value> callArgs;
             callArgs.reserve(f->args.size());
             for (auto& arg : f->args) {
-                callArgs.push_back(Value(fastEval(arg, env, resolver)));
+                std::complex<double> c = fastEvalComplex(arg, env, resolver);
+                if (Tol::isEq(c.imag(), 0.0)) callArgs.push_back(Value(c.real()));
+                else callArgs.push_back(Value(Complex(c.real(), c.imag())));
             }
-            // 拿到宿主的 Value 后光速拆包回 double！
-            return resolver(f->name, callArgs).asDouble();
+            Value res = resolver(f->name, callArgs);
+            if (res.isComplex()) return std::complex<double>(res.asComplex().real, res.asComplex().imag);
+            return res.asDouble();
         }
         }
         return 0.0;
+    }
+
+    double fastEval(const std::shared_ptr<SymNode>& node, const std::map<std::string, double>& env, const SymbolicFuncResolver& resolver) {
+        std::complex<double> res = fastEvalComplex(node, env, resolver);
+        return res.real();
     }
 
     // =================================================================
@@ -4765,7 +4864,29 @@ namespace jc {
         }
         case SymType::POW: {
             auto p = std::static_pointer_cast<SymPow>(node);
-            return evalUniversal(p->base, env, resolver) ^ evalUniversal(p->exp, env, resolver);
+            Value b = evalUniversal(p->base, env, resolver);
+            Value e = evalUniversal(p->exp, env, resolver);
+            Value res = b ^ e;
+            
+            if (std::holds_alternative<double>(res.data) && std::isnan(std::get<double>(res.data))) {
+                double br = 0.0, bi = 0.0, er = 0.0, ei = 0.0;
+                bool ok_cast = true;
+                try {
+                    if (b.isComplex()) { br = b.asComplex().real; bi = b.asComplex().imag; }
+                    else { br = b.asDouble(); }
+                    if (e.isComplex()) { er = e.asComplex().real; ei = e.asComplex().imag; }
+                    else { er = e.asDouble(); }
+                } catch (...) { ok_cast = false; }
+                
+                if (ok_cast) {
+                    std::complex<double> bc(br, bi);
+                    std::complex<double> ec(er, ei);
+                    std::complex<double> cres = std::pow(bc, ec);
+                    if (Tol::isEq(cres.imag(), 0.0)) return Value(cres.real());
+                    return Value(Complex(cres.real(), cres.imag()));
+                }
+            }
+            return res;
         }
         case SymType::FUNC: {
             auto f = std::static_pointer_cast<SymFunc>(node);
@@ -4774,6 +4895,53 @@ namespace jc {
                     return evalUniversal(e.ptr, env, resolver);
                 });
             }
+            
+            // 内置常见数学函数，避免跨界调用开销并支持复数
+            if (f->args.size() == 1) {
+                Value arg = evalUniversal(f->args[0], env, resolver);
+                std::complex<double> c(0.0, 0.0);
+                bool is_c = false;
+                if (arg.isComplex()) { c = std::complex<double>(arg.asComplex().real, arg.asComplex().imag); is_c = true; }
+                else if (std::holds_alternative<double>(arg.data) || std::holds_alternative<BigInt>(arg.data) || std::holds_alternative<Fraction>(arg.data)) {
+                    c = std::complex<double>(arg.asDouble(), 0.0); is_c = true;
+                }
+                
+                if (is_c) {
+                    std::complex<double> res;
+                    bool handled = true;
+                    if (f->name == "sqrt") res = std::sqrt(c);
+                    else if (f->name == "cbrt") res = std::pow(c, 1.0/3.0);
+                    else if (f->name == "exp") res = std::exp(c);
+                    else if (f->name == "log") res = std::log(c);
+                    else if (f->name == "sin") res = std::sin(c);
+                    else if (f->name == "cos") res = std::cos(c);
+                    else if (f->name == "tan") res = std::tan(c);
+                    else if (f->name == "asin") res = std::asin(c);
+                    else if (f->name == "acos") res = std::acos(c);
+                    else if (f->name == "atan") res = std::atan(c);
+                    else if (f->name == "sinh") res = std::sinh(c);
+                    else if (f->name == "cosh") res = std::cosh(c);
+                    else if (f->name == "tanh") res = std::tanh(c);
+                    else if (f->name == "abs") res = std::abs(c);
+                    else handled = false;
+                    
+                    if (handled) {
+                        if (Tol::isEq(res.imag(), 0.0)) return Value(res.real());
+                        return Value(Complex(res.real(), res.imag()));
+                    }
+                }
+            } else if (f->args.size() == 2) {
+                if (f->name == "root") {
+                    Value base = evalUniversal(f->args[0], env, resolver);
+                    Value n = evalUniversal(f->args[1], env, resolver);
+                    std::complex<double> cb(base.isComplex() ? base.asComplex().real : base.asDouble(), base.isComplex() ? base.asComplex().imag : 0.0);
+                    std::complex<double> cn(n.isComplex() ? n.asComplex().real : n.asDouble(), n.isComplex() ? n.asComplex().imag : 0.0);
+                    std::complex<double> res = std::pow(cb, 1.0 / cn);
+                    if (Tol::isEq(res.imag(), 0.0)) return Value(res.real());
+                    return Value(Complex(res.real(), res.imag()));
+                }
+            }
+
             if (!resolver) throw std::runtime_error("Universal Error: No function resolver provided for '" + f->name + "'.");
 
             // 同构打包发送给宿主环境处理
