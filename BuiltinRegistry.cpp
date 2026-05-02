@@ -1130,6 +1130,7 @@ void BuiltinRegistry::registerSystemUtils() {
             d.set("maxAstNodes", Value(static_cast<double>(SymConfig::maxAstNodes)));
             d.set("maxIterations", Value(static_cast<double>(SymConfig::maxIterations)));
             d.set("maxDepth", Value(static_cast<double>(SymConfig::maxDepth)));
+            d.set("debugIntegration", Value(SymConfig::debugIntegration ? 1.0 : 0.0));
             return Value(d);
         }
         if (std::holds_alternative<std::string>(args[0].data) && std::get<std::string>(args[0].data) == "default") {
@@ -1137,6 +1138,7 @@ void BuiltinRegistry::registerSystemUtils() {
             SymConfig::maxAstNodes = 50000;
             SymConfig::maxIterations = 1000;
             SymConfig::maxDepth = 20;
+            SymConfig::debugIntegration = false;
             return Value::none();
         }
         if (!std::holds_alternative<Dict>(args[0].data)) {
@@ -1147,6 +1149,7 @@ void BuiltinRegistry::registerSystemUtils() {
         if (d.has("maxAstNodes")) SymConfig::maxAstNodes = static_cast<int>(std::any_cast<Value>(*d.get("maxAstNodes")).asDouble());
         if (d.has("maxIterations")) SymConfig::maxIterations = static_cast<int>(std::any_cast<Value>(*d.get("maxIterations")).asDouble());
         if (d.has("maxDepth")) SymConfig::maxDepth = static_cast<int>(std::any_cast<Value>(*d.get("maxDepth")).asDouble());
+        if (d.has("debugIntegration")) SymConfig::debugIntegration = isTruthy(std::any_cast<Value>(*d.get("debugIntegration")));
         return Value::none();
         });
 
@@ -1161,6 +1164,7 @@ void BuiltinRegistry::registerSystemUtils() {
                 SymConfig::maxAstNodes = 50000;
                 SymConfig::maxIterations = 1000;
                 SymConfig::maxDepth = 20;
+                SymConfig::debugIntegration = false;
                 return Value::none();
             }
             throw std::runtime_error("Runtime Error: setSymLimit() expects 2 arguments unless resetting with \"default\".");
@@ -1171,7 +1175,13 @@ void BuiltinRegistry::registerSystemUtils() {
             else if (key == "maxAstNodes") SymConfig::maxAstNodes = 50000;
             else if (key == "maxIterations") SymConfig::maxIterations = 1000;
             else if (key == "maxDepth") SymConfig::maxDepth = 20;
+            else if (key == "debugIntegration") SymConfig::debugIntegration = false;
             else throw std::runtime_error("Runtime Error: Unknown SymConfig key '" + key + "'.");
+            return Value::none();
+        }
+
+        if (key == "debugIntegration") {
+            SymConfig::debugIntegration = isTruthy(args[1]);
             return Value::none();
         }
 
@@ -1304,6 +1314,13 @@ void BuiltinRegistry::registerControlFlow() {
         std::string arg = std::get<std::string>(args[0].data);
         if (arg=="on") jc::colorsEnabled = true; else if (arg=="off") jc::colorsEnabled = false;
         else throw std::runtime_error("Runtime Error: color() expects \"on\" or \"off\".");
+        return Value::none();
+    });
+    reg("debugInteg", { 1 }, [](const std::vector<Value>& args) -> Value {
+        if (!std::holds_alternative<std::string>(args[0].data)) throw std::runtime_error("Type Error: debugInteg() expects \"on\" or \"off\".");
+        std::string arg = std::get<std::string>(args[0].data);
+        if (arg=="on") jc::SymConfig::debugIntegration = true; else if (arg=="off") jc::SymConfig::debugIntegration = false;
+        else throw std::runtime_error("Runtime Error: debugInteg() expects \"on\" or \"off\".");
         return Value::none();
     });
 

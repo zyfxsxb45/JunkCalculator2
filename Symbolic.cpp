@@ -1171,6 +1171,7 @@ namespace jc {
 
     // 精确匹配 AST 并记录捕获变量 (支持 ADD/MUL 的全排列交换律检测)
     bool matchAST(const std::shared_ptr<SymNode>& node, const std::shared_ptr<SymNode>& pat, std::map<std::string, SymExpr>& captures) {
+        checkInterrupt();
         if (!node || !pat) return false;
         
         std::string wcName;
@@ -1323,6 +1324,7 @@ namespace jc {
 
     // 核心入口：后序遍历并尝试重写
     SymExpr applyRule(const SymExpr& expr, const SymExpr& pattern, const SymExpr& target) {
+        checkInterrupt();
         if (!expr.ptr) return expr;
         
         // 1. 无情探底（Post-order traversal）
@@ -1472,10 +1474,25 @@ namespace jc {
 // 符号展开：带有防爆截断额度 maxPowTerms
 // =================================================================
     SymExpr expand(const SymExpr& expr, int64_t maxPowTerms) {
+        checkInterrupt();
         if (!expr.ptr) return expr;
         if (maxPowTerms <= 0) maxPowTerms = SymConfig::maxExpandTerms;
 
-        switch (expr.ptr->getType()) {
+        static thread_local std::unordered_map<std::string, SymExpr> cache;
+        static thread_local int depth = 0;
+
+        std::string sig = expr.ptr->getSignature() + "_" + std::to_string(maxPowTerms);
+        if (depth > 0) {
+            auto it = cache.find(sig);
+            if (it != cache.end()) return it->second;
+        } else {
+            cache.clear();
+        }
+
+        depth++;
+
+        auto compute = [&]() -> SymExpr {
+            switch (expr.ptr->getType()) {
         case SymType::NUM:
         case SymType::VAR:
             return expr;
@@ -1730,10 +1747,16 @@ namespace jc {
                     return expand(SymExpr(powN->exp) * logA, maxPowTerms); // 传递
                 }
             }
-            return SymExpr(std::make_shared<SymFunc>(func->name, std::move(expArgs)));
-        }
-        }
-        return expr;
+                return SymExpr(std::make_shared<SymFunc>(func->name, std::move(expArgs)));
+            }
+            }
+            return expr;
+        };
+
+        SymExpr result = compute();
+        depth--;
+        cache[sig] = result;
+        return result;
     }
 
     static std::pair<bool, Value> tryEvalConst(const SymExpr& expr) {
@@ -1828,6 +1851,7 @@ namespace jc {
     // 代入引擎 (Substitution Engine)
     // ==========================================
     SymExpr subs(const SymExpr& expr, const std::string& var, const SymExpr& val) {
+        checkInterrupt();
         if (!expr.ptr) return expr;
 
         switch (expr.ptr->getType()) {
@@ -2141,6 +2165,7 @@ namespace jc {
 // 微积分引擎 (Calculus Engine)
 // =================================================================
     SymExpr diff(const SymExpr& expr, const std::string& var) {
+        checkInterrupt();
         if (!expr.ptr) return expr;
 
         switch (expr.ptr->getType()) {
@@ -2415,9 +2440,24 @@ namespace jc {
 // exp(a) * exp(b)  → exp(a+b)
 // =================================================================
     SymExpr contract(const SymExpr& expr) {
+        checkInterrupt();
         if (!expr.ptr) return expr;
 
-        switch (expr.ptr->getType()) {
+        static thread_local std::unordered_map<std::string, SymExpr> cache;
+        static thread_local int depth = 0;
+
+        std::string sig = expr.ptr->getSignature();
+        if (depth > 0) {
+            auto it = cache.find(sig);
+            if (it != cache.end()) return it->second;
+        } else {
+            cache.clear();
+        }
+
+        depth++;
+
+        auto compute = [&]() -> SymExpr {
+            switch (expr.ptr->getType()) {
 
             // ─────────────────────────────────────────────
             // 加法节点：寻找所有 log 项，合并为一个 log
@@ -2554,9 +2594,15 @@ namespace jc {
             return SymExpr(std::make_shared<SymFunc>(f->name, std::move(nArgs)));
         }
 
-        default: break;
-        }
-        return expr;
+            default: break;
+            }
+            return expr;
+        };
+
+        SymExpr result = compute();
+        depth--;
+        cache[sig] = result;
+        return result;
     }
 
     // =================================================================
@@ -2654,8 +2700,22 @@ namespace jc {
         checkInterrupt();
         if (!expr.ptr) return expr;
 
-        // 递归化简内层 + 身份吸收法则
-        std::shared_ptr<SymNode> newNode = expr.ptr;
+        static thread_local std::unordered_map<std::string, SymExpr> cache;
+        static thread_local int depth = 0;
+
+        std::string sig = expr.ptr->getSignature();
+        if (depth > 0) {
+            auto it = cache.find(sig);
+            if (it != cache.end()) return it->second;
+        } else {
+            cache.clear();
+        }
+
+        depth++;
+
+        auto compute = [&]() -> SymExpr {
+            // 递归化简内层 + 身份吸收法则
+            std::shared_ptr<SymNode> newNode = expr.ptr;
         switch (expr.ptr->getType()) {
         case SymType::ADD: {
             SymExpr res(BigInt(0));
@@ -2989,19 +3049,25 @@ namespace jc {
         tryC(c_contract);
         tryC(c_both);
 
-        // 激进的代数数化简：尝试将 best 再次 expand，以强制合并隐藏的同类项（如展开后的根式乘积）
-        if (best.ptr->getType() == SymType::ADD || best.ptr->getType() == SymType::MUL) {
-            try {
-                SymExpr ultra_expand = expand(best, 100);
-                if (getAstNodeCount(ultra_expand) < minSize) {
-                    best = ultra_expand;
-                }
-            } catch (const EngineInterruptError&) {
-                throw;
-            } catch (...) {}
-        }
+            // 激进的代数数化简：尝试将 best 再次 expand，以强制合并隐藏的同类项（如展开后的根式乘积）
+            if (best.ptr->getType() == SymType::ADD || best.ptr->getType() == SymType::MUL) {
+                try {
+                    SymExpr ultra_expand = expand(best, 100);
+                    if (getAstNodeCount(ultra_expand) < minSize) {
+                        best = ultra_expand;
+                    }
+                } catch (const EngineInterruptError&) {
+                    throw;
+                } catch (...) {}
+            }
 
-        return best;
+            return best;
+        };
+
+        SymExpr result = compute();
+        depth--;
+        cache[sig] = result;
+        return result;
     }
 
 
@@ -3171,6 +3237,12 @@ namespace jc {
         while (!a.empty() && a.back().isZero()) a.pop_back();
     }
 
+    static SymExpr simplifyFrac(const SymExpr& expr) {
+        auto [num, den] = getFraction(expr);
+        if (den.isOne()) return simplifyCore(expand(num, SymConfig::maxExpandTerms));
+        return simplifyCore(expand(num, SymConfig::maxExpandTerms)) / simplifyCore(expand(den, SymConfig::maxExpandTerms));
+    }
+
     static std::pair<std::vector<SymExpr>, std::vector<SymExpr>> polyDivCoeffs(std::vector<SymExpr> A, const std::vector<SymExpr>& B) {
         trimCoeffs(A);
         if (B.empty()) throw std::runtime_error("Math Error: Division by zero polynomial.");
@@ -3183,11 +3255,12 @@ namespace jc {
         SymExpr leadB = B.back();
         
         for (int i = degA - degB; i >= 0; --i) {
+            checkInterrupt();
             if (A[i + degB].isZero()) continue;
-            SymExpr q = simplifyCore(expand(A[i + degB] / leadB, SymConfig::maxExpandTerms));
+            SymExpr q = simplifyFrac(A[i + degB] / leadB);
             Q[i] = q;
             for (int j = 0; j <= degB; ++j) {
-                A[i + j] = simplifyCore(expand(A[i + j] - q * B[j], SymConfig::maxExpandTerms));
+                A[i + j] = simplifyFrac(A[i + j] - q * B[j]);
             }
         }
         trimCoeffs(Q);
@@ -3209,15 +3282,19 @@ namespace jc {
         SymExpr leadB = B.back();
         
         while (degA >= degB) {
+            checkInterrupt();
+            if (getAstNodeCount(A.back()) > SymConfig::maxAstNodes) {
+                throw std::runtime_error("Math Error: polyPseudoRemCoeffs failed due to coefficient explosion.");
+            }
             SymExpr leadA = A.back();
             
             for (int i = 0; i <= degA; ++i) {
-                A[i] = simplifyCore(expand(A[i] * leadB, SymConfig::maxExpandTerms));
+                A[i] = simplifyFrac(A[i] * leadB);
             }
             
             int shift = degA - degB;
             for (int i = 0; i <= degB; ++i) {
-                A[i + shift] = simplifyCore(expand(A[i + shift] - B[i] * leadA, SymConfig::maxExpandTerms));
+                A[i + shift] = simplifyFrac(A[i + shift] - B[i] * leadA);
             }
             
             trimCoeffs(A);
@@ -3226,8 +3303,8 @@ namespace jc {
         }
         
         if (d > 0) {
-            SymExpr multiplier = simplifyCore(expand(leadB ^ SymExpr(BigInt(d)), SymConfig::maxExpandTerms));
-            for (auto& c : A) c = simplifyCore(expand(c * multiplier, SymConfig::maxExpandTerms));
+            SymExpr multiplier = simplifyFrac(leadB ^ SymExpr(BigInt(d)));
+            for (auto& c : A) c = simplifyFrac(c * multiplier);
         }
         
         return A;
@@ -3319,24 +3396,24 @@ namespace jc {
             
             SymExpr leadB = coeffsB.back();
             
-            SymExpr divisor = simplifyCore(expand(g * (h ^ SymExpr(BigInt(delta))), SymConfig::maxExpandTerms));
+            SymExpr divisor = simplifyFrac(g * (h ^ SymExpr(BigInt(delta))));
             
             coeffsA = coeffsB;
             coeffsB = coeffsR;
-            for (auto& c : coeffsB) c = simplifyCore(expand(c / divisor, SymConfig::maxExpandTerms));
+            for (auto& c : coeffsB) c = simplifyFrac(c / divisor);
             trimCoeffs(coeffsB);
             
             g = leadB;
             if (delta > 0) {
-                SymExpr h_pow = simplifyCore(expand(h ^ SymExpr(BigInt(delta - 1)), SymConfig::maxExpandTerms));
-                h = simplifyCore(expand((g ^ SymExpr(BigInt(delta))) / h_pow, SymConfig::maxExpandTerms));
+                SymExpr h_pow = simplifyFrac(h ^ SymExpr(BigInt(delta - 1)));
+                h = simplifyFrac((g ^ SymExpr(BigInt(delta))) / h_pow);
             }
         }
 
         if (!coeffsA.empty()) {
             SymExpr lead = coeffsA.back();
             if (!lead.isZero() && !lead.isOne()) {
-                for (auto& c : coeffsA) c = simplifyCore(expand(c / lead, SymConfig::maxExpandTerms));
+                for (auto& c : coeffsA) c = simplifyFrac(c / lead);
             }
         }
         
@@ -3354,7 +3431,7 @@ namespace jc {
 
     std::vector<std::pair<SymExpr, int>> polySquareFree(const SymExpr& p, const std::string& var) {
         std::vector<std::pair<SymExpr, int>> result;
-        SymExpr P = simplifyCore(expand(p, SymConfig::maxExpandTerms));
+        SymExpr P = simplifyFrac(p);
         if (P.isZero()) return result;
         int maxI = getDegree(P, var);
         if (maxI <= 0) {
@@ -3365,7 +3442,7 @@ namespace jc {
         auto coeffs = extractCoeffs(P, var);
         SymExpr lead = coeffs.back();
         SymExpr c = lead;
-        P = simplifyCore(expand(P / c, SymConfig::maxExpandTerms));
+        P = simplifyFrac(P / c);
 
         SymExpr dP = diff(P, var);
         SymExpr R = polyGCD(P, dP, var);
@@ -3379,7 +3456,7 @@ namespace jc {
                 throw std::runtime_error("Math Error: polySquareFree failed due to algebraic deadlock.");
             }
             SymExpr dV = diff(V, var);
-            SymExpr W_minus_dV = simplifyCore(expand(W - dV, SymConfig::maxExpandTerms));
+            SymExpr W_minus_dV = simplifyFrac(W - dV);
             SymExpr Y = polyGCD(V, W_minus_dV, var);
             
             if (getDegree(Y, var) > 0) {
@@ -3393,7 +3470,7 @@ namespace jc {
         
         if (!c.isOne()) {
             if (!result.empty()) {
-                result[0].first = simplifyCore(expand(result[0].first * c, SymConfig::maxExpandTerms));
+                result[0].first = simplifyFrac(result[0].first * c);
             } else {
                 result.push_back({c, 1});
             }
@@ -3414,9 +3491,9 @@ namespace jc {
             }
             auto [q, r] = polyDiv(r0, r1, var);
             r0 = r1; r1 = r;
-            SymExpr s_temp = simplifyCore(expand(s0 - q * s1, SymConfig::maxExpandTerms));
+            SymExpr s_temp = simplifyFrac(s0 - q * s1);
             s0 = s1; s1 = s_temp;
-            SymExpr t_temp = simplifyCore(expand(t0 - q * t1, SymConfig::maxExpandTerms));
+            SymExpr t_temp = simplifyFrac(t0 - q * t1);
             t0 = t1; t1 = t_temp;
             
             if (getAstNodeCount(s1) > SymConfig::maxAstNodes || getAstNodeCount(t1) > SymConfig::maxAstNodes) {
@@ -3428,14 +3505,14 @@ namespace jc {
         if (!coeffs.empty()) {
             SymExpr lead = coeffs.back();
             if (!lead.isZero() && !lead.isOne()) {
-                r0 = simplifyCore(expand(r0 / lead, SymConfig::maxExpandTerms));
-                s0 = simplifyCore(expand(s0 / lead, SymConfig::maxExpandTerms));
-                t0 = simplifyCore(expand(t0 / lead, SymConfig::maxExpandTerms));
+                r0 = simplifyFrac(r0 / lead);
+                s0 = simplifyFrac(s0 / lead);
+                t0 = simplifyFrac(t0 / lead);
             }
         }
         
         // 最终清理，防止 Bezout 系数中残留未合并的代数数
-        return { simplifyCore(expand(r0, SymConfig::maxExpandTerms)), simplifyCore(expand(s0, SymConfig::maxExpandTerms)), simplifyCore(expand(t0, SymConfig::maxExpandTerms)) };
+        return { simplifyFrac(r0), simplifyFrac(s0), simplifyFrac(t0) };
     }
 
     SymExpr polyResultant(const SymExpr& a, const SymExpr& b, const std::string& var) {
@@ -3449,13 +3526,13 @@ namespace jc {
         
         if (degA < degB) {
             SymExpr res = polyResultant(b, a, var);
-            if ((degA * degB) % 2 != 0) return simplifyCore(expand(-res, SymConfig::maxExpandTerms));
+            if ((degA * degB) % 2 != 0) return simplifyFrac(-res);
             return res;
         }
         
         if (degB == 0) {
             SymExpr leadB = coeffsB[0];
-            return simplifyCore(expand(leadB ^ SymExpr(BigInt(degA)), SymConfig::maxExpandTerms));
+            return simplifyFrac(leadB ^ SymExpr(BigInt(degA)));
         }
         
         SymExpr g(BigInt(1));
@@ -3467,6 +3544,9 @@ namespace jc {
             if (++iter > SymConfig::maxIterations) {
                 throw std::runtime_error("Math Error: polyResultant infinite loop detected.");
             }
+            if (!coeffsA.empty() && getAstNodeCount(coeffsA.back()) > SymConfig::maxAstNodes) {
+                throw std::runtime_error("Math Error: polyResultant failed due to coefficient explosion.");
+            }
             degA = static_cast<int>(coeffsA.size()) - 1;
             degB = static_cast<int>(coeffsB.size()) - 1;
             if (degB < 0) return SymExpr(BigInt(0));
@@ -3477,8 +3557,8 @@ namespace jc {
                 if (delta == 0) {
                     return coeffsB[0];
                 } else {
-                    SymExpr divisor = simplifyCore(expand(h ^ SymExpr(BigInt(delta - 1)), SymConfig::maxExpandTerms));
-                    return simplifyCore(expand((coeffsB[0] ^ SymExpr(BigInt(delta))) / divisor, SymConfig::maxExpandTerms));
+                    SymExpr divisor = simplifyFrac(h ^ SymExpr(BigInt(delta - 1)));
+                    return simplifyFrac((coeffsB[0] ^ SymExpr(BigInt(delta))) / divisor);
                 }
             }
         
@@ -3487,17 +3567,17 @@ namespace jc {
         
             SymExpr leadB = coeffsB.back();
         
-            SymExpr divisor = simplifyCore(expand(g * (h ^ SymExpr(BigInt(delta))), SymConfig::maxExpandTerms));
+            SymExpr divisor = simplifyFrac(g * (h ^ SymExpr(BigInt(delta))));
         
             coeffsA = coeffsB;
             coeffsB = coeffsR;
-            for (auto& c : coeffsB) c = simplifyCore(expand(c / divisor, SymConfig::maxExpandTerms));
+            for (auto& c : coeffsB) c = simplifyFrac(c / divisor);
             trimCoeffs(coeffsB);
         
             g = leadB;
             if (delta > 0) {
-                SymExpr h_pow = simplifyCore(expand(h ^ SymExpr(BigInt(delta - 1)), SymConfig::maxExpandTerms));
-                h = simplifyCore(expand((g ^ SymExpr(BigInt(delta))) / h_pow, SymConfig::maxExpandTerms));
+                SymExpr h_pow = simplifyFrac(h ^ SymExpr(BigInt(delta - 1)));
+                h = simplifyFrac((g ^ SymExpr(BigInt(delta))) / h_pow);
             }
         }
     }
@@ -3583,6 +3663,7 @@ namespace jc {
     // 提取有理分式的分子和分母 (Get Numerator and Denominator)
     // =================================================================
     std::pair<SymExpr, SymExpr> getFraction(const SymExpr& expr) {
+        checkInterrupt();
         if (!expr.ptr) return {expr, SymExpr(BigInt(1))};
         switch (expr.ptr->getType()) {
             case SymType::NUM:
@@ -4049,6 +4130,7 @@ namespace jc {
     // 静默代入 (Quiet Substitution) - 避免除零异常的控制流开销
     // =================================================================
     static std::optional<SymExpr> trySubsQuiet(const SymExpr& expr, const std::string& var, const SymExpr& val) {
+        checkInterrupt();
         if (!expr.ptr) return expr;
 
         switch (expr.ptr->getType()) {
@@ -4646,6 +4728,7 @@ namespace jc {
     }
 
     static SymExpr flattenLogExp(const SymExpr& expr) {
+        checkInterrupt();
         if (!expr.ptr) return expr;
         switch (expr.ptr->getType()) {
             case SymType::ADD: {
@@ -4702,6 +4785,7 @@ namespace jc {
     }
 
     SymExpr rischNormalize(const SymExpr& expr) {
+        checkInterrupt();
         SymExpr flat = flattenLogExp(expand(expr, SymConfig::maxExpandTerms));
         
         std::vector<SymExpr> allExps;
