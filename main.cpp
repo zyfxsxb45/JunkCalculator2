@@ -335,7 +335,10 @@ int main(int argc, char* argv[]) {
                 std::cout << "\n";
                 continue;
             }
-            if (isEof) break; // 处理真正的 Ctrl+D (EOF)
+            if (isEof) {
+                std::cout << "\nGoodbye!" << std::endl;
+                std::exit(1);
+            }
             
             std::cout << "\n";
             continue;
@@ -383,7 +386,10 @@ int main(int argc, char* argv[]) {
                 else if (c == '[') brackets++; else if (c == ']') brackets--;
             }
         }
-        if (inputAborted && isEof) break;
+        if (inputAborted && isEof) {
+            std::cout << "\nGoodbye!" << std::endl;
+            std::exit(1);
+        }
         if (inputAborted) continue;
 
         if (input == "color on") { jc::colorsEnabled = true; continue; }
