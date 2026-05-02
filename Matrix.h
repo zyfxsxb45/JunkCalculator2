@@ -766,7 +766,7 @@ namespace jc {
         // [矩阵正切] tan(A) = sin(A) * cos(A)^{-1}
         Matrix<T> matTan() const {
             Matrix<T> c = matCos();
-            if (isEssentiallyZero(c.determinant()))
+            if (c.rank() < rows)
                 throw std::runtime_error("Math Error: Matrix cos(A) is singular, tan(A) undefined.");
             return matSin() * c.inverse();
         }
@@ -784,7 +784,7 @@ namespace jc {
         // [矩阵双曲正切] tanh(A) = sinh(A) * cosh(A)^{-1}
         Matrix<T> matTanh() const {
             Matrix<T> c = matCosh();
-            if (isEssentiallyZero(c.determinant()))
+            if (c.rank() < rows)
                 throw std::runtime_error("Math Error: Matrix cosh(A) is singular, tanh(A) undefined.");
             return matSinh() * c.inverse();
         }
@@ -1264,13 +1264,11 @@ namespace jc {
         return computeEigenvalues(A.toComplexMatrix());
     }
     // 特征向量计算：对每个特征值 λ，求 (A - λI) 的零空间
-    inline ComplexMatrix computeEigenvectors(const ComplexMatrix& A, const std::vector<Complex>& eigenvals) {
+    // 返回 {特征向量矩阵 P, 对齐后的特征值列表}
+    inline std::pair<ComplexMatrix, std::vector<Complex>> computeEigenvectorsAligned(const ComplexMatrix& A, const std::vector<Complex>& eigenvals) {
         int n = A.getRows();
         ComplexMatrix I = ComplexMatrix::identity(n);
-        // 用一整个大矩阵，逐列拼接各特征向量
-        std::vector<Complex> allVecs;
-        allVecs.reserve(n * n);
-        int totalCols = 0;
+        
         // 去重特征值（相同特征值只求一次零空间）
         std::vector<Complex> unique;
         for (const auto& ev : eigenvals) {
@@ -1279,31 +1277,53 @@ namespace jc {
                 if (Tol::clean((ev - u).modulus(), ev.modulus(), 1e6) == 0.0) { found = true; break; }
             if (!found) unique.push_back(ev);
         }
+        
+        std::vector<ComplexMatrix> nullSpaces;
+        std::vector<Complex> alignedEigenvals;
+        int totalCols = 0;
         for (const auto& lambda : unique) {
             ComplexMatrix B = A - lambda * I;
             ComplexMatrix ns = B.nullSpace();
-            int nsCols = ns.getCols();
-            for (int j = 0; j < nsCols; ++j) {
-                for (int i = 0; i < n; ++i)
-                    allVecs.push_back(ns(i, j));
-                totalCols++;
+            int cols = ns.getCols();
+            nullSpaces.push_back(ns);
+            for (int j = 0; j < cols; ++j) {
+                alignedEigenvals.push_back(lambda);
+            }
+            totalCols += cols;
+        }
+        
+        if (totalCols == 0) throw std::runtime_error("Math Error: No eigenvectors found.");
+        
+        ComplexMatrix P(n, totalCols);
+        int currentCol = 0;
+        for (const auto& ns : nullSpaces) {
+            int cols = ns.getCols();
+            for (int j = 0; j < cols; ++j) {
+                for (int i = 0; i < n; ++i) {
+                    P(i, currentCol) = ns(i, j);
+                }
+                currentCol++;
             }
         }
-        if (totalCols == 0) throw std::runtime_error("Math Error: No eigenvectors found.");
-        ComplexMatrix result(n, totalCols, allVecs);
-        return result;
+        return { P, alignedEigenvals };
     }
+
+    // 兼容旧版接口：仅返回特征向量矩阵 P
+    inline ComplexMatrix computeEigenvectors(const ComplexMatrix& A, const std::vector<Complex>& eigenvals) {
+        return computeEigenvectorsAligned(A, eigenvals).first;
+    }
+
     // 对角化：返回 {P, D}，满足 A = P * D * P^(-1)
     inline std::pair<ComplexMatrix, ComplexMatrix> diagonalize(const ComplexMatrix& A) {
         int n = A.getRows();
         if (n != A.getCols()) throw std::invalid_argument("Math Error: Diagonalization requires a square matrix.");
         auto eigenvals = computeEigenvalues(A);
-        ComplexMatrix P = computeEigenvectors(A, eigenvals);
+        auto [P, alignedEigenvals] = computeEigenvectorsAligned(A, eigenvals);
         if (P.getCols() != n)
             throw std::runtime_error("Math Error: Matrix is not diagonalizable (insufficient eigenvectors).");
         ComplexMatrix D(n, n);
         for (int i = 0; i < n; ++i)
-            D(i, i) = eigenvals[i];
+            D(i, i) = alignedEigenvals[i];
         return { P, D };
     }
 
@@ -1312,6 +1332,8 @@ namespace jc {
         if (A.getRows() != A.getCols())
             throw std::invalid_argument("Math Error: Matrix sqrt requires a square matrix.");
         int n = A.getRows();
+        if (A.rank() < n)
+            throw std::runtime_error("Math Error: Iterative matrix sqrt requires a non-singular matrix.");
         ComplexMatrix Y = A;
         ComplexMatrix Z = ComplexMatrix::identity(n);
         for (int iter = 0; iter < 100; ++iter) {
@@ -1346,6 +1368,9 @@ namespace jc {
             throw std::invalid_argument("Math Error: Matrix log requires a square matrix.");
 
         int n = A.getRows();
+        if (A.rank() < n)
+            throw std::runtime_error("Math Error: Matrix logarithm undefined for singular matrices.");
+
         ComplexMatrix I = ComplexMatrix::identity(n);
 
         // 路径 1：||A - I|| < 1 时直接用 Taylor 级数（最快最精确）
