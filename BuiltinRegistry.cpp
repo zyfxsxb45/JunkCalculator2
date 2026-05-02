@@ -477,28 +477,12 @@ void BuiltinRegistry::registerMath() {
     });
 
     regMath("sqrt", { 1 }, [](const std::vector<Value>& args) -> Value {
-        if (std::holds_alternative<RealMatrix>(args[0].data)) return Value(matSqrt(std::get<RealMatrix>(args[0].data)));
-        if (std::holds_alternative<ComplexMatrix>(args[0].data)) return Value(matSqrt(std::get<ComplexMatrix>(args[0].data)));
-        if (std::holds_alternative<Complex>(args[0].data)) return Value(sqrt(std::get<Complex>(args[0].data)));
-        double x = args[0].asDouble();
-        if (x < 0) return Value(Complex(0, std::sqrt(-x)));
-        return Value(std::sqrt(x));
+        return args[0] ^ Value(Fraction(1, 2));
     });
 
     regMath("cbrt", { 1 }, [](const std::vector<Value>& args) -> Value {
-        // 1. 矩阵直接使用底层的数值算符重载 (Matrix 的运算没有符号逃逸风险)
-        if (std::holds_alternative<RealMatrix>(args[0].data) ||
-            std::holds_alternative<ComplexMatrix>(args[0].data)) {
-            return args[0] ^ Value(1.0 / 3.0);
-        }
-        // 2. 复数使用底层的复数类重载
-        if (std::holds_alternative<Complex>(args[0].data)) {
-            return Value(std::get<Complex>(args[0].data) ^ Complex(1.0 / 3.0, 0.0));
-        }
-        // 3. 标量严格强制转双精度，彻底封死 BigInt/Fraction 向 SymExpr 逃逸的退路！
-        double x = args[0].asDouble();
-        return Value(std::cbrt(x));
-        });
+        return args[0] ^ Value(Fraction(1, 3));
+    });
 
     reg("matpow", { 2 }, [](const std::vector<Value>& args) -> Value {
         return Value(matPow(args[0].asComplexMatrix(), args[1].asComplexMatrix()));
@@ -628,25 +612,8 @@ void BuiltinRegistry::registerMath() {
         });
 
     regMath("root", { 2 }, [](const std::vector<Value>& args) -> Value {
-        Value x = args[0];
-        Value y = args[1];
-        Value numY;
-
-        if (y.isComplex()) {
-            Complex cy = y.asComplex();
-            if (Tol::isEq(cy.modulus(), 0.0))
-                throw std::runtime_error("Math Error: Root degree cannot be zero.");
-            numY = Value(Complex(1.0, 0.0) / cy);
-        }
-        else {
-            double dy = y.asDouble();
-            if (Tol::isEq(dy, 0.0))
-                throw std::runtime_error("Math Error: Root degree cannot be zero.");
-            numY = Value(1.0 / dy);
-        }
-
-        return x ^ numY;
-        });
+        return args[0] ^ (Value(BigInt(1)) / args[1]);
+    });
 
     // 通用取整分发器
     auto roundDispatch = [](const std::vector<Value>& args, const std::string& name,

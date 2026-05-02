@@ -1981,6 +1981,15 @@ namespace jc {
                 if (v.isComplex()) return SymExpr(v.asComplex());
                 return SymExpr(v.asDouble());
             }
+            if (func->name == "sqrt" && func->args.size() == 1) {
+                return evalFloat(SymExpr(func->args[0]) ^ SymExpr(Fraction(1, 2)));
+            }
+            if (func->name == "cbrt" && func->args.size() == 1) {
+                return evalFloat(SymExpr(func->args[0]) ^ SymExpr(Fraction(1, 3)));
+            }
+            if (func->name == "root" && func->args.size() == 2) {
+                return evalFloat(SymExpr(func->args[0]) ^ (SymExpr(BigInt(1)) / SymExpr(func->args[1])));
+            }
             std::vector<std::shared_ptr<SymNode>> newArgs;
             for (auto& arg : func->args)
                 newArgs.push_back(evalFloat(SymExpr(arg)).ptr);
@@ -2042,6 +2051,15 @@ namespace jc {
                     throw std::runtime_error("Numerical Error: Cannot evaluate Root node dependencies to value.");
                 });
                 return v.asSymbolic();
+            }
+            if (func->name == "sqrt" && func->args.size() == 1) {
+                return evalValue(SymExpr(func->args[0]) ^ SymExpr(Fraction(1, 2)));
+            }
+            if (func->name == "cbrt" && func->args.size() == 1) {
+                return evalValue(SymExpr(func->args[0]) ^ SymExpr(Fraction(1, 3)));
+            }
+            if (func->name == "root" && func->args.size() == 2) {
+                return evalValue(SymExpr(func->args[0]) ^ (SymExpr(BigInt(1)) / SymExpr(func->args[1])));
             }
             std::vector<std::shared_ptr<SymNode>> newArgs;
             for (auto& arg : func->args)
