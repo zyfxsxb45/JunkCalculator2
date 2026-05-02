@@ -325,7 +325,12 @@ int main(int argc, char* argv[]) {
 
         std::string input;
         std::cout << "\n" << jc::col(jc::Ansi::BOLD) << jc::col(jc::Ansi::BRIGHT_CYAN) << "JC2> " << jc::col(jc::Ansi::RESET);
-        std::getline(std::cin, input);
+        if (!std::getline(std::cin, input)) {
+            if (std::cin.eof()) break; // 处理 Ctrl+D (EOF)
+            std::cin.clear();          // 清除 Ctrl+C 导致的错误状态
+            std::cout << "\n";
+            continue;
+        }
 
         size_t start = input.find_first_not_of(" \t");
         size_t end = input.find_last_not_of(" \t");
@@ -338,10 +343,20 @@ int main(int argc, char* argv[]) {
             else if (c == '(') parens++; else if (c == ')') parens--;
             else if (c == '[') brackets++; else if (c == ']') brackets--;
         }
+        bool inputAborted = false;
         while (braces > 0 || parens > 0 || brackets > 0 || endsWithContinuation(input)) {
             std::string line;
             std::cout << jc::col(jc::Ansi::BRIGHT_CYAN) << "...  " << jc::col(jc::Ansi::RESET);
-            if (!std::getline(std::cin, line)) break;
+            if (!std::getline(std::cin, line)) {
+                if (std::cin.eof()) {
+                    inputAborted = true;
+                    break;
+                }
+                std::cin.clear();
+                std::cout << "\n";
+                inputAborted = true;
+                break;
+            }
             input += "\n" + line;
             for (char c : line) {
                 if (c == '{') braces++; else if (c == '}') braces--;
@@ -349,6 +364,8 @@ int main(int argc, char* argv[]) {
                 else if (c == '[') brackets++; else if (c == ']') brackets--;
             }
         }
+        if (inputAborted && std::cin.eof()) break;
+        if (inputAborted) continue;
 
         if (input == "color on") { jc::colorsEnabled = true; continue; }
         if (input == "color off") { jc::colorsEnabled = false; continue; }
