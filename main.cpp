@@ -22,7 +22,29 @@
 #include "modules/bytes_module.h"
 #include "modules/window_module.h"
 #include "modules/latex_module.h"
+#include <csignal>
+#include <atomic>
 
+// 信号处理
+static std::atomic<int> g_sigintCount{0};
+static auto g_lastSigintTime = std::chrono::steady_clock::now();
+
+void sigintHandler(int signum) {
+    auto now = std::chrono::steady_clock::now();
+    if (std::chrono::duration_cast<std::chrono::milliseconds>(now - g_lastSigintTime).count() < 1000) {
+        g_sigintCount++;
+    } else {
+        g_sigintCount = 1;
+    }
+    g_lastSigintTime = now;
+
+    if (g_sigintCount >= 3) {
+        std::cerr << "\n[Hard Kill] Multiple Ctrl+C detected. Exiting immediately.\n";
+        std::exit(1);
+    }
+
+    jc::g_interruptRequested.store(true, std::memory_order_relaxed);
+}
 
 // 延续字符串判定
 static bool endsWithContinuation(const std::string& line) {
@@ -154,6 +176,10 @@ void runScript(const std::string& filepath, bool isImport = false) {
         jc::Value result = evalCode(code, resolvedPath, true);
         if (!result.isNone()) vm.setGlobal("ANS", result);
     }
+    catch (const jc::EngineInterruptError&) {
+        if (isImport) throw;
+        std::cerr << "\n^C KeyboardInterrupt in script '" << resolvedPath << "'" << std::endl;
+    }
     catch (const std::exception& ex) {
         if (isImport) throw;
         // 注意这里不在最后加 RESET，交给底层传递回来的字符串本身控制
@@ -207,6 +233,7 @@ int main(int argc, char* argv[]) {
     std::system("chcp 65001 > nul");
 #endif
     jc::enableAnsiColors();
+    std::signal(SIGINT, sigintHandler);
     std::string exeDir = getExecutableDir();
     // ===== 初始化超级虚拟机 =====
     jc::BuiltinRegistry registry;
@@ -292,6 +319,9 @@ int main(int argc, char* argv[]) {
         << "Type " << jc::col(jc::Ansi::BRIGHT_YELLOW) << "'help'" << jc::col(jc::Ansi::RESET) << " for a list of commands." << std::endl;
 
     while (true) {
+        jc::g_interruptRequested.store(false, std::memory_order_relaxed);
+        g_sigintCount = 0;
+
         std::string input;
         std::cout << "\n" << jc::col(jc::Ansi::BOLD) << jc::col(jc::Ansi::BRIGHT_CYAN) << "JC2> " << jc::col(jc::Ansi::RESET);
         std::getline(std::cin, input);
@@ -398,6 +428,9 @@ int main(int argc, char* argv[]) {
             if (g_profile && jc::VM::activeVM) {
                 jc::VM::activeVM->printProfileReport();
             }
+        }
+        catch (const jc::EngineInterruptError&) {
+            std::cerr << "^C KeyboardInterrupt" << std::endl;
         }
         catch (const std::exception& e) {
             std::cerr << jc::col(jc::Ansi::BRIGHT_RED)

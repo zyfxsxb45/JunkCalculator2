@@ -22,6 +22,8 @@
 
 namespace jc {
 
+    std::atomic<bool> g_interruptRequested{false};
+
     // ==========================================
     // 全局表达式内存池 (DAG Interning Pool)
     // ==========================================
@@ -327,6 +329,8 @@ namespace jc {
             if constexpr (std::is_same_v<T, BigInt>) {
                 try {
                     return { true, arg.toInt64() };
+                } catch (const EngineInterruptError&) {
+                    throw;
                 } catch (...) {
                     return { false, 0 };
                 }
@@ -335,6 +339,8 @@ namespace jc {
                 if (arg.getDen() == BigInt(1)) {
                     try {
                         return { true, arg.getNum().toInt64() };
+                    } catch (const EngineInterruptError&) {
+                        throw;
                     } catch (...) {
                         return { false, 0 };
                     }
@@ -797,6 +803,8 @@ namespace jc {
                                 return res;
                             }
                         }
+                    } catch (const EngineInterruptError&) {
+                        throw;
                     } catch (...) {}
                 }
             }
@@ -925,6 +933,8 @@ namespace jc {
                         }
                         
                         return result.asSymbolic();
+                    } catch (const EngineInterruptError&) {
+                        throw;
                     } catch (...) {}
                 }
             } else if (std::holds_alternative<double>(expNum->value)) {
@@ -942,6 +952,8 @@ namespace jc {
                     }
                         
                     return result.asSymbolic();
+                } catch (const EngineInterruptError&) {
+                    throw;
                 } catch (...) {}
             }
             // 非整数指数保留符号形式（由 Value 的升维机制自动保障）
@@ -1782,7 +1794,7 @@ namespace jc {
                             else { br = b.asDouble(); }
                             if (e.isComplex()) { er = e.asComplex().real; ei = e.asComplex().imag; }
                             else { er = e.asDouble(); }
-                        } catch (...) { ok_cast = false; }
+                        } catch (const EngineInterruptError&) { throw; } catch (...) { ok_cast = false; }
                         
                         if (ok_cast) {
                             std::complex<double> bc(br, bi);
@@ -1800,6 +1812,8 @@ namespace jc {
                         return {false, Value()};
                     }
                     return {true, res};
+                } catch (const EngineInterruptError&) {
+                    throw;
                 } catch (...) {
                     return {false, Value()};
                 }
@@ -1909,6 +1923,7 @@ namespace jc {
 
         const int max_iter = 2000;
         for (int iter = 0; iter < max_iter; ++iter) {
+            checkInterrupt();
             double max_diff = 0.0;
             for (int i = 0; i < n; ++i) {
                 std::complex<double> p_val = 0.0;
@@ -1976,6 +1991,8 @@ namespace jc {
                 } else {
                     return SymExpr(val.asDouble());
                 }
+            } catch (const EngineInterruptError&) {
+                throw;
             } catch (...) {
                 // 如果 asDouble 失败（例如 val 是 Symbolic 符号表达式），则回退到 AST 遍历
             }
@@ -2634,6 +2651,7 @@ namespace jc {
 // ★ 不调用 factor，专门用于 factor 内部，防止循环递归
 // =================================================================
     SymExpr simplifyCore(const SymExpr& expr) {
+        checkInterrupt();
         if (!expr.ptr) return expr;
 
         // 递归化简内层 + 身份吸收法则
@@ -2949,13 +2967,16 @@ namespace jc {
         SymExpr c_both = current;
 
         try { c_expand = expand(current, 30); }
+        catch (const EngineInterruptError&) { throw; }
         catch (const std::runtime_error&) {}
         try { c_contract = contract(current); }
+        catch (const EngineInterruptError&) { throw; }
         catch (const std::runtime_error&) {}
         try {
             if (c_expand.ptr != current.ptr)
                 c_both = contract(c_expand);
         }
+        catch (const EngineInterruptError&) { throw; }
         catch (const std::runtime_error&) {}
 
         SymExpr best = current;
@@ -2975,6 +2996,8 @@ namespace jc {
                 if (getAstNodeCount(ultra_expand) < minSize) {
                     best = ultra_expand;
                 }
+            } catch (const EngineInterruptError&) {
+                throw;
             } catch (...) {}
         }
 
@@ -3038,6 +3061,7 @@ namespace jc {
 
         SymExpr expanded;
         try { expanded = expand(expr, SymConfig::maxExpandTerms); }
+        catch (const EngineInterruptError&) { throw; }
         catch (const std::runtime_error&) { return {}; }
 
         std::map<int, SymExpr> degreeMap;
@@ -3279,6 +3303,7 @@ namespace jc {
         
         int iter = 0;
         while (!coeffsB.empty()) {
+            checkInterrupt();
             if (++iter > SymConfig::maxIterations) {
                 throw std::runtime_error("Math Error: polyGCD infinite loop detected.");
             }
@@ -3349,6 +3374,7 @@ namespace jc {
 
         int i = 1;
         while (getDegree(V, var) > 0) {
+            checkInterrupt();
             if (i > maxI + 2 || i > SymConfig::maxIterations) {
                 throw std::runtime_error("Math Error: polySquareFree failed due to algebraic deadlock.");
             }
@@ -3382,6 +3408,7 @@ namespace jc {
 
         int iter = 0;
         while (!r1.isZero()) {
+            checkInterrupt();
             if (++iter > SymConfig::maxIterations) {
                 throw std::runtime_error("Math Error: polyEGCD infinite loop detected.");
             }
@@ -3436,6 +3463,7 @@ namespace jc {
         
         int iter = 0;
         while (true) {
+            checkInterrupt();
             if (++iter > SymConfig::maxIterations) {
                 throw std::runtime_error("Math Error: polyResultant infinite loop detected.");
             }
@@ -3691,6 +3719,8 @@ namespace jc {
         std::vector<MultiPoly> rgb;
         try {
             rgb = computeGroebnerBasis(generators);
+        } catch (const EngineInterruptError&) {
+            throw;
         } catch (...) {
             return expr;
         }
@@ -3785,7 +3815,7 @@ namespace jc {
         SymExpr current = simplifyCore(expr);
         
         // 强制进行一次三角化简，消除反三角嵌套等，将超越函数转化为代数式
-        try { current = trigsimp(current); } catch (...) {}
+        try { current = trigsimp(current); } catch (const EngineInterruptError&) { throw; } catch (...) {}
 
         // 第二阶段：多重宇宙博弈 (轻量级)
         SymExpr c_expand = current;
@@ -3793,9 +3823,11 @@ namespace jc {
         SymExpr c_both = current;
 
         try { c_expand = expand(current, 30); }
+        catch (const EngineInterruptError&) { throw; }
         catch (const std::runtime_error&) {}
 
         try { c_contract = contract(current); }
+        catch (const EngineInterruptError&) { throw; }
         catch (const std::runtime_error&) {}
 
         try {
@@ -3803,6 +3835,7 @@ namespace jc {
                 c_both = contract(c_expand);
             }
         }
+        catch (const EngineInterruptError&) { throw; }
         catch (const std::runtime_error&) {}
 
         // 选出体积最小的宇宙
@@ -3839,9 +3872,11 @@ namespace jc {
         SymExpr c_factor_expand = current;
 
         try { c_rational = simplifyRational(current); }
+        catch (const EngineInterruptError&) { throw; }
         catch (const std::runtime_error&) {}
 
         try { c_factor = factor(current); }
+        catch (const EngineInterruptError&) { throw; }
         catch (const std::runtime_error&) {}
 
         try {
@@ -3850,6 +3885,7 @@ namespace jc {
                 c_factor_expand = factor(c_expand);
             }
         }
+        catch (const EngineInterruptError&) { throw; }
         catch (const std::runtime_error&) {}
 
         // 选出体积最小的宇宙
@@ -4131,6 +4167,8 @@ namespace jc {
             if (auto subbed = trySubsQuiet(current_deriv, var, a)) {
                 try {
                     coeff = simplify(*subbed);
+                } catch (const EngineInterruptError&) {
+                    throw;
                 } catch (...) {
                     throw std::runtime_error("Math Error: Cannot compute Taylor expansion (derivative undefined at expansion point).");
                 }
@@ -4432,6 +4470,8 @@ namespace jc {
             try {
                 SymExpr simp = simplify(*subbed);
                 if (!containsVar(simp.ptr, var)) return simp;
+            } catch (const EngineInterruptError&) {
+                throw;
             } catch (const std::runtime_error& e) {
                 std::string msg = e.what();
                 if (msg.find("Division by zero") == std::string::npos && 
@@ -4446,7 +4486,7 @@ namespace jc {
 
         if (den.isOne()) {
             if (auto subbed = trySubsQuiet(expr, var, val)) {
-                try { return simplify(*subbed); } catch (...) { return *subbed; }
+                try { return simplify(*subbed); } catch (const EngineInterruptError&) { throw; } catch (...) { return *subbed; }
             }
             return expr;
         }
@@ -4454,10 +4494,10 @@ namespace jc {
         // 3. 检查是否为 0/0 型
         bool numZero = false, denZero = false;
         if (auto subNum = trySubsQuiet(num, var, val)) {
-            try { numZero = simplify(*subNum).isZero(); } catch (...) {}
+            try { numZero = simplify(*subNum).isZero(); } catch (const EngineInterruptError&) { throw; } catch (...) {}
         }
         if (auto subDen = trySubsQuiet(den, var, val)) {
-            try { denZero = simplify(*subDen).isZero(); } catch (...) {}
+            try { denZero = simplify(*subDen).isZero(); } catch (const EngineInterruptError&) { throw; } catch (...) {}
         }
 
         if (numZero && denZero) {
@@ -4481,6 +4521,8 @@ namespace jc {
                     if (leadNum.first < leadDen.first) throw std::runtime_error("Math Error: Limit is infinite (pole).");
                     return simplify(leadNum.second / leadDen.second);
                 }
+            } catch (const EngineInterruptError&) {
+                throw;
             } catch (...) {
                 // 级数展开失败，回退到多项式主导项提取 (Leading Term Extraction)
             }
@@ -4514,7 +4556,7 @@ namespace jc {
         }
 
         if (auto subbed = trySubsQuiet(expr, var, val)) {
-            try { return simplify(*subbed); } catch (...) { return *subbed; }
+            try { return simplify(*subbed); } catch (const EngineInterruptError&) { throw; } catch (...) { return *subbed; }
         }
         return expr;
     }
@@ -4875,7 +4917,7 @@ namespace jc {
                     else { br = b.asDouble(); }
                     if (e.isComplex()) { er = e.asComplex().real; ei = e.asComplex().imag; }
                     else { er = e.asDouble(); }
-                } catch (...) { ok_cast = false; }
+                } catch (const EngineInterruptError&) { throw; } catch (...) { ok_cast = false; }
                 
                 if (ok_cast) {
                     std::complex<double> bc(br, bi);

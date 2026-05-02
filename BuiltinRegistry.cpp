@@ -71,6 +71,7 @@ namespace jc {
 
     template<typename MapType>
     static SymExpr collapseSymFuncs(const SymExpr& expr, const MapType& fns) {
+        jc::checkInterrupt();
         if (!expr.ptr) return expr;
 
         switch (expr.ptr->getType()) {
@@ -550,8 +551,8 @@ void BuiltinRegistry::registerMath() {
         if (n > 100000) n = 100000; // 限制最大迭代次数防止卡死
         double h = (b - a) / n;
         double sum = f(a) + f(b);
-        for (int i = 1; i < n; i += 2) sum += 4 * f(a + i * h);
-        for (int i = 2; i < n - 1; i += 2) sum += 2 * f(a + i * h);
+        for (int i = 1; i < n; i += 2) { jc::checkInterrupt(); sum += 4 * f(a + i * h); }
+        for (int i = 2; i < n - 1; i += 2) { jc::checkInterrupt(); sum += 2 * f(a + i * h); }
         return sum * h / 3.0;
     };
 
@@ -940,9 +941,9 @@ void BuiltinRegistry::registerNumberTheory() {
         double r = std::fmod(a, b); if (r < 0) r += std::abs(b); return Value(r);
     });
     reg("modpow", { 3 }, [toBigInt](const std::vector<Value>& args) -> Value { return Value(BigInt::modPow(toBigInt(args[0]), toBigInt(args[1]), toBigInt(args[2]))); });
-    reg("C", { 2 }, [](const std::vector<Value>& args) -> Value { int64_t n = static_cast<int64_t>(std::round(args[0].asDouble())), k = static_cast<int64_t>(std::round(args[1].asDouble())); if (n<0||k<0) throw std::runtime_error("Math Error: C(n,k) requires non-negative integers."); if (k>n) return Value(BigInt(0)); if (k>n-k) k = n-k; BigInt result(1); for (int64_t i = 0; i < k; ++i) { result = result*BigInt(n-i); result = result/BigInt(i+1); } return Value(result); });
-    reg("A", { 2 }, [](const std::vector<Value>& args) -> Value { int64_t n = static_cast<int64_t>(std::round(args[0].asDouble())), k = static_cast<int64_t>(std::round(args[1].asDouble())); if (n<0||k<0) throw std::runtime_error("Math Error: A(n,k) requires non-negative integers."); if (k>n) return Value(BigInt(0)); BigInt result(1); for (int64_t i = 0; i < k; ++i) result = result*BigInt(n-i); return Value(result); });
-    reg("catalan", { 1 }, [](const std::vector<Value>& args) -> Value { int64_t n = static_cast<int64_t>(std::round(args[0].asDouble())); if (n<0) throw std::runtime_error("Math Error: catalan(n) requires non-negative integer."); BigInt result(1); for (int64_t i = 0; i < n; ++i) { result = result*BigInt(2*n-i); result = result/BigInt(i+1); } result = result/BigInt(n+1); return Value(result); });
+    reg("C", { 2 }, [](const std::vector<Value>& args) -> Value { int64_t n = static_cast<int64_t>(std::round(args[0].asDouble())), k = static_cast<int64_t>(std::round(args[1].asDouble())); if (n<0||k<0) throw std::runtime_error("Math Error: C(n,k) requires non-negative integers."); if (k>n) return Value(BigInt(0)); if (k>n-k) k = n-k; BigInt result(1); for (int64_t i = 0; i < k; ++i) { jc::checkInterrupt(); result = result*BigInt(n-i); result = result/BigInt(i+1); } return Value(result); });
+    reg("A", { 2 }, [](const std::vector<Value>& args) -> Value { int64_t n = static_cast<int64_t>(std::round(args[0].asDouble())), k = static_cast<int64_t>(std::round(args[1].asDouble())); if (n<0||k<0) throw std::runtime_error("Math Error: A(n,k) requires non-negative integers."); if (k>n) return Value(BigInt(0)); BigInt result(1); for (int64_t i = 0; i < k; ++i) { jc::checkInterrupt(); result = result*BigInt(n-i); } return Value(result); });
+    reg("catalan", { 1 }, [](const std::vector<Value>& args) -> Value { int64_t n = static_cast<int64_t>(std::round(args[0].asDouble())); if (n<0) throw std::runtime_error("Math Error: catalan(n) requires non-negative integer."); BigInt result(1); for (int64_t i = 0; i < n; ++i) { jc::checkInterrupt(); result = result*BigInt(2*n-i); result = result/BigInt(i+1); } result = result/BigInt(n+1); return Value(result); });
 }
 
 // =================================================================
@@ -1266,8 +1267,8 @@ void BuiltinRegistry::registerControlFlow() {
         else { start=args[0].asDouble(); step=args[1].asDouble(); end=args[2].asDouble(); }
         if (Tol::isEq(step, 0.0)) throw std::runtime_error("Math Error: Step cannot be zero.");
         std::vector<double> vals;
-        if (step>0) { for (double v=start; v<=end+Tol::EPS*100; v+=step) vals.push_back(v); }
-        else { for (double v=start; v>=end-Tol::EPS*100; v+=step) vals.push_back(v); }
+        if (step>0) { for (double v=start; v<=end+Tol::EPS*100; v+=step) { jc::checkInterrupt(); vals.push_back(v); } }
+        else { for (double v=start; v>=end-Tol::EPS*100; v+=step) { jc::checkInterrupt(); vals.push_back(v); } }
         if (vals.empty()) throw std::runtime_error("Math Error: seq() produced empty sequence.");
         return Value(RealMatrix(static_cast<int>(vals.size()), 1, vals));
     });
@@ -2233,7 +2234,7 @@ void BuiltinRegistry::registerHigherOrder() {
             using T = std::decay_t<decltype(arg)>;
             if constexpr (std::is_same_v<T, List>) {
                 List result;
-                for (const auto& e : arg.raw()) result.push_back(valToAny(safeCallFunction(cl, { anyToVal(e) })));
+                for (const auto& e : arg.raw()) { jc::checkInterrupt(); result.push_back(valToAny(safeCallFunction(cl, { anyToVal(e) }))); }
                 return Value(result);
             }
             else if constexpr (std::is_same_v<T, RealMatrix> || std::is_same_v<T, ComplexMatrix> || std::is_same_v<T, StringMatrix>) {
@@ -2243,6 +2244,7 @@ void BuiltinRegistry::registerHigherOrder() {
                 std::vector<double> rd; std::vector<Complex> rc; std::vector<std::string> rs;
 
                 for (size_t i = 0; i < flat.size(); ++i) {
+                    jc::checkInterrupt();
                     Value y = safeCallFunction(cl, { Value(flat[i]) });
                     if (i == 0) {
                         if (std::holds_alternative<std::string>(y.data)) hasString = true;
@@ -2268,7 +2270,7 @@ void BuiltinRegistry::registerHigherOrder() {
                 }
 
                 if (typeConflict) {
-                    for (size_t i = fallback.size(); i < flat.size(); ++i) fallback.push_back(valToAny(safeCallFunction(cl, { Value(flat[i]) })));
+                    for (size_t i = fallback.size(); i < flat.size(); ++i) { jc::checkInterrupt(); fallback.push_back(valToAny(safeCallFunction(cl, { Value(flat[i]) }))); }
                     return Value(fallback);
                 }
                 if (hasString) return Value(StringMatrix(arg.getRows(), arg.getCols(), rs));
@@ -2287,14 +2289,14 @@ void BuiltinRegistry::registerHigherOrder() {
             using T = std::decay_t<decltype(arg)>;
             if constexpr (std::is_same_v<T, List>) {
                 List result;
-                for (const auto& e : arg.raw()) { if (isTruthy(safeCallFunction(cl, { anyToVal(e) }))) result.push_back(e); }
+                for (const auto& e : arg.raw()) { jc::checkInterrupt(); if (isTruthy(safeCallFunction(cl, { anyToVal(e) }))) result.push_back(e); }
                 return Value(result);
             }
             else if constexpr (std::is_same_v<T, RealMatrix> || std::is_same_v<T, ComplexMatrix> || std::is_same_v<T, StringMatrix>) {
                 auto flat = arg.rawData();
                 using Elem = std::decay_t<decltype(flat[0])>;
                 std::vector<Elem> result;
-                for (const auto& x : flat) { if (isTruthy(safeCallFunction(cl, { Value(x) }))) result.push_back(x); }
+                for (const auto& x : flat) { jc::checkInterrupt(); if (isTruthy(safeCallFunction(cl, { Value(x) }))) result.push_back(x); }
                 int n = static_cast<int>(result.size());
                 if (n == 0) return Value(T(1, 0));
                 return Value(T(1, n, result));
@@ -2313,7 +2315,7 @@ void BuiltinRegistry::registerHigherOrder() {
                 Value acc; size_t startIdx = 0;
                 if (args.size() == 3) { acc = args[2]; }
                 else { if (arg.empty()) throw std::runtime_error("Runtime Error: reduce() on empty."); acc = anyToVal(arg.raw()[0]); startIdx = 1; }
-                for (size_t i = startIdx; i < arg.size(); ++i) acc = safeCallFunction(cl, { acc, anyToVal(arg.raw()[i]) });
+                for (size_t i = startIdx; i < arg.size(); ++i) { jc::checkInterrupt(); acc = safeCallFunction(cl, { acc, anyToVal(arg.raw()[i]) }); }
                 return acc;
             }
             else if constexpr (std::is_same_v<T, RealMatrix> || std::is_same_v<T, ComplexMatrix> || std::is_same_v<T, StringMatrix>) {
@@ -2321,7 +2323,7 @@ void BuiltinRegistry::registerHigherOrder() {
                 Value acc; size_t startIdx = 0;
                 if (args.size() == 3) { acc = args[2]; }
                 else { if (flat.empty()) throw std::runtime_error("Runtime Error: reduce() on empty."); acc = Value(flat[0]); startIdx = 1; }
-                for (size_t i = startIdx; i < flat.size(); ++i) acc = safeCallFunction(cl, { acc, Value(flat[i]) });
+                for (size_t i = startIdx; i < flat.size(); ++i) { jc::checkInterrupt(); acc = safeCallFunction(cl, { acc, Value(flat[i]) }); }
                 return acc;
             }
             throw std::runtime_error("Type Error: reduce() expects a vector/matrix/list.");
@@ -2334,10 +2336,10 @@ void BuiltinRegistry::registerHigherOrder() {
         return std::visit([&](auto&& arg) -> Value {
             using T = std::decay_t<decltype(arg)>;
             if constexpr (std::is_same_v<T, List>) {
-                for (const auto& e : arg.raw()) { if (isTruthy(safeCallFunction(cl, { anyToVal(e) }))) return Value(1.0); } return Value(0.0);
+                for (const auto& e : arg.raw()) { jc::checkInterrupt(); if (isTruthy(safeCallFunction(cl, { anyToVal(e) }))) return Value(1.0); } return Value(0.0);
             }
             else if constexpr (std::is_same_v<T, RealMatrix> || std::is_same_v<T, ComplexMatrix> || std::is_same_v<T, StringMatrix>) {
-                for (const auto& x : arg.rawData()) { if (isTruthy(safeCallFunction(cl, { Value(x) }))) return Value(1.0); } return Value(0.0);
+                for (const auto& x : arg.rawData()) { jc::checkInterrupt(); if (isTruthy(safeCallFunction(cl, { Value(x) }))) return Value(1.0); } return Value(0.0);
             }
             throw std::runtime_error("Type Error: any() expects a vector/list.");
             }, args[1].data);
@@ -2349,10 +2351,10 @@ void BuiltinRegistry::registerHigherOrder() {
         return std::visit([&](auto&& arg) -> Value {
             using T = std::decay_t<decltype(arg)>;
             if constexpr (std::is_same_v<T, List>) {
-                for (const auto& e : arg.raw()) { if (!isTruthy(safeCallFunction(cl, { anyToVal(e) }))) return Value(0.0); } return Value(1.0);
+                for (const auto& e : arg.raw()) { jc::checkInterrupt(); if (!isTruthy(safeCallFunction(cl, { anyToVal(e) }))) return Value(0.0); } return Value(1.0);
             }
             else if constexpr (std::is_same_v<T, RealMatrix> || std::is_same_v<T, ComplexMatrix> || std::is_same_v<T, StringMatrix>) {
-                for (const auto& x : arg.rawData()) { if (!isTruthy(safeCallFunction(cl, { Value(x) }))) return Value(0.0); } return Value(1.0);
+                for (const auto& x : arg.rawData()) { jc::checkInterrupt(); if (!isTruthy(safeCallFunction(cl, { Value(x) }))) return Value(0.0); } return Value(1.0);
             }
             throw std::runtime_error("Type Error: all() expects a vector/list.");
             }, args[1].data);
@@ -2365,10 +2367,10 @@ void BuiltinRegistry::registerHigherOrder() {
             using T = std::decay_t<decltype(arg)>;
             int c = 0;
             if constexpr (std::is_same_v<T, List>) {
-                for (const auto& e : arg.raw()) { if (isTruthy(safeCallFunction(cl, { anyToVal(e) }))) c++; } return Value(static_cast<double>(c));
+                for (const auto& e : arg.raw()) { jc::checkInterrupt(); if (isTruthy(safeCallFunction(cl, { anyToVal(e) }))) c++; } return Value(static_cast<double>(c));
             }
             else if constexpr (std::is_same_v<T, RealMatrix> || std::is_same_v<T, ComplexMatrix> || std::is_same_v<T, StringMatrix>) {
-                for (const auto& x : arg.rawData()) { if (isTruthy(safeCallFunction(cl, { Value(x) }))) c++; } return Value(static_cast<double>(c));
+                for (const auto& x : arg.rawData()) { jc::checkInterrupt(); if (isTruthy(safeCallFunction(cl, { Value(x) }))) c++; } return Value(static_cast<double>(c));
             }
             throw std::runtime_error("Type Error: countIf() expects a vector/list.");
             }, args[1].data);
@@ -2434,6 +2436,7 @@ void BuiltinRegistry::registerCalculus() {
     reg("solveE", { 2 }, [evalFunc](const std::vector<Value>& args) -> Value {
         auto cl = args[0].asFunction(); double x = args[1].asDouble(); double h = 1e-5;
         for (int i = 0; i < 1000; ++i) {
+            jc::checkInterrupt();
             double y = evalFunc(cl, x);
             if (Tol::clean(y, std::max(1.0, std::abs(x)), 1e7) == 0.0) return Value(x);
             double df = (evalFunc(cl, x + h) - evalFunc(cl, x - h)) / (2 * h);
@@ -2455,6 +2458,7 @@ void BuiltinRegistry::registerCalculus() {
 
         auto evalRow = [&](const std::vector<Value>& rowArgs,
             std::vector<double>& res_d, std::vector<Complex>& res_c, bool& hasComplex) {
+                jc::checkInterrupt();
                 Value y_val = safeCallFunction(cl, rowArgs);
                 if (!hasComplex) {
                     try { res_d.push_back(y_val.asDouble()); }
@@ -2559,6 +2563,7 @@ void BuiltinRegistry::registerFileIO() {
         if (!file.is_open()) throw std::runtime_error("IO Error: Cannot open file '" + path + "'.");
         List L; std::string line;
         while (std::getline(file, line)) {
+            jc::checkInterrupt();
             if (!line.empty() && line.back() == '\r') line.pop_back();
             L.push_back(valToAny(Value(line)));
         }
@@ -2633,7 +2638,7 @@ void BuiltinRegistry::registerFileIO() {
         if (args.size() == 2) { if (!std::holds_alternative<std::string>(args[1].data)) throw std::runtime_error("Type Error: readCSV() delimiter must be a string."); delim = std::get<std::string>(args[1].data); }
         std::ifstream file(path); if (!file.is_open()) throw std::runtime_error("IO Error: Cannot open file '" + path + "'.");
         List rows; std::string line;
-        while (std::getline(file, line)) { if (!line.empty() && line.back() == '\r') line.pop_back(); List row; size_t pos = 0, found; while ((found = line.find(delim, pos)) != std::string::npos) { row.push_back(valToAny(Value(line.substr(pos, found - pos)))); pos = found + delim.size(); } row.push_back(valToAny(Value(line.substr(pos)))); rows.push_back(valToAny(Value(row))); }
+        while (std::getline(file, line)) { jc::checkInterrupt(); if (!line.empty() && line.back() == '\r') line.pop_back(); List row; size_t pos = 0, found; while ((found = line.find(delim, pos)) != std::string::npos) { row.push_back(valToAny(Value(line.substr(pos, found - pos)))); pos = found + delim.size(); } row.push_back(valToAny(Value(line.substr(pos)))); rows.push_back(valToAny(Value(row))); }
         file.close(); return Value(rows);
         });
 
@@ -2644,7 +2649,7 @@ void BuiltinRegistry::registerFileIO() {
         if (args.size() == 2) { if (!std::holds_alternative<std::string>(args[1].data)) throw std::runtime_error("Type Error: readCSVMat() delimiter must be a string."); delim = std::get<std::string>(args[1].data); }
         std::ifstream file(path); if (!file.is_open()) throw std::runtime_error("IO Error: Cannot open file '" + path + "'.");
         std::vector<std::vector<std::string>> rowsData; std::string line; size_t maxCols = 0;
-        while (std::getline(file, line)) { if (!line.empty() && line.back() == '\r') line.pop_back(); std::vector<std::string> row; size_t pos = 0, found; while ((found = line.find(delim, pos)) != std::string::npos) { row.push_back(line.substr(pos, found - pos)); pos = found + delim.size(); } row.push_back(line.substr(pos)); if (row.size() > maxCols) maxCols = row.size(); rowsData.push_back(row); }
+        while (std::getline(file, line)) { jc::checkInterrupt(); if (!line.empty() && line.back() == '\r') line.pop_back(); std::vector<std::string> row; size_t pos = 0, found; while ((found = line.find(delim, pos)) != std::string::npos) { row.push_back(line.substr(pos, found - pos)); pos = found + delim.size(); } row.push_back(line.substr(pos)); if (row.size() > maxCols) maxCols = row.size(); rowsData.push_back(row); }
         file.close(); std::vector<std::string> flat; for (auto& row : rowsData) { row.resize(maxCols, ""); flat.insert(flat.end(), row.begin(), row.end()); }
         return Value(StringMatrix(static_cast<int>(rowsData.size()), static_cast<int>(maxCols), flat));
         });
@@ -2656,7 +2661,7 @@ void BuiltinRegistry::registerFileIO() {
         if (args.size() == 2) { if (!std::holds_alternative<std::string>(args[1].data)) throw std::runtime_error("Type Error: parseCSVNum() delimiter must be a string."); delim = std::get<std::string>(args[1].data); }
         std::ifstream file(path); if (!file.is_open()) throw std::runtime_error("IO Error: Cannot open file '" + path + "'.");
         std::vector<std::vector<double>> rowsData; std::string line; size_t maxCols = 0;
-        while (std::getline(file, line)) { if (!line.empty() && line.back() == '\r') line.pop_back(); if (line.empty()) continue; std::vector<double> row; size_t pos = 0, found; while ((found = line.find(delim, pos)) != std::string::npos) { try { row.push_back(std::stod(line.substr(pos, found - pos))); } catch (...) { row.push_back(0.0); } pos = found + delim.size(); } try { row.push_back(std::stod(line.substr(pos))); } catch (...) { row.push_back(0.0); } if (row.size() > maxCols) maxCols = row.size(); rowsData.push_back(row); }
+        while (std::getline(file, line)) { jc::checkInterrupt(); if (!line.empty() && line.back() == '\r') line.pop_back(); if (line.empty()) continue; std::vector<double> row; size_t pos = 0, found; while ((found = line.find(delim, pos)) != std::string::npos) { try { row.push_back(std::stod(line.substr(pos, found - pos))); } catch (...) { row.push_back(0.0); } pos = found + delim.size(); } try { row.push_back(std::stod(line.substr(pos))); } catch (...) { row.push_back(0.0); } if (row.size() > maxCols) maxCols = row.size(); rowsData.push_back(row); }
         file.close(); if (rowsData.empty()) return Value(RealMatrix(0, 0));
         std::vector<double> flat; for (auto& row : rowsData) { row.resize(maxCols, 0.0); flat.insert(flat.end(), row.begin(), row.end()); }
         return Value(RealMatrix(static_cast<int>(rowsData.size()), static_cast<int>(maxCols), flat));
@@ -2838,6 +2843,7 @@ void BuiltinRegistry::registerSystemShell() {
         int prevPx = -1, prevPy = -1;
 
         for (int px = 0; px <= plotW; ++px) {
+            jc::checkInterrupt();
             double x = xMin + (static_cast<double>(px) / plotW) * (xMax - xMin);
             double y = 0;
             try { y = helpers::safeCallFunction(fn_actual, { Value(x) }).asDouble(); }
@@ -3340,6 +3346,7 @@ void BuiltinRegistry::registerSetFunctions() {
         const auto& raw = s.raw();
 
         for (int mask = 0; mask < limit; ++mask) {
+            jc::checkInterrupt();
             Set sub;
             for (int i = 0; i < n; ++i) {
                 if (mask & (1 << i)) {
@@ -3756,8 +3763,8 @@ void BuiltinRegistry::registerCAS() {
         int n = (args.size() == 4) ? static_cast<int>(std::round(args[3].asDouble())) : 100000;
         if (n <= 0 || n % 2 != 0) n = 100000;
         double h = (b - a) / n, s = evalFunc(cl, a) + evalFunc(cl, b);
-        for (int i = 1; i < n; i += 2) s += 4 * evalFunc(cl, a + i * h);
-        for (int i = 2; i < n - 1; i += 2) s += 2 * evalFunc(cl, a + i * h);
+        for (int i = 1; i < n; i += 2) { jc::checkInterrupt(); s += 4 * evalFunc(cl, a + i * h); }
+        for (int i = 2; i < n - 1; i += 2) { jc::checkInterrupt(); s += 2 * evalFunc(cl, a + i * h); }
         return Value(s * h / 3.0);
         });
 }

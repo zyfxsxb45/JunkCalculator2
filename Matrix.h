@@ -11,6 +11,8 @@
 
 namespace jc {
 
+    extern void checkInterrupt();
+
     template <typename T>
     class Matrix {
     private:
@@ -99,6 +101,7 @@ namespace jc {
 
             Matrix result(rows, other.cols);
             for (int i = 0; i < rows; ++i) {
+                checkInterrupt();
                 for (int k = 0; k < cols; ++k) {
                     T r = (*this)(i, k);
                     for (int j = 0; j < other.cols; ++j) {
@@ -271,6 +274,7 @@ namespace jc {
             }
 
             for (int j = 0; j < cols && currentRow < rows; ++j) {
+                checkInterrupt();
                 int maxRow = currentRow;
                 double maxVal = magnitudeOf(result(currentRow, j));
 
@@ -334,6 +338,7 @@ namespace jc {
             }
 
             for (int i = 0; i < cols; ++i) {
+                checkInterrupt();
                 int maxRow = i;
                 double maxVal = magnitudeOf(temp(i, i));
                 for (int k = i + 1; k < rows; ++k) {
@@ -721,6 +726,7 @@ namespace jc {
             Matrix<T> result = identity(n);
             Matrix<T> term = identity(n);
             for (int k = 1; k <= 64; ++k) {
+                checkInterrupt();
                 term = term * B / T(static_cast<double>(k));
                 result = result + term;
                 // 相对收敛判定：当前项相对于结果可忽略
@@ -741,6 +747,7 @@ namespace jc {
             Matrix<T> term = *this;
             Matrix<T> result = *this;
             for (int k = 1; k <= 1000; ++k) {
+                checkInterrupt();
                 term = term * negA2 / T(static_cast<double>((2 * k) * (2 * k + 1)));
                 result = result + term;
                 if (Tol::clean(term.norm(), result.norm(), 1e3) == 0.0) return result;
@@ -756,6 +763,7 @@ namespace jc {
             Matrix<T> term = identity(rows);
             Matrix<T> result = identity(rows);
             for (int k = 1; k <= 1000; ++k) {
+                checkInterrupt();
                 term = term * negA2 / T(static_cast<double>((2 * k - 1) * (2 * k)));
                 result = result + term;
                 if (Tol::clean(term.norm(), result.norm(), 1e3) == 0.0) return result;
@@ -800,6 +808,7 @@ namespace jc {
             Matrix<T> term = X;
             Matrix<T> result = X;
             for (int k = 2; k <= 1000; ++k) {
+                checkInterrupt();
                 term = term * X * T(-1.0) * T(static_cast<double>(k - 1)) / T(static_cast<double>(k));
                 result = result + term;
                 if (Tol::clean(term.norm(), result.norm(), 1e3) == 0.0) return result;  // ★ 相对阈值
@@ -854,6 +863,7 @@ namespace jc {
             Matrix<T> R(n, n);
 
             for (int j = 0; j < n; ++j) {
+                checkInterrupt();
                 // 计算第 j 列的范数
                 double colNorm = 0;
                 for (int i = 0; i < m; ++i) {
@@ -911,6 +921,7 @@ namespace jc {
             }
 
             for (int k = 0; k < n; ++k) {
+                checkInterrupt();
                 // 列主元选取
                 int maxRow = k;
                 double maxVal = magnitudeOf(U(k, k));
@@ -1099,6 +1110,7 @@ namespace jc {
         ComplexMatrix H(A);
 
         for (int k = 0; k < n - 2; ++k) {
+            checkInterrupt();
             int m = n - k - 1;
             double xnorm = 0;
             for (int i = k + 1; i < n; ++i) {
@@ -1176,6 +1188,7 @@ namespace jc {
         int maxIter = 10000;
 
         while (n > 0) {
+            checkInterrupt();
             if (n == 1) {
                 eigenvals.push_back(A(0, 0));
                 break;
@@ -1337,6 +1350,7 @@ namespace jc {
         ComplexMatrix Y = A;
         ComplexMatrix Z = ComplexMatrix::identity(n);
         for (int iter = 0; iter < 100; ++iter) {
+            checkInterrupt();
             ComplexMatrix Yinv, Zinv;
             try {
                 Yinv = Y.inverse();
@@ -1406,6 +1420,7 @@ namespace jc {
                 const int maxSqrtSteps = 64;
 
                 while ((B - I).norm() >= 1.0 && sqrtCount < maxSqrtSteps) {
+                    checkInterrupt();
                     B = matSqrtIterative(B);  // ★ 自闭合迭代，不会回调 matLog
                     sqrtCount++;
                 }
@@ -1416,6 +1431,9 @@ namespace jc {
                 // log(A) = 2^sqrtCount * log(B)
                 ComplexMatrix logB = B.matLogSeries();
                 return logB * Complex(std::pow(2.0, sqrtCount));
+            }
+            catch (const EngineInterruptError&) {
+                throw;
             }
             catch (...) {
                 // 所有路径都失败，给出清晰的最终诊断
@@ -1461,12 +1479,18 @@ namespace jc {
             try {
                 return matSqrtIterative(A);
             }
+            catch (const EngineInterruptError&) {
+                throw;
+            }
             catch (...) {}
 
             // 路径 3：exp(log(A) * 0.5)
             // ★ 此处安全：matLog 路径 3 调用的是 matSqrtIterative 而非 matSqrt，无循环
             try {
                 return (matLog(A) * Complex(0.5)).matExp();
+            }
+            catch (const EngineInterruptError&) {
+                throw;
             }
             catch (...) {
                 throw std::runtime_error(
@@ -1488,6 +1512,9 @@ namespace jc {
     inline ComplexMatrix matPow(const ComplexMatrix& A, const ComplexMatrix& B) {
         try {
             return (B * matLog(A)).matExp();
+        }
+        catch (const EngineInterruptError&) {
+            throw;
         }
         catch (const std::runtime_error& e) {
             std::string msg = e.what();

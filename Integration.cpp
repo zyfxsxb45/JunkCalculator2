@@ -3,6 +3,9 @@
 #include "Factorization.h"
 #include "Groebner.h"
 #include <stdexcept>
+#include <iostream>
+
+static bool DEBUG_INTEG = true;
 #include <algorithm>
 #include <numeric>
 #include <vector>
@@ -608,6 +611,7 @@ namespace jc {
     // 🚀 Risch 算法核心 (Risch Algorithm Core)
     // =================================================================
     static SymExpr rischIntegrateCore(const SymExpr& expr, const std::string& var, int depth) {
+        checkInterrupt();
         // Step 0 - 刘维尔域规范化 (Liouvillian Field Normalization)
         SymExpr normalizedExpr = rischNormalize(expr);
 
@@ -633,6 +637,8 @@ namespace jc {
                         orig_ext = ext.arg;
                     }
                     return simplifyCore(subs(int_t, ext.name, orig_ext));
+                } catch (const EngineInterruptError&) {
+                    throw;
                 } catch (...) {}
             }
             
@@ -645,6 +651,8 @@ namespace jc {
                         SymExpr int_t = integrate(integrand_t, ext.name, depth + 1);
                         SymExpr orig_ext(std::make_shared<SymFunc>("exp", std::vector<std::shared_ptr<SymNode>>{ext.arg.ptr}));
                         return simplifyCore(subs(int_t, ext.name, orig_ext));
+                    } catch (const EngineInterruptError&) {
+                        throw;
                     } catch (...) {}
                 }
             }
@@ -666,6 +674,8 @@ namespace jc {
                     if (getAstNodeCount(intPart) >= getAstNodeCount(normalizedExpr)) throw std::runtime_error("Complexity increased");
                     SymExpr intRes = integrate(intPart, var, depth + 1);
                     return ratPart + intRes;
+                } catch (const EngineInterruptError&) {
+                    throw;
                 } catch (const std::exception& e) {
                     std::string debugInfo = "Hermite Reduction completed, but remaining integral is non-elementary.\n";
                     debugInfo += "Original: " + normalizedExpr.toString() + "\n";
@@ -775,6 +785,8 @@ namespace jc {
                         SymExpr finalRes = simplifyCore(backSubstitute(result));
                         markTainted(finalRes);
                         return finalRes;
+                    } catch (const EngineInterruptError&) {
+                        throw;
                     } catch (...) {
                         // 失败则继续往下走，抛出调试信息
                     }
@@ -799,6 +811,8 @@ namespace jc {
                                 }
                                 SymExpr int_0 = integrate(integrand_x, var, depth + 1);
                                 result = result + field.rewrite(trigToExp(int_0));
+                            } catch (const EngineInterruptError&) {
+                                throw;
                             } catch (...) {
                                 success = false;
                                 break;
@@ -1074,29 +1088,40 @@ namespace jc {
         int baseTransWeight = getTranscendentalWeight(expr, var);
 
         auto doIntegImpl = [&](const SymExpr& e, int current_depth) -> std::optional<SymExpr> {
+            checkInterrupt();
+            if (DEBUG_INTEG) {
+                std::string indent(current_depth * 2, ' ');
+                std::cout << indent << "-> doIntegImpl depth=" << current_depth << " expr=" << e.toString() << std::endl;
+            }
+
             if (current_depth > SymConfig::maxDepth) {
+                if (DEBUG_INTEG) std::cout << std::string(current_depth * 2, ' ') << "<- Max depth exceeded" << std::endl;
                 return std::nullopt;
             }
 
             // 积分变量下沉检测 (Variable Submergence Check)
             int currentVarDepth = getVarDepth(e, var);
             if (currentVarDepth > baseVarDepth + 5) {
+                if (DEBUG_INTEG) std::cout << std::string(current_depth * 2, ' ') << "<- Variable submergence limit" << std::endl;
                 return std::nullopt;
             }
 
             // 超越函数嵌套惩罚 (Transcendental Extension Penalty)
             int currentTransWeight = getTranscendentalWeight(e, var);
             if (currentTransWeight > baseTransWeight + 20) {
+                if (DEBUG_INTEG) std::cout << std::string(current_depth * 2, ' ') << "<- Transcendental weight limit" << std::endl;
                 return std::nullopt;
             }
 
             // 绝对体积限制 (Absolute AST Size Limit)
             if (getAstNodeCount(e) > 300) {
+                if (DEBUG_INTEG) std::cout << std::string(current_depth * 2, ' ') << "<- AST size limit" << std::endl;
                 return std::nullopt;
             }
 
             // 积分路径污染机制的黑盒锁 (Integration Path Taint Lock)
             if (isTainted(e)) {
+                if (DEBUG_INTEG) std::cout << std::string(current_depth * 2, ' ') << "<- Tainted signature" << std::endl;
                 return std::nullopt;
             }
 
@@ -1159,6 +1184,7 @@ namespace jc {
             }
 
             if (matched) {
+                if (DEBUG_INTEG) std::cout << std::string(current_depth * 2, ' ') << "<- Matched Table" << std::endl;
                 return coeff * integratedPart;
             }
 
@@ -1238,6 +1264,7 @@ namespace jc {
                 if (!containsVar(f_u.ptr, var)) {
                     SymExpr f_var = subs(f_u, u_var, SymExpr::makeVar(var));
                     if (auto int_var = doInteg(simplify(expand(f_var / sub_a, SymConfig::maxExpandTerms)), current_depth + 1)) {
+                        if (DEBUG_INTEG) std::cout << std::string(current_depth * 2, ' ') << "<- Linear Substitution Success" << std::endl;
                         SymExpr res = subs(*int_var, var, sub_u);
                         return coeff * res;
                     }
@@ -1360,6 +1387,7 @@ namespace jc {
                     if (!containsVar(rem_u.ptr, var)) {
                         SymExpr f_var = subs(rem_u, u_var, SymExpr::makeVar(var));
                         if (auto int_var = doInteg(simplify(expand(f_var, SymConfig::maxExpandTerms)), current_depth + 1)) {
+                            if (DEBUG_INTEG) std::cout << std::string(current_depth * 2, ' ') << "<- Generalized Substitution Success" << std::endl;
                             SymExpr res = subs(*int_var, var, u);
                             return coeff * res;
                         }
@@ -1476,6 +1504,7 @@ namespace jc {
                         SymExpr new_integrand = simplify(subs(varPart, var, *x_sol) * dx_du);
                         SymExpr integrand_var = subs(new_integrand, u_var, SymExpr::makeVar(var));
                         if (auto int_var = doInteg(integrand_var, current_depth + 1)) {
+                            if (DEBUG_INTEG) std::cout << std::string(current_depth * 2, ' ') << "<- Radical Substitution Success" << std::endl;
                             SymExpr back_sub = radicalBase ^ SymExpr(Fraction(BigInt(1), BigInt(radicalN)));
                             return coeff * simplify(subs(*int_var, var, back_sub));
                         }
@@ -1498,7 +1527,10 @@ namespace jc {
                                 SymExpr expanded = expand(halfAngle ^ SymExpr(BigInt(n / 2)), SymConfig::maxExpandTerms);
                                 SymExpr cos2x = SymExpr(std::make_shared<SymFunc>("cos", std::vector<std::shared_ptr<SymNode>>{(SymExpr(BigInt(2)) * arg).ptr}));
                                 expanded = subs(expanded, "_C", cos2x);
-                                if (auto res = doInteg(expanded, current_depth + 1)) return coeff * (*res);
+                                if (auto res = doInteg(expanded, current_depth + 1)) {
+                                    if (DEBUG_INTEG) std::cout << std::string(current_depth * 2, ' ') << "<- Trig Power Reduction Success" << std::endl;
+                                    return coeff * (*res);
+                                }
                             } else {
                                 SymExpr _C = SymExpr::makeVar("_C");
                                 SymExpr cosSq = SymExpr(BigInt(1)) - (_C ^ SymExpr(BigInt(2)));
@@ -1506,7 +1538,10 @@ namespace jc {
                                 SymExpr expanded = expand(rem, SymConfig::maxExpandTerms);
                                 SymExpr cosx = SymExpr(std::make_shared<SymFunc>("cos", std::vector<std::shared_ptr<SymNode>>{arg.ptr}));
                                 expanded = subs(expanded, "_C", cosx);
-                                if (auto res = doInteg(expanded, current_depth + 1)) return coeff * (*res);
+                                if (auto res = doInteg(expanded, current_depth + 1)) {
+                                    if (DEBUG_INTEG) std::cout << std::string(current_depth * 2, ' ') << "<- Trig Power Reduction Success" << std::endl;
+                                    return coeff * (*res);
+                                }
                             }
                         } else if (func->name == "cos") {
                             if (n % 2 == 0) {
@@ -1515,7 +1550,10 @@ namespace jc {
                                 SymExpr expanded = expand(halfAngle ^ SymExpr(BigInt(n / 2)), SymConfig::maxExpandTerms);
                                 SymExpr cos2x = SymExpr(std::make_shared<SymFunc>("cos", std::vector<std::shared_ptr<SymNode>>{(SymExpr(BigInt(2)) * arg).ptr}));
                                 expanded = subs(expanded, "_C", cos2x);
-                                if (auto res = doInteg(expanded, current_depth + 1)) return coeff * (*res);
+                                if (auto res = doInteg(expanded, current_depth + 1)) {
+                                    if (DEBUG_INTEG) std::cout << std::string(current_depth * 2, ' ') << "<- Trig Power Reduction Success" << std::endl;
+                                    return coeff * (*res);
+                                }
                             } else {
                                 SymExpr _S = SymExpr::makeVar("_S");
                                 SymExpr sinSq = SymExpr(BigInt(1)) - (_S ^ SymExpr(BigInt(2)));
@@ -1523,7 +1561,10 @@ namespace jc {
                                 SymExpr expanded = expand(rem, SymConfig::maxExpandTerms);
                                 SymExpr sinx = SymExpr(std::make_shared<SymFunc>("sin", std::vector<std::shared_ptr<SymNode>>{arg.ptr}));
                                 expanded = subs(expanded, "_S", sinx);
-                                if (auto res = doInteg(expanded, current_depth + 1)) return coeff * (*res);
+                                if (auto res = doInteg(expanded, current_depth + 1)) {
+                                    if (DEBUG_INTEG) std::cout << std::string(current_depth * 2, ' ') << "<- Trig Power Reduction Success" << std::endl;
+                                    return coeff * (*res);
+                                }
                             }
                         }
                     }
@@ -1616,6 +1657,7 @@ namespace jc {
                         SymExpr subbed = simplifyCore(subs(varPart, var, x_sub) * dx_sub);
                         SymExpr subbed_var = subs(subbed, "_t", SymExpr::makeVar(var));
                         if (auto int_var = doInteg(trigsimp(subbed_var), current_depth + 1)) {
+                            if (DEBUG_INTEG) std::cout << std::string(current_depth * 2, ' ') << "<- Trig Substitution Success" << std::endl;
                             SymExpr res = subs(*int_var, var, t_back);
                             return coeff * res;
                         }
@@ -1706,11 +1748,13 @@ namespace jc {
                                 SymExpr part1 = simplifyCore(SymExpr(BigInt(1)) / (SymExpr(BigInt(4)) * A * sqrt2C));
                                 SymExpr part2 = simplifyCore(SymExpr(BigInt(1)) / (SymExpr(BigInt(2)) * A * sqrt2C));
                                 SymExpr res = part1 * (log1 - log2) + part2 * (atan1 + atan2);
+                                if (DEBUG_INTEG) std::cout << std::string(current_depth * 2, ' ') << "<- Biquadratic Fraction Success" << std::endl;
                                 return coeff * res;
                             } else if (bqM == 0) {
                                 SymExpr part1 = simplifyCore(SymExpr(BigInt(1)) / (SymExpr(BigInt(4)) * A * C * sqrt2C));
                                 SymExpr part2 = simplifyCore(SymExpr(BigInt(1)) / (SymExpr(BigInt(2)) * A * C * sqrt2C));
                                 SymExpr res = part1 * (log2 - log1) + part2 * (atan1 + atan2);
+                                if (DEBUG_INTEG) std::cout << std::string(current_depth * 2, ' ') << "<- Biquadratic Fraction Success" << std::endl;
                                 return coeff * res;
                             }
                         }
@@ -1822,6 +1866,7 @@ namespace jc {
                                     res = -res_minus;
                                 }
                                 
+                                if (DEBUG_INTEG) std::cout << std::string(current_depth * 2, ' ') << "<- Binomial Fraction Success" << std::endl;
                                 return coeff * simplifyCore(res / (B * du_dx));
                             }
                         }
@@ -1860,6 +1905,7 @@ namespace jc {
                         SymExpr atan_term = SymExpr(std::make_shared<SymFunc>("atan", std::vector<std::shared_ptr<SymNode>>{atan_arg.ptr}));
                         
                         SymExpr res = simplifyCore((SymExpr(BigInt(2)) * num / sqrtNegDelta) * atan_term);
+                        if (DEBUG_INTEG) std::cout << std::string(current_depth * 2, ' ') << "<- Inverse Quadratic Success" << std::endl;
                         return coeff * res;
                     }
                 }
@@ -1938,7 +1984,10 @@ namespace jc {
                             res = subs(res, kv.first, kv.second);
                         }
                         
+                        if (DEBUG_INTEG) std::cout << std::string(current_depth * 2, ' ') << "<- Rational Function Success" << std::endl;
                         return coeff * res;
+                    } catch (const EngineInterruptError&) {
+                        throw;
                     } catch (...) {
                         // 有理分式积分失败，静默吞没，继续尝试后续方法（如 Risch 算法）
                     }
@@ -2044,9 +2093,12 @@ namespace jc {
                     SymExpr rational_t = simplifyCore(expand(num_t / den_t, SymConfig::maxExpandTerms));
                     SymExpr rational_var = subs(rational_t, t_var, SymExpr::makeVar(var));
                     if (auto opt_integrated_var = doInteg(rational_var, current_depth + 1)) {
+                        if (DEBUG_INTEG) std::cout << std::string(current_depth * 2, ' ') << "<- Weierstrass Substitution Success" << std::endl;
                         SymExpr back_sub = SymExpr(std::make_shared<SymFunc>("tan", std::vector<std::shared_ptr<SymNode>>{(SymExpr::makeVar(var) / SymExpr(BigInt(2))).ptr}));
                         return coeff * simplifyCore(subs(*opt_integrated_var, var, back_sub));
                     }
+                } catch (const EngineInterruptError&) {
+                    throw;
                 } catch (...) {}
             }
 
@@ -2232,6 +2284,7 @@ namespace jc {
 
                     auto opt_int_v_du = doInteg(v_du, current_depth + 1);
                     if (!opt_int_v_du) return std::nullopt;
+                    if (DEBUG_INTEG) std::cout << std::string(current_depth * 2, ' ') << "<- Integration by Parts Success" << std::endl;
                     return coeff * simplifyCore(u * v - *opt_int_v_du);
                 };
 
@@ -2247,9 +2300,15 @@ namespace jc {
             }
 
             // 启发式方法全部失效，移交 Risch 算法处理
+            if (DEBUG_INTEG) std::cout << std::string(current_depth * 2, ' ') << "-> Fallback to Risch Algorithm" << std::endl;
             try {
-                return coeff * rischIntegrate(varPart, var, current_depth + 1);
+                auto rischRes = coeff * rischIntegrate(varPart, var, current_depth + 1);
+                if (DEBUG_INTEG) std::cout << std::string(current_depth * 2, ' ') << "<- Risch Algorithm Success" << std::endl;
+                return rischRes;
+            } catch (const EngineInterruptError&) {
+                throw;
             } catch (...) {
+                if (DEBUG_INTEG) std::cout << std::string(current_depth * 2, ' ') << "<- Risch Algorithm Failed" << std::endl;
                 // 如果是在递归深层，静默返回 nullopt 让上层继续尝试其他分支
                 // 如果是在最外层 (current_depth == start_depth)，则抛出异常以保留详细的 Risch 失败信息
                 if (current_depth == start_depth) throw;
@@ -2274,17 +2333,22 @@ namespace jc {
                     return simplify(*res);
                 }
                 throw std::runtime_error("Calculus Error: Function integration not supported or complex power.");
+            } catch (const EngineInterruptError&) {
+                throw;
             } catch (const std::runtime_error& e) {
                 std::string msg = e.what();
                 SymExpr expanded;
-                try { expanded = expand(expr, SymConfig::maxExpandTerms * 2); } catch (...) { expanded = expr; }
+                try { expanded = expand(expr, SymConfig::maxExpandTerms * 2); } catch (const EngineInterruptError&) { throw; } catch (...) { expanded = expr; }
                 
                 // 严格防死锁：只有当展开后的表达式确实发生了变化，才允许重置 depth 再次尝试
                 if (expanded != expr) {
+                    if (DEBUG_INTEG) std::cout << "-> Retrying integration after expansion: " << expanded.toString() << std::endl;
                     try {
                         if (auto res2 = doInteg(expanded, start_depth)) {
                             return simplify(*res2);
                         }
+                    } catch (const EngineInterruptError&) {
+                        throw;
                     } catch (const std::runtime_error& e2) {
                         std::string msg2 = e2.what();
                         // 如果展开后再次失败，保留新的错误信息
@@ -2309,6 +2373,8 @@ namespace jc {
                 }
                 
                 throw std::runtime_error("Calculus Error: Function integration not supported or complex power. (" + msg + ")");
+            } catch (const EngineInterruptError&) {
+                throw;
             } catch (...) {
                 throw std::runtime_error("Calculus Error: Function integration not supported or complex power.");
             }
