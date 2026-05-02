@@ -695,7 +695,7 @@ namespace jc {
                                 break;
                             }
                         } else {
-                            // 求解 Risch 微分方程 B_i' + i u' B_i = A_i
+                            // 求解 Risch 微分方程 B_i' + i u' B_i = A_i (SPDE 多项式度数界限法)
                             SymExpr A_i = backSubstitute(coeffs[i]);
                             SymExpr V_i = backSubstitute(simplifyCore(SymExpr(BigInt(i)) * u_deriv));
                             
@@ -703,35 +703,68 @@ namespace jc {
                             SymExpr currentA = A_i;
                             bool rde_success = false;
                             
-                            int iter = 0;
-                            while (true) {
-                                if (currentA.isZero()) { rde_success = true; break; }
-                                if (++iter > SymConfig::maxIterations) break;
+                            auto cV = extractCoeffs(V_i, var);
+                            while (!cV.empty() && cV.back().isZero()) cV.pop_back();
+                            
+                            if (cV.empty()) {
+                                // V_i 不是多项式，退化为常数除法尝试
+                                SymExpr B_term = simplifyCore(currentA / V_i);
+                                if (!containsVar(B_term.ptr, var)) {
+                                    B_i = B_term;
+                                    rde_success = true;
+                                }
+                            } else {
+                                int degV = static_cast<int>(cV.size()) - 1;
+                                SymExpr leadV = cV.back();
                                 
-                                auto cA = extractCoeffs(currentA, var);
-                                auto cV = extractCoeffs(V_i, var);
+                                // 计算多项式度数界限 b = deg(A) - deg(V)
+                                int b_bound = -1;
+                                auto cA_init = extractCoeffs(currentA, var);
+                                while (!cA_init.empty() && cA_init.back().isZero()) cA_init.pop_back();
                                 
-                                if (cA.empty() || cV.empty()) {
-                                    SymExpr B_term = simplifyCore(currentA / V_i);
-                                    // 严格检查 B_term 是否为常数（不包含积分变量）
-                                    if (!containsVar(B_term.ptr, var)) {
-                                        B_i = B_i + B_term;
-                                        rde_success = true;
-                                    }
-                                    break;
+                                if (!cA_init.empty()) {
+                                    b_bound = static_cast<int>(cA_init.size()) - 1 - degV;
                                 }
                                 
-                                int degA = static_cast<int>(cA.size()) - 1;
-                                int degV = static_cast<int>(cV.size()) - 1;
-                                if (degA < degV) break;
+                                if (b_bound >= 0) {
+                                    for (int d = b_bound; d >= 0; --d) {
+                                        if (currentA.isZero()) break;
+                                        
+                                        auto cA = extractCoeffs(currentA, var);
+                                        while (!cA.empty() && cA.back().isZero()) cA.pop_back();
+                                        if (cA.empty()) break;
+                                        
+                                        int degA = static_cast<int>(cA.size()) - 1;
+                                        
+                                        if (degA != d + degV) {
+                                            if (degA > d + degV) break; // 异常升次，无多项式解
+                                            continue; // 当前次项系数为0，跳过
+                                        }
+                                        
+                                        SymExpr leadA = cA.back();
+                                        SymExpr c_d = simplifyCore(leadA / leadV);
+                                        SymExpr B_term = simplifyCore(c_d * (SymExpr::makeVar(var) ^ SymExpr(BigInt(d))));
+                                        
+                                        B_i = B_i + B_term;
+                                        SymExpr B_term_deriv = simplifyCore(diff(B_term, var));
+                                        currentA = simplifyCore(expand(currentA - B_term_deriv - V_i * B_term, SymConfig::maxExpandTerms));
+                                    }
+                                }
                                 
-                                int degB = degA - degV;
-                                SymExpr leadB = simplifyCore(cA.back() / cV.back());
-                                SymExpr B_term = simplifyCore(leadB * (SymExpr::makeVar(var) ^ SymExpr(BigInt(degB))));
-                                
-                                B_i = B_i + B_term;
-                                SymExpr B_term_deriv = simplifyCore(diff(B_term, var));
-                                currentA = simplifyCore(expand(currentA - B_term_deriv - V_i * B_term, SymConfig::maxExpandTerms));
+                                if (currentA.isZero()) {
+                                    rde_success = true;
+                                } else if (degV == 0) {
+                                    auto cA_final = extractCoeffs(currentA, var);
+                                    while (!cA_final.empty() && cA_final.back().isZero()) cA_final.pop_back();
+                                    if (cA_final.empty()) {
+                                        // 兜底常数项处理
+                                        SymExpr B_term = simplifyCore(currentA / V_i);
+                                        if (!containsVar(B_term.ptr, var)) {
+                                            B_i = B_i + B_term;
+                                            rde_success = true;
+                                        }
+                                    }
+                                }
                             }
                             
                             if (rde_success) {
