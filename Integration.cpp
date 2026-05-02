@@ -189,7 +189,7 @@ namespace jc {
     // =================================================================
     // 🚀 Risch 算法核心组件 (Risch Algorithm Core Components)
     // =================================================================
-    enum class RischExtType { LOG, EXP };
+    enum class RischExtType { LOG, EXP, ALG };
 
     struct RischExtension {
         RischExtType type = RischExtType::LOG;
@@ -197,6 +197,7 @@ namespace jc {
         SymExpr deriv;     // 导数 t'
         std::string name;  // 变量名 (如 _t1)
         SymExpr t_var;     // 变量节点
+        SymExpr minPoly;   // 极小多项式 (仅代数扩张使用，如 t^2 - P(x))
     };
 
     struct RischDiffField {
@@ -247,6 +248,8 @@ namespace jc {
                 } else if (it->type == RischExtType::EXP) {
                     SymExpr targetExp(std::make_shared<SymFunc>("exp", std::vector<std::shared_ptr<SymNode>>{it->arg.ptr}));
                     res = applyRule(res, targetExp, it->t_var);
+                } else if (it->type == RischExtType::ALG) {
+                    res = applyRule(res, it->arg, it->t_var);
                 }
             }
             return res;
@@ -540,8 +543,10 @@ namespace jc {
                     SymExpr orig_ext;
                     if (ext.type == RischExtType::LOG) {
                         orig_ext = SymExpr(std::make_shared<SymFunc>("log", std::vector<std::shared_ptr<SymNode>>{ext.arg.ptr}));
-                    } else {
+                    } else if (ext.type == RischExtType::EXP) {
                         orig_ext = SymExpr(std::make_shared<SymFunc>("exp", std::vector<std::shared_ptr<SymNode>>{ext.arg.ptr}));
+                    } else if (ext.type == RischExtType::ALG) {
+                        orig_ext = ext.arg;
                     }
                     return simplifyCore(subs(int_t, ext.name, orig_ext));
                 } catch (...) {}
@@ -603,8 +608,10 @@ namespace jc {
                     SymExpr orig;
                     if (it->type == RischExtType::LOG) {
                         orig = SymExpr(std::make_shared<SymFunc>("log", std::vector<std::shared_ptr<SymNode>>{it->arg.ptr}));
-                    } else {
+                    } else if (it->type == RischExtType::EXP) {
                         orig = SymExpr(std::make_shared<SymFunc>("exp", std::vector<std::shared_ptr<SymNode>>{it->arg.ptr}));
+                    } else if (it->type == RischExtType::ALG) {
+                        orig = it->arg;
                     }
                     res = subs(res, it->name, orig);
                 }
@@ -809,7 +816,8 @@ namespace jc {
         for (const auto& ext : field.tower) {
             debugInfo += "  " + ext.name + " = ";
             if (ext.type == RischExtType::LOG) debugInfo += "log(" + ext.arg.toString() + ")";
-            else debugInfo += "exp(" + ext.arg.toString() + ")";
+            else if (ext.type == RischExtType::EXP) debugInfo += "exp(" + ext.arg.toString() + ")";
+            else debugInfo += "RootOf(" + ext.minPoly.toString() + " = 0)";
             debugInfo += ",  " + ext.name + "' = " + ext.deriv.toString() + "\n";
         }
         debugInfo += "Rewritten integrand: " + rewritten.toString();
