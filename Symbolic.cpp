@@ -2636,6 +2636,23 @@ namespace jc {
                         if (powNode->base->getType() == SymType::VAR && std::static_pointer_cast<SymVar>(powNode->base)->name == "E") {
                             return SymExpr(powNode->exp);
                         }
+                        SymExpr baseLog(std::make_shared<SymFunc>("log", std::vector<std::shared_ptr<SymNode>>{powNode->base}));
+                        SymExpr simpBaseLog = simplifyCore(baseLog);
+                        if (simpBaseLog.ptr != baseLog.ptr) {
+                            return simplifyCore(SymExpr(powNode->exp) * simpBaseLog);
+                        }
+                    }
+                    if (inner.ptr->getType() == SymType::MUL) {
+                        auto mul = std::static_pointer_cast<SymMul>(inner.ptr);
+                        SymExpr res(BigInt(0));
+                        bool simplified = false;
+                        for (auto& arg : mul->args) {
+                            SymExpr partLog(std::make_shared<SymFunc>("log", std::vector<std::shared_ptr<SymNode>>{arg}));
+                            SymExpr simpPart = simplifyCore(partLog);
+                            if (simpPart.ptr != partLog.ptr) simplified = true;
+                            res = res + simpPart;
+                        }
+                        if (simplified) return res;
                     }
                 }
                 
@@ -2651,7 +2668,7 @@ namespace jc {
                         SymExpr coeff(BigInt(1));
                         std::shared_ptr<SymNode> logArg = nullptr;
                         for (auto& arg : mul->args) {
-                            if (arg->getType() == SymType::FUNC) {
+                            if (!logArg && arg->getType() == SymType::FUNC) {
                                 auto fn = std::static_pointer_cast<SymFunc>(arg);
                                 if (fn->name == "log" && fn->args.size() == 1) {
                                     logArg = fn->args[0];
@@ -2663,6 +2680,18 @@ namespace jc {
                         if (logArg) {
                             return SymExpr(logArg) ^ coeff;
                         }
+                    }
+                    if (inner.ptr->getType() == SymType::ADD) {
+                        auto add = std::static_pointer_cast<SymAdd>(inner.ptr);
+                        SymExpr res(BigInt(1));
+                        bool simplified = false;
+                        for (auto& arg : add->args) {
+                            SymExpr partExp(std::make_shared<SymFunc>("exp", std::vector<std::shared_ptr<SymNode>>{arg}));
+                            SymExpr simpPart = simplifyCore(partExp);
+                            if (simpPart.ptr != partExp.ptr) simplified = true;
+                            res = res * simpPart;
+                        }
+                        if (simplified) return res;
                     }
                 }
                 
