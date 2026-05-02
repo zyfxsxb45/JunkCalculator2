@@ -227,6 +227,20 @@ namespace jc {
                             SymExpr log_base(std::make_shared<SymFunc>("log", std::vector<std::shared_ptr<SymNode>>{base.ptr}));
                             return SymExpr(std::make_shared<SymFunc>("exp", std::vector<std::shared_ptr<SymNode>>{(exp * log_base).ptr}));
                         }
+                        if (exp.ptr->getType() == SymType::NUM) {
+                            auto numVal = std::static_pointer_cast<SymNum>(exp.ptr)->value;
+                            if (std::holds_alternative<Fraction>(numVal)) {
+                                Fraction frac = std::get<Fraction>(numVal);
+                                if (frac.getDen() > BigInt(1)) {
+                                    SymExpr ext_arg = base ^ SymExpr(Fraction(BigInt(1), frac.getDen()));
+                                    for (auto it = tower.rbegin(); it != tower.rend(); ++it) {
+                                        if (it->type == RischExtType::ALG && it->arg == ext_arg) {
+                                            return it->t_var ^ SymExpr(frac.getNum());
+                                        }
+                                    }
+                                }
+                            }
+                        }
                         return base ^ exp;
                     }
                     case SymType::FUNC: {
@@ -282,13 +296,12 @@ namespace jc {
                         if (std::holds_alternative<Fraction>(numVal)) {
                             Fraction frac = std::get<Fraction>(numVal);
                             if (frac.getDen() > BigInt(1)) {
-                                // 构造极小多项式 _t^den - base^num = 0
                                 SymExpr base(p->base);
-                                SymExpr num_pow = base ^ SymExpr(frac.getNum());
+                                SymExpr ext_arg = base ^ SymExpr(Fraction(BigInt(1), frac.getDen()));
                                 
                                 bool exists = false;
                                 for (const auto& ext : field.tower) {
-                                    if (ext.type == RischExtType::ALG && ext.arg == expr) {
+                                    if (ext.type == RischExtType::ALG && ext.arg == ext_arg) {
                                         exists = true;
                                         break;
                                     }
@@ -297,11 +310,11 @@ namespace jc {
                                 if (!exists) {
                                     RischExtension ext;
                                     ext.type = RischExtType::ALG;
-                                    ext.arg = SymExpr(expr);
+                                    ext.arg = ext_arg;
                                     ext.name = "_t" + std::to_string(++counter);
                                     ext.t_var = SymExpr::makeVar(ext.name);
                                     
-                                    ext.minPoly = (ext.t_var ^ SymExpr(frac.getDen())) - num_pow;
+                                    ext.minPoly = (ext.t_var ^ SymExpr(frac.getDen())) - base;
                                     
                                     SymExpr dP_dx = diff(ext.minPoly, x);
                                     SymExpr dP_dt = diff(ext.minPoly, ext.name);
@@ -907,25 +920,34 @@ namespace jc {
                     
                     std::vector<SymExpr> roots = solveEq(R_z, "_z");
                     if (!roots.empty()) {
-                        SymExpr result(BigInt(0));
+                        bool allConstant = true;
                         for (const auto& root : roots) {
-                            SymExpr v_i = simplifyCore(expand(subs(trager_poly, "_z", root), SymConfig::maxExpandTerms));
-                            
-                            // 降次短路与首一化
-                            auto coeffs_vi = extractCoeffs(v_i, topExt.name);
-                            if (!coeffs_vi.empty()) {
-                                SymExpr lead = coeffs_vi.back();
-                                if (!lead.isZero() && !lead.isOne()) {
-                                    v_i = simplifyCore(expand(v_i / lead, SymConfig::maxExpandTerms));
-                                }
+                            if (containsVar(root.ptr, var)) {
+                                allConstant = false;
+                                break;
                             }
-                            
-                            SymExpr log_vi(std::make_shared<SymFunc>("log", std::vector<std::shared_ptr<SymNode>>{v_i.ptr}));
-                            result = result + root * log_vi;
                         }
-                        SymExpr finalRes = simplifyCore(backSubstitute(result));
-                        markTainted(finalRes);
-                        return finalRes;
+                        if (allConstant) {
+                            SymExpr result(BigInt(0));
+                            for (const auto& root : roots) {
+                                SymExpr v_i = simplifyCore(expand(subs(trager_poly, "_z", root), SymConfig::maxExpandTerms));
+                                
+                                // 降次短路与首一化
+                                auto coeffs_vi = extractCoeffs(v_i, topExt.name);
+                                if (!coeffs_vi.empty()) {
+                                    SymExpr lead = coeffs_vi.back();
+                                    if (!lead.isZero() && !lead.isOne()) {
+                                        v_i = simplifyCore(expand(v_i / lead, SymConfig::maxExpandTerms));
+                                    }
+                                }
+                                
+                                SymExpr log_vi(std::make_shared<SymFunc>("log", std::vector<std::shared_ptr<SymNode>>{v_i.ptr}));
+                                result = result + root * log_vi;
+                            }
+                            SymExpr finalRes = simplifyCore(backSubstitute(result));
+                            markTainted(finalRes);
+                            return finalRes;
+                        }
                     }
                 }
             }
@@ -1790,6 +1812,34 @@ namespace jc {
                 factors.push_back(varPart);
                 factors.push_back(SymExpr(BigInt(1)));
                 tryParts = true;
+            }
+
+            bool hasTranscendental = false;
+            std::function<void(const std::shared_ptr<SymNode>&)> checkTrans = [&](const std::shared_ptr<SymNode>& node) {
+                if (!node || hasTranscendental) return;
+                if (node->getType() == SymType::FUNC) {
+                    auto func = std::static_pointer_cast<SymFunc>(node);
+                    if (func->name != "sqrt" && func->name != "cbrt" && func->name != "root" && func->name != "RootOf" && func->name != "RootSum") {
+                        hasTranscendental = true;
+                        return;
+                    }
+                }
+                if (node->getType() == SymType::ADD) {
+                    for (auto& arg : std::static_pointer_cast<SymAdd>(node)->args) checkTrans(arg);
+                } else if (node->getType() == SymType::MUL) {
+                    for (auto& arg : std::static_pointer_cast<SymMul>(node)->args) checkTrans(arg);
+                } else if (node->getType() == SymType::POW) {
+                    auto powNode = std::static_pointer_cast<SymPow>(node);
+                    checkTrans(powNode->base);
+                    checkTrans(powNode->exp);
+                } else if (node->getType() == SymType::FUNC) {
+                    for (auto& arg : std::static_pointer_cast<SymFunc>(node)->args) checkTrans(arg);
+                }
+            };
+            checkTrans(varPart.ptr);
+            
+            if (tryParts && !hasTranscendental) {
+                tryParts = false;
             }
 
             if (tryParts) {
