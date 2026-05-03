@@ -1829,13 +1829,26 @@ namespace jc {
     Lists are tracked by the VM's Mark-and-Sweep Garbage Collector.
       gcinfo()                  View tracked objects
       gc()                      Force memory sweep
+
+  Immutability & Snapshots (Defensive Programming)
+  ──────────────────────
+    freeze(L)               Locks the list physically. Any future attempt to 
+                            modify it (push, pop, L[i]=) will throw an error.
+                            Returns the list itself.
+    isFrozen(L)             Returns 1 if the list is locked, 0 otherwise.
+    val(L)                  Creates a deep-copy snapshot of the list (and all 
+                            nested containers), freezes the new copy, and returns it.
+                            Perfect for safely passing data to untrusted functions.
+    
+    * Note: Only frozen containers can be used as keys in Dicts or elements in Sets!
 )HELP" },
 
         {"dict", R"HELP(
 ═══ Dictionary (Key-Value Store) ═══
 
-  Dicts store unordered key-value string mappings in JC2. Keys are exclusively
-  strings, but values can be of any type.
+  Dicts store unordered key-value mappings in JC2. Keys can be ANY hashable type
+  (strings, numbers, instances with __hash__, or frozen containers). Values can 
+  be of any type.
 
   Creation
   ──────────────────────
@@ -1897,6 +1910,15 @@ namespace jc {
     Dicts are fully tracked by the VM's Garbage Collector. Therefore, creating a
     graph where Dict A points to Dict B, and Dict B points back to Dict A will 
     never cause a memory leak when they go out of scope.
+
+  Immutability & Hashing
+  ──────────────────────
+    freeze(d)                           Locks the dictionary permanently.
+    isFrozen(d)                         Returns 1 if locked, 0 otherwise.
+    val(d)                              Returns a deep-copied, frozen snapshot.
+    
+    * Keys MUST be hashable. Unfrozen Lists/Dicts/Sets will throw a TypeError 
+      if used as a key. Use freeze() or val() to make them hashable.
 )HELP"},
 
 { "set", R"HELP(
@@ -1974,6 +1996,16 @@ namespace jc {
       s2 = s1                      s2 and s1 are the SAME set
       add(s2, 99)                  s1 now also contains 99
     Sets are tracked by the Garbage Collector (see: help sys).
+
+  Immutability & Hashing
+  ──────────────────────
+    freeze(s)               Locks the set permanently.
+    isFrozen(s)             Returns 1 if locked, 0 otherwise.
+    val(s)                  Returns a deep-copied, frozen snapshot of the set.
+    
+    * Elements MUST be hashable. Unfrozen containers will throw a TypeError 
+      if inserted. Built-in functions that generate nested sets (like setPow 
+      or setProduct) automatically freeze their inner containers.
 
   Examples
   ──────────────────────
@@ -2059,6 +2091,7 @@ namespace jc {
       __len__()    → len(obj)
       __abs__()    → abs(obj)
       __bool__()   → bool(obj)
+      __hash__()   → Allows the instance to be used as a Dict key or Set element.
 
 
   Chained Method Calls
