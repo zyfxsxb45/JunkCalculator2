@@ -34,7 +34,7 @@
 namespace jc {
     class Value;
     struct FunctionClosure;
-    inline std::string setValueKey(const Value& v);
+    std::string setValueKey(const Value& v);
 
     struct PrintGuard {
         std::vector<const void*>& vis;
@@ -53,62 +53,45 @@ namespace jc {
     // =======================================================
     class Dict {
     private:
-        std::shared_ptr<std::unordered_map<std::string, std::any>> ptr;
+        struct DictData {
+            std::vector<std::pair<Value, Value>> elements;
+            std::unordered_map<std::string, size_t> keyMap;
+            bool is_frozen = false;
+        };
+        std::shared_ptr<DictData> ptr;
     public:
-        Dict() : ptr(std::make_shared<std::unordered_map<std::string, std::any>>()) {
+        Dict() : ptr(std::make_shared<DictData>()) {
             // ★ GC 注册
             GcHeap::get().track(
                 ptr.get(),
-                [w = std::weak_ptr<std::unordered_map<std::string, std::any>>(ptr)]()
+                [w = std::weak_ptr<DictData>(ptr)]()
                 { return !w.expired(); },
-                [w = std::weak_ptr<std::unordered_map<std::string, std::any>>(ptr)]()
-                { auto sp = w.lock(); if (sp) sp->clear(); }
+                [w = std::weak_ptr<DictData>(ptr)]()
+                { auto sp = w.lock(); if (sp) { sp->elements.clear(); sp->keyMap.clear(); } }
             );
         }
 
-        void set(const std::string& key, const std::any& val) {
-            (*ptr)[key] = val;
-        }
+        void freeze() { ptr->is_frozen = true; }
+        bool isFrozen() const { return ptr->is_frozen; }
 
-        std::any* get(const std::string& key) {
-            auto it = ptr->find(key);
-            if (it != ptr->end()) return &it->second;
-            return nullptr;
-        }
+        void set(const Value& key, const Value& val);
+        Value* get(const Value& key);
+        const Value* get(const Value& key) const;
+        bool has(const Value& key) const;
+        bool remove(const Value& key);
 
-        const std::any* get(const std::string& key) const {
-            auto it = ptr->find(key);
-            if (it != ptr->end()) return &it->second;
-            return nullptr;
-        }
+        size_t size() const { return ptr->elements.size(); }
+        bool empty() const { return ptr->elements.empty(); }
 
-        bool has(const std::string& key) const {
-            return ptr->find(key) != ptr->end();
-        }
-
-        bool remove(const std::string& key) {
-            return ptr->erase(key) > 0;
-        }
-
-        size_t size() const { return ptr->size(); }
-        bool empty() const { return ptr->empty(); }
-
-        std::vector<std::string> getKeys() const {
-            std::vector<std::string> keys;
-            keys.reserve(ptr->size());
-            for (const auto& kv : *ptr) keys.push_back(kv.first);
-            return keys;
-        }
-
-        std::vector<std::pair<std::string, std::any>> getEntries() const {
-            std::vector<std::pair<std::string, std::any>> res;
-            res.reserve(ptr->size());
-            for (const auto& kv : *ptr) res.push_back(kv);
-            return res;
-        }
+        std::vector<Value> getKeys() const;
+        std::vector<std::pair<Value, Value>> getEntries() const;
 
         const void* id() const { return ptr.get(); }
-        void clear() { ptr->clear(); }
+        void clear() {
+            if (ptr->is_frozen) throw std::runtime_error("Runtime Error: Object is frozen.");
+            ptr->elements.clear();
+            ptr->keyMap.clear();
+        }
     };
 
     // =======================================================
@@ -116,67 +99,42 @@ namespace jc {
     // =======================================================
     class List {
     private:
-        std::shared_ptr<std::vector<std::any>> ptr;
+        struct ListData {
+            std::vector<Value> vec;
+            bool is_frozen = false;
+        };
+        std::shared_ptr<ListData> ptr;
     public:
-        List() : ptr(std::make_shared<std::vector<std::any>>()) {
+        List() : ptr(std::make_shared<ListData>()) {
             // ★ GC 注册
             GcHeap::get().track(
                 ptr.get(),
-                [w = std::weak_ptr<std::vector<std::any>>(ptr)]()
+                [w = std::weak_ptr<ListData>(ptr)]()
                 { return !w.expired(); },
-                [w = std::weak_ptr<std::vector<std::any>>(ptr)]()
-                { auto sp = w.lock(); if (sp) sp->clear(); }
+                [w = std::weak_ptr<ListData>(ptr)]()
+                { auto sp = w.lock(); if (sp) sp->vec.clear(); }
             );
         }
 
-        void push_back(const std::any& val) { ptr->push_back(val); }
+        void freeze() { ptr->is_frozen = true; }
+        bool isFrozen() const { return ptr->is_frozen; }
 
-        std::any& at(int idx) {
-            int n = static_cast<int>(ptr->size());
-            if (idx < 0) idx = n + idx;
-            if (idx < 0 || idx >= n)
-                throw std::out_of_range("List Error: Index out of bounds.");
-            return (*ptr)[idx];
-        }
+        void push_back(const Value& val);
+        Value& at(int idx);
+        const Value& at(int idx) const;
+        void set(int idx, const Value& val);
+        void insert(int idx, const Value& val);
+        void removeAt(int idx);
 
-        const std::any& at(int idx) const {
-            int n = static_cast<int>(ptr->size());
-            if (idx < 0) idx = n + idx;
-            if (idx < 0 || idx >= n)
-                throw std::out_of_range("List Error: Index out of bounds.");
-            return (*ptr)[idx];
-        }
-
-        void set(int idx, const std::any& val) {
-            int n = static_cast<int>(ptr->size());
-            if (idx < 0) idx = n + idx;
-            if (idx < 0 || idx >= n)
-                throw std::out_of_range("List Error: Index out of bounds.");
-            (*ptr)[idx] = val;
-        }
-
-        void insert(int idx, const std::any& val) {
-            int n = static_cast<int>(ptr->size());
-            if (idx < 0) idx = n + idx;
-            if (idx < 0 || idx > n)
-                throw std::out_of_range("List Error: Insert index out of bounds.");
-            ptr->insert(ptr->begin() + idx, val);
-        }
-
-        void removeAt(int idx) {
-            int n = static_cast<int>(ptr->size());
-            if (idx < 0) idx = n + idx;
-            if (idx < 0 || idx >= n)
-                throw std::out_of_range("List Error: Remove index out of bounds.");
-            ptr->erase(ptr->begin() + idx);
-        }
-
-        size_t size() const { return ptr->size(); }
-        bool empty() const { return ptr->empty(); }
-        const std::vector<std::any>& raw() const { return *ptr; }
-        std::vector<std::any>& raw() { return *ptr; }
+        size_t size() const { return ptr->vec.size(); }
+        bool empty() const { return ptr->vec.empty(); }
+        const std::vector<Value>& raw() const;
+        std::vector<Value>& raw();
         const void* id() const { return ptr.get(); }
-        void clear() { ptr->clear(); }
+        void clear() {
+            if (ptr->is_frozen) throw std::runtime_error("Runtime Error: Object is frozen.");
+            ptr->vec.clear();
+        }
     };
 
     // =======================================================
@@ -185,8 +143,9 @@ namespace jc {
     class Set {
     private:
         struct SetData {
-            std::vector<std::pair<std::string, std::any>> elements; // (key, value) 保留插入顺序
+            std::vector<std::pair<std::string, Value>> elements; // (key, value) 保留插入顺序
             std::unordered_set<std::string> keys;                   // O(1) 查重索引
+            bool is_frozen = false;
         };
         std::shared_ptr<SetData> ptr;
     public:
@@ -201,31 +160,21 @@ namespace jc {
             );
         }
 
-        // key 由外部 setValueKey() 生成
-        bool insert(const std::string& key, const std::any& val) {
-            if (ptr->keys.count(key)) return false;
-            ptr->keys.insert(key);
-            ptr->elements.push_back({ key, val });
-            return true;
-        }
+        void freeze() { ptr->is_frozen = true; }
+        bool isFrozen() const { return ptr->is_frozen; }
 
-        bool contains(const std::string& key) const {
-            return ptr->keys.count(key) > 0;
-        }
-
-        bool erase(const std::string& key) {
-            if (!ptr->keys.erase(key)) return false;
-            for (auto it = ptr->elements.begin(); it != ptr->elements.end(); ++it) {
-                if (it->first == key) { ptr->elements.erase(it); return true; }
-            }
-            return true;
-        }
+        bool insert(const Value& val);
+        bool contains(const Value& val) const;
+        bool erase(const Value& val);
 
         size_t size() const { return ptr->elements.size(); }
         bool empty() const { return ptr->elements.empty(); }
-        const std::vector<std::pair<std::string, std::any>>& raw() const { return ptr->elements; }
+        const std::vector<std::pair<std::string, Value>>& raw() const;
         const void* id() const { return ptr.get(); }
-        void clear() { ptr->elements.clear(); ptr->keys.clear(); }
+        void clear() {
+            if (ptr->is_frozen) throw std::runtime_error("Runtime Error: Object is frozen.");
+            ptr->elements.clear(); ptr->keys.clear();
+        }
     };
 
     struct ClassDefinition {
@@ -495,6 +444,63 @@ namespace jc {
         }
 
         // ==========================================
+        // 统一哈希判定 (The One and Only Hashability)
+        // ==========================================
+        bool isHashable() const {
+            return std::visit([this](auto&& arg) -> bool {
+                using T = std::decay_t<decltype(arg)>;
+                if constexpr (std::is_same_v<T, std::monostate> ||
+                              std::is_same_v<T, double> ||
+                              std::is_same_v<T, BigInt> ||
+                              std::is_same_v<T, Fraction> ||
+                              std::is_same_v<T, Complex> ||
+                              std::is_same_v<T, BaseNum> ||
+                              std::is_same_v<T, std::string> ||
+                              std::is_same_v<T, SymExpr> ||
+                              std::is_same_v<T, std::shared_ptr<FunctionClosure>> ||
+                              std::is_same_v<T, std::shared_ptr<ClassDefinition>>) {
+                    return true;
+                }
+                else if constexpr (std::is_same_v<T, List>) {
+                    if (!arg.isFrozen()) return false;
+                    for (const auto& e : arg.raw()) {
+                        try {
+                            if (!e.isHashable()) return false;
+                        } catch (...) { return false; }
+                    }
+                    return true;
+                }
+                else if constexpr (std::is_same_v<T, Dict>) {
+                    if (!arg.isFrozen()) return false;
+                    for (const auto& [k, v] : arg.getEntries()) {
+                        try {
+                            if (!v.isHashable()) return false;
+                        } catch (...) { return false; }
+                    }
+                    return true;
+                }
+                else if constexpr (std::is_same_v<T, Set>) {
+                    if (!arg.isFrozen()) return false;
+                    for (const auto& [k, v] : arg.raw()) {
+                        try {
+                            if (!v.isHashable()) return false;
+                        } catch (...) { return false; }
+                    }
+                    return true;
+                }
+                else if constexpr (std::is_same_v<T, std::shared_ptr<Instance>>) {
+                    auto c = arg->classDef;
+                    while (c) {
+                        if (c->methods.count("__hash__")) return true;
+                        c = c->parent;
+                    }
+                    return false;
+                }
+                return false;
+            }, data);
+        }
+
+        // ==========================================
 // 统一真值判定 (The One and Only Truthiness)
 // ==========================================
         bool truthy() const {
@@ -587,8 +593,8 @@ namespace jc {
                     bool eq = true;
                     for (size_t i = 0; i < a.size(); ++i) {
                         try {
-                            Value va = std::any_cast<Value>(a.raw()[i]);
-                            Value vb = std::any_cast<Value>(b.raw()[i]);
+                            Value va = a.raw()[i];
+                            Value vb = b.raw()[i];
                             if (!equals(va, vb)) { eq = false; break; }
                         }
                         catch (...) { eq = false; break; }
@@ -609,8 +615,8 @@ namespace jc {
                         const auto* bval = b.get(key);
                         if (!bval) { eq = false; break; }
                         try {
-                            Value va = std::any_cast<Value>(val);
-                            Value vb = std::any_cast<Value>(*bval);
+                            Value va = val;
+                            Value vb = *bval;
                             if (!equals(va, vb)) { eq = false; break; }
                         }
                         catch (...) { eq = false; break; }
@@ -624,7 +630,7 @@ namespace jc {
                     if (a.id() == b.id()) return true;
                     if (a.size() != b.size()) return false;
                     for (const auto& [key, val] : a.raw()) {
-                        if (!b.contains(key)) return false;
+                        if (!b.contains(val)) return false;
                     }
                     return true;
                 }
@@ -782,7 +788,7 @@ namespace jc {
                 else if constexpr (std::is_same_v<T1, Set> && std::is_same_v<T2, Set>) {
                     Set result;
                     for (const auto& [key, val] : a.raw()) {
-                        if (!b.contains(key)) result.insert(key, val);
+                        if (!b.contains(val)) result.insert(val);
                     }
                     return Value(result);
                 }
@@ -867,10 +873,11 @@ namespace jc {
                     for (const auto& [k1, v1Any] : a.raw()) {
                         for (const auto& [k2, v2Any] : b.raw()) {
                             List pair;
-                            pair.push_back(std::make_any<Value>(std::any_cast<Value>(v1Any)));
-                            pair.push_back(std::make_any<Value>(std::any_cast<Value>(v2Any)));
+                            pair.push_back(v1Any);
+                            pair.push_back(v2Any);
+                            pair.freeze();
                             Value pairVal(pair);
-                            result.insert(setValueKey(pairVal), std::make_any<Value>(pairVal));
+                            result.insert(pairVal);
                         }
                     }
                     return Value(result);
@@ -1218,9 +1225,10 @@ namespace jc {
                     os << "{";
                     const auto& entries = arg.getEntries();
                     for (size_t ii = 0; ii < entries.size(); ++ii) {
-                        os << "\"" << entries[ii].first << "\": ";
+                        try { printNested(entries[ii].first); } catch (...) { os << "?"; }
+                        os << ": ";
                         try {
-                            const auto& v = std::any_cast<const jc::Value&>(entries[ii].second);
+                            const auto& v = entries[ii].second;
                             printNested(v);  // ★ 替换 os << v
                         }
                         catch (...) { os << "?"; }
@@ -1234,7 +1242,7 @@ namespace jc {
                     os << "[";
                     for (size_t ii = 0; ii < arg.size(); ++ii) {
                         try {
-                            const auto& v = std::any_cast<const jc::Value&>(arg.raw()[ii]);
+                            const auto& v = arg.raw()[ii];
                             printNested(v);  // ★ 替换 os << v
                         }
                         catch (...) { os << "?"; }
@@ -1269,8 +1277,9 @@ namespace jc {
                         const auto& entries = arg->fields.getEntries();
                         for (size_t ii = 0; ii < entries.size(); ++ii) {
                             if (ii > 0) os << ", ";
-                            os << entries[ii].first << ": ";
-                            try { printNested(std::any_cast<const jc::Value&>(entries[ii].second)); }  // ★
+                            try { printNested(entries[ii].first); } catch (...) { os << "?"; }
+                            os << ": ";
+                            try { printNested(entries[ii].second); }  // ★
                             catch (...) { os << "?"; }
                         }
                         os << "}>";
@@ -1283,7 +1292,7 @@ namespace jc {
                     const auto& elems = arg.raw();
                     for (size_t ii = 0; ii < elems.size(); ++ii) {
                         try {
-                            const auto& v = std::any_cast<const jc::Value&>(elems[ii].second);
+                            const auto& v = elems[ii].second;
                             printNested(v);
                         }
                         catch (...) { os << "?"; }
@@ -1310,7 +1319,7 @@ namespace jc {
                 if constexpr (std::is_same_v<T1, Set> && std::is_same_v<T2, Set>) {
                     Set result;
                     for (const auto& [key, val] : a.raw()) {
-                        if (b.contains(key)) result.insert(key, val);
+                        if (b.contains(val)) result.insert(val);
                     }
                     return Value(result);
                 }
@@ -1330,8 +1339,8 @@ namespace jc {
 
                 if constexpr (std::is_same_v<T1, Set> && std::is_same_v<T2, Set>) {
                     Set result;
-                    for (const auto& [key, val] : a.raw()) result.insert(key, val);
-                    for (const auto& [key, val] : b.raw()) result.insert(key, val);
+                    for (const auto& [key, val] : a.raw()) result.insert(val);
+                    for (const auto& [key, val] : b.raw()) result.insert(val);
                     return Value(result);
                 }
                 else if constexpr (std::is_same_v<T1, BaseNum> && std::is_same_v<T2, BaseNum>) {
@@ -1397,9 +1406,10 @@ namespace jc {
                     const auto& entries = arg.getEntries();
                     std::string res = "dict(";
                     for (size_t ii = 0; ii < entries.size(); ++ii) {
-                        res += "\"" + entries[ii].first + "\", ";
+                        try { res += entries[ii].first.toJC2Expression(); } catch (...) { res += "0"; }
+                        res += ", ";
                         try {
-                            const auto& v = std::any_cast<const jc::Value&>(entries[ii].second);
+                            const auto& v = entries[ii].second;
                             res += v.toJC2Expression();
                         }
                         catch (...) { res += "0"; }
@@ -1412,7 +1422,7 @@ namespace jc {
                     std::string res = "list(";
                     for (size_t ii = 0; ii < arg.size(); ++ii) {
                         try {
-                            const auto& v = std::any_cast<const jc::Value&>(arg.raw()[ii]);
+                            const auto& v = arg.raw()[ii];
                             res += v.toJC2Expression();
                         }
                         catch (...) { res += "0"; }
@@ -1426,7 +1436,7 @@ namespace jc {
                     const auto& elems = arg.raw();
                     for (size_t ii = 0; ii < elems.size(); ++ii) {
                         try {
-                            const auto& v = std::any_cast<const jc::Value&>(elems[ii].second);
+                            const auto& v = elems[ii].second;
                             res += v.toJC2Expression();
                         }
                         catch (...) { res += "0"; }
@@ -1471,39 +1481,6 @@ namespace jc {
                 return rhs / lhs;
             }
             }, lhs.data, rhs.data);
-    }
-
-    // ═══ 容器元素键生成器（保证内容相同的 Set/Dict 无论插入顺序如何，都能生成相同的键用于去重）═══
-    inline std::string setValueKey(const Value& v) {
-        std::ostringstream oss;
-        oss << v.data.index() << ":";
-
-        if (std::holds_alternative<std::monostate>(v.data)) {
-            oss << "none";
-        }
-        // Set：提取元素的键排序后拼接，保证顺序无关
-        else if (std::holds_alternative<Set>(v.data)) {
-            auto& s = std::get<Set>(v.data);
-            std::vector<std::string> keys;
-            for (const auto& [k, val] : s.raw()) keys.push_back(k);
-            std::sort(keys.begin(), keys.end());
-            oss << "{";
-            for (const auto& k : keys) oss << k << ",";
-            oss << "}";
-        }
-        // Dict：提取键排后拼接
-        else if (std::holds_alternative<Dict>(v.data)) {
-            auto& d = std::get<Dict>(v.data);
-            std::vector<std::string> keys = d.getKeys();
-            std::sort(keys.begin(), keys.end());
-            oss << "{";
-            for (const auto& k : keys) oss << k << ",";
-            oss << "}";
-        }
-        else {
-            oss << v;
-        }
-        return oss.str();
     }
 
     struct FunctionClosure {
@@ -1582,6 +1559,147 @@ namespace jc {
         StackTracedException(const std::string& raw, const std::string& fullTraceText)
             : std::runtime_error(fullTraceText), rawMessage(raw) {}
     };
+
+inline void Dict::set(const Value& key, const Value& val) {
+    if (!key.isHashable()) throw std::runtime_error("TypeError: unhashable type as dict key.");
+    if (ptr->is_frozen) throw std::runtime_error("Runtime Error: Object is frozen.");
+    std::string hashKey = setValueKey(key);
+    auto it = ptr->keyMap.find(hashKey);
+    if (it != ptr->keyMap.end()) {
+        ptr->elements[it->second].second = val;
+    } else {
+        ptr->keyMap[hashKey] = ptr->elements.size();
+        ptr->elements.push_back({key, val});
+    }
+}
+
+inline Value* Dict::get(const Value& key) {
+    std::string hashKey = setValueKey(key);
+    auto it = ptr->keyMap.find(hashKey);
+    if (it != ptr->keyMap.end()) return &ptr->elements[it->second].second;
+    return nullptr;
+}
+
+inline const Value* Dict::get(const Value& key) const {
+    std::string hashKey = setValueKey(key);
+    auto it = ptr->keyMap.find(hashKey);
+    if (it != ptr->keyMap.end()) return &ptr->elements[it->second].second;
+    return nullptr;
+}
+
+inline bool Dict::has(const Value& key) const {
+    if (!key.isHashable()) throw std::runtime_error("TypeError: unhashable type as dict key.");
+    std::string hashKey = setValueKey(key);
+    return ptr->keyMap.find(hashKey) != ptr->keyMap.end();
+}
+
+inline bool Dict::remove(const Value& key) {
+    if (!key.isHashable()) throw std::runtime_error("TypeError: unhashable type as dict key.");
+    if (ptr->is_frozen) throw std::runtime_error("Runtime Error: Object is frozen.");
+    std::string hashKey = setValueKey(key);
+    auto it = ptr->keyMap.find(hashKey);
+    if (it == ptr->keyMap.end()) return false;
+    size_t idx = it->second;
+    ptr->keyMap.erase(it);
+    ptr->elements.erase(ptr->elements.begin() + idx);
+    for (size_t i = idx; i < ptr->elements.size(); ++i) {
+        ptr->keyMap[setValueKey(ptr->elements[i].first)] = i;
+    }
+    return true;
+}
+
+inline std::vector<Value> Dict::getKeys() const {
+    std::vector<Value> keys;
+    keys.reserve(ptr->elements.size());
+    for (const auto& kv : ptr->elements) keys.push_back(kv.first);
+    return keys;
+}
+
+inline std::vector<std::pair<Value, Value>> Dict::getEntries() const {
+    return ptr->elements;
+}
+
+inline bool Set::insert(const Value& val) {
+    if (!val.isHashable()) throw std::runtime_error("TypeError: unhashable type as set element.");
+    if (ptr->is_frozen) throw std::runtime_error("Runtime Error: Object is frozen.");
+    std::string key = setValueKey(val);
+    if (ptr->keys.count(key)) return false;
+    ptr->keys.insert(key);
+    ptr->elements.push_back({ key, val });
+    return true;
+}
+
+inline bool Set::contains(const Value& val) const {
+    if (!val.isHashable()) throw std::runtime_error("TypeError: unhashable type as set element.");
+    std::string key = setValueKey(val);
+    return ptr->keys.count(key) > 0;
+}
+
+inline bool Set::erase(const Value& val) {
+    if (!val.isHashable()) throw std::runtime_error("TypeError: unhashable type as set element.");
+    if (ptr->is_frozen) throw std::runtime_error("Runtime Error: Object is frozen.");
+    std::string key = setValueKey(val);
+    if (!ptr->keys.erase(key)) return false;
+    for (auto it = ptr->elements.begin(); it != ptr->elements.end(); ++it) {
+        if (it->first == key) { ptr->elements.erase(it); return true; }
+    }
+    return true;
+}
+
+inline const std::vector<std::pair<std::string, Value>>& Set::raw() const {
+    return ptr->elements;
+}
+
+inline void List::push_back(const Value& val) {
+    if (ptr->is_frozen) throw std::runtime_error("Runtime Error: Object is frozen.");
+    ptr->vec.push_back(val);
+}
+
+inline Value& List::at(int idx) {
+    int n = static_cast<int>(ptr->vec.size());
+    if (idx < 0) idx = n + idx;
+    if (idx < 0 || idx >= n)
+        throw std::out_of_range("List Error: Index out of bounds.");
+    return ptr->vec[idx];
+}
+
+inline const Value& List::at(int idx) const {
+    int n = static_cast<int>(ptr->vec.size());
+    if (idx < 0) idx = n + idx;
+    if (idx < 0 || idx >= n)
+        throw std::out_of_range("List Error: Index out of bounds.");
+    return ptr->vec[idx];
+}
+
+inline void List::set(int idx, const Value& val) {
+    if (ptr->is_frozen) throw std::runtime_error("Runtime Error: Object is frozen.");
+    int n = static_cast<int>(ptr->vec.size());
+    if (idx < 0) idx = n + idx;
+    if (idx < 0 || idx >= n)
+        throw std::out_of_range("List Error: Index out of bounds.");
+    ptr->vec[idx] = val;
+}
+
+inline void List::insert(int idx, const Value& val) {
+    if (ptr->is_frozen) throw std::runtime_error("Runtime Error: Object is frozen.");
+    int n = static_cast<int>(ptr->vec.size());
+    if (idx < 0) idx = n + idx;
+    if (idx < 0 || idx > n)
+        throw std::out_of_range("List Error: Insert index out of bounds.");
+    ptr->vec.insert(ptr->vec.begin() + idx, val);
+}
+
+inline void List::removeAt(int idx) {
+    if (ptr->is_frozen) throw std::runtime_error("Runtime Error: Object is frozen.");
+    int n = static_cast<int>(ptr->vec.size());
+    if (idx < 0) idx = n + idx;
+    if (idx < 0 || idx >= n)
+        throw std::out_of_range("List Error: Remove index out of bounds.");
+    ptr->vec.erase(ptr->vec.begin() + idx);
+}
+
+inline const std::vector<Value>& List::raw() const { return ptr->vec; }
+inline std::vector<Value>& List::raw() { return ptr->vec; }
 
 } // namespace jc
 

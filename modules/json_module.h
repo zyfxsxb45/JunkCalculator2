@@ -81,7 +81,7 @@ namespace jc {
                 std::string r = "[" + nl;
                 for (size_t i = 0; i < raw.size(); ++i) {
                     if (i > 0) r += "," + nl;
-                    r += pad_inner + encode(std::any_cast<jc::Value>(raw[i]), indent, level + 1);
+                    r += pad_inner + encode(raw[i], indent, level + 1);
                 }
                 r += nl + pad + "]";
                 return r;
@@ -95,9 +95,9 @@ namespace jc {
                 bool first = true;
                 for (const auto& kv : entries) {
                     if (!first) r += "," + nl;
-                    r += pad_inner + "\"" + kv.first + "\":" + sp;
+                    r += pad_inner + "\"" + kv.first.toString() + "\":" + sp;
                     try {
-                        r += encode(std::any_cast<jc::Value>(kv.second), indent, level + 1);
+                        r += encode(kv.second, indent, level + 1);
                     }
                     catch (...) {
                         r += "null";
@@ -199,7 +199,7 @@ namespace jc {
 
         jc::Value parseArray() {
             pos++; // skip '['
-            std::vector<std::any> elements;
+            std::vector<jc::Value> elements;
             skipWS();
             if (pos < s.size() && s[pos] == ']') {
                 pos++;
@@ -207,7 +207,7 @@ namespace jc {
             }
 
             while (true) {
-                elements.push_back(std::make_any<jc::Value>(parseValue()));
+                elements.push_back(parseValue());
                 skipWS();
                 if (pos < s.size() && s[pos] == ',') { pos++; skipWS(); }
                 else break;
@@ -216,7 +216,7 @@ namespace jc {
             pos++;
 
             jc::List L;
-            for (auto& e : elements) L.push_back(std::move(e));
+            for (auto& e : elements) L.push_back(e);
             return jc::Value(L);
         }
 
@@ -234,7 +234,7 @@ namespace jc {
                 if (pos >= s.size() || s[pos] != ':') throw std::runtime_error("JSON Parse Error: Expected ':' separator.");
                 pos++; skipWS();
 
-                d.set(key, std::make_any<jc::Value>(parseValue()));
+                d.set(jc::Value(key), parseValue());
                 skipWS();
 
                 if (pos < s.size() && s[pos] == ',') { pos++; }

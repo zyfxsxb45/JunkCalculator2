@@ -326,7 +326,7 @@ namespace jc {
                     tempValues[restCount - 1 - j] = pop();
                 }
                 for (int j = 0; j < restCount; j++) {
-                    restList.push_back(std::make_any<Value>(tempValues[j]));
+                    restList.push_back(tempValues[j]);
                 }
                 argc = static_cast<uint8_t>(fixedMax);
             }
@@ -1136,7 +1136,7 @@ namespace jc {
                     }
                     else if (std::holds_alternative<List>(rhs.data)) {
                         for (const auto& e : std::get<List>(rhs.data).raw())
-                            elements.push_back(std::any_cast<Value>(e));
+                            elements.push_back(e);
                     }
                     else if (std::holds_alternative<StringMatrix>(rhs.data)) {
                         for (const auto& s : std::get<StringMatrix>(rhs.data).rawData())
@@ -1194,21 +1194,14 @@ namespace jc {
                 case OpCode::OP_BUILD_DICT: {
                     uint16_t count = readShort();
                     Dict d;
-                    std::vector<std::pair<std::string, Value>> pairs(count);
+                    std::vector<std::pair<Value, Value>> pairs(count);
                     for (int j = count - 1; j >= 0; --j) {
                         Value val = pop();
                         Value key = pop();
-                        std::string keyStr;
-                        if (std::holds_alternative<std::string>(key.data))
-                            keyStr = std::get<std::string>(key.data);
-                        else {
-                            std::ostringstream oss; oss << key;
-                            keyStr = oss.str();
-                        }
-                        pairs[j] = { keyStr, val };
+                        pairs[j] = { key, val };
                     }
                     for (auto& [k, v] : pairs)
-                        d.set(k, std::make_any<Value>(v));
+                        d.set(k, v);
                     push(Value(d));
                     break;
                 }
@@ -1226,45 +1219,45 @@ namespace jc {
                         const auto& m = std::get<RealMatrix>(iterable.data);
                         if (m.getRows() == 1) {
                             for (int j = 0; j < m.getCols(); ++j)
-                                elements.push_back(std::make_any<Value>(Value(m(0, j))));
+                                elements.push_back(Value(m(0, j)));
                         }
                         else if (m.getCols() == 1) {
                             for (int ii = 0; ii < m.getRows(); ++ii)
-                                elements.push_back(std::make_any<Value>(Value(m(ii, 0))));
+                                elements.push_back(Value(m(ii, 0)));
                         }
                         else {
                             for (int ii = 0; ii < m.getRows(); ++ii)
-                                elements.push_back(std::make_any<Value>(Value(m.getRow(ii))));
+                                elements.push_back(Value(m.getRow(ii)));
                         }
                     }
                     else if (std::holds_alternative<StringMatrix>(iterable.data)) {
                         const auto& m = std::get<StringMatrix>(iterable.data);
                         if (m.getRows() == 1) {
                             for (int j = 0; j < m.getCols(); ++j)
-                                elements.push_back(std::make_any<Value>(Value(m(0, j))));
+                                elements.push_back(Value(m(0, j)));
                         }
                         else if (m.getCols() == 1) {
                             for (int ii = 0; ii < m.getRows(); ++ii)
-                                elements.push_back(std::make_any<Value>(Value(m(ii, 0))));
+                                elements.push_back(Value(m(ii, 0)));
                         }
                         else {
                             for (int ii = 0; ii < m.getRows(); ++ii)
-                                elements.push_back(std::make_any<Value>(Value(m.getRow(ii))));
+                                elements.push_back(Value(m.getRow(ii)));
                         }
                     }
                     else if (std::holds_alternative<ComplexMatrix>(iterable.data)) {
                         const auto& m = std::get<ComplexMatrix>(iterable.data);
                         if (m.getRows() == 1) {
                             for (int j = 0; j < m.getCols(); ++j)
-                                elements.push_back(std::make_any<Value>(Value(m(0, j))));
+                                elements.push_back(Value(m(0, j)));
                         }
                         else if (m.getCols() == 1) {
                             for (int ii = 0; ii < m.getRows(); ++ii)
-                                elements.push_back(std::make_any<Value>(Value(m(ii, 0))));
+                                elements.push_back(Value(m(ii, 0)));
                         }
                         else {
                             for (int ii = 0; ii < m.getRows(); ++ii)
-                                elements.push_back(std::make_any<Value>(Value(m.getRow(ii))));
+                                elements.push_back(Value(m.getRow(ii)));
                         }
                     }
                     else if (std::holds_alternative<List>(iterable.data)) {
@@ -1272,21 +1265,22 @@ namespace jc {
                     }
                     else if (std::holds_alternative<std::string>(iterable.data)) {
                         for (char c : std::get<std::string>(iterable.data))
-                            elements.push_back(std::make_any<Value>(Value(std::string(1, c))));
+                            elements.push_back(Value(std::string(1, c)));
                     }
                     else if (std::holds_alternative<Dict>(iterable.data)) {
                         const auto& d = std::get<Dict>(iterable.data);
                         if (destructFlag) {
                             for (const auto& [key, val] : d.getEntries()) {
                                 List pair;
-                                pair.push_back(std::make_any<Value>(Value(key)));
-                                pair.push_back(std::make_any<Value>(std::any_cast<Value>(val)));
-                                elements.push_back(std::make_any<Value>(Value(pair)));
+                                pair.push_back(Value(key));
+                                pair.push_back(val);
+                                pair.freeze();
+                                elements.push_back(Value(pair));
                             }
                         }
                         else {
                             for (const auto& [key, val] : d.getEntries()) {
-                                elements.push_back(std::make_any<Value>(Value(key)));
+                                elements.push_back(Value(key));
                             }
                         }
                     }
@@ -1313,7 +1307,7 @@ namespace jc {
                         frame().ip += offset;
                     }
                     else {
-                        Value elem = std::any_cast<Value>(elems.raw()[i]);
+                        Value elem = elems.raw()[i];
                         stack[stack.size() - 1] = Value(idx + 1);
                         push(elem);
                     }
@@ -1405,7 +1399,7 @@ namespace jc {
                     Value elem = pop();
                     int listIdx = static_cast<int>(stack.size()) - 1 - static_cast<int>(depth);
                     if (listIdx >= 0 && std::holds_alternative<List>(stack[listIdx].data)) {
-                        std::get<List>(stack[listIdx].data).push_back(std::make_any<Value>(elem));
+                        std::get<List>(stack[listIdx].data).push_back(elem);
                     }
                     else {
                         throw std::runtime_error("VM Error: LIST_APPEND target not found at depth " +
@@ -1524,9 +1518,9 @@ namespace jc {
                         auto inst = std::get<std::shared_ptr<Instance>>(obj.data);
 
                         // 1. 字段查找 — 不变
-                        auto* fval = inst->fields.get(field);
+                        auto* fval = inst->fields.get(Value(field));
                         if (fval) {
-                            push(std::any_cast<Value>(*fval));
+                            push(*fval);
                             break;
                         }
 
@@ -1603,9 +1597,9 @@ namespace jc {
                     }
                     else if (std::holds_alternative<Dict>(obj.data)) {
                         const auto& d = std::get<Dict>(obj.data);
-                        const auto* v = d.get(field);
+                        const auto* v = d.get(Value(field));
                         if (!v) throw std::runtime_error("VM Error: Key '" + field + "' not found.");
-                        push(std::any_cast<Value>(*v));
+                        push(*v);
                     }
                     else {
                         throw std::runtime_error("VM Error: Cannot access property on this type.");
@@ -1621,11 +1615,11 @@ namespace jc {
 
                     if (std::holds_alternative<std::shared_ptr<Instance>>(obj.data)) {
                         auto inst = std::get<std::shared_ptr<Instance>>(obj.data);
-                        inst->fields.set(field, std::make_any<Value>(val));
+                        inst->fields.set(Value(field), val);
                         push(Value(inst));
                     }
                     else if (std::holds_alternative<Dict>(obj.data)) {
-                        std::get<Dict>(obj.data).set(field, std::make_any<Value>(val));
+                        std::get<Dict>(obj.data).set(Value(field), val);
                         push(obj);
                     }
                     else {
@@ -1848,7 +1842,7 @@ namespace jc {
             if (!id || marked.count(id)) return;
             marked.insert(id);
             for (const auto& elem : p->raw()) {
-                try { markValue(std::any_cast<const Value&>(elem), marked); }
+                try { markValue(elem, marked); }
                 catch (...) {}
             }
             return;
@@ -1860,7 +1854,7 @@ namespace jc {
             if (!id || marked.count(id)) return;
             marked.insert(id);
             for (const auto& [key, anyVal] : p->getEntries()) {
-                try { markValue(std::any_cast<const Value&>(anyVal), marked); }
+                try { markValue(key, marked); markValue(anyVal, marked); }
                 catch (...) {}
             }
             return;
@@ -1872,7 +1866,7 @@ namespace jc {
             if (!id || marked.count(id)) return;
             marked.insert(id);
             for (const auto& [key, elem] : p->raw()) {
-                try { markValue(std::any_cast<const Value&>(elem), marked); }
+                try { markValue(elem, marked); }
                 catch (...) {}
             }
             return;
@@ -1885,7 +1879,7 @@ namespace jc {
             marked.insert(id);
             marked.insert((*p)->fields.id());
             for (const auto& [key, anyVal] : (*p)->fields.getEntries()) {
-                try { markValue(std::any_cast<const Value&>(anyVal), marked); }
+                try { markValue(key, marked); markValue(anyVal, marked); }
                 catch (...) {}
             }
             markClassDef((*p)->classDef, marked);
@@ -2157,7 +2151,7 @@ namespace jc {
                             tempValues[restCount - 1 - j] = pop();
                         }
                         for (int j = 0; j < restCount; j++) {
-                            restList.push_back(std::make_any<Value>(tempValues[j]));
+                            restList.push_back(tempValues[j]);
                         }
                         argc = static_cast<uint8_t>(fixedMax);
                     }
@@ -2241,7 +2235,7 @@ namespace jc {
                             tempValues[restCount - 1 - j] = pop();
                         }
                         for (int j = 0; j < restCount; j++) {
-                            restList.push_back(std::make_any<Value>(tempValues[j]));
+                            restList.push_back(tempValues[j]);
                         }
                         argc = static_cast<uint8_t>(fixedMax);
                     }
@@ -2300,16 +2294,14 @@ namespace jc {
             Value obj = pop();
 
             if (std::holds_alternative<Dict>(obj.data)) {
-                std::string key;
-                if (std::holds_alternative<std::string>(idx.data))
-                    key = std::get<std::string>(idx.data);
-                else {
-                    std::ostringstream oss; oss << idx;
-                    key = oss.str();
+                const auto* entry = std::get<Dict>(obj.data).get(idx);
+                if (!entry) {
+                    std::string keyStr;
+                    if (std::holds_alternative<std::string>(idx.data)) keyStr = std::get<std::string>(idx.data);
+                    else { std::ostringstream oss; oss << idx; keyStr = oss.str(); }
+                    throw std::runtime_error("VM Error: Key '" + keyStr + "' not found.");
                 }
-                const auto* entry = std::get<Dict>(obj.data).get(key);
-                if (!entry) throw std::runtime_error("VM Error: Key '" + key + "' not found.");
-                push(std::any_cast<Value>(*entry));
+                push(*entry);
                 return;
             }
 
@@ -2438,7 +2430,7 @@ namespace jc {
                 }
             }
             else if (std::holds_alternative<List>(obj.data)) {
-                push(std::any_cast<Value>(std::get<List>(obj.data).at(i)));
+                push(std::get<List>(obj.data).at(i));
             }
             else if (std::holds_alternative<std::string>(obj.data)) {
                 const auto& s = std::get<std::string>(obj.data);
@@ -2490,14 +2482,7 @@ namespace jc {
             Value& obj = peek(0);
 
             if (std::holds_alternative<Dict>(obj.data)) {
-                std::string key;
-                if (std::holds_alternative<std::string>(idx.data))
-                    key = std::get<std::string>(idx.data);
-                else {
-                    std::ostringstream oss; oss << idx;
-                    key = oss.str();
-                }
-                std::get<Dict>(obj.data).set(key, std::make_any<Value>(val));
+                std::get<Dict>(obj.data).set(idx, val);
                 return;
             }
 
@@ -2687,7 +2672,7 @@ namespace jc {
                 }
             }
             else if (std::holds_alternative<List>(obj.data)) {
-                std::get<List>(obj.data).set(i, std::make_any<Value>(val));
+                std::get<List>(obj.data).set(i, val);
             }
             else if (std::holds_alternative<std::string>(obj.data)) {
                 auto& s = std::get<std::string>(obj.data);
@@ -3064,7 +3049,7 @@ namespace jc {
                 }
                 else {
                     for (int id : ids)
-                        L.set(id, std::make_any<Value>(val));
+                        L.set(id, val);
                 }
             }
             else if (std::holds_alternative<std::string>(obj.data)) {
@@ -3315,7 +3300,7 @@ namespace jc {
             if (rows == 1) {
                 List L;
                 for (int ii = 0; ii < total; ++ii)
-                    L.push_back(std::make_any<Value>(stack[stack.size() - total + ii]));
+                    L.push_back(stack[stack.size() - total + ii]);
                 result = Value(L);
             }
             else {
@@ -3323,9 +3308,9 @@ namespace jc {
                 for (int i = 0; i < rows; ++i) {
                     List inner;
                     for (int j = 0; j < cols; ++j)
-                        inner.push_back(std::make_any<Value>(
-                            stack[stack.size() - total + i * cols + j]));
-                    outer.push_back(std::make_any<Value>(Value(inner)));
+                        inner.push_back(stack[stack.size() - total + i * cols + j]);
+                    inner.freeze();
+                    outer.push_back(Value(inner));
                 }
                 result = Value(outer);
             }
@@ -3516,7 +3501,7 @@ namespace jc {
             const auto& L = std::get<List>(haystack.data);
             for (const auto& e : L.raw()) {
                 try {
-                    Value elem = std::any_cast<Value>(e);
+                    Value elem = e;
                     if (Value::equals(needle, elem)) {
                         push(Value(1.0));
                         return;
@@ -3529,19 +3514,12 @@ namespace jc {
         }
 
         if (std::holds_alternative<Dict>(haystack.data)) {
-            std::string key;
-            if (std::holds_alternative<std::string>(needle.data))
-                key = std::get<std::string>(needle.data);
-            else {
-                std::ostringstream oss; oss << needle;
-                key = oss.str();
-            }
-            push(Value(std::get<Dict>(haystack.data).has(key) ? 1.0 : 0.0));
+            push(Value(std::get<Dict>(haystack.data).has(needle) ? 1.0 : 0.0));
             return;
         }
 
         if (std::holds_alternative<Set>(haystack.data)) {
-            push(Value(std::get<Set>(haystack.data).contains(setValueKey(needle)) ? 1.0 : 0.0));
+            push(Value(std::get<Set>(haystack.data).contains(needle) ? 1.0 : 0.0));
             return;
         }
 
@@ -3622,9 +3600,9 @@ namespace jc {
         // 1. 如果它是原生 Dict！我们要像对待对象一样去调用它内部的闭包
         // ==============================================================
         if (std::holds_alternative<Dict>(obj.data)) {
-            const auto* v = std::get<Dict>(obj.data).get(methodName);
+            const auto* v = std::get<Dict>(obj.data).get(Value(methodName));
             if (v) {
-                Value fv = std::any_cast<Value>(*v);
+                Value fv = *v;
                 if (std::holds_alternative<std::shared_ptr<FunctionClosure>>(fv.data)) {
                     method = std::get<std::shared_ptr<FunctionClosure>>(fv.data);
                 }
@@ -3652,7 +3630,7 @@ namespace jc {
             if (!method) {
                 auto* fieldVal = inst->fields.get(methodName);
                 if (fieldVal) {
-                    Value fv = std::any_cast<Value>(*fieldVal);
+                    Value fv = *fieldVal;
                     if (std::holds_alternative<std::shared_ptr<FunctionClosure>>(fv.data)) {
                         method = std::get<std::shared_ptr<FunctionClosure>>(fv.data);
                         owningClass = inst->classDef;
@@ -3691,7 +3669,7 @@ namespace jc {
                     int restCount = static_cast<int>(argc) - fixedMax;
                     std::vector<Value> tempValues(restCount);
                     for (int j = 0; j < restCount; j++) tempValues[restCount - 1 - j] = pop();
-                    for (int j = 0; j < restCount; j++) restList.push_back(std::make_any<Value>(tempValues[j]));
+                    for (int j = 0; j < restCount; j++) restList.push_back(tempValues[j]);
                     argc = static_cast<uint8_t>(fixedMax);
                 }
 
@@ -3804,7 +3782,7 @@ namespace jc {
                         tempValues[restCount - 1 - j] = pop();
                     }
                     for (int j = 0; j < restCount; j++) {
-                        restList.push_back(std::make_any<Value>(tempValues[j]));
+                        restList.push_back(tempValues[j]);
                     }
                     argc = static_cast<uint8_t>(fixedMax);
                 }

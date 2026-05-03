@@ -34,6 +34,68 @@ namespace jc {
     }
 
     // =================================================================
+    // 容器元素键生成器（保证内容相同的 Set/Dict 无论插入顺序如何，都能生成相同的键用于去重）
+    // =================================================================
+    std::string setValueKey(const Value& v) {
+        static thread_local std::vector<const void*> visited;
+        std::ostringstream oss;
+        oss << v.data.index() << ":";
+
+        if (std::holds_alternative<std::monostate>(v.data)) {
+            oss << "none";
+        }
+        else if (std::holds_alternative<List>(v.data)) {
+            auto& l = std::get<List>(v.data);
+            PrintGuard guard(visited, l.id());
+            if (guard.isCycle) { oss << "CYCLE"; return oss.str(); }
+            oss << "[";
+            for (const auto& e : l.raw()) {
+                oss << setValueKey(e) << ",";
+            }
+            oss << "]";
+        }
+        else if (std::holds_alternative<Dict>(v.data)) {
+            auto& d = std::get<Dict>(v.data);
+            PrintGuard guard(visited, d.id());
+            if (guard.isCycle) { oss << "CYCLE"; return oss.str(); }
+            std::vector<std::string> pairs;
+            for (const auto& [k, val] : d.getEntries()) {
+                pairs.push_back(setValueKey(k) + ":" + setValueKey(val));
+            }
+            std::sort(pairs.begin(), pairs.end());
+            oss << "{";
+            for (const auto& p : pairs) oss << p << ",";
+            oss << "}";
+        }
+        else if (std::holds_alternative<Set>(v.data)) {
+            auto& s = std::get<Set>(v.data);
+            PrintGuard guard(visited, s.id());
+            if (guard.isCycle) { oss << "CYCLE"; return oss.str(); }
+            std::vector<std::string> elems;
+            for (const auto& [k, val] : s.raw()) {
+                elems.push_back(setValueKey(val));
+            }
+            std::sort(elems.begin(), elems.end());
+            oss << "Set{";
+            for (const auto& e : elems) oss << e << ",";
+            oss << "}";
+        }
+        else if (std::holds_alternative<std::shared_ptr<Instance>>(v.data)) {
+            auto inst = std::get<std::shared_ptr<Instance>>(v.data);
+            auto [found, res] = helpers::tryCallDunder(inst, "__hash__");
+            if (found) {
+                oss << res.toString();
+            } else {
+                oss << inst.get();
+            }
+        }
+        else {
+            oss << v;
+        }
+        return oss.str();
+    }
+
+    // =================================================================
 // 符号函数坍缩器：递归求值所有参数已为纯数字的 SymFunc 节点
 // sin(0) → 0,  cos(PI) → -1,  etc.
 // =================================================================
@@ -1123,14 +1185,70 @@ void BuiltinRegistry::registerSystemUtils() {
         return Value::none();
         });
 
+    reg("freeze", { 1 }, [](const std::vector<Value>& args) -> Value {
+        if (std::holds_alternative<List>(args[0].data)) {
+            List l = std::get<List>(args[0].data);
+            l.freeze();
+        } else if (std::holds_alternative<Dict>(args[0].data)) {
+            Dict d = std::get<Dict>(args[0].data);
+            d.freeze();
+        } else if (std::holds_alternative<Set>(args[0].data)) {
+            Set s = std::get<Set>(args[0].data);
+            s.freeze();
+        }
+        return args[0];
+        });
+
+    reg("isFrozen", { 1 }, [](const std::vector<Value>& args) -> Value {
+        if (std::holds_alternative<List>(args[0].data)) {
+            return Value(std::get<List>(args[0].data).isFrozen() ? 1.0 : 0.0);
+        } else if (std::holds_alternative<Dict>(args[0].data)) {
+            return Value(std::get<Dict>(args[0].data).isFrozen() ? 1.0 : 0.0);
+        } else if (std::holds_alternative<Set>(args[0].data)) {
+            return Value(std::get<Set>(args[0].data).isFrozen() ? 1.0 : 0.0);
+        }
+        return Value(0.0);
+        });
+
+    reg("val", { 1 }, [](const std::vector<Value>& args) -> Value {
+        std::function<Value(const Value&)> deepCopyAndFreeze = [&](const Value& v) -> Value {
+            if (std::holds_alternative<List>(v.data)) {
+                List newList;
+                for (const auto& e : std::get<List>(v.data).raw()) {
+                    newList.push_back(deepCopyAndFreeze(e));
+                }
+                newList.freeze();
+                return Value(newList);
+            }
+            if (std::holds_alternative<Dict>(v.data)) {
+                Dict newDict;
+                for (const auto& [k, val] : std::get<Dict>(v.data).getEntries()) {
+                    newDict.set(deepCopyAndFreeze(k), deepCopyAndFreeze(val));
+                }
+                newDict.freeze();
+                return Value(newDict);
+            }
+            if (std::holds_alternative<Set>(v.data)) {
+                Set newSet;
+                for (const auto& [k, val] : std::get<Set>(v.data).raw()) {
+                    newSet.insert(deepCopyAndFreeze(val));
+                }
+                newSet.freeze();
+                return Value(newSet);
+            }
+            return v;
+        };
+        return deepCopyAndFreeze(args[0]);
+        });
+
     reg("symconfig", { 0, 1 }, [](const std::vector<Value>& args) -> Value {
         if (args.empty()) {
             Dict d;
-            d.set("maxExpandTerms", Value(static_cast<double>(SymConfig::maxExpandTerms)));
-            d.set("maxAstNodes", Value(static_cast<double>(SymConfig::maxAstNodes)));
-            d.set("maxIterations", Value(static_cast<double>(SymConfig::maxIterations)));
-            d.set("maxDepth", Value(static_cast<double>(SymConfig::maxDepth)));
-            d.set("debugIntegration", Value(SymConfig::debugIntegration ? 1.0 : 0.0));
+            d.set(Value("maxExpandTerms"), Value(static_cast<double>(SymConfig::maxExpandTerms)));
+            d.set(Value("maxAstNodes"), Value(static_cast<double>(SymConfig::maxAstNodes)));
+            d.set(Value("maxIterations"), Value(static_cast<double>(SymConfig::maxIterations)));
+            d.set(Value("maxDepth"), Value(static_cast<double>(SymConfig::maxDepth)));
+            d.set(Value("debugIntegration"), Value(SymConfig::debugIntegration ? 1.0 : 0.0));
             return Value(d);
         }
         if (std::holds_alternative<std::string>(args[0].data) && std::get<std::string>(args[0].data) == "default") {
@@ -1145,11 +1263,11 @@ void BuiltinRegistry::registerSystemUtils() {
             throw std::runtime_error("Type Error: symconfig() expects a Dict or \"default\".");
         }
         Dict d = std::get<Dict>(args[0].data);
-        if (d.has("maxExpandTerms")) SymConfig::maxExpandTerms = static_cast<int64_t>(std::any_cast<Value>(*d.get("maxExpandTerms")).asDouble());
-        if (d.has("maxAstNodes")) SymConfig::maxAstNodes = static_cast<int>(std::any_cast<Value>(*d.get("maxAstNodes")).asDouble());
-        if (d.has("maxIterations")) SymConfig::maxIterations = static_cast<int>(std::any_cast<Value>(*d.get("maxIterations")).asDouble());
-        if (d.has("maxDepth")) SymConfig::maxDepth = static_cast<int>(std::any_cast<Value>(*d.get("maxDepth")).asDouble());
-        if (d.has("debugIntegration")) SymConfig::debugIntegration = isTruthy(std::any_cast<Value>(*d.get("debugIntegration")));
+        if (d.has(Value("maxExpandTerms"))) SymConfig::maxExpandTerms = static_cast<int64_t>((*d.get(Value("maxExpandTerms"))).asDouble());
+        if (d.has(Value("maxAstNodes"))) SymConfig::maxAstNodes = static_cast<int>((*d.get(Value("maxAstNodes"))).asDouble());
+        if (d.has(Value("maxIterations"))) SymConfig::maxIterations = static_cast<int>((*d.get(Value("maxIterations"))).asDouble());
+        if (d.has(Value("maxDepth"))) SymConfig::maxDepth = static_cast<int>((*d.get(Value("maxDepth"))).asDouble());
+        if (d.has(Value("debugIntegration"))) SymConfig::debugIntegration = isTruthy(*d.get(Value("debugIntegration")));
         return Value::none();
         });
 
@@ -1332,7 +1450,7 @@ void BuiltinRegistry::registerControlFlow() {
         if (std::holds_alternative<Set>(args[0].data)) {
             if (args.size() != 2) throw std::runtime_error("Runtime Error: add() on Set takes 2 args (set, val).");
             Set s = std::get<Set>(args[0].data);
-            s.insert(setValueKey(args[1]), valToAny(args[1]));
+            s.insert(args[1]);
             return Value(s);
         }
         else if (std::holds_alternative<List>(args[0].data)) {
@@ -1344,10 +1462,7 @@ void BuiltinRegistry::registerControlFlow() {
         else if (std::holds_alternative<Dict>(args[0].data) || std::holds_alternative<std::shared_ptr<Instance>>(args[0].data)) {
             if (args.size() != 3) throw std::runtime_error("Runtime Error: add() on Dict/Instance takes 3 args (obj, key, val).");
             Dict d = helpers::getDictMap(args[0], "add");
-            std::string key;
-            if (std::holds_alternative<std::string>(args[1].data)) key = std::get<std::string>(args[1].data);
-            else { std::ostringstream oss; oss << args[1]; key = oss.str(); }
-            d.set(key, valToAny(args[2]));
+            d.set(args[1], args[2]);
             return args[0]; // 返回原对象
         }
         throw std::runtime_error("Type Error: add() expects a Set, List, Dict, or Instance.");
@@ -1356,7 +1471,7 @@ void BuiltinRegistry::registerControlFlow() {
     reg("remove", { 2 }, [](const std::vector<Value>& args) -> Value {
         if (std::holds_alternative<Set>(args[0].data)) {
             Set s = std::get<Set>(args[0].data);
-            if (!s.erase(setValueKey(args[1]))) throw std::runtime_error("Runtime Error: Element not found in Set.");
+            if (!s.erase(args[1])) throw std::runtime_error("Runtime Error: Element not found in Set.");
             return Value(s);
         }
         else if (std::holds_alternative<List>(args[0].data)) {
@@ -1367,10 +1482,7 @@ void BuiltinRegistry::registerControlFlow() {
         }
         else if (std::holds_alternative<Dict>(args[0].data) || std::holds_alternative<std::shared_ptr<Instance>>(args[0].data)) {
             Dict d = helpers::getDictMap(args[0], "remove");
-            std::string key;
-            if (std::holds_alternative<std::string>(args[1].data)) key = std::get<std::string>(args[1].data);
-            else { std::ostringstream oss; oss << args[1]; key = oss.str(); }
-            if (!d.remove(key)) throw std::runtime_error("Runtime Error: Key '" + key + "' not found.");
+            if (!d.remove(args[1])) throw std::runtime_error("Runtime Error: Key not found.");
             return args[0];
         }
         throw std::runtime_error("Type Error: remove() expects a Set, List, Dict, or Instance.");
@@ -1379,15 +1491,12 @@ void BuiltinRegistry::registerControlFlow() {
     reg("discard", { 2 }, [](const std::vector<Value>& args) -> Value {
         if (std::holds_alternative<Set>(args[0].data)) {
             Set s = std::get<Set>(args[0].data);
-            s.erase(setValueKey(args[1]));
+            s.erase(args[1]);
             return Value(s);
         }
         else if (std::holds_alternative<Dict>(args[0].data) || std::holds_alternative<std::shared_ptr<Instance>>(args[0].data)) {
             Dict d = helpers::getDictMap(args[0], "discard");
-            std::string key;
-            if (std::holds_alternative<std::string>(args[1].data)) key = std::get<std::string>(args[1].data);
-            else { std::ostringstream oss; oss << args[1]; key = oss.str(); }
-            d.remove(key); // 静默处理
+            d.remove(args[1]); // 静默处理
             return args[0];
         }
         throw std::runtime_error("Type Error: discard() expects a Set, Dict, or Instance.");
@@ -1907,12 +2016,14 @@ void BuiltinRegistry::registerStringMatrix() {
 // [19] Dict / Instance 属性大一统透视 API
 // =================================================================
 void BuiltinRegistry::registerDictFunctions() {
-    reg("dict", {}, [](const std::vector<Value>& args) -> Value { Dict d; if (args.size() % 2 != 0) throw std::runtime_error("Runtime Error: dict() expects even number of arguments."); for (size_t i = 0; i < args.size(); i += 2) { std::string key; if (std::holds_alternative<std::string>(args[i].data)) key = std::get<std::string>(args[i].data); else { std::ostringstream oss; oss << args[i]; key = oss.str(); } d.set(key, valToAny(args[i + 1])); } return Value(d); });
+    reg("dict", {}, [](const std::vector<Value>& args) -> Value { Dict d; if (args.size() % 2 != 0) throw std::runtime_error("Runtime Error: dict() expects even number of arguments."); for (size_t i = 0; i < args.size(); i += 2) { d.set(args[i], args[i + 1]); } return Value(d); });
 
     reg("keys", { 1 }, [](const std::vector<Value>& args) -> Value {
         Dict d = helpers::getDictMap(args[0], "keys");
-        auto ks = d.getKeys(); std::vector<std::string> flat(ks.begin(), ks.end());
-        return Value(StringMatrix(1, static_cast<int>(flat.size()), flat));
+        auto ks = d.getKeys();
+        List L;
+        for (const auto& k : ks) L.push_back(k);
+        return Value(L);
         });
     // ★ 设定属性拾取别名！完美融合 Instance
     builtins["getFields"] = builtins["keys"]; builtinArity["getFields"] = builtinArity["keys"];
@@ -1920,18 +2031,14 @@ void BuiltinRegistry::registerDictFunctions() {
     reg("values", { 1 }, [](const std::vector<Value>& args) -> Value {
         Dict d = helpers::getDictMap(args[0], "values");
         const auto& entries = d.getEntries();
-        std::vector<double> nums; bool allDouble = true;
-        for (const auto& [k, v] : entries) { try { const auto& val = std::any_cast<const Value&>(v); if (allDouble) { try { nums.push_back(val.asDouble()); } catch (...) { allDouble = false; } } } catch (...) { allDouble = false; } }
-        if (allDouble && !nums.empty()) return Value(RealMatrix(1, static_cast<int>(nums.size()), nums));
-        std::vector<std::string> strs;
-        for (const auto& [k, v] : entries) { try { const auto& val = std::any_cast<const Value&>(v); std::ostringstream oss; oss << val; strs.push_back(oss.str()); } catch (...) { strs.push_back("?"); } }
-        return Value(StringMatrix(1, static_cast<int>(strs.size()), strs));
+        List L;
+        for (const auto& [k, v] : entries) L.push_back(v);
+        return Value(L);
         });
 
     reg("hasKey", { 2 }, [](const std::vector<Value>& args) -> Value {
         Dict d = helpers::getDictMap(args[0], "hasKey");
-        std::string key; if (std::holds_alternative<std::string>(args[1].data)) key = std::get<std::string>(args[1].data); else { std::ostringstream oss; oss << args[1]; key = oss.str(); }
-        return Value(d.has(key) ? 1.0 : 0.0);
+        return Value(d.has(args[1]) ? 1.0 : 0.0);
         });
     // ★ 设定查询别名
     builtins["hasField"] = builtins["hasKey"]; builtinArity["hasField"] = builtinArity["hasKey"];
@@ -1939,8 +2046,7 @@ void BuiltinRegistry::registerDictFunctions() {
 
     reg("removeKey", { 2 }, [](const std::vector<Value>& args) -> Value {
         Dict d = helpers::getDictMap(args[0], "removeKey");
-        std::string key; if (std::holds_alternative<std::string>(args[1].data)) key = std::get<std::string>(args[1].data); else { std::ostringstream oss; oss << args[1]; key = oss.str(); }
-        if (!d.remove(key)) throw std::runtime_error("Runtime Error: Key '" + key + "' not found.");
+        if (!d.remove(args[1])) throw std::runtime_error("Runtime Error: Key not found.");
         return args[0];
         });
 
@@ -1957,9 +2063,16 @@ void BuiltinRegistry::registerDictFunctions() {
 
     reg("dictPairs", { 1 }, [](const std::vector<Value>& args) -> Value {
         Dict d = helpers::getDictMap(args[0], "dictPairs");
-        const auto& entries = d.getEntries(); std::vector<std::string> flat;
-        for (const auto& [k, v] : entries) { flat.push_back(k); try { const auto& val = std::any_cast<const Value&>(v); std::ostringstream oss; oss << val; flat.push_back(oss.str()); } catch (...) { flat.push_back("?"); } }
-        return Value(StringMatrix(static_cast<int>(entries.size()), 2, flat));
+        const auto& entries = d.getEntries();
+        List L;
+        for (const auto& [k, v] : entries) {
+            List pair;
+            pair.push_back(k);
+            pair.push_back(v);
+            pair.freeze();
+            L.push_back(Value(pair));
+        }
+        return Value(L);
         });
 }
 
@@ -1979,7 +2092,7 @@ void BuiltinRegistry::registerListConversion() {
                 }
                 List rows;
                 for (int i = 0; i < arg.getRows(); ++i) {
-                    List row; for (int j = 0; j < arg.getCols(); ++j) row.push_back(valToAny(Value(arg(i, j)))); rows.push_back(valToAny(Value(row)));
+                    List row; for (int j = 0; j < arg.getCols(); ++j) row.push_back(valToAny(Value(arg(i, j)))); row.freeze(); rows.push_back(valToAny(Value(row)));
                 }
                 return Value(rows);
             }
@@ -2067,7 +2180,7 @@ void BuiltinRegistry::registerListConversion() {
             List a = extractL(args[0]), b = extractL(args[1]);
             if (a.size() != b.size()) throw std::runtime_error("Math Error: zip() requires same length.");
             List result;
-            for (size_t i = 0; i < a.size(); ++i) { List pair; pair.push_back(a.raw()[i]); pair.push_back(b.raw()[i]); result.push_back(valToAny(Value(pair))); }
+            for (size_t i = 0; i < a.size(); ++i) { List pair; pair.push_back(a.raw()[i]); pair.push_back(b.raw()[i]); pair.freeze(); result.push_back(valToAny(Value(pair))); }
             return Value(result);
         }
 
@@ -2405,8 +2518,8 @@ void BuiltinRegistry::registerHigherOrder() {
                 }
                 else if constexpr (std::is_same_v<T, List>) {
                     List L = arg;
-                    std::sort(L.raw().begin(), L.raw().end(), [](const std::any& a, const std::any& b) {
-                        std::ostringstream oa, ob; oa << anyToVal(a); ob << anyToVal(b); return oa.str() < ob.str();
+                    std::sort(L.raw().begin(), L.raw().end(), [](const Value& a, const Value& b) {
+                        std::ostringstream oa, ob; oa << a; ob << b; return oa.str() < ob.str();
                         });
                     return Value(L);
                 }
@@ -2420,8 +2533,8 @@ void BuiltinRegistry::registerHigherOrder() {
                 using T = std::decay_t<decltype(arg)>;
                 if constexpr (std::is_same_v<T, List>) {
                     List L = arg;
-                    std::sort(L.raw().begin(), L.raw().end(), [&](const std::any& a, const std::any& b) {
-                        return isTruthy(safeCallFunction(cmp, { anyToVal(a), anyToVal(b) }));
+                    std::sort(L.raw().begin(), L.raw().end(), [&](const Value& a, const Value& b) {
+                        return isTruthy(safeCallFunction(cmp, { a, b }));
                         });
                     return Value(L);
                 }
@@ -2655,7 +2768,7 @@ void BuiltinRegistry::registerFileIO() {
         if (args.size() == 2) { if (!std::holds_alternative<std::string>(args[1].data)) throw std::runtime_error("Type Error: readCSV() delimiter must be a string."); delim = std::get<std::string>(args[1].data); }
         std::ifstream file(path); if (!file.is_open()) throw std::runtime_error("IO Error: Cannot open file '" + path + "'.");
         List rows; std::string line;
-        while (std::getline(file, line)) { jc::checkInterrupt(); if (!line.empty() && line.back() == '\r') line.pop_back(); List row; size_t pos = 0, found; while ((found = line.find(delim, pos)) != std::string::npos) { row.push_back(valToAny(Value(line.substr(pos, found - pos)))); pos = found + delim.size(); } row.push_back(valToAny(Value(line.substr(pos)))); rows.push_back(valToAny(Value(row))); }
+        while (std::getline(file, line)) { jc::checkInterrupt(); if (!line.empty() && line.back() == '\r') line.pop_back(); List row; size_t pos = 0, found; while ((found = line.find(delim, pos)) != std::string::npos) { row.push_back(valToAny(Value(line.substr(pos, found - pos)))); pos = found + delim.size(); } row.push_back(valToAny(Value(line.substr(pos)))); row.freeze(); rows.push_back(valToAny(Value(row))); }
         file.close(); return Value(rows);
         });
 
@@ -2712,20 +2825,20 @@ void BuiltinRegistry::registerErrorHandling() {
         try {
             Value result = safeCallFunction(cl, {});
             List L; L.push_back(valToAny(Value(1.0))); L.push_back(valToAny(result));
-            return Value(L);
+            L.freeze(); return Value(L);
         }
         catch (const StackTracedException& ex) {
             // ★ 完美拿到纯净的出错理由字符串！无视底下挂着的多行追踪栈
             List L; L.push_back(valToAny(Value(0.0))); L.push_back(valToAny(Value(ex.rawMessage)));
-            return Value(L);
+            L.freeze(); return Value(L);
         }
         catch (const ErrorSignal& sig) {
             List L; L.push_back(valToAny(Value(0.0))); L.push_back(valToAny(Value(sig.message)));
-            return Value(L);
+            L.freeze(); return Value(L);
         }
         catch (const std::exception& ex) {
             List L; L.push_back(valToAny(Value(0.0))); L.push_back(valToAny(Value(std::string(ex.what()))));
-            return Value(L);
+            L.freeze(); return Value(L);
         }
         });
 
@@ -3171,7 +3284,7 @@ void BuiltinRegistry::registerSetFunctions() {
     reg("Set", {}, [](const std::vector<Value>& args) -> Value {
         Set s;
         for (const auto& a : args) {
-            s.insert(setValueKey(a), valToAny(a));
+            s.insert(a);
         }
         return Value(s);
         });
@@ -3182,25 +3295,25 @@ void BuiltinRegistry::registerSetFunctions() {
         if (std::holds_alternative<List>(args[0].data)) {
             for (const auto& e : std::get<List>(args[0].data).raw()) {
                 Value v = anyToVal(e);
-                s.insert(setValueKey(v), valToAny(v));
+                s.insert(v);
             }
         }
         else if (std::holds_alternative<RealMatrix>(args[0].data)) {
             for (double d : std::get<RealMatrix>(args[0].data).rawData()) {
                 Value v(d);
-                s.insert(setValueKey(v), valToAny(v));
+                s.insert(v);
             }
         }
         else if (std::holds_alternative<ComplexMatrix>(args[0].data)) {
             for (const auto& c : std::get<ComplexMatrix>(args[0].data).rawData()) {
                 Value v(c);
-                s.insert(setValueKey(v), valToAny(v));
+                s.insert(v);
             }
         }
         else if (std::holds_alternative<std::string>(args[0].data)) {
             for (char c : std::get<std::string>(args[0].data)) {
                 Value v(std::string(1, c));
-                s.insert(setValueKey(v), valToAny(v));
+                s.insert(v);
             }
         }
         else {
@@ -3214,7 +3327,7 @@ void BuiltinRegistry::registerSetFunctions() {
         if (!std::holds_alternative<Set>(args[0].data))
             throw std::runtime_error("Type Error: setAdd() expects a Set.");
         Set s = std::get<Set>(args[0].data);  // shared_ptr copy → same underlying data
-        s.insert(setValueKey(args[1]), valToAny(args[1]));
+        s.insert(args[1]);
         return Value(s);
         });
 
@@ -3222,8 +3335,7 @@ void BuiltinRegistry::registerSetFunctions() {
         if (!std::holds_alternative<Set>(args[0].data))
             throw std::runtime_error("Type Error: setRemove() expects a Set.");
         Set s = std::get<Set>(args[0].data);
-        std::string key = setValueKey(args[1]);
-        if (!s.erase(key))
+        if (!s.erase(args[1]))
             throw std::runtime_error("Runtime Error: Element not found in Set.");
         return Value(s);
         });
@@ -3232,7 +3344,7 @@ void BuiltinRegistry::registerSetFunctions() {
         if (!std::holds_alternative<Set>(args[0].data))
             throw std::runtime_error("Type Error: setDiscard() expects a Set.");
         Set s = std::get<Set>(args[0].data);
-        s.erase(setValueKey(args[1]));  // 静默忽略不存在的元素
+        s.erase(args[1]);  // 静默忽略不存在的元素
         return Value(s);
         });
 
@@ -3251,7 +3363,7 @@ void BuiltinRegistry::registerSetFunctions() {
         if (s.empty()) throw std::runtime_error("Runtime Error: setPop() on empty Set.");
         const auto& back = s.raw().back();
         Value result = anyToVal(back.second);
-        s.erase(back.first);
+        s.erase(result);
         return result;
         });
 
@@ -3262,8 +3374,8 @@ void BuiltinRegistry::registerSetFunctions() {
         const auto& a = std::get<Set>(args[0].data);
         const auto& b = std::get<Set>(args[1].data);
         Set result;
-        for (const auto& [key, val] : a.raw()) result.insert(key, val);
-        for (const auto& [key, val] : b.raw()) result.insert(key, val);
+        for (const auto& [key, val] : a.raw()) result.insert(val);
+        for (const auto& [key, val] : b.raw()) result.insert(val);
         return Value(result);
         });
 
@@ -3274,7 +3386,7 @@ void BuiltinRegistry::registerSetFunctions() {
         const auto& b = std::get<Set>(args[1].data);
         Set result;
         for (const auto& [key, val] : a.raw()) {
-            if (b.contains(key)) result.insert(key, val);
+            if (b.contains(val)) result.insert(val);
         }
         return Value(result);
         });
@@ -3286,7 +3398,7 @@ void BuiltinRegistry::registerSetFunctions() {
         const auto& b = std::get<Set>(args[1].data);
         Set result;
         for (const auto& [key, val] : a.raw()) {
-            if (!b.contains(key)) result.insert(key, val);
+            if (!b.contains(val)) result.insert(val);
         }
         return Value(result);
         });
@@ -3298,10 +3410,10 @@ void BuiltinRegistry::registerSetFunctions() {
         const auto& b = std::get<Set>(args[1].data);
         Set result;
         for (const auto& [key, val] : a.raw()) {
-            if (!b.contains(key)) result.insert(key, val);
+            if (!b.contains(val)) result.insert(val);
         }
         for (const auto& [key, val] : b.raw()) {
-            if (!a.contains(key)) result.insert(key, val);
+            if (!a.contains(val)) result.insert(val);
         }
         return Value(result);
         });
@@ -3313,7 +3425,7 @@ void BuiltinRegistry::registerSetFunctions() {
         const auto& a = std::get<Set>(args[0].data);
         const auto& b = std::get<Set>(args[1].data);
         for (const auto& [key, val] : a.raw()) {
-            if (!b.contains(key)) return Value(0.0);
+            if (!b.contains(val)) return Value(0.0);
         }
         return Value(1.0);
         });
@@ -3324,7 +3436,7 @@ void BuiltinRegistry::registerSetFunctions() {
         const auto& a = std::get<Set>(args[0].data);
         const auto& b = std::get<Set>(args[1].data);
         for (const auto& [key, val] : b.raw()) {
-            if (!a.contains(key)) return Value(0.0);
+            if (!a.contains(val)) return Value(0.0);
         }
         return Value(1.0);
         });
@@ -3335,7 +3447,7 @@ void BuiltinRegistry::registerSetFunctions() {
         const auto& a = std::get<Set>(args[0].data);
         const auto& b = std::get<Set>(args[1].data);
         for (const auto& [key, val] : a.raw()) {
-            if (b.contains(key)) return Value(0.0);
+            if (b.contains(val)) return Value(0.0);
         }
         return Value(1.0);
         });
@@ -3367,11 +3479,12 @@ void BuiltinRegistry::registerSetFunctions() {
             Set sub;
             for (int i = 0; i < n; ++i) {
                 if (mask & (1 << i)) {
-                    sub.insert(raw[i].first, raw[i].second);
+                    sub.insert(raw[i].second);
                 }
             }
+            sub.freeze();
             Value subVal(sub);
-            result.insert(setValueKey(subVal), std::make_any<Value>(subVal));
+            result.insert(subVal);
         }
         return Value(result);
         });
@@ -3456,7 +3569,7 @@ void BuiltinRegistry::registerCAS() {
         else if (std::holds_alternative<List>(args[1].data)) {
             const auto& lst = std::get<List>(args[1].data);
             for (size_t i = 0; i < lst.size(); ++i) {
-                Value v = std::any_cast<Value>(lst.raw()[i]);
+                Value v = lst.raw()[i];
                 if (std::holds_alternative<std::string>(v.data)) {
                     vars.push_back(std::get<std::string>(v.data));
                 } else if (v.isSymbolic() && v.asSymbolic().ptr->getType() == SymType::VAR) {
@@ -3488,7 +3601,7 @@ void BuiltinRegistry::registerCAS() {
         else if (std::holds_alternative<List>(args[2].data)) {
             const auto& lst = std::get<List>(args[2].data);
             for (size_t i = 0; i < lst.size(); ++i) {
-                Value v = std::any_cast<Value>(lst.raw()[i]);
+                Value v = lst.raw()[i];
                 vals.push_back(v.asSymbolic());
             }
         }
@@ -3517,7 +3630,7 @@ void BuiltinRegistry::registerCAS() {
         std::vector<std::string> varNames;
         if (std::holds_alternative<jc::List>(args[1].data)) {
             for (const auto& anyVar : std::get<jc::List>(args[1].data).raw()) {
-                jc::Value v = std::any_cast<jc::Value>(anyVar);
+                jc::Value v = anyVar;
                 if (std::holds_alternative<std::string>(v.data)) {
                     varNames.push_back(std::get<std::string>(v.data));
                 } else if (v.isSymbolic() && v.asSymbolic().ptr->getType() == SymType::VAR) {
@@ -3643,6 +3756,7 @@ void BuiltinRegistry::registerCAS() {
         List L;
         L.push_back(valToAny(Value(q)));
         L.push_back(valToAny(Value(r)));
+        L.freeze();
         return Value(L);
     });
 

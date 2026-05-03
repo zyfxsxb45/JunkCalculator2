@@ -18,8 +18,8 @@ using NativeCallable = std::function<Value(const std::vector<Value>&)>;
 // ═══════════════════════════════════════════
 namespace helpers {
 
-    inline Value anyToVal(const std::any& a) { return std::any_cast<Value>(a); }
-    inline std::any valToAny(const Value& v) { return std::make_any<Value>(v); }
+    inline Value anyToVal(const Value& a) { return a; }
+    inline Value valToAny(const Value& v) { return v; }
 
     inline Dict getDictMap(const Value& v, const std::string& fnName) {
         if (std::holds_alternative<Dict>(v.data)) return std::get<Dict>(v.data);
@@ -199,7 +199,7 @@ namespace helpers {
                 if (a.id() == b.id()) return true;
                 if (a.size() != b.size()) return false;
                 for (const auto& [key, val] : a.raw()) {
-                    if (!b.contains(key)) return false;
+                    if (!b.contains(val)) return false;
                 }
                 return true;
             }
