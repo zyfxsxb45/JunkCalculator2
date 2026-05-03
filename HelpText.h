@@ -1840,6 +1840,11 @@ namespace jc {
                             nested containers), freezes the new copy, and returns it.
                             Perfect for safely passing data to untrusted functions.
     
+    Unfreezing / Copying:
+      There is no "unfreeze" function. To get a mutable copy of a frozen list `a`:
+      clone(a)                Returns a deep-copied, fully mutable (unfrozen) clone.
+      b = a[:]                Returns a shallow-copied, unfrozen list.
+    
     * Note: Only frozen containers can be used as keys in Dicts or elements in Sets!
 )HELP" },
 
@@ -1916,6 +1921,11 @@ namespace jc {
     freeze(d)                           Locks the dictionary permanently.
     isFrozen(d)                         Returns 1 if locked, 0 otherwise.
     val(d)                              Returns a deep-copied, frozen snapshot.
+    
+    Unfreezing / Copying:
+      There is no "unfreeze" function. To get a mutable copy of a frozen dict `a`:
+      clone(a)                            Returns a deep-copied, fully mutable clone.
+      b = dict(); for ([k, v] in a) b[k] = v  (Shallow copy)
     
     * Keys MUST be hashable. Unfrozen Lists/Dicts/Sets will throw a TypeError 
       if used as a key. Use freeze() or val() to make them hashable.
@@ -2002,6 +2012,11 @@ namespace jc {
     freeze(s)               Locks the set permanently.
     isFrozen(s)             Returns 1 if locked, 0 otherwise.
     val(s)                  Returns a deep-copied, frozen snapshot of the set.
+    
+    Unfreezing / Copying:
+      There is no "unfreeze" function. To get a mutable copy of a frozen set `a`:
+      clone(a)                Returns a deep-copied, fully mutable clone.
+      b = a | Set()           Returns a shallow-copied, unfrozen set.
     
     * Elements MUST be hashable. Unfrozen containers will throw a TypeError 
       if inserted. Built-in functions that generate nested sets (like setPow 

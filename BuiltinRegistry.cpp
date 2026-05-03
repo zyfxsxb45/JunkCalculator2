@@ -1210,6 +1210,34 @@ void BuiltinRegistry::registerSystemUtils() {
         return Value(0.0);
         });
 
+    reg("clone", { 1 }, [](const std::vector<Value>& args) -> Value {
+        std::function<Value(const Value&)> deepCopy = [&](const Value& v) -> Value {
+            if (std::holds_alternative<List>(v.data)) {
+                List newList;
+                for (const auto& e : std::get<List>(v.data).raw()) {
+                    newList.push_back(deepCopy(e));
+                }
+                return Value(newList);
+            }
+            if (std::holds_alternative<Dict>(v.data)) {
+                Dict newDict;
+                for (const auto& [k, val] : std::get<Dict>(v.data).getEntries()) {
+                    newDict.set(deepCopy(k), deepCopy(val));
+                }
+                return Value(newDict);
+            }
+            if (std::holds_alternative<Set>(v.data)) {
+                Set newSet;
+                for (const auto& [k, val] : std::get<Set>(v.data).raw()) {
+                    newSet.insert(deepCopy(val));
+                }
+                return Value(newSet);
+            }
+            return v;
+        };
+        return deepCopy(args[0]);
+        });
+
     reg("val", { 1 }, [](const std::vector<Value>& args) -> Value {
         std::function<Value(const Value&)> deepCopyAndFreeze = [&](const Value& v) -> Value {
             if (std::holds_alternative<List>(v.data)) {
