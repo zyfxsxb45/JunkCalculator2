@@ -1840,10 +1840,15 @@ namespace jc {
                             nested containers), freezes the new copy, and returns it.
                             Perfect for safely passing data to untrusted functions.
     
-    Unfreezing / Copying:
-      There is no "unfreeze" function. To get a mutable copy of a frozen list `a`:
-      clone(a)                Returns a deep-copied, fully mutable (unfrozen) clone.
-      b = a[:]                Returns a shallow-copied, unfrozen list.
+    Copying & Mutability Matrix
+    ──────────────────────
+      There is no "unfreeze" function. Use copying to change lock states:
+      
+      Syntax        Depth         Lock State          Best For...
+      b = a         Zero (Ref)    Same as source      Fast passing, default high-perf state.
+      b = a[:]      Shallow       Outer unfrozen      1D cloning, simple unfrozen shell.
+      b = val(a)    Deep          Fully frozen        Read-only snapshots, Dict keys, Set elements.
+      b = clone(a)  Deep          Fully unfrozen      Complete rebirth. Fully mutable nested data.
     
     * Note: Only frozen containers can be used as keys in Dicts or elements in Sets!
 )HELP" },
@@ -1922,10 +1927,17 @@ namespace jc {
     isFrozen(d)                         Returns 1 if locked, 0 otherwise.
     val(d)                              Returns a deep-copied, frozen snapshot.
     
-    Unfreezing / Copying:
-      There is no "unfreeze" function. To get a mutable copy of a frozen dict `a`:
-      clone(a)                            Returns a deep-copied, fully mutable clone.
-      b = dict(); for ([k, v] in a) b[k] = v  (Shallow copy)
+    Copying & Mutability Matrix
+    ──────────────────────
+      There is no "unfreeze" function. Use copying to change lock states:
+      
+      Syntax        Depth         Lock State          Best For...
+      b = a         Zero (Ref)    Same as source      Fast passing, default high-perf state.
+      (Loop copy)   Shallow       Outer unfrozen      Flat cloning, simple unfrozen shell.
+      b = val(a)    Deep          Fully frozen        Read-only snapshots, safe Dict keys.
+      b = clone(a)  Deep          Fully unfrozen      Complete rebirth. Fully mutable nested data.
+      
+      * Loop copy: b = dict(); for ([k, v] in a) b[k] = v
     
     * Keys MUST be hashable. Unfrozen Lists/Dicts/Sets will throw a TypeError 
       if used as a key. Use freeze() or val() to make them hashable.
@@ -2013,10 +2025,15 @@ namespace jc {
     isFrozen(s)             Returns 1 if locked, 0 otherwise.
     val(s)                  Returns a deep-copied, frozen snapshot of the set.
     
-    Unfreezing / Copying:
-      There is no "unfreeze" function. To get a mutable copy of a frozen set `a`:
-      clone(a)                Returns a deep-copied, fully mutable clone.
-      b = a | Set()           Returns a shallow-copied, unfrozen set.
+    Copying & Mutability Matrix
+    ──────────────────────
+      There is no "unfreeze" function. Use copying to change lock states:
+      
+      Syntax        Depth         Lock State          Best For...
+      b = a         Zero (Ref)    Same as source      Fast passing, default high-perf state.
+      b = a | Set() Shallow       Outer unfrozen      Flat cloning, simple unfrozen shell.
+      b = val(a)    Deep          Fully frozen        Read-only snapshots, safe Set elements.
+      b = clone(a)  Deep          Fully unfrozen      Complete rebirth. Fully mutable nested data.
     
     * Elements MUST be hashable. Unfrozen containers will throw a TypeError 
       if inserted. Built-in functions that generate nested sets (like setPow 
