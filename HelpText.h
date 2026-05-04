@@ -139,7 +139,6 @@ namespace jc {
     format("x={:.2f}", PI)         string formatting → "x=3.14"
     s = 'Say "Hi!"'                alternating single/double quotes
     f"x = {x}, pi = {PI::.2f}"     string interpolation (f-string)
-    func( (a=1, 2) )               pass sequence as function argument
     switch (x) { case 1: {...} }   pattern matching
     for ([k, v] in d) { ... }      destructured for-in
     [x^2 for x in range(10)]       list comprehension
@@ -189,22 +188,15 @@ namespace jc {
     x &= expr           x |= expr
     Also works on indexed elements: A[i, j] += 1, d.flag |= Set("X")
 
-  Comma Sequence (Serial Evaluation)
+  Multi-statement Rules
   ──────────────────────
-    expr1, expr2, expr3
-    Evaluates each expression from left to right, discarding the results 
-    of all but the last. The entire sequence returns the final expression.
+    The comma (,) is strictly a syntax separator (for lists, dicts, arguments).
+    It CANNOT be used to chain expressions.
     
-      a = 1, b = 2, c = 3           // Sequential execution without braces
-      
-    ★ Strict Boundary Warning:
-    The comma (,) has the LOWEST operator priority. To use a sequence inside 
-    a lambda body, an assignment, or as a FUNCTION ARGUMENT, you MUST wrap 
-    it explicitly in parentheses to prevent parsing ambiguity:
-    
-      val = (a = 10, b = 20, 30)    // val becomes 30
-      f = (x) => (t = x*2, t+1)     // Lambda series
-      print( (a=1, b=2) )           // Mandatory for function arguments!
+    • Single-line multi-statements: Use semicolon (;)
+        a = 1; b = 2; c = 3
+    • Multi-step lambda returns: Use block braces ({})
+        f = (x) => { t = x^2; t + 1 }
 
    Destructuring Assignment (Arrays & Dicts)
   ──────────────────────

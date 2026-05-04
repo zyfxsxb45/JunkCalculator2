@@ -5,7 +5,7 @@
 namespace jc {
 
     std::unique_ptr<Expr> Parser::expression() {
-        return sequence();
+        return assignment();
     }
 
     std::unique_ptr<Expr> Parser::pipe() {
@@ -114,7 +114,7 @@ namespace jc {
         return expr;
     }
 
-    std::unique_ptr<Expr> Parser::sequence() {
+    std::unique_ptr<Expr> Parser::parseForInitOrUpdate() {
         auto expr = assignment();
         if (match({ TokenType::COMMA })) {
             std::vector<std::unique_ptr<Expr>> exprs;
@@ -780,11 +780,11 @@ namespace jc {
         }
 
         // 传统三段式 for
-        auto init = expression();
+        auto init = parseForInitOrUpdate();
         consume(TokenType::SEMICOLON, "Parser Error: Expect ';' after for-initializer.");
         auto cond = expression();
         consume(TokenType::SEMICOLON, "Parser Error: Expect ';' after for-condition.");
-        auto update = expression();
+        auto update = parseForInitOrUpdate();
         consume(TokenType::RPAREN, "Parser Error: Expect ')' after for-clauses.");
         auto body = parseStatementOrBlock();
         return std::make_unique<ForExpr>(std::move(init), std::move(cond), std::move(update), std::move(body));

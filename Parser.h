@@ -44,7 +44,7 @@ namespace jc {
         std::unique_ptr<Expr> parseListComp(std::unique_ptr<Expr> valueExpr);  // ★
         std::unique_ptr<Expr> pipe();
         std::unique_ptr<Expr> parseDictLiteral();  // ★
-        std::unique_ptr<Expr> sequence();
+        std::unique_ptr<Expr> parseForInitOrUpdate();
 
         // --- 游标工具 ---
         bool match(std::initializer_list<TokenType> types);
