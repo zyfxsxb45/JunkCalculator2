@@ -1,13 +1,16 @@
 #ifndef JC2_HELP_TEXT_H
 #define JC2_HELP_TEXT_H
 
+#include <array>
 #include <map>
 #include <string>
+#include <string_view>
+#include <utility>
 
 namespace jc {
     inline std::map<std::string, std::string> DynamicHelp;
 
-    const std::map<std::string, std::string> BuiltinHelp = {
+    inline constexpr std::array<std::pair<std::string_view, std::string_view>, 35> BuiltinHelp = {{
         {"main", R"HELP(
 =================== Junk Calculator 2.3.1.1 — Help ===================
 
@@ -744,7 +747,7 @@ namespace jc {
         {"vector", R"HELP(
 ═══ Vector Geometry ═══
   Mathematical vectors are explicitly N×1 column matrices:  v = [1; 2; 3]
-  (Row vectors like [1, 2, 3] are arrays — see 'help array')
+  (Row vectors like [1, 2, 3] are arrays — see '/help array')
 
   Generation
   ──────────────────────
@@ -2397,7 +2400,7 @@ namespace jc {
     isodd(n)            Is n an odd integer?
     isprime(n)          Is n a prime number? (Miller-Rabin test)
 
-  Type Constructors (see also: help basic)
+  Type Constructors (see also: /help basic)
   ──────────────────────
     int(x)              Truncate to BigInt (toward zero)
     double(x)           Convert to double
@@ -2815,7 +2818,15 @@ namespace jc {
       Expressions like "2i", "xy", and "2 \sin(x)" act identically to 
       "2*i", "x*y", and "2 * \sin(x)".
 )HELP" },
-    };
+    }};
+
+    // 编译期 O(N) 查找辅助函数（由于数据量小，缓存局部性极佳，实际速度快于 std::map）
+    inline constexpr std::string_view getBuiltinHelp(std::string_view topic) {
+        for (const auto& [key, value] : BuiltinHelp) {
+            if (key == topic) return value;
+        }
+        return {};
+    }
 
 } // namespace jc
 

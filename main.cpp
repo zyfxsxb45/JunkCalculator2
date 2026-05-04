@@ -72,8 +72,8 @@ std::string getExecutableDir() {
 }
 
 void printHelp() {
-    auto it = jc::BuiltinHelp.find("main");
-    if (it != jc::BuiltinHelp.end()) std::cout << "\n" << it->second << std::endl;
+    std::string_view helpText = jc::getBuiltinHelp("main");
+    if (!helpText.empty()) std::cout << "\n" << helpText << std::endl;
 }
 
 // 在 main.cpp 中找到 printHelpTopic 并修改为：
@@ -95,8 +95,8 @@ void printHelpTopic(const std::string& topic) {
     std::transform(key.begin(), key.end(), key.begin(),
         [](unsigned char c) -> char { return static_cast<char>(std::tolower(c)); });
 
-    auto it = jc::BuiltinHelp.find(key);
-    if (it != jc::BuiltinHelp.end()) std::cout << "\n" << it->second << std::endl;
+    std::string_view helpText = jc::getBuiltinHelp(key);
+    if (!helpText.empty()) std::cout << "\n" << helpText << std::endl;
     else std::cout << "\n  No detailed help available for topic: '" << topic << "'\n";
 }
 

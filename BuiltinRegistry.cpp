@@ -1354,8 +1354,8 @@ void BuiltinRegistry::registerSystemUtils() {
     // ★ 暴露给用户的原生 help() 内置函数
     reg("help", { 0, 1 }, [](const std::vector<Value>& args) -> Value {
         if (args.empty()) {
-            auto it = jc::BuiltinHelp.find("main");
-            if (it != jc::BuiltinHelp.end()) std::cout << "\n" << it->second << std::endl;
+            std::string_view helpText = jc::getBuiltinHelp("main");
+            if (!helpText.empty()) std::cout << "\n" << helpText << std::endl;
             return Value::none();
         }
 
@@ -1376,9 +1376,9 @@ void BuiltinRegistry::registerSystemUtils() {
         std::transform(key.begin(), key.end(), key.begin(),
             [](unsigned char c) -> char { return static_cast<char>(std::tolower(c)); });
 
-        auto itBuiltin = jc::BuiltinHelp.find(key);
-        if (itBuiltin != jc::BuiltinHelp.end()) {
-            std::cout << "\n" << itBuiltin->second << std::endl;
+        std::string_view helpText = jc::getBuiltinHelp(key);
+        if (!helpText.empty()) {
+            std::cout << "\n" << helpText << std::endl;
             return Value::none();
         }
 
