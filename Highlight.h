@@ -80,10 +80,9 @@ namespace jc {
     }
 
     // ═══════════════════════════════════════════
-    // 代码语法高亮引擎
+    // 代码语法高亮引擎 (单行处理核心)
     // ═══════════════════════════════════════════
-    inline std::string highlightCode(const std::string& code) {
-        if (!colorsEnabled) return code;
+    inline std::string highlightSingleLine(const std::string& code) {
         if (code.empty()) return code;
 
         static const std::set<std::string> keywords = {
@@ -224,7 +223,7 @@ namespace jc {
             case TokenType::LPAREN: case TokenType::RPAREN:
             case TokenType::LBRACKET: case TokenType::RBRACKET:
             case TokenType::LBRACE: case TokenType::RBRACE:
-                result += col(Ansi::WHITE) + srcText + col(Ansi::RESET);
+                result += col(Ansi::CYAN) + srcText + col(Ansi::RESET);
                 break;
 
             default:
@@ -244,6 +243,31 @@ namespace jc {
     }
 
     // ═══════════════════════════════════════════
+    // 代码语法高亮引擎 (多行安全入口)
+    // ═══════════════════════════════════════════
+    inline std::string highlightCode(const std::string& code) {
+        if (!colorsEnabled) return code;
+        if (code.empty()) return code;
+
+        std::string result;
+        size_t start = 0;
+        size_t end = code.find('\n');
+        
+        while (end != std::string::npos) {
+            std::string line = code.substr(start, end - start);
+            result += highlightSingleLine(line) + "\n";
+            start = end + 1;
+            end = code.find('\n', start);
+        }
+        
+        if (start < code.size()) {
+            result += highlightSingleLine(code.substr(start));
+        }
+        
+        return result;
+    }
+
+    // ═══════════════════════════════════════════
     // 值类型着色（用于 REPL 输出）
     // ═══════════════════════════════════════════
     inline std::string colorizeType(const std::string& typeName) {
@@ -254,14 +278,20 @@ namespace jc {
             return col(Ansi::BRIGHT_MAGENTA);
         if (typeName == "String")
             return col(Ansi::BRIGHT_GREEN);
-        if (typeName == "RealMatrix" || typeName == "ComplexMatrix" || typeName == "StringMatrix")
-            return col(Ansi::WHITE);
+        if (typeName == "RealMatrix")
+            return col(Ansi::BRIGHT_YELLOW);
+        if (typeName == "ComplexMatrix")
+            return col(Ansi::BRIGHT_MAGENTA);
+        if (typeName == "StringMatrix")
+            return col(Ansi::BRIGHT_GREEN);
         if (typeName == "BaseNum")
             return col(Ansi::BRIGHT_CYAN);
         if (typeName == "Function")
             return col(Ansi::BRIGHT_BLUE);
         if (typeName == "Dict" || typeName == "List"|| typeName == "Set")
             return col(Ansi::CYAN);
+        if (typeName == "SymExpr")
+            return col(Ansi::BRIGHT_MAGENTA);
         return "";
     }
 

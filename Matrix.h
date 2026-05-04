@@ -12,6 +12,8 @@
 
 namespace jc {
 
+    inline bool g_printMatrix2D = false;
+
     template <typename T>
     class Matrix {
     private:
@@ -202,17 +204,30 @@ namespace jc {
                 }
             }
 
-            // 保持排版输出不变
-            for (int i = 0; i < m.rows; ++i) {
+            if (jc::g_printMatrix2D) {
+                // 保持排版输出不变 (2D)
+                for (int i = 0; i < m.rows; ++i) {
+                    out << "[";
+                    for (int j = 0; j < m.cols; ++j) {
+                        size_t padding = colWidths[j] - strs[i][j].length();
+                        for (size_t p = 0; p < padding; ++p) out << ' ';
+                        out << strs[i][j];
+                        if (j < m.cols - 1) out << ", ";
+                    }
+                    out << "]";
+                    if (i < m.rows - 1) out << "\n";
+                }
+            } else {
+                // 嵌套时的一维紧凑输出 (1D)
                 out << "[";
-                for (int j = 0; j < m.cols; ++j) {
-                    size_t padding = colWidths[j] - strs[i][j].length();
-                    for (size_t p = 0; p < padding; ++p) out << ' ';
-                    out << strs[i][j];
-                    if (j < m.cols - 1) out << ", ";
+                for (int i = 0; i < m.rows; ++i) {
+                    for (int j = 0; j < m.cols; ++j) {
+                        out << strs[i][j];
+                        if (j < m.cols - 1) out << ", ";
+                    }
+                    if (i < m.rows - 1) out << "; ";
                 }
                 out << "]";
-                if (i < m.rows - 1) out << "\n";
             }
             return out;
         }
@@ -1661,17 +1676,29 @@ namespace jc {
                     if (w > colWidths[j]) colWidths[j] = w;
                 }
 
-            for (int i = 0; i < m.rows; ++i) {
+            if (jc::g_printMatrix2D) {
+                for (int i = 0; i < m.rows; ++i) {
+                    out << "[";
+                    for (int j = 0; j < m.cols; ++j) {
+                        std::string cell = "\"" + m(i, j) + "\"";
+                        size_t padding = colWidths[j] - cell.size();
+                        for (size_t p = 0; p < padding; ++p) out << ' ';
+                        out << cell;
+                        if (j < m.cols - 1) out << ", ";
+                    }
+                    out << "]";
+                    if (i < m.rows - 1) out << "\n";
+                }
+            } else {
                 out << "[";
-                for (int j = 0; j < m.cols; ++j) {
-                    std::string cell = "\"" + m(i, j) + "\"";
-                    size_t padding = colWidths[j] - cell.size();
-                    for (size_t p = 0; p < padding; ++p) out << ' ';
-                    out << cell;
-                    if (j < m.cols - 1) out << ", ";
+                for (int i = 0; i < m.rows; ++i) {
+                    for (int j = 0; j < m.cols; ++j) {
+                        out << "\"" << m(i, j) << "\"";
+                        if (j < m.cols - 1) out << ", ";
+                    }
+                    if (i < m.rows - 1) out << "; ";
                 }
                 out << "]";
-                if (i < m.rows - 1) out << "\n";
             }
             return out;
         }

@@ -835,7 +835,7 @@ namespace jc {
   Algebraic Manipulation
   ──────────────────────
     expand((x+1)^3)              → x^3 + 3*x^2 + 3*x + 1
-    factor(x^2 - 4)              → (x - 2) * (x + 2)
+    factor(x^4 - 1)              → (x - 1) * (x + 1) * (x^2 + 1) (Cantor-Zassenhaus)
     factorReal(x^2 + 1)          → Factor over reals
     simplify(expr)               Smart heuristic simplification
     contract(2*log(x) + log(y))  → log(x^2 * y)
@@ -860,9 +860,9 @@ namespace jc {
   Calculus (Exact Symbolic)
   ──────────────────────
     diff(sin(x^2), x)            → 2 * x * cos(x^2)
-    integ(x^2, x)                → 1/3 * x^3
+    integ(exp(x^2), x)           → Risch Algorithm (Liouvillian extensions)
     integ(x^2, x, 0, 1)          → 1/3 (Definite integral)
-    limit(sin(x)/x, x, 0)        → 1 (L'Hôpital's rule supported)
+    limit(sin(x)/x, x, 0)        → 1 (Gruntz asymptotic expansion algorithm)
     taylor(sin(x), x, 0, 5)      → x - 1/6 * x^3 + 1/120 * x^5
     debugInteg("on")             → Print detailed integration steps & Risch algorithm trace
 
@@ -876,9 +876,8 @@ namespace jc {
       to prevent premature floating-point evaluation.
     • solveEq now exactly solves high-degree binomial equations (ax^n + b = 0), 
       returning all complex roots using Euler's formula (E and PI).
-    • Warning: solveEq currently cannot solve general polynomials of 
-      degree > 2 (non-binomials) or transcendental equations. For robust 
-      numerical root-finding, use `solveE`.
+    • For high-degree irreducible polynomials, solveEq returns exact `RootOf` 
+      algebraic number nodes. For robust numerical root-finding, use `solveE`.
 
   Compilation & Evaluation
   ──────────────────────
@@ -1246,10 +1245,12 @@ namespace jc {
       Numbers (double/BigInt/Fraction)   → Yellow
       Complex                            → Magenta
       Strings                            → Green
-      Matrices                           → White
-      Functions/Classes                  → Blue
-      Dicts/Lists                        → Cyan
+      Matrices                           → Yellow/Magenta/Green
       BaseNum                            → Bright Cyan
+      Functions/Classes                  → Blue
+      Instances                          → Bright Cyan
+      Dicts/Lists/Sets                   → Cyan
+      SymExpr                            → Bright Magenta
       Errors                             → Red
 
     Commands:
@@ -1840,15 +1841,15 @@ namespace jc {
                             nested containers), freezes the new copy, and returns it.
                             Perfect for safely passing data to untrusted functions.
     
-    Copying & Mutability Matrix
-    ──────────────────────
-      There is no "unfreeze" function. Use copying to change lock states:
+  Copying & Mutability Matrix
+  ──────────────────────
+    There is no "unfreeze" function. Use copying to change lock states:
       
-      Syntax        Depth         Lock State          Best For...
-      b = a         Zero (Ref)    Same as source      Fast passing, default high-perf state.
-      b = a[:]      Shallow       Outer unfrozen      1D cloning, simple unfrozen shell.
-      b = val(a)    Deep          Fully frozen        Read-only snapshots, Dict keys, Set elements.
-      b = clone(a)  Deep          Fully unfrozen      Complete rebirth. Fully mutable nested data.
+    Syntax        Depth         Lock State          Best For...
+    b = a         Zero (Ref)    Same as source      Fast passing, default high-perf state.
+    b = a[:]      Shallow       Outer unfrozen      1D cloning, simple unfrozen shell.
+    b = val(a)    Deep          Fully frozen        Read-only snapshots, Dict keys, Set elements.
+    b = clone(a)  Deep          Fully unfrozen      Complete rebirth. Fully mutable nested data.
     
     * Note: Only frozen containers can be used as keys in Dicts or elements in Sets!
 )HELP" },
@@ -1927,17 +1928,17 @@ namespace jc {
     isFrozen(d)                         Returns 1 if locked, 0 otherwise.
     val(d)                              Returns a deep-copied, frozen snapshot.
     
-    Copying & Mutability Matrix
-    ──────────────────────
-      There is no "unfreeze" function. Use copying to change lock states:
+  Copying & Mutability Matrix
+  ──────────────────────
+    There is no "unfreeze" function. Use copying to change lock states:
       
-      Syntax        Depth         Lock State          Best For...
-      b = a         Zero (Ref)    Same as source      Fast passing, default high-perf state.
-      (Loop copy)   Shallow       Outer unfrozen      Flat cloning, simple unfrozen shell.
-      b = val(a)    Deep          Fully frozen        Read-only snapshots, safe Dict keys.
-      b = clone(a)  Deep          Fully unfrozen      Complete rebirth. Fully mutable nested data.
+    Syntax        Depth         Lock State          Best For...
+    b = a         Zero (Ref)    Same as source      Fast passing, default high-perf state.
+    (Loop copy)   Shallow       Outer unfrozen      Flat cloning, simple unfrozen shell.
+    b = val(a)    Deep          Fully frozen        Read-only snapshots, safe Dict keys.
+    b = clone(a)  Deep          Fully unfrozen      Complete rebirth. Fully mutable nested data.
       
-      * Loop copy: b = dict(); for ([k, v] in a) b[k] = v
+    * Loop copy: b = dict(); for ([k, v] in a) b[k] = v
     
     * Keys MUST be hashable. Unfrozen Lists/Dicts/Sets will throw a TypeError 
       if used as a key. Use freeze() or val() to make them hashable.
@@ -2025,15 +2026,15 @@ namespace jc {
     isFrozen(s)             Returns 1 if locked, 0 otherwise.
     val(s)                  Returns a deep-copied, frozen snapshot of the set.
     
-    Copying & Mutability Matrix
-    ──────────────────────
-      There is no "unfreeze" function. Use copying to change lock states:
+  Copying & Mutability Matrix
+  ──────────────────────
+    There is no "unfreeze" function. Use copying to change lock states:
       
-      Syntax        Depth         Lock State          Best For...
-      b = a         Zero (Ref)    Same as source      Fast passing, default high-perf state.
-      b = a | Set() Shallow       Outer unfrozen      Flat cloning, simple unfrozen shell.
-      b = val(a)    Deep          Fully frozen        Read-only snapshots, safe Set elements.
-      b = clone(a)  Deep          Fully unfrozen      Complete rebirth. Fully mutable nested data.
+    Syntax        Depth         Lock State          Best For...
+    b = a         Zero (Ref)    Same as source      Fast passing, default high-perf state.
+    b = a | Set() Shallow       Outer unfrozen      Flat cloning, simple unfrozen shell.
+    b = val(a)    Deep          Fully frozen        Read-only snapshots, safe Set elements.
+    b = clone(a)  Deep          Fully unfrozen      Complete rebirth. Fully mutable nested data.
     
     * Elements MUST be hashable. Unfrozen containers will throw a TypeError 
       if inserted. Built-in functions that generate nested sets (like setPow 
@@ -2350,6 +2351,7 @@ namespace jc {
     isclass(x)          Is x a class definition?
     isinstance(x)       Is x an instance of any class? (1 arg)
     isinstance(x, C)    Is x an instance of class C or its subclass? (2 args)
+    issym(x)            Is x a Symbolic Expression (SymExpr)?
 
   Floating-Point Checks
   ──────────────────────

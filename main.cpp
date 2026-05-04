@@ -443,7 +443,8 @@ int main(int argc, char* argv[]) {
             if (!result.isNone()) {
                 vm.setGlobal("ANS", result);
                 std::string typeColor;
-                std::visit([&typeColor](auto&& arg) {
+                bool isTopLevelMatrix = false;
+                std::visit([&typeColor, &isTopLevelMatrix](auto&& arg) {
                     using T = std::decay_t<decltype(arg)>;
                     if constexpr (std::is_same_v<T, double> || std::is_same_v<T, jc::BigInt> || std::is_same_v<T, jc::Fraction>)
                         typeColor = jc::col(jc::Ansi::BRIGHT_YELLOW);
@@ -451,22 +452,33 @@ int main(int argc, char* argv[]) {
                         typeColor = jc::col(jc::Ansi::BRIGHT_MAGENTA);
                     else if constexpr (std::is_same_v<T, std::string>)
                         typeColor = jc::col(jc::Ansi::BRIGHT_GREEN);
-                    else if constexpr (std::is_same_v<T, jc::RealMatrix> || std::is_same_v<T, jc::ComplexMatrix>)
-                        typeColor = jc::col(jc::Ansi::WHITE);
-                    else if constexpr (std::is_same_v<T, jc::StringMatrix>)
-                        typeColor = jc::col(jc::Ansi::GREEN);
+                    else if constexpr (std::is_same_v<T, jc::RealMatrix>) {
+                        typeColor = jc::col(jc::Ansi::BRIGHT_YELLOW);
+                        isTopLevelMatrix = true;
+                    }
+                    else if constexpr (std::is_same_v<T, jc::ComplexMatrix>) {
+                        typeColor = jc::col(jc::Ansi::BRIGHT_MAGENTA);
+                        isTopLevelMatrix = true;
+                    }
+                    else if constexpr (std::is_same_v<T, jc::StringMatrix>) {
+                        typeColor = jc::col(jc::Ansi::BRIGHT_GREEN);
+                        isTopLevelMatrix = true;
+                    }
                     else if constexpr (std::is_same_v<T, jc::BaseNum>)
                         typeColor = jc::col(jc::Ansi::BRIGHT_CYAN);
-                    else if constexpr (std::is_same_v<T, std::shared_ptr<jc::FunctionClosure>>)
-                        typeColor = jc::col(jc::Ansi::BRIGHT_BLUE);
-                    else if constexpr (std::is_same_v<T, jc::Dict> || std::is_same_v<T, jc::List> || std::is_same_v<T, jc::Set>)
-                        typeColor = jc::col(jc::Ansi::CYAN);
-                    else if constexpr (std::is_same_v<T, std::shared_ptr<jc::ClassDefinition>>)
+                    else if constexpr (std::is_same_v<T, std::shared_ptr<jc::FunctionClosure>> || std::is_same_v<T, std::shared_ptr<jc::ClassDefinition>>)
                         typeColor = jc::col(jc::Ansi::BRIGHT_BLUE);
                     else if constexpr (std::is_same_v<T, std::shared_ptr<jc::Instance>>)
                         typeColor = jc::col(jc::Ansi::BRIGHT_CYAN);
+                    else if constexpr (std::is_same_v<T, jc::Dict> || std::is_same_v<T, jc::List> || std::is_same_v<T, jc::Set>)
+                        typeColor = jc::col(jc::Ansi::CYAN);
+                    else
+                        typeColor = jc::col(jc::Ansi::BRIGHT_MAGENTA); // SymExpr 等
                     }, result.data);
+
+                jc::g_printMatrix2D = isTopLevelMatrix;
                 std::cout << typeColor << result << jc::col(jc::Ansi::RESET) << std::endl;
+                jc::g_printMatrix2D = false;
             }
             if (g_profile && jc::VM::activeVM) {
                 jc::VM::activeVM->printProfileReport();

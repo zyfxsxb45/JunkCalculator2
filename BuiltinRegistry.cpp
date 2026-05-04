@@ -3217,6 +3217,10 @@ void BuiltinRegistry::registerTypeChecks() {
         return Value(std::holds_alternative<std::shared_ptr<ClassDefinition>>(args[0].data) ? 1.0 : 0.0);
         });
 
+    reg("issym", { 1 }, [](const std::vector<Value>& args) -> Value {
+        return Value(args[0].isSymbolic() ? 1.0 : 0.0);
+        });
+
     reg("isnan", { 1 }, [](const std::vector<Value>& args) -> Value {
         if (std::holds_alternative<double>(args[0].data))
             return Value(std::isnan(std::get<double>(args[0].data)) ? 1.0 : 0.0);
