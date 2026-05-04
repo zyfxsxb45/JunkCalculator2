@@ -118,16 +118,37 @@ namespace jc {
         // Lazard-Rioboo-Trager 算法：通过无平方分解分离不同重数的根
         auto rSqFree = polySquareFree(R_z, "_z");
         if (SymConfig::debugIntegration) std::cout << "   [RT] rSqFree size: " << rSqFree.size() << std::endl;
-        for (const auto& factor : rSqFree) {
-            SymExpr Q_k = factor.first;
-            if (SymConfig::debugIntegration) std::cout << "   [RT] Q_k(z): " << Q_k.toString() << " (multiplicity " << factor.second << ")" << std::endl;
-            if (getDegree(Q_k, "_z") <= 0) continue;
+        for (const auto& factor_sq : rSqFree) {
+            SymExpr Q_k_full = factor_sq.first;
+            if (SymConfig::debugIntegration) std::cout << "   [RT] Q_k_full(z): " << Q_k_full.toString() << " (multiplicity " << factor_sq.second << ")" << std::endl;
+            if (getDegree(Q_k_full, "_z") <= 0) continue;
             
-            // 对每个重数 k 的因子 Q_k(z)，计算 D(x) 和 P(x, z) 模 Q_k(z) 的 GCD
-            std::vector<MultiPoly> generators;
-            generators.push_back(MultiPoly(P));
-            generators.push_back(MultiPoly(D));
-            generators.push_back(MultiPoly(Q_k));
+            // 对 Q_k_full 进一步因式分解，提取有理根和低次因子
+            SymExpr factored_Q = factor(Q_k_full);
+            std::vector<SymExpr> q_factors;
+            if (factored_Q.ptr->getType() == SymType::MUL) {
+                for (auto& arg : std::static_pointer_cast<SymMul>(factored_Q.ptr)->args) {
+                    if (arg->getType() == SymType::POW) {
+                        q_factors.push_back(SymExpr(std::static_pointer_cast<SymPow>(arg)->base));
+                    } else {
+                        q_factors.push_back(SymExpr(arg));
+                    }
+                }
+            } else if (factored_Q.ptr->getType() == SymType::POW) {
+                q_factors.push_back(SymExpr(std::static_pointer_cast<SymPow>(factored_Q.ptr)->base));
+            } else {
+                q_factors.push_back(factored_Q);
+            }
+            
+            for (const auto& Q_k : q_factors) {
+                if (getDegree(Q_k, "_z") <= 0) continue;
+                if (SymConfig::debugIntegration) std::cout << "   [RT] Processing irreducible factor Q_k(z): " << Q_k.toString() << std::endl;
+                
+                // 对每个重数 k 的因子 Q_k(z)，计算 D(x) 和 P(x, z) 模 Q_k(z) 的 GCD
+                std::vector<MultiPoly> generators;
+                generators.push_back(MultiPoly(P));
+                generators.push_back(MultiPoly(D));
+                generators.push_back(MultiPoly(Q_k));
             
             SymExpr v_z(BigInt(1));
             try {
@@ -160,10 +181,11 @@ namespace jc {
             }
             if (SymConfig::debugIntegration) std::cout << "   [RT] v_z(x,z) after monic: " << v_z.toString() << std::endl;
             
-            // 如果 Q_k 的度数 <= 4，尝试求出精确根，避免生成 RootSum
+            // 如果 Q_k 的度数 <= 2，尝试求出精确根，避免生成 RootSum
+            // 对于 3 次及以上方程，如果无有理根，展开为根式会极其复杂，因此保留为 RootSum
             auto q_coeffs = extractCoeffs(Q_k, "_z");
             int q_deg = static_cast<int>(q_coeffs.size()) - 1;
-            if (q_deg >= 1 && q_deg <= 4) {
+            if (q_deg >= 1 && q_deg <= 2) {
                 auto exactRoots = getExactRoots(q_coeffs);
                 if (!exactRoots.empty()) {
                     std::vector<bool> used(exactRoots.size(), false);
@@ -262,6 +284,7 @@ namespace jc {
             }));
             
             result = result + rootSum;
+            }
         }
         if (SymConfig::debugIntegration) std::cout << "   [RT] Result before simplify: " << result.toString() << std::endl;
         
@@ -689,16 +712,20 @@ namespace jc {
     // =================================================================
     static SymExpr rischIntegrateCore(const SymExpr& expr, const std::string& var, int depth) {
         checkInterrupt();
+        if (SymConfig::debugIntegration) std::cout << std::string(depth * 2, ' ') << "-> Entering Risch Core with: " << expr.toString() << std::endl;
         // Step 0 - 刘维尔域规范化 (Liouvillian Field Normalization)
         SymExpr normalizedExpr = rischNormalize(expr);
+        if (SymConfig::debugIntegration && normalizedExpr != expr) std::cout << std::string(depth * 2, ' ') << "   [Risch] Normalized: " << normalizedExpr.toString() << std::endl;
 
         // Step 1 - 构建微分域与刘维尔扩张
         RischDiffField field = buildRischDifferentialField(normalizedExpr, var);
         SymExpr rewritten = field.rewrite(normalizedExpr);
+        if (SymConfig::debugIntegration) std::cout << std::string(depth * 2, ' ') << "   [Risch] Rewritten in diff field: " << rewritten.toString() << std::endl;
         
         // Step 1.5 - 单一扩张的变量代换降维打击 (Change of Variables for Single Extension)
         if (field.tower.size() == 1) {
             auto ext = field.tower[0];
+            if (SymConfig::debugIntegration) std::cout << std::string(depth * 2, ' ') << "   [Risch] Trying Single Extension Substitution for " << ext.name << std::endl;
             
             // 形式 1: 积分恰好是 F(t) * t' dx = F(t) dt
             SymExpr F_t = simplifyCore(rewritten / ext.deriv);
@@ -713,6 +740,7 @@ namespace jc {
                     } else if (ext.type == RischExtType::ALG) {
                         orig_ext = ext.arg;
                     }
+                    if (SymConfig::debugIntegration) std::cout << std::string(depth * 2, ' ') << "<- Risch Single Extension (Form 1) Success" << std::endl;
                     return simplifyCore(subs(int_t, ext.name, orig_ext));
                 } catch (const EngineInterruptError&) {
                     throw;
@@ -727,6 +755,7 @@ namespace jc {
                         SymExpr integrand_t = simplifyCore(rewritten / (u_deriv * ext.t_var));
                         SymExpr int_t = integrate(integrand_t, ext.name, depth + 1);
                         SymExpr orig_ext(std::make_shared<SymFunc>("exp", std::vector<std::shared_ptr<SymNode>>{ext.arg.ptr}));
+                        if (SymConfig::debugIntegration) std::cout << std::string(depth * 2, ' ') << "<- Risch Single Extension (Form 2) Success" << std::endl;
                         return simplifyCore(subs(int_t, ext.name, orig_ext));
                     } catch (const EngineInterruptError&) {
                         throw;
@@ -737,6 +766,7 @@ namespace jc {
 
         // Step 2 - Hermite 约化 (目前仅针对有理函数域 Q(x))
         if (field.tower.empty()) {
+            if (SymConfig::debugIntegration) std::cout << std::string(depth * 2, ' ') << "   [Risch] Base field Q(x) detected, using Hermite Reduction." << std::endl;
             auto [num, den] = getFraction(rewritten);
             if (getDegree(den, var) > 0) {
                 auto [ratPart, polyPart, cA, cD] = hermiteReduce(num, den, var);
@@ -773,6 +803,7 @@ namespace jc {
         // Step 4 & 5 - 扩张多项式积分 (Extension Polynomial Integration)
         if (!field.tower.empty()) {
             auto topExt = field.tower.back();
+            if (SymConfig::debugIntegration) std::cout << std::string(depth * 2, ' ') << "   [Risch] Integrating over extension: " << topExt.name << " (Type: " << (int)topExt.type << ")" << std::endl;
             
             auto backSubstitute = [&](SymExpr res) {
                 for (auto it = field.tower.rbegin(); it != field.tower.rend(); ++it) {
@@ -790,6 +821,7 @@ namespace jc {
             };
 
             if (topExt.type == RischExtType::LOG) {
+                if (SymConfig::debugIntegration) std::cout << std::string(depth * 2, ' ') << "   [Risch] Step 4: Logarithmic Extension Polynomial Integration" << std::endl;
                 auto coeffs = extractCoeffs(rewritten, topExt.name);
                 if (!coeffs.empty()) {
                     int n = static_cast<int>(coeffs.size()) - 1;
@@ -862,6 +894,7 @@ namespace jc {
                         }
                         SymExpr finalRes = simplifyCore(backSubstitute(result));
                         markTainted(finalRes);
+                        if (SymConfig::debugIntegration) std::cout << std::string(depth * 2, ' ') << "<- Risch Step 4 (LOG) Success" << std::endl;
                         return finalRes;
                     } catch (const EngineInterruptError&) {
                         throw;
@@ -870,6 +903,7 @@ namespace jc {
                     }
                 }
             } else if (topExt.type == RischExtType::EXP) {
+                if (SymConfig::debugIntegration) std::cout << std::string(depth * 2, ' ') << "   [Risch] Step 5: Exponential Extension Polynomial Integration" << std::endl;
                 auto coeffs = extractCoeffs(rewritten, topExt.name);
                 if (!coeffs.empty()) {
                     int n = static_cast<int>(coeffs.size()) - 1;
@@ -982,10 +1016,12 @@ namespace jc {
                     if (success) {
                         SymExpr finalRes = simplifyCore(backSubstitute(result));
                         markTainted(finalRes);
+                        if (SymConfig::debugIntegration) std::cout << std::string(depth * 2, ' ') << "<- Risch Step 5 (EXP) Success" << std::endl;
                         return finalRes;
                     }
                 }
             } else if (topExt.type == RischExtType::ALG) {
+                if (SymConfig::debugIntegration) std::cout << std::string(depth * 2, ' ') << "   [Risch] Trager's Algorithm for Algebraic Extension" << std::endl;
                 // Trager 算法 (1984) - 代数曲线伪化简 (Pseudo-reduction)
                 SymExpr minPoly = topExt.minPoly;
                 SymExpr t_sym = SymExpr::makeVar(topExt.name);
@@ -1074,6 +1110,7 @@ namespace jc {
                             }
                             SymExpr finalRes = simplifyCore(backSubstitute(result));
                             markTainted(finalRes);
+                            if (SymConfig::debugIntegration) std::cout << std::string(depth * 2, ' ') << "<- Risch Trager (ALG) Success" << std::endl;
                             return finalRes;
                         }
                     }
