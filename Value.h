@@ -457,6 +457,9 @@ namespace jc {
                               std::is_same_v<T, BaseNum> ||
                               std::is_same_v<T, std::string> ||
                               std::is_same_v<T, SymExpr> ||
+                              std::is_same_v<T, RealMatrix> ||
+                              std::is_same_v<T, ComplexMatrix> ||
+                              std::is_same_v<T, StringMatrix> ||
                               std::is_same_v<T, std::shared_ptr<FunctionClosure>> ||
                               std::is_same_v<T, std::shared_ptr<ClassDefinition>>) {
                     return true;
