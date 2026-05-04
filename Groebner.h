@@ -47,6 +47,7 @@ namespace jc {
         bool isZero() const;
         Term leadingTerm() const;
         void cleanAndSort(); // 合并同类项并按字典序降序排列
+        void makePrimitive(); // 清除分母并提取整数 GCD 以控制系数膨胀
 
         MultiPoly operator+(const MultiPoly& other) const;
         MultiPoly operator-(const MultiPoly& other) const;

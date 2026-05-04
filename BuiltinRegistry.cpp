@@ -3789,7 +3789,31 @@ void BuiltinRegistry::registerCAS() {
     reg("solveEq", { 2 }, [getVarName](const std::vector<Value>& args) -> Value {
         auto roots = jc::solveEq(args[0].asSymbolic(), getVarName(args[1], "solveEq"));
         List L;
-        for (const auto& r : roots) L.push_back(valToAny(Value(r)));
+        for (const auto& r : roots) {
+            if (r.ptr->getType() == SymType::FUNC) {
+                auto func = std::static_pointer_cast<SymFunc>(r.ptr);
+                if (func->name == "RootOf" && func->args.size() == 3) {
+                    SymExpr P(func->args[0]);
+                    std::string dummy = std::static_pointer_cast<SymVar>(func->args[1])->name;
+                    int k = 1;
+                    if (func->args[2]->getType() == SymType::NUM) {
+                        auto [isInt, val] = jc::extractExactInt(std::static_pointer_cast<SymNum>(func->args[2])->value);
+                        if (isInt) k = static_cast<int>(val);
+                    }
+                    
+                    auto coeffs = jc::extractCoeffs(P, dummy);
+                    int deg = static_cast<int>(coeffs.size()) - 1;
+                    if (deg >= 1 && deg <= 4) {
+                        auto exactRoots = jc::getExactRoots(coeffs);
+                        if (!exactRoots.empty() && k >= 1 && k <= deg) {
+                            L.push_back(valToAny(Value(exactRoots[k - 1])));
+                            continue;
+                        }
+                    }
+                }
+            }
+            L.push_back(valToAny(Value(r)));
+        }
         return Value(L);
     });
 
@@ -3883,6 +3907,54 @@ void BuiltinRegistry::registerCAS() {
         throw std::runtime_error("Math Error: Limit does not exist (left and right limits differ significantly or are undefined).");
     });
 
+    reg("verifyInteg", { 2 }, [getVarName, this](const std::vector<Value>& args) -> Value {
+        SymExpr expr = args[0].asSymbolic();
+        std::string var = getVarName(args[1], "verifyInteg");
+        SymExpr integral = jc::integrate(expr, var);
+        SymExpr derivative = jc::diff(integral, var);
+        SymExpr diff_expr = jc::simplify(derivative - expr);
+        
+        if (diff_expr.isZero()) return Value(1.0);
+
+        std::set<std::string> vars;
+        jc::collectAllVars(diff_expr.ptr, vars);
+        
+        // 使用复数测试点，完美避开实数域的定义域陷阱 (如 log(-x), sqrt(-x))
+        // 选择模长较小的测试点，防止高次幂导致浮点误差放大
+        std::vector<Complex> test_vals = {
+            Complex(0.271828, 0.314159),
+            Complex(0.141421, -0.173205),
+            Complex(-0.223606, 0.264575),
+            Complex(0.331662, 0.316227),
+            Complex(-0.123456, -0.654321)
+        };
+        
+        int pass_count = 0;
+        int valid_tests = 0;
+
+        auto evalfIt = builtins.find("evalf");
+
+        for (const auto& tv : test_vals) {
+            SymExpr subbed = diff_expr;
+            for (const auto& v : vars) {
+                if (v != "i" && v != "I" && v != "PI" && v != "E") {
+                    subbed = jc::subs(subbed, v, SymExpr(tv));
+                }
+            }
+            
+            try {
+                Value res = evalfIt->second({Value(subbed)});
+                if (res.isSymbolic()) continue; // 如果 evalf 没能完全化简为数值，则跳过该测试点
+                valid_tests++;
+                double err = res.isComplex() ? res.asComplex().modulus() : std::abs(res.asDouble());
+                if (err < 1e-4) pass_count++;
+            } catch (...) {}
+        }
+        
+        if (valid_tests > 0 && pass_count == valid_tests) return Value(1.0);
+        return Value(0.0);
+    });
+
     reg("diff", { 2 }, [evalFunc, getVarName](const std::vector<Value>& args) -> Value {
         bool isSymDiff = args[0].isSymbolic();
         if (!isSymDiff) {
@@ -3905,7 +3977,7 @@ void BuiltinRegistry::registerCAS() {
         return Value(d);
         });
 
-    reg("integ", { 2, 3, 4 }, [evalFunc, getVarName](const std::vector<Value>& args) -> Value {
+    reg("integ", { 2, 3, 4 }, [evalFunc, getVarName, this](const std::vector<Value>& args) -> Value {
         bool isSymInteg = args[0].isSymbolic();
         if (!isSymInteg && args.size() >= 2) {
             if (std::holds_alternative<std::string>(args[1].data) || (args[1].isSymbolic() && args[1].asSymbolic().ptr->getType() == SymType::VAR)) {
@@ -3915,16 +3987,15 @@ void BuiltinRegistry::registerCAS() {
         if (isSymInteg) {
             SymExpr expr = args[0].asSymbolic();
             std::string var = getVarName(args[1], "integ");
-            SymExpr integral = jc::integrate(expr, var);
             
             if (args.size() == 4) {
                 SymExpr a = args[2].asSymbolic();
                 SymExpr b = args[3].asSymbolic();
-                return Value(simplify(subs(integral, var, b) - subs(integral, var, a)));
+                return Value(jc::defint(expr, var, a, b));
             } else if (args.size() == 3) {
                 throw std::runtime_error("TypeError: Symbolic definite integration expects 4 arguments: expr, var, a, b.");
             }
-            return Value(simplify(integral));
+            return Value(simplify(jc::integrate(expr, var)));
         }
 
         if (args.size() < 3) {

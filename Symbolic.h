@@ -161,6 +161,7 @@ namespace jc {
 
     // 符号方程求解
     std::vector<SymExpr> solveEq(const SymExpr& expr, const std::string& var);
+    std::vector<SymExpr> getExactRoots(const std::vector<SymExpr>& coeffs);
 
     // ==========================================
     // 🚀 下一步发展路线图 (Roadmap) 接口预留

@@ -157,6 +157,74 @@ namespace jc {
         terms = std::move(cleaned);
     }
 
+    void MultiPoly::makePrimitive() {
+        if (isZero()) return;
+        
+        BigInt lcm_den(1);
+        bool all_rational = true;
+        
+        for (const auto& t : terms) {
+            if (t.coeff.ptr->getType() == SymType::NUM) {
+                auto num = std::static_pointer_cast<SymNum>(t.coeff.ptr);
+                if (std::holds_alternative<Fraction>(num->value)) {
+                    lcm_den = BigInt::lcm(lcm_den, std::get<Fraction>(num->value).getDen());
+                } else if (!std::holds_alternative<BigInt>(num->value)) {
+                    all_rational = false;
+                    break;
+                }
+            } else {
+                all_rational = false;
+                break;
+            }
+        }
+        
+        if (!all_rational) return;
+        
+        if (lcm_den > BigInt(1)) {
+            SymExpr lcm_expr(lcm_den);
+            for (auto& t : terms) {
+                t.coeff = simplifyCore(t.coeff * lcm_expr);
+            }
+        }
+        
+        BigInt gcd_num(0);
+        bool first = true;
+        for (const auto& t : terms) {
+            if (t.coeff.ptr->getType() == SymType::NUM) {
+                auto num = std::static_pointer_cast<SymNum>(t.coeff.ptr);
+                BigInt v(0);
+                if (std::holds_alternative<BigInt>(num->value)) {
+                    v = std::get<BigInt>(num->value);
+                } else if (std::holds_alternative<Fraction>(num->value)) {
+                    v = std::get<Fraction>(num->value).getNum();
+                }
+                if (v.isNegative()) v = -v;
+                if (first) { gcd_num = v; first = false; }
+                else gcd_num = BigInt::gcd(gcd_num, v);
+            }
+        }
+        
+        if (!gcd_num.isZero() && gcd_num > BigInt(1)) {
+            SymExpr gcd_expr(gcd_num);
+            for (auto& t : terms) {
+                t.coeff = simplifyCore(t.coeff / gcd_expr);
+            }
+        }
+        
+        if (!terms.empty()) {
+            if (terms[0].coeff.ptr->getType() == SymType::NUM) {
+                auto num = std::static_pointer_cast<SymNum>(terms[0].coeff.ptr);
+                bool is_neg = false;
+                if (std::holds_alternative<BigInt>(num->value)) is_neg = std::get<BigInt>(num->value).isNegative();
+                else if (std::holds_alternative<Fraction>(num->value)) is_neg = std::get<Fraction>(num->value).getNum().isNegative();
+                
+                if (is_neg) {
+                    for (auto& t : terms) t.coeff = simplifyCore(-t.coeff);
+                }
+            }
+        }
+    }
+
     MultiPoly MultiPoly::operator+(const MultiPoly& other) const {
         MultiPoly res;
         res.terms = terms;
@@ -220,10 +288,12 @@ namespace jc {
         Term ltG = g.leadingTerm();
         Monomial lcmMono = ltF.mono.lcm(ltG.mono);
         
-        Term tF(simplifyCore(SymExpr(BigInt(1)) / ltF.coeff), lcmMono.divide(ltF.mono));
-        Term tG(simplifyCore(SymExpr(BigInt(1)) / ltG.coeff), lcmMono.divide(ltG.mono));
+        Term tF(ltG.coeff, lcmMono.divide(ltF.mono));
+        Term tG(ltF.coeff, lcmMono.divide(ltG.mono));
         
-        return (f * tF) - (g * tG);
+        MultiPoly res = (f * tF) - (g * tG);
+        res.makePrimitive();
+        return res;
     }
 
     MultiPoly multivariateDivide(MultiPoly f, const std::vector<MultiPoly>& G) {
@@ -238,8 +308,40 @@ namespace jc {
                 if (g.isZero()) continue;
                 Term ltG = g.leadingTerm();
                 if (ltG.mono.divides(ltP.mono)) {
-                    Term q(simplifyCore(ltP.coeff / ltG.coeff), ltP.mono.divide(ltG.mono));
-                    p = p - (g * q);
+                    Term multiplier_p(ltG.coeff, Monomial());
+                    Term multiplier_g(ltP.coeff, ltP.mono.divide(ltG.mono));
+                    
+                    p = (p * multiplier_p) - (g * multiplier_g);
+                    r = r * multiplier_p; // ★ 核心修复：同步放大余式，维持理想等价性
+                    
+                    // 提取 p 和 r 的公共内容 (Content) 以防止系数爆炸
+                    BigInt gcd_val(0);
+                    auto updateGcd = [&](const MultiPoly& poly) {
+                        for (const auto& t : poly.terms) {
+                            if (gcd_val == BigInt(1)) return;
+                            if (t.coeff.ptr->getType() == SymType::NUM) {
+                                auto num = std::static_pointer_cast<SymNum>(t.coeff.ptr);
+                                BigInt v(0);
+                                if (std::holds_alternative<BigInt>(num->value)) v = std::get<BigInt>(num->value);
+                                else if (std::holds_alternative<Fraction>(num->value)) v = std::get<Fraction>(num->value).getNum();
+                                if (v.isNegative()) v = -v;
+                                if (gcd_val.isZero()) gcd_val = v;
+                                else gcd_val = BigInt::gcd(gcd_val, v);
+                            } else {
+                                gcd_val = BigInt(1);
+                                return;
+                            }
+                        }
+                    };
+                    updateGcd(p);
+                    updateGcd(r);
+                    
+                    if (gcd_val > BigInt(1)) {
+                        SymExpr gcd_expr(gcd_val);
+                        for (auto& t : p.terms) t.coeff = simplifyCore(t.coeff / gcd_expr);
+                        for (auto& t : r.terms) t.coeff = simplifyCore(t.coeff / gcd_expr);
+                    }
+                    
                     divisionOccurred = true;
                     break;
                 }
@@ -253,13 +355,18 @@ namespace jc {
             }
         }
         r.cleanAndSort();
+        r.makePrimitive();
         return r;
     }
 
     std::vector<MultiPoly> computeGroebnerBasis(const std::vector<MultiPoly>& generators) {
         std::vector<MultiPoly> G;
         for (const auto& g : generators) {
-            if (!g.isZero()) G.push_back(g);
+            if (!g.isZero()) {
+                MultiPoly p = g;
+                p.makePrimitive();
+                G.push_back(p);
+            }
         }
         
         // 存储临界对 (i, j)
@@ -345,9 +452,8 @@ namespace jc {
             }
             MultiPoly r = multivariateDivide(minimalG[i], others);
             if (!r.isZero()) {
-                Term lt = r.leadingTerm();
-                Term invLead(simplifyCore(SymExpr(BigInt(1)) / lt.coeff), Monomial());
-                reducedG.push_back(r * invLead);
+                r.makePrimitive();
+                reducedG.push_back(r);
             }
         }
         return reducedG;
