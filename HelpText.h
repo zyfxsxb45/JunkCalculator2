@@ -1875,8 +1875,10 @@ namespace jc {
     Shorthand Properties (Variables directly to Dict):
       name = "Bob"; age = 25
       d = { name, age }                 → {"name": "Bob", "age": 25}
-    For computed keys, use the function form:
-      dict(dynamic_key, 42)             → {"dynamic": 42}
+    For computed keys (using a variable's value as the key), wrap it in 
+    parentheses or use the function form:
+      d = { (dynamic_key): 42 }         → {"[1]": 42}
+      d = dict(dynamic_key, 42)         → {"[1]": 42}
 
   Block vs. Dict Ambiguity Resolution
   ──────────────────────
@@ -1899,6 +1901,10 @@ namespace jc {
   ──────────────────────
     d["key"]                            Read / Write the value 
     d["key"] += 1                       Compound assignment directly on the value
+    
+    * Note: d[a] evaluates the variable 'a' and uses its value as the key. 
+      If you want the literal string "a", use d["a"]. For convenience, 
+      you can also use the dot operator: d.a (which is identical to d["a"]).
 
   Dot Operator Syntax Sugar
   ──────────────────────
