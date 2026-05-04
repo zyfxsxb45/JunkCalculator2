@@ -289,6 +289,11 @@ namespace jc {
     • Complex            — == and != compare both parts
     • Matrix / String    — == / != element-wise; ordering throws error
 
+    ★ Chained Comparisons (Python-style):
+      0 <= x <= 10       Evaluates as (0 <= x) && (x <= 10).
+                         Middle expressions are evaluated exactly once.
+                         Short-circuiting is fully supported.
+
     in                Membership / containment test (returns 1 or 0)
                         3 in [1,2,3]          → 1
 
