@@ -631,18 +631,55 @@ namespace jc {
             }
 
             bool isDict = false;
-            if (peekPos + 1 < static_cast<int>(tokens.size())) {
-                TokenType first = tokens[peekPos].type;
-                TokenType second = tokens[peekPos + 1].type;
+            int depth = 0;
+            int ternaryDepth = 0;
+            int scanPos = peekPos;
+            bool foundColon = false;
+            bool foundSemicolon = false;
 
-                if (second == TokenType::COLON &&
-                    (first == TokenType::IDENTIFIER || first == TokenType::STRING ||
-                        first == TokenType::NUMBER || first == TokenType::FSTRING ||
-                        first == TokenType::RSTRING || first == TokenType::IMAGINARY)) {
-                    isDict = true;
+            // 深度扫描，跳过嵌套的 [], {}, ()
+            while (scanPos < static_cast<int>(tokens.size())) {
+                TokenType t = tokens[scanPos].type;
+                if (t == TokenType::LBRACE || t == TokenType::LBRACKET || t == TokenType::LPAREN) {
+                    depth++;
+                } else if (t == TokenType::RBRACE || t == TokenType::RBRACKET || t == TokenType::RPAREN) {
+                    if (depth == 0) break;
+                    depth--;
+                } else if (depth == 0) {
+                    if (t == TokenType::QUESTION) {
+                        ternaryDepth++;
+                    } else if (t == TokenType::COLON) {
+                        if (ternaryDepth > 0) {
+                            ternaryDepth--;
+                        } else {
+                            foundColon = true;
+                            break;
+                        }
+                    } else if (t == TokenType::SEMICOLON) {
+                        foundSemicolon = true;
+                        break;
+                    }
                 }
-                else if (first == TokenType::IDENTIFIER && second == TokenType::COMMA) {
-                    isDict = true;
+                scanPos++;
+            }
+
+            if (foundColon) {
+                isDict = true;
+            } else if (foundSemicolon) {
+                isDict = false;
+            } else {
+                // 最低优先级：简写字典推断
+                if (peekPos < static_cast<int>(tokens.size())) {
+                    if (tokens[peekPos].type == TokenType::RBRACE) {
+                        isDict = true;
+                    } else if (tokens[peekPos].type == TokenType::IDENTIFIER) {
+                        int afterId = peekPos + 1;
+                        while (afterId < static_cast<int>(tokens.size()) && tokens[afterId].type == TokenType::NEWLINE) afterId++;
+                        if (afterId < static_cast<int>(tokens.size()) && 
+                            (tokens[afterId].type == TokenType::RBRACE || tokens[afterId].type == TokenType::COMMA)) {
+                            isDict = true;
+                        }
+                    }
                 }
             }
 
@@ -874,25 +911,61 @@ namespace jc {
                 tokens[peekPos].type == TokenType::NEWLINE) {
                 peekPos++;
             }
-            if (peekPos + 1 < static_cast<int>(tokens.size())) {
-                TokenType first = tokens[peekPos].type;
-                TokenType second = tokens[peekPos + 1].type;
+            bool isDict = false;
+            int depth = 0;
+            int ternaryDepth = 0;
+            int scanPos = peekPos;
+            bool foundColon = false;
+            bool foundSemicolon = false;
 
-                bool isDict = false;
+            // 深度扫描，跳过嵌套的 [], {}, ()
+            while (scanPos < static_cast<int>(tokens.size())) {
+                TokenType t = tokens[scanPos].type;
+                if (t == TokenType::LBRACE || t == TokenType::LBRACKET || t == TokenType::LPAREN) {
+                    depth++;
+                } else if (t == TokenType::RBRACE || t == TokenType::RBRACKET || t == TokenType::RPAREN) {
+                    if (depth == 0) break;
+                    depth--;
+                } else if (depth == 0) {
+                    if (t == TokenType::QUESTION) {
+                        ternaryDepth++;
+                    } else if (t == TokenType::COLON) {
+                        if (ternaryDepth > 0) {
+                            ternaryDepth--;
+                        } else {
+                            foundColon = true;
+                            break;
+                        }
+                    } else if (t == TokenType::SEMICOLON) {
+                        foundSemicolon = true;
+                        break;
+                    }
+                }
+                scanPos++;
+            }
 
-                if (second == TokenType::COLON &&
-                    (first == TokenType::IDENTIFIER || first == TokenType::STRING ||
-                        first == TokenType::NUMBER || first == TokenType::FSTRING ||
-                        first == TokenType::RSTRING || first == TokenType::IMAGINARY)) {
-                    isDict = true;
+            if (foundColon) {
+                isDict = true;
+            } else if (foundSemicolon) {
+                isDict = false;
+            } else {
+                // 最低优先级：简写字典推断
+                if (peekPos < static_cast<int>(tokens.size())) {
+                    if (tokens[peekPos].type == TokenType::RBRACE) {
+                        isDict = true;
+                    } else if (tokens[peekPos].type == TokenType::IDENTIFIER) {
+                        int afterId = peekPos + 1;
+                        while (afterId < static_cast<int>(tokens.size()) && tokens[afterId].type == TokenType::NEWLINE) afterId++;
+                        if (afterId < static_cast<int>(tokens.size()) && 
+                            (tokens[afterId].type == TokenType::RBRACE || tokens[afterId].type == TokenType::COMMA)) {
+                            isDict = true;
+                        }
+                    }
                 }
-                else if (first == TokenType::IDENTIFIER && second == TokenType::COMMA) {
-                    isDict = true;
-                }
+            }
 
-                if (isDict) {
-                    return parseDictLiteral();
-                }
+            if (isDict) {
+                return parseDictLiteral();
             }
             return parseBlock();
         }
@@ -1376,13 +1449,24 @@ namespace jc {
             std::unique_ptr<Expr> key, value;
 
             // 1. 尝试将第一个元素当成可能的标识符或常数提取出来
+            int savedPos = current;
             bool isSimpleId = check(TokenType::IDENTIFIER);
             Token maybeIdTok = peek(); // 暂存这个可能的名字
 
             if (isSimpleId) {
                 advance(); // 吞掉这个标识符
+                int tempPos = current;
+                while (tempPos < static_cast<int>(tokens.size()) && tokens[tempPos].type == TokenType::NEWLINE) tempPos++;
+                if (tempPos < static_cast<int>(tokens.size()) && 
+                    (tokens[tempPos].type == TokenType::COLON || tokens[tempPos].type == TokenType::COMMA || tokens[tempPos].type == TokenType::RBRACE)) {
+                    // 确实是简写或普通标识符 key
+                } else {
+                    isSimpleId = false;
+                    current = savedPos; // 回退
+                }
             }
-            else {
+            
+            if (!isSimpleId) {
                 key = ternary(); // 它不是简单的标识符，按常规表达式读取
             }
 

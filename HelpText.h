@@ -1878,6 +1878,23 @@ namespace jc {
     For computed keys, use the function form:
       dict(dynamic_key, 42)             → {"dynamic": 42}
 
+  Block vs. Dict Ambiguity Resolution
+  ──────────────────────
+    Because `{ ... }` is used for both code blocks and dictionaries, JC2 uses
+    a smart lookahead scanner to resolve ambiguities:
+    1. If it finds a colon `:` at the top level (ignoring ternary `? :`), it's a Dict.
+         { [1, 2; 3, 4]: "matrix" }   → Dict
+         { a ? b : c : "value" }      → Dict
+    2. If it finds a semicolon `;` at the top level, it's a Block.
+         { a, b = 1; }                → Block
+    3. If neither is found, it checks for shorthand syntax:
+         {}                           → Empty Dict
+         {a, b}                       → Shorthand Dict {"a": a, "b": b}
+         { a }                        → Shorthand Dict {"a": a}
+    * Tip: If you want a single-statement block that returns a variable,
+      always add a semicolon to avoid it being parsed as a shorthand dict:
+         { a; }                       → Block returning 'a'
+
   Access & Modification
   ──────────────────────
     d["key"]                            Read / Write the value 
