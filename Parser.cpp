@@ -397,13 +397,63 @@ namespace jc {
 
     std::unique_ptr<Expr> Parser::comparison() {
         auto expr = addition();
-        while (match({ TokenType::EQUAL, TokenType::BANG_EQUAL,
-                       TokenType::LESS, TokenType::LESS_EQUAL,
-                       TokenType::GREATER, TokenType::GREATER_EQUAL,
-                       TokenType::IN })) {                           // ★ 新增
+        if (match({ TokenType::EQUAL, TokenType::BANG_EQUAL,
+                    TokenType::LESS, TokenType::LESS_EQUAL,
+                    TokenType::GREATER, TokenType::GREATER_EQUAL,
+                    TokenType::IN })) {
             Token op = previous();
             auto right = addition();
-            expr = std::make_unique<Binary>(std::move(expr), op, std::move(right));
+            
+            if (check(TokenType::EQUAL) || check(TokenType::BANG_EQUAL) ||
+                check(TokenType::LESS) || check(TokenType::LESS_EQUAL) ||
+                check(TokenType::GREATER) || check(TokenType::GREATER_EQUAL) ||
+                check(TokenType::IN)) {
+                
+                // 连续比较，为每个中间节点生成独立的临时变量
+                int chainIdx = 0;
+                std::string tmpName = "__jc2_chain_" + std::to_string(current) + "_" + std::to_string(chainIdx++);
+                Token tmpTok(TokenType::IDENTIFIER, tmpName, op.position, op.line);
+                
+                auto assign = std::make_unique<Assign>(tmpTok, std::move(right));
+                auto comp = std::make_unique<Binary>(std::move(expr), op, std::move(assign));
+                
+                Token prevTmpTok = tmpTok;
+
+                while (match({ TokenType::EQUAL, TokenType::BANG_EQUAL,
+                               TokenType::LESS, TokenType::LESS_EQUAL,
+                               TokenType::GREATER, TokenType::GREATER_EQUAL,
+                               TokenType::IN })) {
+                    Token nextOp = previous();
+                    auto nextRight = addition();
+                    
+                    if (check(TokenType::EQUAL) || check(TokenType::BANG_EQUAL) ||
+                        check(TokenType::LESS) || check(TokenType::LESS_EQUAL) ||
+                        check(TokenType::GREATER) || check(TokenType::GREATER_EQUAL) ||
+                        check(TokenType::IN)) {
+                        
+                        std::string nextTmpName = "__jc2_chain_" + std::to_string(current) + "_" + std::to_string(chainIdx++);
+                        Token nextTmpTok(TokenType::IDENTIFIER, nextTmpName, nextOp.position, nextOp.line);
+
+                        auto nextAssign = std::make_unique<Assign>(nextTmpTok, std::move(nextRight));
+                        auto leftVar = std::make_unique<Variable>(prevTmpTok);
+                        auto nextComp = std::make_unique<Binary>(std::move(leftVar), nextOp, std::move(nextAssign));
+                        
+                        Token andOp(TokenType::AND_AND, "&&", nextOp.position, nextOp.line);
+                        comp = std::make_unique<Binary>(std::move(comp), andOp, std::move(nextComp));
+
+                        prevTmpTok = nextTmpTok;
+                    } else {
+                        auto leftVar = std::make_unique<Variable>(prevTmpTok);
+                        auto nextComp = std::make_unique<Binary>(std::move(leftVar), nextOp, std::move(nextRight));
+                        
+                        Token andOp(TokenType::AND_AND, "&&", nextOp.position, nextOp.line);
+                        comp = std::make_unique<Binary>(std::move(comp), andOp, std::move(nextComp));
+                    }
+                }
+                return comp;
+            } else {
+                return std::make_unique<Binary>(std::move(expr), op, std::move(right));
+            }
         }
         return expr;
     }
