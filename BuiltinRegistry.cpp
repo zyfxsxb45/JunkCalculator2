@@ -23,6 +23,7 @@
 #include <thread>               // ★ sleep() — std::this_thread::sleep_for
 #include <filesystem>           // ★ Phase 2: file I/O
 #include <fstream>              // ★ Phase 2: file I/O
+#include <cstdlib>              // ★ std::system
 
 namespace jc {
     // 替代 Evaluator 中的路径状态
@@ -2957,6 +2958,15 @@ void BuiltinRegistry::registerSystemShell() {
     reg("pwd", { 0 }, [](const std::vector<Value>&) -> Value {
         std::cout << "  Script dir:    " << g_cwd() << std::endl;
         std::cout << "  Workspace dir: " << (g_workspacePath.empty() ? (std::filesystem::current_path() / "data").string() : g_workspacePath) << std::endl;
+        return Value::none();
+        });
+
+    reg("cls", { 0 }, [](const std::vector<Value>&) -> Value {
+#ifdef _WIN32
+        std::system("cls");
+#else
+        std::system("clear");
+#endif
         return Value::none();
         });
 

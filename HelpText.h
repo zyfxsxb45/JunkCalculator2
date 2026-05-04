@@ -13,20 +13,24 @@ namespace jc {
 
   Session Commands
   ────────────────────────────────────────────────────────────────────
-    help                  Show this overview
-    help <topic>          Dive into a specific topic (see list below)
-    clear                 Wipe all user-defined variables
-    exit / quit           Leave the calculator
-    color on / color off  Enable/disable REPL syntax highlighting
-    gcinfo()              Show current Garbage Collector tracking status
-    gc()                  Force a Mark-and-Sweep garbage collection cycle
+    /help                  Show this overview
+    /help <topic>          Dive into a specific topic (see list below)
+    /clear                 Wipe all user-defined variables
+    /cls                   Clear the console screen and reprint banner
+    /exit | /quit          Leave the calculator
+    /color on | off        Enable/disable REPL syntax highlighting
+    /d on | off            Enable/disable real-time bytecode disassembly
+    /debug on | off        Enable/disable global step-debugger
+    /profile on | off      Enable/disable execution profiler
+    gcinfo()               Show current Garbage Collector tracking status
+    gc()                   Force a Mark-and-Sweep garbage collection cycle
 
   Workspace & Scripts
   ────────────────────────────────────────────────────────────────────
-    save <name>           Snapshot variables  → data/<name>.jc2
-    load <name>           Restore a previously saved workspace
-    run  <file>           Execute a script (sets relative path context)
-    import "lib"          Load a library (deduplicates automatically)
+    /save <name>           Snapshot variables  → data/<name>.jc2
+    /load <name>           Restore a previously saved workspace
+    run("file")            Execute a script (sets relative path context)
+    import "lib"           Load a library (deduplicates automatically)
 
     setWorkspace("path")  Change workspace directory (function form)
     getWorkspace()        Returns current workspace path
@@ -41,7 +45,7 @@ namespace jc {
     JunkCalculator2 script.jc2 -d      Run with bytecode disassembly output
     JunkCalculator2 -d                 REPL with bytecode disassembly
 
-  Topics (type "help <topic>")
+  Topics (type "/help <topic>")
   ────────────────────────────────────────────────────────────────────
     basic       Operators, constants, formatting, elementary functions
     complex     Complex number creation, properties, promotion rules
@@ -83,7 +87,7 @@ namespace jc {
 
     Type `modules()` in the REPL to see all available native modules.
 
-  Standard Libraries (require `import` before use, use help("<library>") for details)
+  Standard Libraries (require `import` before use, use `/help <library>` for details)
   ────────────────────────────────────────────────────────────────────
     regex       Regular Expression standard library (import "regex")
     discrete    Discrete math utilities standard library (import "discrete")
@@ -142,7 +146,7 @@ namespace jc {
     resetConst()                   restore PI, E, i, I, true, false
     debugInteg("on")               enable integration debug trace
     pi()  e()  i()  none()         constant factory functions (always available)
-    isint(x)  isstring(x)          type predicates (see: help typecheck)
+    isint(x)  isstring(x)          type predicates (see: /help typecheck)
     delete x                       remove any variable (including const)
     data |> sort |> unique         pipe operator (left-to-right)
     breakpoint()                   trigger interactive step-debugger
@@ -478,7 +482,7 @@ namespace jc {
     double(3+0i)        → 3.0    (only if imaginary part is zero)
     double(3+4i)        → Error  (nonzero imaginary part)
     int(3+0i)           → 3      (only if imaginary part is zero)
-    iscomplex(z)        → 1      (type predicate, see: help typecheck)
+    iscomplex(z)        → 1      (type predicate, see: /help typecheck)
     isreal(3+0i)        → 1      (real if imag ≈ 0)
 
   Automatic Promotion
@@ -639,7 +643,7 @@ namespace jc {
     zeros(n,c)          All-zeros
     magic(n)            Magic square  (n ≥ 3)
 
-  Type Predicates (see: help typecheck)
+  Type Predicates (see: /help typecheck)
   ──────────────────────
     ismatrix(A)         Any matrix type
     isrealmat(A)        RealMatrix specifically
@@ -785,7 +789,7 @@ namespace jc {
     solve(a, b, c)               ax² + bx + c = 0       (quadratic)
     solve(a, b, c, d)            ax³ + … = 0            (Cardano)
     solve(a, b, c, d, e)         ax⁴ + … = 0            (Ferrari)
-    solveEq(expr, x)             Exact symbolic solver (see: help cas)
+    solveEq(expr, x)             Exact symbolic solver (see: /help cas)
     
   Examples
   ──────────────────────
@@ -918,7 +922,7 @@ namespace jc {
       diff(x^2, x)         → 2 * x
       integ(x^2, x)        → 1/3 * x^3
       limit(sin(x)/x, x, 0) → 1
-      (See `help cas` for full symbolic features)
+      (See `/help cas` for full symbolic features)
 
     Numerical (Approximation):
       diff(f, x0)          Derivative f′(x₀)  (5-point central difference)
@@ -1096,7 +1100,7 @@ namespace jc {
     mod(a, b)            Mathematical mod (always ≥ 0)
     modpow(a, e, m)      aᵉ mod m
 
-  Numeric Predicates (see also: help typecheck)
+  Numeric Predicates (see also: /help typecheck)
   ──────────────────────
     isint(x)             Is x an integer? (BigInt, or integer-valued double/Fraction)
     iseven(n)            Is n even?
@@ -1153,9 +1157,9 @@ namespace jc {
     JunkCalculator2 script.jc2 --profile Run and print performance report
 
     REPL Dynamic Switches (can be toggled anytime):
-      -d on / off         Enable/disable real-time bytecode disassembly
-      --debug on / off    Enable/disable global step-debugger
-      --profile on / off  Enable/disable execution profiler
+      /d on | off         Enable/disable real-time bytecode disassembly
+      /debug on | off     Enable/disable global step-debugger
+      /profile on | off   Enable/disable execution profiler
 
   Interactive Debugger & Profiler
   ──────────────────────
@@ -1225,9 +1229,10 @@ namespace jc {
     setWorkspace("default")      Reset to ./data/
     getWorkspace()               Returns current workspace path as string
     pwd()                        Print both script dir and workspace dir
+    cls()                        Clear the console screen
 
-    save <name>                  REPL command: snapshot variables → data/<name>.jc2
-    load <name>                  REPL command: restore saved workspace
+    /save <name>                 REPL command: snapshot variables → data/<name>.jc2
+    /load <name>                 REPL command: restore saved workspace
 
   Script Execution & Path Context
   ──────────────────────
@@ -1250,12 +1255,12 @@ namespace jc {
       Functions/Classes                  → Blue
       Instances                          → Bright Cyan
       Dicts/Lists/Sets                   → Cyan
-      SymExpr                            → Bright Magenta
+      SymExpr                            → White
       Errors                             → Red
 
     Commands:
-      color on              Enable colors (default)
-      color off             Disable colors (for piping output)
+      /color on             Enable colors (default)
+      /color off            Disable colors (for piping output)
       color("on")           Function form (usable in scripts)
       highlight("code")     Returns a colorized version of JC2 code
 
@@ -1276,7 +1281,7 @@ namespace jc {
       json     JSON serialization & deserialization
 
     To see details:
-      help image              help prob              help json
+      /help image             /help prob             /help json
 
     Native modules take priority over .jc2 files with the same name.
     Importing the same module twice is a safe no-op.
@@ -1637,7 +1642,7 @@ namespace jc {
   ──────────────────────
     [x^2 for x in range(10)]              Generate inline
     [x for x in data if x > 0]           Filter + transform
-    See: `help basic` (List Comprehension section)
+    See: `/help basic` (List Comprehension section)
 
   Functional Programming (Works on ALL container types)
   ──────────────────────
@@ -1688,7 +1693,7 @@ namespace jc {
       [5,3,1,4,2] |> sort |> reverse |> (v) => slice(v, 0, 3)
       // → [5, 4, 3]
 
-    See: `help basic` (Pipe Operator section)
+    See: `/help basic` (Pipe Operator section)
 )HELP" },
 
 { "list", R"HELP(
@@ -1698,7 +1703,7 @@ namespace jc {
 
   ★ UNIVERSAL COMPATIBILITY:
   All array functions (push, slice, map, filter, reduce, sort, join, etc.)
-  now work natively on Lists. See `help array` for the complete reference.
+  now work natively on Lists. See `/help array` for the complete reference.
 
   Creation
   ──────────────────────
@@ -2018,7 +2023,7 @@ namespace jc {
       s1 = Set(1, 2, 3)
       s2 = s1                      s2 and s1 are the SAME set
       add(s2, 99)                  s1 now also contains 99
-    Sets are tracked by the Garbage Collector (see: help sys).
+    Sets are tracked by the Garbage Collector (see: /help sys).
 
   Immutability & Hashing
   ──────────────────────
@@ -2153,7 +2158,7 @@ namespace jc {
     getClass(p)              The class definition object
     getParent(Dog)           Parent class or none
 
-  Type Predicates (see: help typecheck)
+  Type Predicates (see: /help typecheck)
   ──────────────────────
     isclass(Point)           1 if argument is a class definition
     isinstance(p)            1 if argument is any instance

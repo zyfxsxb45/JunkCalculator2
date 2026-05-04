@@ -313,12 +313,16 @@ int main(int argc, char* argv[]) {
         return 0;
     }
 
-    std::cout << jc::col(jc::Ansi::BRIGHT_CYAN)
-        << "=================================================\n"
-        << "   Junk Calculator 2.3.1.1\n"
-        << "   Developed by Yu Liangyang, Tsinghua University\n"
-        << "=================================================\n" << jc::col(jc::Ansi::RESET)
-        << "Type " << jc::col(jc::Ansi::BRIGHT_YELLOW) << "'help'" << jc::col(jc::Ansi::RESET) << " for a list of commands." << std::endl;
+    auto printBanner = []() {
+        std::cout << jc::col(jc::Ansi::BRIGHT_CYAN)
+            << "=================================================\n"
+            << "   Junk Calculator 2.3.1.1\n"
+            << "   Developed by Yu Liangyang, Tsinghua University\n"
+            << "=================================================\n" << jc::col(jc::Ansi::RESET)
+            << "Type " << jc::col(jc::Ansi::BRIGHT_YELLOW) << "'/help'" << jc::col(jc::Ansi::RESET) << " for a list of commands." << std::endl;
+    };
+
+    printBanner();
 
     while (true) {
         jc::g_interruptRequested.store(false, std::memory_order_relaxed);
@@ -392,51 +396,60 @@ int main(int argc, char* argv[]) {
         }
         if (inputAborted) continue;
 
-        if (input == "color on") { jc::colorsEnabled = true; continue; }
-        if (input == "color off") { jc::colorsEnabled = false; continue; }
+        if (input == "/color on") { jc::colorsEnabled = true; continue; }
+        if (input == "/color off") { jc::colorsEnabled = false; continue; }
 
         // ★ 随时开关 Disassembly 打印
-        if (input == "-d on") {
+        if (input == "/d on") {
             g_showDisasm = true;
             std::cout << "Bytecode disassembly enabled.\n";
             continue;
         }
-        if (input == "-d off") {
+        if (input == "/d off") {
             g_showDisasm = false;
             std::cout << "Bytecode disassembly disabled.\n";
             continue;
         }
 
         // ★ 随时开关全局单步 Debugger
-        if (input == "--debug on") {
+        if (input == "/debug on") {
             g_autoDebug = true;
             std::cout << "Interactive Step-Debugger enabled. (Will break on next evaluated line)\n";
             continue;
         }
-        if (input == "--debug off") {
+        if (input == "/debug off") {
             g_autoDebug = false;
             if (jc::VM::activeVM) jc::VM::activeVM->disableDebugger(); // ★ 强制拉闸
             std::cout << "Interactive Step-Debugger disabled.\n";
             continue;
         }
-        if (input == "--profile on") {
+        if (input == "/profile on") {
             g_profile = true;
             if (jc::VM::activeVM) jc::VM::activeVM->enableProfiler(true);
             std::cout << "Profiler enabled. Will print report after execution.\n";
             continue;
         }
-        if (input == "--profile off") {
+        if (input == "/profile off") {
             g_profile = false;
             if (jc::VM::activeVM) jc::VM::activeVM->enableProfiler(false);
             std::cout << "Profiler disabled.\n";
             continue;
         }
-        if (input == "exit" || input == "quit") break;
-        if (input == "help") { printHelp(); continue; }
-        if (input.substr(0, 5) == "help ") { printHelpTopic(input.substr(5)); continue; }
-        if (input == "clear") { vm.clearGlobals(); std::cout << "All variables cleared.\n"; continue; }
-        if (input.substr(0, 5) == "save ") { saveWorkspace(input.substr(5)); continue; }
-        if (input.substr(0, 5) == "load ") { loadWorkspace(input.substr(5)); continue; }
+        if (input == "/exit" || input == "/quit") break;
+        if (input == "/help") { printHelp(); continue; }
+        if (input.substr(0, 6) == "/help ") { printHelpTopic(input.substr(6)); continue; }
+        if (input == "/clear") { vm.clearGlobals(); std::cout << "All variables cleared.\n"; continue; }
+        if (input == "/cls") {
+#ifdef _WIN32
+            std::system("cls");
+#else
+            std::system("clear");
+#endif
+            printBanner();
+            continue;
+        }
+        if (input.substr(0, 6) == "/save ") { saveWorkspace(input.substr(6)); continue; }
+        if (input.substr(0, 6) == "/load ") { loadWorkspace(input.substr(6)); continue; }
 
         try {
             jc::Value result = evalCode(input, "REPL", false);
@@ -473,7 +486,7 @@ int main(int argc, char* argv[]) {
                     else if constexpr (std::is_same_v<T, jc::Dict> || std::is_same_v<T, jc::List> || std::is_same_v<T, jc::Set>)
                         typeColor = jc::col(jc::Ansi::CYAN);
                     else
-                        typeColor = jc::col(jc::Ansi::BRIGHT_MAGENTA); // SymExpr 等
+                        typeColor = jc::col(jc::Ansi::WHITE); // SymExpr 等
                     }, result.data);
 
                 jc::g_printMatrix2D = isTopLevelMatrix;

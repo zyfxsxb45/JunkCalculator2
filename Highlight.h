@@ -291,7 +291,7 @@ namespace jc {
         if (typeName == "Dict" || typeName == "List"|| typeName == "Set")
             return col(Ansi::CYAN);
         if (typeName == "SymExpr")
-            return col(Ansi::BRIGHT_MAGENTA);
+            return col(Ansi::WHITE);
         return "";
     }
 
