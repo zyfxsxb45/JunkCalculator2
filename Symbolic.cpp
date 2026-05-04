@@ -3646,7 +3646,7 @@ namespace jc {
         }
         
         if (!c.isOne()) {
-            if (!result.empty()) {
+            if (!result.empty() && result[0].second == 1) {
                 result[0].first = simplifyFrac(result[0].first * c);
             } else {
                 result.push_back({c, 1});

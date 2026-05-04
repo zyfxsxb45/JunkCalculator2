@@ -46,9 +46,11 @@ namespace jc {
             catch (...) {}
 
             if (checkZero.isZero()) {
-                auto [sqrtOk, rootLead] = trySquareRoot(lead);
-                if (sqrtOk) {
-                    return simplifyCore((rootLead * X + simplifyCore(rootLead * R)) ^ SymExpr(BigInt(N)));
+                if (N == 2) {
+                    auto [sqrtOk, rootLead] = trySquareRoot(lead);
+                    if (sqrtOk) {
+                        return simplifyCore((rootLead * X + simplifyCore(rootLead * R)) ^ SymExpr(BigInt(2)));
+                    }
                 }
                 return rawCandidate;
             }
@@ -295,6 +297,9 @@ namespace jc {
         
         SymExpr result(BigInt(1));
         bool changed = false;
+        if (sqFree.size() > 1 || sqFree[0].second > 1 || sqFree[0].first != expr) {
+            changed = true;
+        }
         
         for (const auto& [part, power] : sqFree) {
             if (part.ptr->getType() == SymType::NUM) {
@@ -449,9 +454,7 @@ namespace jc {
             }
             
             if (trueFactorsZ.size() == 1) {
-                SymExpr factoredPart = part;
-                if (content > BigInt(1)) factoredPart = SymExpr(content) * part;
-                result = result * (factoredPart ^ SymExpr(BigInt(power)));
+                result = result * (part ^ SymExpr(BigInt(power)));
                 continue;
             }
             

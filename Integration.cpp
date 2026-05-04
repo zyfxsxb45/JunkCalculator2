@@ -67,26 +67,6 @@ namespace jc {
     // =================================================================
     static SymExpr rothsteinTrager(SymExpr A, SymExpr D, const std::string& var) {
         if (SymConfig::debugIntegration) std::cout << "   [RT] A: " << A.toString() << ", D: " << D.toString() << std::endl;
-        // 智能拦截：基于 Galois 群扩展度的 Rothstein-Trager 智能拦截
-        auto sqFree = polySquareFree(D, var);
-        for (const auto& p : sqFree) {
-            if (getDegree(p.first, var) > 4) {
-                SymExpr factored = factor(p.first);
-                auto checkDegree = [&](const SymExpr& f) {
-                    if (getDegree(f, var) > 4) {
-                        if (SymConfig::debugIntegration) std::cout << "   [RT] Irreducible denominator factor degree > 4: " << f.toString() << std::endl;
-                        throw std::runtime_error("Non-integrable rational function: irreducible denominator factor degree exceeds solvability.");
-                    }
-                };
-                if (factored.ptr->getType() == SymType::MUL) {
-                    for (auto& arg : std::static_pointer_cast<SymMul>(factored.ptr)->args) checkDegree(SymExpr(arg));
-                } else if (factored.ptr->getType() == SymType::POW) {
-                    checkDegree(SymExpr(std::static_pointer_cast<SymPow>(factored.ptr)->base));
-                } else {
-                    checkDegree(factored);
-                }
-            }
-        }
 
         SymExpr z = SymExpr::makeVar("_z");
         SymExpr dD = diff(D, var);
@@ -529,6 +509,12 @@ namespace jc {
         A = simplifyCore(expand(A, SymConfig::maxExpandTerms));
         D = simplifyCore(expand(D, SymConfig::maxExpandTerms));
         
+        SymExpr gcd_AD = polyGCD(A, D, var);
+        if (!gcd_AD.isOne() && !gcd_AD.isZero()) {
+            A = polyDiv(A, gcd_AD, var).first;
+            D = polyDiv(D, gcd_AD, var).first;
+        }
+        
         auto [Q, R] = polyDiv(A, D, var);
         SymExpr rationalPart(0);
         SymExpr polyPart = Q; 
@@ -771,32 +757,16 @@ namespace jc {
             if (getDegree(den, var) > 0) {
                 auto [ratPart, polyPart, cA, cD] = hermiteReduce(num, den, var);
             
-                SymExpr intPart = polyPart;
-                if (!cA.isZero()) intPart = intPart + simplifyCore(expand(cA / cD, SymConfig::maxExpandTerms));
-                
-                if (intPart.isZero()) return ratPart;
-                
-                try {
-                    if (intPart == normalizedExpr) throw std::runtime_error("Loop");
-                    if (getAstNodeCount(intPart) >= getAstNodeCount(normalizedExpr)) throw std::runtime_error("Complexity increased");
-                    SymExpr intRes = integrate(intPart, var, depth + 1);
-                    return ratPart + intRes;
-                } catch (const EngineInterruptError&) {
-                    throw;
-                } catch (const std::exception& e) {
-                    std::string debugInfo = "Hermite Reduction completed, but remaining integral is non-elementary.\n";
-                    debugInfo += "Original: " + normalizedExpr.toString() + "\n";
-                    debugInfo += "Rational Part: " + ratPart.toString() + "\n";
-                    debugInfo += "Remaining Integral: \\int (" + intPart.toString() + ") d" + var + "\n";
-                    debugInfo += "Reason: " + std::string(e.what()) + "\n";
-                    throw std::runtime_error("Calculus Error: " + debugInfo);
-                } catch (...) {
-                    std::string debugInfo = "Hermite Reduction completed, but remaining integral is non-elementary.\n";
-                    debugInfo += "Original: " + normalizedExpr.toString() + "\n";
-                    debugInfo += "Rational Part: " + ratPart.toString() + "\n";
-                    debugInfo += "Remaining Integral: \\int (" + intPart.toString() + ") d" + var + "\n";
-                    throw std::runtime_error("Calculus Error: " + debugInfo);
+                SymExpr res = ratPart;
+                if (!polyPart.isZero()) {
+                    res = res + integrate(polyPart, var, depth + 1);
                 }
+                
+                if (!cA.isZero()) {
+                    res = res + rothsteinTrager(cA, cD, var);
+                }
+                
+                return res;
             }
         }
         
