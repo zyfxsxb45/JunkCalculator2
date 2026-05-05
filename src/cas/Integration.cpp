@@ -2099,6 +2099,28 @@ namespace jc {
                     if (valid) {
                         SymExpr subbed = simplifyCore(subs(varPart, var, x_sub) * dx_sub);
                         SymExpr subbed_var = subs(subbed, "_t", SymExpr::makeVar(var));
+                        
+                        auto hyperbolicSimp = [&](const SymExpr& e) -> SymExpr {
+                            SymExpr _x = SymExpr::makeVar("_x");
+                            SymExpr _c = SymExpr::makeVar("_c");
+                            auto func = [](const std::string& name, const SymExpr& arg) {
+                                return SymExpr(std::make_shared<SymFunc>(name, std::vector<std::shared_ptr<SymNode>>{arg.ptr}));
+                            };
+                            SymExpr sinh_x = func("sinh", _x);
+                            SymExpr cosh_x = func("cosh", _x);
+                            
+                            SymExpr res = e;
+                            res = applyRule(res, ((sinh_x ^ SymExpr(BigInt(2))) + SymExpr(BigInt(1))) ^ SymExpr(Fraction(1, 2)), cosh_x);
+                            res = applyRule(res, ((cosh_x ^ SymExpr(BigInt(2))) - SymExpr(BigInt(1))) ^ SymExpr(Fraction(1, 2)), sinh_x);
+                            
+                            res = applyRule(res, (_c * (sinh_x ^ SymExpr(BigInt(2))) + _c) ^ SymExpr(Fraction(1, 2)), (_c ^ SymExpr(Fraction(1, 2))) * cosh_x);
+                            res = applyRule(res, (_c * (cosh_x ^ SymExpr(BigInt(2))) - _c) ^ SymExpr(Fraction(1, 2)), (_c ^ SymExpr(Fraction(1, 2))) * sinh_x);
+                            
+                            return simplifyCore(res);
+                        };
+                        
+                        subbed_var = hyperbolicSimp(subbed_var);
+                        
                         if (auto int_var = doInteg(trigsimp(subbed_var), current_depth + 1)) {
                             if (SymConfig::debugIntegration) std::cout << std::string(current_depth * 2, ' ') << "<- Trig Substitution Success" << std::endl;
                             SymExpr res = subs(*int_var, var, t_back);
@@ -2106,6 +2128,7 @@ namespace jc {
                         }
                         SymExpr exp_subbed = trigToExp(subbed_var);
                         if (exp_subbed != subbed_var) {
+                            exp_subbed = simplifyCore(expand_core(exp_subbed, SymConfig::maxExpandTerms));
                             if (auto int_exp = doInteg(exp_subbed, current_depth + 1)) {
                                 if (SymConfig::debugIntegration) std::cout << std::string(current_depth * 2, ' ') << "<- Trig Substitution (via Exp) Success" << std::endl;
                                 SymExpr res = subs(expToTrig(*int_exp), var, t_back);
