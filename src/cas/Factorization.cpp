@@ -42,7 +42,7 @@ namespace jc {
             SymExpr checkZero;
             try { checkZero = simplifyCore(expr - rawCandidate); }
             catch (...) { checkZero = SymExpr(BigInt(1)); }
-            try { checkZero = simplifyCore(expand(checkZero, SymConfig::maxExpandTerms)); }
+            try { checkZero = simplifyCore(expand_core(checkZero, SymConfig::maxExpandTerms)); }
             catch (...) {}
 
             if (checkZero.isZero()) {
