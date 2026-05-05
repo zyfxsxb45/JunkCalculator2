@@ -128,6 +128,7 @@ namespace jc {
     // ==========================================
     // CAS 操作函数
     // ==========================================
+    SymExpr expand_core(const SymExpr& expr, int64_t maxPowTerms = 0);
     SymExpr expand(const SymExpr& expr, int64_t maxPowTerms = 0);
     SymExpr subs(const SymExpr& expr, const std::string& var, const SymExpr& val);
     SymExpr evalFloat(const SymExpr& expr);   // 已有：全部转 double

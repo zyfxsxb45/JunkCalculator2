@@ -16,51 +16,6 @@
 
 namespace jc {
 
-    thread_local std::unordered_set<std::string> g_taintedSignatures;
-
-    static void markTainted(const SymExpr& expr) {
-        if (!expr.ptr) return;
-        g_taintedSignatures.insert(expr.ptr->getSignature());
-        switch (expr.ptr->getType()) {
-            case SymType::ADD:
-                for (auto& arg : std::static_pointer_cast<SymAdd>(expr.ptr)->args) markTainted(SymExpr(arg));
-                break;
-            case SymType::MUL:
-                for (auto& arg : std::static_pointer_cast<SymMul>(expr.ptr)->args) markTainted(SymExpr(arg));
-                break;
-            case SymType::POW:
-                markTainted(SymExpr(std::static_pointer_cast<SymPow>(expr.ptr)->base));
-                markTainted(SymExpr(std::static_pointer_cast<SymPow>(expr.ptr)->exp));
-                break;
-            case SymType::FUNC:
-                for (auto& arg : std::static_pointer_cast<SymFunc>(expr.ptr)->args) markTainted(SymExpr(arg));
-                break;
-            default: break;
-        }
-    }
-
-    static bool isTainted(const SymExpr& expr) {
-        if (!expr.ptr) return false;
-        if (g_taintedSignatures.count(expr.ptr->getSignature())) return true;
-        switch (expr.ptr->getType()) {
-            case SymType::ADD:
-                for (auto& arg : std::static_pointer_cast<SymAdd>(expr.ptr)->args) if (isTainted(SymExpr(arg))) return true;
-                break;
-            case SymType::MUL:
-                for (auto& arg : std::static_pointer_cast<SymMul>(expr.ptr)->args) if (isTainted(SymExpr(arg))) return true;
-                break;
-            case SymType::POW:
-                if (isTainted(SymExpr(std::static_pointer_cast<SymPow>(expr.ptr)->base))) return true;
-                if (isTainted(SymExpr(std::static_pointer_cast<SymPow>(expr.ptr)->exp))) return true;
-                break;
-            case SymType::FUNC:
-                for (auto& arg : std::static_pointer_cast<SymFunc>(expr.ptr)->args) if (isTainted(SymExpr(arg))) return true;
-                break;
-            default: break;
-        }
-        return false;
-    }
-
     // =================================================================
     // Rothstein-Trager 算法 (Rothstein-Trager Algorithm)
     // 用于积分 A/D，其中 D 无平方，deg(A) < deg(D)
@@ -70,7 +25,7 @@ namespace jc {
 
         SymExpr z = SymExpr::makeVar("_z");
         SymExpr dD = diff(D, var);
-        SymExpr P = simplifyCore(expand(A - z * dD, SymConfig::maxExpandTerms));
+        SymExpr P = simplifyCore(expand_core(A - z * dD, SymConfig::maxExpandTerms));
         if (SymConfig::debugIntegration) std::cout << "   [RT] P(x,z) = A - z*D': " << P.toString() << std::endl;
         
         // 确保 polyResultant 的第一个参数次数 >= 第二个参数
@@ -156,7 +111,7 @@ namespace jc {
             if (!coeffs.empty()) {
                 SymExpr lead = coeffs.back();
                 if (!lead.isZero() && !lead.isOne()) {
-                    v_z = simplifyCore(expand(v_z / lead, SymConfig::maxExpandTerms));
+                    v_z = simplifyCore(expand_core(v_z / lead, SymConfig::maxExpandTerms));
                 }
             }
             if (SymConfig::debugIntegration) std::cout << "   [RT] v_z(x,z) after monic: " << v_z.toString() << std::endl;
@@ -215,7 +170,7 @@ namespace jc {
                                 used[i] = true;
                                 used[conj_idx] = true;
                                 
-                                SymExpr v_i = simplifyCore(expand(subs(v_z, "_z", exactRoots[i]), SymConfig::maxExpandTerms));
+                                SymExpr v_i = simplifyCore(expand_core(subs(v_z, "_z", exactRoots[i]), SymConfig::maxExpandTerms));
                                 auto v_coeffs = extractCoeffs(v_i, "i");
                                 SymExpr partA(BigInt(0)), partB(BigInt(0));
                                 for (size_t k = 0; k < v_coeffs.size(); ++k) {
@@ -247,7 +202,7 @@ namespace jc {
                         used[i] = true;
                         SymExpr root = exactRoots[i];
                         if (SymConfig::debugIntegration) std::cout << "   [RT] Exact root: " << root.toString() << std::endl;
-                        SymExpr v_i = simplifyCore(expand(subs(v_z, "_z", root), SymConfig::maxExpandTerms));
+                        SymExpr v_i = simplifyCore(expand_core(subs(v_z, "_z", root), SymConfig::maxExpandTerms));
                         if (SymConfig::debugIntegration) std::cout << "   [RT] v_i(x): " << v_i.toString() << std::endl;
                         SymExpr log_vi(std::make_shared<SymFunc>("log", std::vector<std::shared_ptr<SymNode>>{v_i.ptr}));
                         result = result + root * log_vi;
@@ -269,7 +224,6 @@ namespace jc {
         if (SymConfig::debugIntegration) std::cout << "   [RT] Result before simplify: " << result.toString() << std::endl;
         
         SymExpr finalRes = simplifyCore(result);
-        markTainted(finalRes);
         return finalRes;
     }
 
@@ -290,6 +244,16 @@ namespace jc {
     struct RischDiffField {
         std::string x_var;
         std::vector<RischExtension> tower;
+
+        SymExpr derive(SymExpr expr, const std::string& exclude_var = "") const {
+            SymExpr res = diff(expr, x_var);
+            for (const auto& ext : tower) {
+                if (ext.name != exclude_var && containsVar(expr.ptr, ext.name)) {
+                    res = res + diff(expr, ext.name) * ext.deriv;
+                }
+            }
+            return simplifyCore(expand_core(res, SymConfig::maxExpandTerms));
+        }
 
         // 将表达式重写为微分域变量的代数式
         SymExpr rewrite(const SymExpr& expr) const {
@@ -506,8 +470,8 @@ namespace jc {
     // 🚀 Risch 算法 Step 2: Hermite 约化 (Hermite Reduction)
     // =================================================================
     static std::tuple<SymExpr, SymExpr, SymExpr, SymExpr> hermiteReduce(SymExpr A, SymExpr D, const std::string& var) {
-        A = simplifyCore(expand(A, SymConfig::maxExpandTerms));
-        D = simplifyCore(expand(D, SymConfig::maxExpandTerms));
+        A = simplifyCore(expand_core(A, SymConfig::maxExpandTerms));
+        D = simplifyCore(expand_core(D, SymConfig::maxExpandTerms));
         
         SymExpr gcd_AD = polyGCD(A, D, var);
         if (!gcd_AD.isOne() && !gcd_AD.isZero()) {
@@ -537,30 +501,30 @@ namespace jc {
             }
             if (getDegree(V, var) <= 0) continue;
 
-            SymExpr Vi = simplifyCore(expand(V ^ SymExpr(i), SymConfig::maxExpandTerms));
+            SymExpr Vi = simplifyCore(expand_core(V ^ SymExpr(i), SymConfig::maxExpandTerms));
             SymExpr U = polyDiv(currentD, Vi, var).first;
 
             SymExpr dV = diff(V, var);
-            SymExpr U_dV = simplifyCore(expand(U * dV, SymConfig::maxExpandTerms));
+            SymExpr U_dV = simplifyCore(expand_core(U * dV, SymConfig::maxExpandTerms));
 
             auto [gcd, S, T] = polyEGCD(U_dV, V, var);
-            SymExpr factor = simplifyCore(expand(currentA / gcd, SymConfig::maxExpandTerms));
-            SymExpr B = simplifyCore(expand(S * factor, SymConfig::maxExpandTerms));
-            SymExpr C = simplifyCore(expand(T * factor, SymConfig::maxExpandTerms));
+            SymExpr factor_expr = simplifyCore(expand_core(currentA / gcd, SymConfig::maxExpandTerms));
+            SymExpr B = simplifyCore(expand_core(S * factor_expr, SymConfig::maxExpandTerms));
+            SymExpr C = simplifyCore(expand_core(T * factor_expr, SymConfig::maxExpandTerms));
 
             auto [q, r] = polyDiv(B, V, var);
             B = r;
-            C = simplifyCore(expand(C + q * U_dV, SymConfig::maxExpandTerms));
+            C = simplifyCore(expand_core(C + q * U_dV, SymConfig::maxExpandTerms));
 
-            SymExpr V_im1 = simplifyCore(expand(V ^ SymExpr(i - 1), SymConfig::maxExpandTerms));
-            SymExpr denom = simplifyCore(expand(SymExpr(i - 1) * V_im1, SymConfig::maxExpandTerms));
-            rationalPart = rationalPart + simplifyCore(expand(-B / denom, SymConfig::maxExpandTerms));
+            SymExpr V_im1 = simplifyCore(expand_core(V ^ SymExpr(i - 1), SymConfig::maxExpandTerms));
+            SymExpr denom = simplifyCore(expand_core(SymExpr(i - 1) * V_im1, SymConfig::maxExpandTerms));
+            rationalPart = rationalPart + simplifyCore(expand_core(-B / denom, SymConfig::maxExpandTerms));
 
             SymExpr dB = diff(B, var);
-            SymExpr term2 = simplifyCore(expand((dB * U) / SymExpr(i - 1), SymConfig::maxExpandTerms));
-            currentA = simplifyCore(expand(C + term2, SymConfig::maxExpandTerms));
+            SymExpr term2 = simplifyCore(expand_core((dB * U) / SymExpr(i - 1), SymConfig::maxExpandTerms));
+            currentA = simplifyCore(expand_core(C + term2, SymConfig::maxExpandTerms));
             
-            currentD = simplifyCore(expand(U * V_im1, SymConfig::maxExpandTerms));
+            currentD = simplifyCore(expand_core(U * V_im1, SymConfig::maxExpandTerms));
             
             for (auto& p : sqFree) {
                 if (p.second == i) p.second = i - 1;
@@ -863,7 +827,6 @@ namespace jc {
                             }
                         }
                         SymExpr finalRes = simplifyCore(backSubstitute(result));
-                        markTainted(finalRes);
                         if (SymConfig::debugIntegration) std::cout << std::string(depth * 2, ' ') << "<- Risch Step 4 (LOG) Success" << std::endl;
                         return finalRes;
                     } catch (const EngineInterruptError&) {
@@ -952,8 +915,8 @@ namespace jc {
                                         SymExpr B_term = simplifyCore(c_d * (SymExpr::makeVar(var) ^ SymExpr(BigInt(d))));
                                         
                                         B_i = B_i + B_term;
-                                        SymExpr B_term_deriv = simplifyCore(diff(B_term, var));
-                                        currentA = simplifyCore(expand(currentA - B_term_deriv - V_i * B_term, SymConfig::maxExpandTerms));
+                                        SymExpr B_term_deriv = field.derive(B_term);
+                                        currentA = simplifyCore(expand_core(currentA - B_term_deriv - V_i * B_term, SymConfig::maxExpandTerms));
                                     }
                                 }
                                 
@@ -985,25 +948,30 @@ namespace jc {
                     
                     if (success) {
                         SymExpr finalRes = simplifyCore(backSubstitute(result));
-                        markTainted(finalRes);
                         if (SymConfig::debugIntegration) std::cout << std::string(depth * 2, ' ') << "<- Risch Step 5 (EXP) Success" << std::endl;
                         return finalRes;
                     }
                 }
             } else if (topExt.type == RischExtType::ALG) {
-                if (SymConfig::debugIntegration) std::cout << std::string(depth * 2, ' ') << "   [Risch] Trager's Algorithm for Algebraic Extension" << std::endl;
-                // Trager 算法 (1984) - 代数曲线伪化简 (Pseudo-reduction)
-                SymExpr minPoly = topExt.minPoly;
+                if (SymConfig::debugIntegration) std::cout << std::string(depth * 2, ' ') << "   [Risch] Algebraic Extension Integration" << std::endl;
+                SymExpr minPoly = field.rewrite(topExt.minPoly);
                 SymExpr t_sym = SymExpr::makeVar(topExt.name);
                 
                 auto [A, D] = getFraction(rewritten);
+                if (SymConfig::debugIntegration) {
+                    std::cout << std::string(depth * 2, ' ') << "   [Risch] A: " << A.toString() << ", D: " << D.toString() << std::endl;
+                }
                 
                 // 1. 分母有理化 (Rationalize Denominator)
                 auto [gcd_D, U, V] = polyEGCD(D, minPoly, topExt.name);
-                SymExpr res_D = simplifyCore(expand(U * D + V * minPoly, SymConfig::maxExpandTerms));
+                SymExpr res_D = simplifyCore(expand_core(U * D + V * minPoly, SymConfig::maxExpandTerms));
                 
+                if (SymConfig::debugIntegration) {
+                    std::cout << std::string(depth * 2, ' ') << "   [Risch] Rationalized D: " << res_D.toString() << std::endl;
+                }
+
                 if (!res_D.isZero() && !containsVar(res_D.ptr, topExt.name)) {
-                    SymExpr newA = simplifyCore(expand(A * U, SymConfig::maxExpandTerms));
+                    SymExpr newA = simplifyCore(expand_core(A * U, SymConfig::maxExpandTerms));
                     SymExpr newD = res_D;
                     
                     // 2. 伪化简 (Pseudo-reduction) 降次
@@ -1011,34 +979,183 @@ namespace jc {
                     SymExpr A_red = R;
                     SymExpr D_red = newD;
                     
-                    // 3. 构造 Trager 结式 (Trager's Resultant) 提取对数留数
+                    if (SymConfig::debugIntegration) {
+                        std::cout << std::string(depth * 2, ' ') << "   [Risch] Pseudo-reduced A_red: " << A_red.toString() << ", D_red: " << D_red.toString() << std::endl;
+                    }
+
+                    // 3. 纯根式扩张的完整 Risch 积分 (Complete Risch for Radical Extensions)
+                    // 适用于 minPoly = t^n - P(x)
+                    SymExpr P_x = simplifyCore(-subs(minPoly, topExt.name, SymExpr(BigInt(0))));
+                    int n_deg = getDegree(minPoly, topExt.name);
+                    bool is_radical = simplifyCore(minPoly - ((t_sym ^ SymExpr(BigInt(n_deg))) - P_x)).isZero();
+                    
+                    if (is_radical && n_deg > 0) {
+                        if (SymConfig::debugIntegration) std::cout << std::string(depth * 2, ' ') << "   [Risch] Radical Extension detected: t^" << n_deg << " = " << P_x.toString() << std::endl;
+                        
+                        auto coeffs_R = extractCoeffs(R, topExt.name);
+                        SymExpr alg_result(BigInt(0));
+                        SymExpr log_integrand(BigInt(0));
+                        bool radical_success = true;
+                        
+                        for (size_t i = 0; i < coeffs_R.size(); ++i) {
+                            if (coeffs_R[i].isZero()) continue;
+                            SymExpr A_i = coeffs_R[i];
+                            SymExpr D_i = newD;
+                            
+                            if (i == 0) {
+                                log_integrand = log_integrand + simplifyCore(A_i / D_i);
+                                continue;
+                            }
+                            
+                            // 积分 A_i / D_i * t^i
+                            // 使用 Ostrogradsky-Hermite 约化提取代数部分
+                            SymExpr current_A = A_i;
+                            SymExpr current_D = D_i;
+                            
+                            auto sqFree = polySquareFree(current_D, var);
+                            int m = 0;
+                            for (const auto& p : sqFree) m = std::max(m, p.second);
+                            
+                            for (int j = m; j >= 2; --j) {
+                                SymExpr V_j(1);
+                                for (auto& p : sqFree) if (p.second == j) V_j = p.first;
+                                if (getDegree(V_j, var) <= 0) continue;
+                                
+                                SymExpr V_prime = field.derive(V_j);
+                                SymExpr P_prime = field.derive(P_x);
+                                
+                                // 解 A P = - (j-1) B V' P (mod V)
+                                SymExpr rhs = simplifyCore(expand_core(current_A * P_x, SymConfig::maxExpandTerms));
+                                SymExpr lhs_coeff = simplifyCore(expand_core(SymExpr(BigInt(-(j - 1))) * V_prime * P_x, SymConfig::maxExpandTerms));
+                                
+                                auto [gcd, S, T] = polyEGCD(lhs_coeff, V_j, var);
+                                if (!gcd.isOne() && !gcd.isZero()) continue; // 极点在分支点上，保留给对数部分
+                                
+                                SymExpr B = polyDiv(simplifyCore(expand_core(S * rhs, SymConfig::maxExpandTerms)), V_j, var).second;
+                                
+                                // C = (A P - (B' V P - (j-1) B V' P + B V (i/n) P')) / (V P)
+                                SymExpr B_prime = field.derive(B);
+                                SymExpr term1 = simplifyCore(expand_core(B_prime * V_j * P_x, SymConfig::maxExpandTerms));
+                                SymExpr term2 = simplifyCore(expand_core(SymExpr(BigInt(j - 1)) * B * V_prime * P_x, SymConfig::maxExpandTerms));
+                                SymExpr term3 = simplifyCore(expand_core(B * V_j * SymExpr(Fraction(BigInt(i), BigInt(n_deg))) * P_prime, SymConfig::maxExpandTerms));
+                                
+                                SymExpr num = simplifyCore(expand_core(rhs - term1 + term2 - term3, SymConfig::maxExpandTerms));
+                                SymExpr den = simplifyCore(expand_core(V_j * P_x, SymConfig::maxExpandTerms));
+                                
+                                SymExpr C = polyDiv(num, den, var).first;
+                                
+                                SymExpr V_jm1 = V_j ^ SymExpr(BigInt(j - 1));
+                                alg_result = alg_result + simplifyCore(B / V_jm1) * (t_sym ^ SymExpr(BigInt(i)));
+                                current_A = C;
+                                current_D = polyDiv(current_D, V_j, var).first;
+                                
+                                for (auto& p : sqFree) if (p.second == j) p.second = j - 1;
+                            }
+                            
+                            // 多项式部分约化 (Polynomial Reduction)
+                            SymExpr W = simplifyCore(expand_core(current_A * P_x, SymConfig::maxExpandTerms));
+                            int iter_poly = 0;
+                            while (!W.isZero() && getDegree(W, var) >= getDegree(P_x, var) - 1 && iter_poly++ < 20) {
+                                int degW = getDegree(W, var);
+                                int degP = getDegree(P_x, var);
+                                if (degP <= 0) break;
+                                
+                                int k = degW - degP + 1;
+                                if (k < 0) break;
+                                
+                                SymExpr k_sym = SymExpr(BigInt(k));
+                                SymExpr i_n = SymExpr(Fraction(BigInt(i), BigInt(n_deg)));
+                                SymExpr P_prime = field.derive(P_x);
+                                
+                                SymExpr deriv_core = simplifyCore(expand_core(k_sym * P_x + SymExpr::makeVar(var) * i_n * P_prime, SymConfig::maxExpandTerms));
+                                auto coeffs_deriv = extractCoeffs(deriv_core, var);
+                                if (coeffs_deriv.empty()) break;
+                                SymExpr lead_deriv = coeffs_deriv.back();
+                                if (lead_deriv.isZero()) break;
+                                
+                                auto coeffs_W = extractCoeffs(W, var);
+                                SymExpr leadW = coeffs_W.back();
+                                
+                                SymExpr coeff_c = simplifyCore(leadW / lead_deriv);
+                                SymExpr Y_term = coeff_c * (SymExpr::makeVar(var) ^ SymExpr(BigInt(k)));
+                                
+                                alg_result = alg_result + Y_term * (t_sym ^ SymExpr(BigInt(i)));
+                                
+                                SymExpr Y_prime = field.derive(Y_term);
+                                SymExpr sub_term = simplifyCore(expand_core(Y_prime * P_x + Y_term * i_n * P_prime, SymConfig::maxExpandTerms));
+                                W = simplifyCore(expand_core(W - sub_term, SymConfig::maxExpandTerms));
+                            }
+                            
+                            SymExpr rem_A = simplifyCore(W / P_x);
+                            if (!rem_A.isZero()) {
+                                SymExpr rem = simplifyCore(rem_A / current_D);
+                                log_integrand = log_integrand + rem * (t_sym ^ SymExpr(BigInt(i)));
+                            }
+                        }
+                        
+                        if (radical_success) {
+                            SymExpr final_res = backSubstitute(alg_result);
+                            if (!log_integrand.isZero()) {
+                                SymExpr log_x = backSubstitute(log_integrand);
+                                if (SymConfig::debugIntegration) std::cout << std::string(depth * 2, ' ') << "   [Risch] Integrating remaining log part: " << log_x.toString() << std::endl;
+                                try {
+                                    final_res = final_res + integrate(log_x, var, depth + 1);
+                                } catch (...) {
+                                    radical_success = false;
+                                }
+                            }
+                            if (radical_success) {
+                                if (SymConfig::debugIntegration) std::cout << std::string(depth * 2, ' ') << "<- Risch Radical Extension Success" << std::endl;
+                                return final_res;
+                            }
+                        }
+                    }
+                    
+                    // 4. 构造 Trager 结式 (Trager's Resultant) 提取对数留数
+                    if (SymConfig::debugIntegration) std::cout << std::string(depth * 2, ' ') << "   [Risch] Trager's Algorithm for Logarithmic Part" << std::endl;
                     SymExpr z = SymExpr::makeVar("_z");
-                    SymExpr dP_dx = diff(minPoly, var);
+                    SymExpr dP_dx = field.derive(minPoly, topExt.name);
                     SymExpr dP_dt = diff(minPoly, topExt.name);
                     
                     // Trager 核心方程: z * D_red * dP/dx - A_red * dP/dt
-                    SymExpr trager_poly = simplifyCore(expand(z * D_red * dP_dx - A_red * dP_dt, SymConfig::maxExpandTerms));
+                    SymExpr trager_poly = simplifyCore(expand_core(z * D_red * dP_dx - A_red * dP_dt, SymConfig::maxExpandTerms));
                     trager_poly = getFraction(trager_poly).first; // 提前清除分母，防止结式计算时系数膨胀
                     
+                    if (SymConfig::debugIntegration) {
+                        std::cout << std::string(depth * 2, ' ') << "   [Risch] Trager poly: " << trager_poly.toString() << std::endl;
+                    }
+
                     SymExpr minPoly_clear = getFraction(minPoly).first; // 清除 minPoly 的分母，极大加速结式计算
                     SymExpr R_z = polyResultant(minPoly_clear, trager_poly, topExt.name);
                     
+                    if (SymConfig::debugIntegration) {
+                        std::cout << std::string(depth * 2, ' ') << "   [Risch] Raw Resultant R_z: " << R_z.toString() << std::endl;
+                    }
+
                     // 提取分子，消除伪除法引入的分母
                     R_z = getFraction(R_z).first;
                     
-                    std::set<std::string> vars_in_Rz;
-                    collectAllVars(R_z.ptr, vars_in_Rz);
-                    vars_in_Rz.erase("_z");
-                    
+                    // 处理多重代数扩张：通过连续计算结式 (Norm) 逐个消去底层的代数扩张变量
+                    for (auto it = field.tower.rbegin(); it != field.tower.rend(); ++it) {
+                        if (it->name == topExt.name) continue;
+                        if (it->type == RischExtType::ALG) {
+                            if (containsVar(R_z.ptr, it->name)) {
+                                SymExpr subMinPoly = getFraction(it->minPoly).first;
+                                R_z = polyResultant(subMinPoly, R_z, it->name);
+                                R_z = getFraction(R_z).first;
+                                if (SymConfig::debugIntegration) {
+                                    std::cout << std::string(depth * 2, ' ') << "   [Risch] Resultant after eliminating " << it->name << ": " << R_z.toString() << std::endl;
+                                }
+                            }
+                        }
+                    }
+
                     SymExpr gcd_z(BigInt(0));
-                    if (vars_in_Rz.empty()) {
+                    if (!containsVar(R_z.ptr, var)) {
                         gcd_z = R_z;
                     } else {
                         for (int pt = 1; pt <= 5; ++pt) {
-                            SymExpr eval_Rz = R_z;
-                            for (const auto& v : vars_in_Rz) {
-                                eval_Rz = simplifyCore(subs(eval_Rz, v, SymExpr(BigInt(pt))));
-                            }
+                            SymExpr eval_Rz = simplifyCore(subs(R_z, var, SymExpr(BigInt(pt))));
                             eval_Rz = getFraction(eval_Rz).first;
                             if (eval_Rz.isZero()) continue;
                             if (gcd_z.isZero()) gcd_z = eval_Rz;
@@ -1047,11 +1164,22 @@ namespace jc {
                         }
                     }
                     
+                    if (SymConfig::debugIntegration) {
+                        std::cout << std::string(depth * 2, ' ') << "   [Risch] gcd_z: " << gcd_z.toString() << std::endl;
+                    }
+
                     std::vector<SymExpr> roots;
                     if (!gcd_z.isZero() && getDegree(gcd_z, "_z") > 0) {
                         roots = solveEq(gcd_z, "_z");
                     }
                     
+                    if (SymConfig::debugIntegration) {
+                        std::cout << std::string(depth * 2, ' ') << "   [Risch] Roots of gcd_z: " << roots.size() << std::endl;
+                        for (const auto& r : roots) {
+                            std::cout << std::string(depth * 2, ' ') << "      root: " << r.toString() << std::endl;
+                        }
+                    }
+
                     if (!roots.empty()) {
                         bool allConstant = true;
                         for (const auto& root : roots) {
@@ -1064,14 +1192,14 @@ namespace jc {
                             SymExpr result(BigInt(0));
                             for (const auto& root : roots) {
                                 checkInterrupt();
-                                SymExpr v_i = simplifyCore(expand(subs(trager_poly, "_z", root), SymConfig::maxExpandTerms));
-                                
-                                // 降次短路与首一化
+                                SymExpr v_i = simplifyCore(expand_core(subs(trager_poly, "_z", root), SymConfig::maxExpandTerms));
+                                    
+                                // 降次短路与首一化 (注意：如果首项包含 x，除以它会改变对数求导的结果，因此仅当 lead 为常数时才首一化)
                                 auto coeffs_vi = extractCoeffs(v_i, topExt.name);
                                 if (!coeffs_vi.empty()) {
                                     SymExpr lead = coeffs_vi.back();
-                                    if (!lead.isZero() && !lead.isOne()) {
-                                        v_i = simplifyCore(expand(v_i / lead, SymConfig::maxExpandTerms));
+                                    if (!lead.isZero() && !lead.isOne() && !containsVar(lead.ptr, var)) {
+                                        v_i = simplifyCore(expand_core(v_i / lead, SymConfig::maxExpandTerms));
                                     }
                                 }
                                 
@@ -1079,11 +1207,16 @@ namespace jc {
                                 result = result + root * log_vi;
                             }
                             SymExpr finalRes = simplifyCore(backSubstitute(result));
-                            markTainted(finalRes);
                             if (SymConfig::debugIntegration) std::cout << std::string(depth * 2, ' ') << "<- Risch Trager (ALG) Success" << std::endl;
                             return finalRes;
+                        } else {
+                            if (SymConfig::debugIntegration) std::cout << std::string(depth * 2, ' ') << "   [Risch] Trager failed: roots are not constant w.r.t " << var << std::endl;
                         }
+                    } else {
+                        if (SymConfig::debugIntegration) std::cout << std::string(depth * 2, ' ') << "   [Risch] Trager failed: no roots found for gcd_z" << std::endl;
                     }
+                } else {
+                    if (SymConfig::debugIntegration) std::cout << std::string(depth * 2, ' ') << "   [Risch] Rationalize Denominator failed: res_D = " << res_D.toString() << std::endl;
                 }
             }
         }
@@ -1159,10 +1292,6 @@ namespace jc {
     // 🚀 符号积分 (Symbolic Integration) - 基础多项式与初等函数
     // =================================================================
     SymExpr integrate(const SymExpr& expr, const std::string& var, int start_depth) {
-        if (start_depth == 0) {
-            g_taintedSignatures.clear();
-        }
-
         if (!expr.ptr) return expr;
 
         SymExpr x = SymExpr::makeVar(var);
@@ -1205,12 +1334,6 @@ namespace jc {
             // 绝对体积限制 (Absolute AST Size Limit)
             if (getAstNodeCount(e) > 300) {
                 if (SymConfig::debugIntegration) std::cout << std::string(current_depth * 2, ' ') << "<- AST size limit" << std::endl;
-                return std::nullopt;
-            }
-
-            // 积分路径污染机制的黑盒锁 (Integration Path Taint Lock)
-            if (isTainted(e)) {
-                if (SymConfig::debugIntegration) std::cout << std::string(current_depth * 2, ' ') << "<- Tainted signature" << std::endl;
                 return std::nullopt;
             }
 
@@ -1353,7 +1476,7 @@ namespace jc {
                 SymExpr f_u = replaceNode(varPart);
                 if (!containsVar(f_u.ptr, var)) {
                     SymExpr f_var = subs(f_u, u_var, SymExpr::makeVar(var));
-                    if (auto int_var = doInteg(simplify(expand(f_var / sub_a, SymConfig::maxExpandTerms)), current_depth + 1)) {
+                    if (auto int_var = doInteg(simplify(expand_core(f_var / sub_a, SymConfig::maxExpandTerms)), current_depth + 1)) {
                         if (SymConfig::debugIntegration) std::cout << std::string(current_depth * 2, ' ') << "<- Linear Substitution Success" << std::endl;
                         SymExpr res = subs(*int_var, var, sub_u);
                         return coeff * res;
@@ -1470,14 +1593,14 @@ namespace jc {
                                         default: return node;
                                     }
                                 };
-                                rem_u = simplify(expand(replaceXn(rem_u), SymConfig::maxExpandTerms));
+                                rem_u = simplify(expand_core(replaceXn(rem_u), SymConfig::maxExpandTerms));
                             }
                         }
                     }
 
                     if (!containsVar(rem_u.ptr, var)) {
                         SymExpr f_var = subs(rem_u, u_var, SymExpr::makeVar(var));
-                        if (auto int_var = doInteg(simplify(expand(f_var, SymConfig::maxExpandTerms)), current_depth + 1)) {
+                        if (auto int_var = doInteg(simplify(expand_core(f_var, SymConfig::maxExpandTerms)), current_depth + 1)) {
                             if (SymConfig::debugIntegration) std::cout << std::string(current_depth * 2, ' ') << "<- Generalized Substitution Success" << std::endl;
                             SymExpr res = subs(*int_var, var, u);
                             return coeff * res;
@@ -1490,6 +1613,104 @@ namespace jc {
             SymExpr radicalBase;
             int radicalN = 0;
             bool foundRadical = false;
+            SymExpr varPart_u = varPart;
+            std::string u_var = "_u_rad";
+            SymExpr u_sym = SymExpr::makeVar(u_var);
+
+            if (varPart.ptr->getType() == SymType::MUL) {
+                auto mul = std::static_pointer_cast<SymMul>(varPart.ptr);
+                std::map<int, std::vector<SymExpr>> posRadicals;
+                std::map<int, std::vector<SymExpr>> negRadicals;
+                for (auto& arg : mul->args) {
+                    if (arg->getType() == SymType::POW) {
+                        auto powNode = std::static_pointer_cast<SymPow>(arg);
+                        if (powNode->exp->getType() == SymType::NUM) {
+                            auto numVal = std::static_pointer_cast<SymNum>(powNode->exp)->value;
+                            if (std::holds_alternative<Fraction>(numVal)) {
+                                Fraction frac = std::get<Fraction>(numVal);
+                                if (frac.getDen() > BigInt(1) && containsVar(powNode->base, var)) {
+                                    int n = static_cast<int>(frac.getDen().toDouble());
+                                    if (frac.getNum() == BigInt(1)) posRadicals[n].push_back(SymExpr(powNode->base));
+                                    else if (frac.getNum() == BigInt(-1)) negRadicals[n].push_back(SymExpr(powNode->base));
+                                }
+                            } else if (std::holds_alternative<BigInt>(numVal) && std::get<BigInt>(numVal) == BigInt(-1)) {
+                                if (powNode->base->getType() == SymType::FUNC) {
+                                    auto func = std::static_pointer_cast<SymFunc>(powNode->base);
+                                    if (func->name == "sqrt" && func->args.size() == 1 && containsVar(func->args[0], var)) {
+                                        negRadicals[2].push_back(SymExpr(func->args[0]));
+                                    } else if (func->name == "cbrt" && func->args.size() == 1 && containsVar(func->args[0], var)) {
+                                        negRadicals[3].push_back(SymExpr(func->args[0]));
+                                    }
+                                }
+                            }
+                        }
+                    } else if (arg->getType() == SymType::FUNC) {
+                        auto func = std::static_pointer_cast<SymFunc>(arg);
+                        if (func->name == "sqrt" && func->args.size() == 1 && containsVar(func->args[0], var)) {
+                            posRadicals[2].push_back(SymExpr(func->args[0]));
+                        } else if (func->name == "cbrt" && func->args.size() == 1 && containsVar(func->args[0], var)) {
+                            posRadicals[3].push_back(SymExpr(func->args[0]));
+                        }
+                    }
+                }
+                for (auto& [n, posList] : posRadicals) {
+                    if (negRadicals.count(n) && !posList.empty() && !negRadicals[n].empty()) {
+                        SymExpr A = posList[0];
+                        SymExpr B = negRadicals[n][0];
+                        radicalBase = simplifyCore(A / B);
+                        radicalN = n;
+                        foundRadical = true;
+                        
+                        SymExpr rest(BigInt(1));
+                        bool removedA = false, removedB = false;
+                        for (auto& arg : mul->args) {
+                            bool skip = false;
+                            if (!removedA) {
+                                if (arg->getType() == SymType::POW) {
+                                    auto powNode = std::static_pointer_cast<SymPow>(arg);
+                                    if (SymExpr(powNode->base) == A && SymExpr(powNode->exp) == SymExpr(Fraction(1, n))) {
+                                        removedA = true;
+                                        skip = true;
+                                    }
+                                } else if (arg->getType() == SymType::FUNC) {
+                                    auto func = std::static_pointer_cast<SymFunc>(arg);
+                                    if (func->name == "sqrt" && n == 2 && func->args.size() == 1 && SymExpr(func->args[0]) == A) {
+                                        removedA = true;
+                                        skip = true;
+                                    } else if (func->name == "cbrt" && n == 3 && func->args.size() == 1 && SymExpr(func->args[0]) == A) {
+                                        removedA = true;
+                                        skip = true;
+                                    }
+                                }
+                            }
+                            if (!skip && !removedB) {
+                                if (arg->getType() == SymType::POW) {
+                                    auto powNode = std::static_pointer_cast<SymPow>(arg);
+                                    if (SymExpr(powNode->base) == B && SymExpr(powNode->exp) == SymExpr(Fraction(-1, n))) {
+                                        removedB = true;
+                                        skip = true;
+                                    } else if (powNode->exp->getType() == SymType::NUM && std::holds_alternative<BigInt>(std::static_pointer_cast<SymNum>(powNode->exp)->value) && std::get<BigInt>(std::static_pointer_cast<SymNum>(powNode->exp)->value) == BigInt(-1)) {
+                                        if (powNode->base->getType() == SymType::FUNC) {
+                                            auto func = std::static_pointer_cast<SymFunc>(powNode->base);
+                                            if (func->name == "sqrt" && n == 2 && func->args.size() == 1 && SymExpr(func->args[0]) == B) {
+                                                removedB = true;
+                                                skip = true;
+                                            } else if (func->name == "cbrt" && n == 3 && func->args.size() == 1 && SymExpr(func->args[0]) == B) {
+                                                removedB = true;
+                                                skip = true;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            if (!skip) rest = rest * SymExpr(arg);
+                        }
+                        varPart_u = rest * u_sym;
+                        break;
+                    }
+                }
+            }
+
             std::function<void(const std::shared_ptr<SymNode>&)> findRadical = [&](const std::shared_ptr<SymNode>& node) {
                 if (!node || foundRadical) return;
                 if (node->getType() == SymType::POW) {
@@ -1502,9 +1723,104 @@ namespace jc {
                                 radicalBase = SymExpr(powNode->base);
                                 radicalN = static_cast<int>(frac.getDen().toDouble());
                                 foundRadical = true;
+                                
+                                std::function<SymExpr(const SymExpr&)> replaceRad = [&](const SymExpr& e) -> SymExpr {
+                                    if (!e.ptr) return e;
+                                    if (e.ptr->getType() == SymType::POW) {
+                                        auto pNode = std::static_pointer_cast<SymPow>(e.ptr);
+                                        if (SymExpr(pNode->base) == radicalBase && pNode->exp->getType() == SymType::NUM) {
+                                            auto nVal = std::static_pointer_cast<SymNum>(pNode->exp)->value;
+                                            if (std::holds_alternative<Fraction>(nVal)) {
+                                                Fraction f = std::get<Fraction>(nVal);
+                                                if (f.getDen() == BigInt(radicalN)) {
+                                                    return u_sym ^ SymExpr(f.getNum());
+                                                }
+                                            }
+                                        }
+                                    }
+                                    switch (e.ptr->getType()) {
+                                        case SymType::ADD: {
+                                            SymExpr res(BigInt(0));
+                                            for (auto& a : std::static_pointer_cast<SymAdd>(e.ptr)->args) res = res + replaceRad(SymExpr(a));
+                                            return res;
+                                        }
+                                        case SymType::MUL: {
+                                            SymExpr res(BigInt(1));
+                                            for (auto& a : std::static_pointer_cast<SymMul>(e.ptr)->args) res = res * replaceRad(SymExpr(a));
+                                            return res;
+                                        }
+                                        case SymType::POW: {
+                                            auto pNode = std::static_pointer_cast<SymPow>(e.ptr);
+                                            return replaceRad(SymExpr(pNode->base)) ^ replaceRad(SymExpr(pNode->exp));
+                                        }
+                                        case SymType::FUNC: {
+                                            auto fNode = std::static_pointer_cast<SymFunc>(e.ptr);
+                                            std::vector<std::shared_ptr<SymNode>> nArgs;
+                                            for (auto& a : fNode->args) nArgs.push_back(replaceRad(SymExpr(a)).ptr);
+                                            return SymExpr(std::make_shared<SymFunc>(fNode->name, std::move(nArgs)));
+                                        }
+                                        default: return e;
+                                    }
+                                };
+                                varPart_u = replaceRad(varPart);
                                 return;
                             }
                         }
+                    }
+                } else if (node->getType() == SymType::FUNC) {
+                    auto func = std::static_pointer_cast<SymFunc>(node);
+                    if ((func->name == "sqrt" || func->name == "cbrt") && func->args.size() == 1 && containsVar(func->args[0], var)) {
+                        radicalBase = SymExpr(func->args[0]);
+                        radicalN = (func->name == "sqrt") ? 2 : 3;
+                        foundRadical = true;
+                        
+                        std::function<SymExpr(const SymExpr&)> replaceRad = [&](const SymExpr& e) -> SymExpr {
+                            if (!e.ptr) return e;
+                            if (e.ptr->getType() == SymType::POW) {
+                                auto pNode = std::static_pointer_cast<SymPow>(e.ptr);
+                                if (SymExpr(pNode->base) == radicalBase && pNode->exp->getType() == SymType::NUM) {
+                                    auto nVal = std::static_pointer_cast<SymNum>(pNode->exp)->value;
+                                    if (std::holds_alternative<Fraction>(nVal)) {
+                                        Fraction f = std::get<Fraction>(nVal);
+                                        if (f.getDen() == BigInt(radicalN)) {
+                                            return u_sym ^ SymExpr(f.getNum());
+                                        }
+                                    }
+                                }
+                            } else if (e.ptr->getType() == SymType::FUNC) {
+                                auto fNode = std::static_pointer_cast<SymFunc>(e.ptr);
+                                if (fNode->name == "sqrt" && fNode->args.size() == 1 && SymExpr(fNode->args[0]) == radicalBase && radicalN == 2) {
+                                    return u_sym;
+                                } else if (fNode->name == "cbrt" && fNode->args.size() == 1 && SymExpr(fNode->args[0]) == radicalBase && radicalN == 3) {
+                                    return u_sym;
+                                }
+                            }
+                            switch (e.ptr->getType()) {
+                                case SymType::ADD: {
+                                    SymExpr res(BigInt(0));
+                                    for (auto& a : std::static_pointer_cast<SymAdd>(e.ptr)->args) res = res + replaceRad(SymExpr(a));
+                                    return res;
+                                }
+                                case SymType::MUL: {
+                                    SymExpr res(BigInt(1));
+                                    for (auto& a : std::static_pointer_cast<SymMul>(e.ptr)->args) res = res * replaceRad(SymExpr(a));
+                                    return res;
+                                }
+                                case SymType::POW: {
+                                    auto pNode = std::static_pointer_cast<SymPow>(e.ptr);
+                                    return replaceRad(SymExpr(pNode->base)) ^ replaceRad(SymExpr(pNode->exp));
+                                }
+                                case SymType::FUNC: {
+                                    auto fNode = std::static_pointer_cast<SymFunc>(e.ptr);
+                                    std::vector<std::shared_ptr<SymNode>> nArgs;
+                                    for (auto& a : fNode->args) nArgs.push_back(replaceRad(SymExpr(a)).ptr);
+                                    return SymExpr(std::make_shared<SymFunc>(fNode->name, std::move(nArgs)));
+                                }
+                                default: return e;
+                            }
+                        };
+                        varPart_u = replaceRad(varPart);
+                        return;
                     }
                 }
                 if (node->getType() == SymType::ADD) {
@@ -1515,11 +1831,19 @@ namespace jc {
                     for (auto& arg : std::static_pointer_cast<SymFunc>(node)->args) findRadical(arg);
                 }
             };
-            findRadical(varPart.ptr);
+            if (!foundRadical) findRadical(varPart.ptr);
 
             if (foundRadical && radicalN >= 2) {
                 if (SymConfig::debugIntegration) std::cout << std::string(current_depth * 2, ' ') << "-> Trying Radical Substitution: u = (" << radicalBase.toString() << ")^(1/" << radicalN << ")" << std::endl;
                 auto invertFunction = [&](SymExpr f, SymExpr target, std::string v) -> std::optional<SymExpr> {
+                    try {
+                        auto [num, den] = getFraction(simplifyCore(f - target));
+                        auto roots = solveEq(num, v);
+                        if (roots.size() == 1) {
+                            return roots[0];
+                        }
+                    } catch (...) {}
+
                     int iters = 0;
                     while (f.ptr->getType() != SymType::VAR && iters++ < 10) {
                         if (f.ptr->getType() == SymType::ADD) {
@@ -1586,14 +1910,12 @@ namespace jc {
                     return std::nullopt;
                 };
 
-                std::string u_var = "_u_rad";
-                SymExpr u_sym = SymExpr::makeVar(u_var);
                 SymExpr target = u_sym ^ SymExpr(BigInt(radicalN));
                 
                 if (auto x_sol = invertFunction(radicalBase, target, var)) {
                     SymExpr dx_du = simplify(diff(*x_sol, u_var));
                     if (!dx_du.isZero()) {
-                        SymExpr new_integrand = simplify(subs(varPart, var, *x_sol) * dx_du);
+                        SymExpr new_integrand = simplify(subs(varPart_u, var, *x_sol) * dx_du);
                         SymExpr integrand_var = subs(new_integrand, u_var, SymExpr::makeVar(var));
                         if (auto int_var = doInteg(integrand_var, current_depth + 1)) {
                             if (SymConfig::debugIntegration) std::cout << std::string(current_depth * 2, ' ') << "<- Radical Substitution Success" << std::endl;
@@ -1617,7 +1939,7 @@ namespace jc {
                             if (n % 2 == 0) {
                                 SymExpr _C = SymExpr::makeVar("_C");
                                 SymExpr halfAngle = (SymExpr(BigInt(1)) - _C) / SymExpr(BigInt(2));
-                                SymExpr expanded = expand(halfAngle ^ SymExpr(BigInt(n / 2)), SymConfig::maxExpandTerms);
+                                SymExpr expanded = expand_core(halfAngle ^ SymExpr(BigInt(n / 2)), SymConfig::maxExpandTerms);
                                 SymExpr cos2x = SymExpr(std::make_shared<SymFunc>("cos", std::vector<std::shared_ptr<SymNode>>{(SymExpr(BigInt(2)) * arg).ptr}));
                                 expanded = subs(expanded, "_C", cos2x);
                                 if (auto res = doInteg(expanded, current_depth + 1)) {
@@ -1628,7 +1950,7 @@ namespace jc {
                                 SymExpr _C = SymExpr::makeVar("_C");
                                 SymExpr cosSq = SymExpr(BigInt(1)) - (_C ^ SymExpr(BigInt(2)));
                                 SymExpr rem = SymExpr(std::make_shared<SymFunc>("sin", std::vector<std::shared_ptr<SymNode>>{arg.ptr})) * (cosSq ^ SymExpr(BigInt((n - 1) / 2)));
-                                SymExpr expanded = expand(rem, SymConfig::maxExpandTerms);
+                                SymExpr expanded = expand_core(rem, SymConfig::maxExpandTerms);
                                 SymExpr cosx = SymExpr(std::make_shared<SymFunc>("cos", std::vector<std::shared_ptr<SymNode>>{arg.ptr}));
                                 expanded = subs(expanded, "_C", cosx);
                                 if (auto res = doInteg(expanded, current_depth + 1)) {
@@ -1640,7 +1962,7 @@ namespace jc {
                             if (n % 2 == 0) {
                                 SymExpr _C = SymExpr::makeVar("_C");
                                 SymExpr halfAngle = (SymExpr(BigInt(1)) + _C) / SymExpr(BigInt(2));
-                                SymExpr expanded = expand(halfAngle ^ SymExpr(BigInt(n / 2)), SymConfig::maxExpandTerms);
+                                SymExpr expanded = expand_core(halfAngle ^ SymExpr(BigInt(n / 2)), SymConfig::maxExpandTerms);
                                 SymExpr cos2x = SymExpr(std::make_shared<SymFunc>("cos", std::vector<std::shared_ptr<SymNode>>{(SymExpr(BigInt(2)) * arg).ptr}));
                                 expanded = subs(expanded, "_C", cos2x);
                                 if (auto res = doInteg(expanded, current_depth + 1)) {
@@ -1651,7 +1973,7 @@ namespace jc {
                                 SymExpr _S = SymExpr::makeVar("_S");
                                 SymExpr sinSq = SymExpr(BigInt(1)) - (_S ^ SymExpr(BigInt(2)));
                                 SymExpr rem = SymExpr(std::make_shared<SymFunc>("cos", std::vector<std::shared_ptr<SymNode>>{arg.ptr})) * (sinSq ^ SymExpr(BigInt((n - 1) / 2)));
-                                SymExpr expanded = expand(rem, SymConfig::maxExpandTerms);
+                                SymExpr expanded = expand_core(rem, SymConfig::maxExpandTerms);
                                 SymExpr sinx = SymExpr(std::make_shared<SymFunc>("sin", std::vector<std::shared_ptr<SymNode>>{arg.ptr}));
                                 expanded = subs(expanded, "_S", sinx);
                                 if (auto res = doInteg(expanded, current_depth + 1)) {
@@ -1704,10 +2026,22 @@ namespace jc {
                     
                     auto isPos = [](const SymExpr& e) {
                         if (e.ptr->getType() == SymType::NUM) return !isCasNegative(std::static_pointer_cast<SymNum>(e.ptr)->value) && !e.isZero();
-                        return false;
+                        if (e.ptr->getType() == SymType::MUL) {
+                            auto mul = std::static_pointer_cast<SymMul>(e.ptr);
+                            if (!mul->args.empty() && mul->args[0]->getType() == SymType::NUM) {
+                                return !isCasNegative(std::static_pointer_cast<SymNum>(mul->args[0])->value);
+                            }
+                        }
+                        return true; // 默认符号参数为正，允许代数换元继续
                     };
                     auto isNeg = [](const SymExpr& e) {
                         if (e.ptr->getType() == SymType::NUM) return isCasNegative(std::static_pointer_cast<SymNum>(e.ptr)->value);
+                        if (e.ptr->getType() == SymType::MUL) {
+                            auto mul = std::static_pointer_cast<SymMul>(e.ptr);
+                            if (!mul->args.empty() && mul->args[0]->getType() == SymType::NUM) {
+                                return isCasNegative(std::static_pointer_cast<SymNum>(mul->args[0])->value);
+                            }
+                        }
                         return false;
                     };
                     
@@ -1817,7 +2151,13 @@ namespace jc {
                         
                         auto isPos = [](const SymExpr& e) {
                             if (e.ptr->getType() == SymType::NUM) return !isCasNegative(std::static_pointer_cast<SymNum>(e.ptr)->value) && !e.isZero();
-                            return false;
+                            if (e.ptr->getType() == SymType::MUL) {
+                                auto mul = std::static_pointer_cast<SymMul>(e.ptr);
+                                if (!mul->args.empty() && mul->args[0]->getType() == SymType::NUM) {
+                                    return !isCasNegative(std::static_pointer_cast<SymNum>(mul->args[0])->value);
+                                }
+                            }
+                            return true; // 默认符号参数为正，允许代数换元继续
                         };
                         
                         if (isPos(A) && isPos(B)) {
@@ -2051,8 +2391,8 @@ namespace jc {
                 SymExpr boxed_num = blackboxConstants(num);
                 SymExpr boxed_den = blackboxConstants(den);
 
-                SymExpr num_expanded = simplifyCore(expand(boxed_num, SymConfig::maxExpandTerms));
-                SymExpr den_expanded = simplifyCore(expand(boxed_den, SymConfig::maxExpandTerms));
+                SymExpr num_expanded = simplifyCore(expand_core(boxed_num, SymConfig::maxExpandTerms));
+                SymExpr den_expanded = simplifyCore(expand_core(boxed_den, SymConfig::maxExpandTerms));
                 
                 int degN = getDegree(num_expanded, var);
                 int degD = getDegree(den_expanded, var);
@@ -2197,7 +2537,7 @@ namespace jc {
                         den_t = polyDiv(den_t, gcd_t, t_var).first;
                     }
                     
-                    SymExpr rational_t = simplifyCore(expand(num_t / den_t, SymConfig::maxExpandTerms));
+                    SymExpr rational_t = simplifyCore(expand_core(num_t / den_t, SymConfig::maxExpandTerms));
                     SymExpr rational_var = subs(rational_t, t_var, SymExpr::makeVar(var));
                     if (auto opt_integrated_var = doInteg(rational_var, current_depth + 1)) {
                         if (SymConfig::debugIntegration) std::cout << std::string(current_depth * 2, ' ') << "<- Weierstrass Substitution Success" << std::endl;
@@ -2342,7 +2682,7 @@ namespace jc {
                         SymExpr k = ratio1;
                         SymExpr one_plus_k = simplifyCore(SymExpr(BigInt(1)) + k);
                         if (!one_plus_k.isZero()) {
-                            return coeff * simplify(expand((u * v) / one_plus_k, SymConfig::maxExpandTerms));
+                            return coeff * simplify(expand_core((u * v) / one_plus_k, SymConfig::maxExpandTerms));
                         }
                     }
                     
@@ -2463,7 +2803,7 @@ namespace jc {
             } catch (const std::runtime_error& e) {
                 std::string msg = e.what();
                 SymExpr expanded;
-                try { expanded = expand(expr, SymConfig::maxExpandTerms * 2); } catch (const EngineInterruptError&) { throw; } catch (...) { expanded = expr; }
+                try { expanded = expand_core(expr, SymConfig::maxExpandTerms * 2); } catch (const EngineInterruptError&) { throw; } catch (...) { expanded = expr; }
                 
                 // 严格防死锁：只有当展开后的表达式确实发生了变化，才允许重置 depth 再次尝试
                 if (expanded != expr) {
