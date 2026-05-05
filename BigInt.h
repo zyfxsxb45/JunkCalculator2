@@ -545,7 +545,7 @@ namespace jc {
             if (exp.isNegative()) throw std::runtime_error("Math Error: Positive exponent expected for BigInt return type.");
             // 安全截断：指数极大时转成 int64_t 肯定会溢出报错，但这是合理的，
             // 因为地球上没有计算机能算哪怕 2 甚至 10 的那么高次方的精确大数
-            return this->pow(static_cast<int64_t>(exp.toDouble()));
+            return this->pow(exp.toInt64());
         }
 
         int digitCount() const {

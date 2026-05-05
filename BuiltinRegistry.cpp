@@ -992,18 +992,18 @@ void BuiltinRegistry::registerNumberTheory() {
         return v.isBigInt() ? std::get<BigInt>(v.data) : BigInt(static_cast<int64_t>(std::round(v.asDouble())));
     };
 
-    reg("factorial", { 1 }, [](const std::vector<Value>& args) -> Value { return Value(BigInt::factorial(static_cast<int64_t>(std::round(args[0].asDouble())))); });
-    reg("fib", { 1 }, [](const std::vector<Value>& args) -> Value { return Value(BigInt::fibonacci(static_cast<int64_t>(std::round(args[0].asDouble())))); });
+    reg("factorial", { 1 }, [](const std::vector<Value>& args) -> Value { return Value(BigInt::factorial(args[0].asBigInt().toInt64())); });
+    reg("fib", { 1 }, [](const std::vector<Value>& args) -> Value { return Value(BigInt::fibonacci(args[0].asBigInt().toInt64())); });
     reg("gcd", { 2 }, [toBigInt](const std::vector<Value>& args) -> Value { return Value(BigInt::gcd(toBigInt(args[0]), toBigInt(args[1]))); });
     reg("lcm", { 2 }, [toBigInt](const std::vector<Value>& args) -> Value { return Value(BigInt::lcm(toBigInt(args[0]), toBigInt(args[1]))); });
     reg("digits", { 1 }, [](const std::vector<Value>& args) -> Value { if (!args[0].isBigInt()) throw std::runtime_error("Type Error: expects BigInt."); return Value(static_cast<double>(std::get<BigInt>(args[0].data).digitCount())); });
     reg("isPrime", { 1 }, [toBigInt](const std::vector<Value>& args) -> Value { return Value(toBigInt(args[0]).isPrime() ? 1.0 : 0.0); });
     reg("nextPrime", { 1 }, [toBigInt](const std::vector<Value>& args) -> Value { return Value(toBigInt(args[0]).nextPrime()); });
-    reg("nthPrime", { 1 }, [](const std::vector<Value>& args) -> Value { return Value(BigInt::nthPrime(static_cast<int64_t>(std::round(args[0].asDouble())))); });
+    reg("nthPrime", { 1 }, [](const std::vector<Value>& args) -> Value { return Value(BigInt::nthPrime(args[0].asBigInt().toInt64())); });
     reg("primePi", { 1 }, [toBigInt](const std::vector<Value>& args) -> Value { return Value(BigInt(toBigInt(args[0]).primePi())); });
     reg("phi", { 1 }, [toBigInt](const std::vector<Value>& args) -> Value { return Value(toBigInt(args[0]).eulerPhi()); });
     reg("divisors", { 1 }, [toBigInt](const std::vector<Value>& args) -> Value { return Value(toBigInt(args[0]).divisorCount()); });
-    reg("sigma", { 1, 2 }, [toBigInt](const std::vector<Value>& args) -> Value { int64_t k = (args.size()==2) ? static_cast<int64_t>(std::round(args[1].asDouble())) : 1; return Value(toBigInt(args[0]).divisorSum(k)); });
+    reg("sigma", { 1, 2 }, [toBigInt](const std::vector<Value>& args) -> Value { int64_t k = (args.size()==2) ? args[1].asBigInt().toInt64() : 1; return Value(toBigInt(args[0]).divisorSum(k)); });
     reg("omega", { 1 }, [toBigInt](const std::vector<Value>& args) -> Value { return Value(BigInt(toBigInt(args[0]).omega())); });
     reg("bigOmega", { 1 }, [toBigInt](const std::vector<Value>& args) -> Value { return Value(BigInt(toBigInt(args[0]).bigOmega())); });
     reg("mobius", { 1 }, [toBigInt](const std::vector<Value>& args) -> Value { return Value(BigInt(toBigInt(args[0]).mobius())); });
@@ -1016,9 +1016,9 @@ void BuiltinRegistry::registerNumberTheory() {
         double r = std::fmod(a, b); if (r < 0) r += std::abs(b); return Value(r);
     });
     reg("modpow", { 3 }, [toBigInt](const std::vector<Value>& args) -> Value { return Value(BigInt::modPow(toBigInt(args[0]), toBigInt(args[1]), toBigInt(args[2]))); });
-    reg("C", { 2 }, [](const std::vector<Value>& args) -> Value { int64_t n = static_cast<int64_t>(std::round(args[0].asDouble())), k = static_cast<int64_t>(std::round(args[1].asDouble())); if (n<0||k<0) throw std::runtime_error("Math Error: C(n,k) requires non-negative integers."); if (k>n) return Value(BigInt(0)); if (k>n-k) k = n-k; BigInt result(1); for (int64_t i = 0; i < k; ++i) { jc::checkInterrupt(); result = result*BigInt(n-i); result = result/BigInt(i+1); } return Value(result); });
-    reg("A", { 2 }, [](const std::vector<Value>& args) -> Value { int64_t n = static_cast<int64_t>(std::round(args[0].asDouble())), k = static_cast<int64_t>(std::round(args[1].asDouble())); if (n<0||k<0) throw std::runtime_error("Math Error: A(n,k) requires non-negative integers."); if (k>n) return Value(BigInt(0)); BigInt result(1); for (int64_t i = 0; i < k; ++i) { jc::checkInterrupt(); result = result*BigInt(n-i); } return Value(result); });
-    reg("catalan", { 1 }, [](const std::vector<Value>& args) -> Value { int64_t n = static_cast<int64_t>(std::round(args[0].asDouble())); if (n<0) throw std::runtime_error("Math Error: catalan(n) requires non-negative integer."); BigInt result(1); for (int64_t i = 0; i < n; ++i) { jc::checkInterrupt(); result = result*BigInt(2*n-i); result = result/BigInt(i+1); } result = result/BigInt(n+1); return Value(result); });
+    reg("C", { 2 }, [](const std::vector<Value>& args) -> Value { int64_t n = args[0].asBigInt().toInt64(), k = args[1].asBigInt().toInt64(); if (n<0||k<0) throw std::runtime_error("Math Error: C(n,k) requires non-negative integers."); if (k>n) return Value(BigInt(0)); if (k>n-k) k = n-k; BigInt result(1); for (int64_t i = 0; i < k; ++i) { jc::checkInterrupt(); result = result*BigInt(n-i); result = result/BigInt(i+1); } return Value(result); });
+    reg("A", { 2 }, [](const std::vector<Value>& args) -> Value { int64_t n = args[0].asBigInt().toInt64(), k = args[1].asBigInt().toInt64(); if (n<0||k<0) throw std::runtime_error("Math Error: A(n,k) requires non-negative integers."); if (k>n) return Value(BigInt(0)); BigInt result(1); for (int64_t i = 0; i < k; ++i) { jc::checkInterrupt(); result = result*BigInt(n-i); } return Value(result); });
+    reg("catalan", { 1 }, [](const std::vector<Value>& args) -> Value { int64_t n = args[0].asBigInt().toInt64(); if (n<0) throw std::runtime_error("Math Error: catalan(n) requires non-negative integer."); BigInt result(1); for (int64_t i = 0; i < n; ++i) { jc::checkInterrupt(); result = result*BigInt(2*n-i); result = result/BigInt(i+1); } result = result/BigInt(n+1); return Value(result); });
 }
 
 // =================================================================
@@ -1221,6 +1221,12 @@ void BuiltinRegistry::registerSystemUtils() {
             return Value(std::get<Set>(args[0].data).isFrozen() ? 1.0 : 0.0);
         }
         return Value(0.0);
+        });
+
+    reg("hash", { 1 }, [](const std::vector<Value>& args) -> Value {
+        if (!args[0].isHashable()) throw std::runtime_error("TypeError: unhashable type.");
+        size_t h = jc::ValueHasher{}(args[0]);
+        return Value(BigInt(static_cast<int64_t>(h)));
         });
 
     reg("clone", { 1 }, [](const std::vector<Value>& args) -> Value {

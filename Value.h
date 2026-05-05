@@ -58,28 +58,14 @@ namespace jc {
     // =======================================================
     // 高级引用语义 Dict (底层交由智能指针接管防深拷贝)
     // =======================================================
+    struct DictData;
     class Dict {
     private:
-        struct DictData {
-            std::vector<std::pair<Value, Value>> elements;
-            std::unordered_map<Value, size_t, ValueHasher, ValueEqual> keyMap;
-            bool is_frozen = false;
-        };
         std::shared_ptr<DictData> ptr;
     public:
-        Dict() : ptr(std::make_shared<DictData>()) {
-            // ★ GC 注册
-            GcHeap::get().track(
-                ptr.get(),
-                [w = std::weak_ptr<DictData>(ptr)]()
-                { return !w.expired(); },
-                [w = std::weak_ptr<DictData>(ptr)]()
-                { auto sp = w.lock(); if (sp) { sp->elements.clear(); sp->keyMap.clear(); } }
-            );
-        }
-
-        void freeze() { ptr->is_frozen = true; }
-        bool isFrozen() const { return ptr->is_frozen; }
+        Dict();
+        void freeze();
+        bool isFrozen() const;
 
         void set(const Value& key, const Value& val);
         Value* get(const Value& key);
@@ -87,44 +73,27 @@ namespace jc {
         bool has(const Value& key) const;
         bool remove(const Value& key);
 
-        size_t size() const { return ptr->elements.size(); }
-        bool empty() const { return ptr->elements.empty(); }
+        size_t size() const;
+        bool empty() const;
 
         std::vector<Value> getKeys() const;
         std::vector<std::pair<Value, Value>> getEntries() const;
 
         const void* id() const { return ptr.get(); }
-        void clear() {
-            if (ptr->is_frozen) throw std::runtime_error("Runtime Error: Object is frozen.");
-            ptr->elements.clear();
-            ptr->keyMap.clear();
-        }
+        void clear();
     };
 
     // =======================================================
     // 高级引用语义 List (底层交由智能指针接管防深拷贝)
     // =======================================================
+    struct ListData;
     class List {
     private:
-        struct ListData {
-            std::vector<Value> vec;
-            bool is_frozen = false;
-        };
         std::shared_ptr<ListData> ptr;
     public:
-        List() : ptr(std::make_shared<ListData>()) {
-            // ★ GC 注册
-            GcHeap::get().track(
-                ptr.get(),
-                [w = std::weak_ptr<ListData>(ptr)]()
-                { return !w.expired(); },
-                [w = std::weak_ptr<ListData>(ptr)]()
-                { auto sp = w.lock(); if (sp) sp->vec.clear(); }
-            );
-        }
-
-        void freeze() { ptr->is_frozen = true; }
-        bool isFrozen() const { return ptr->is_frozen; }
+        List();
+        void freeze();
+        bool isFrozen() const;
 
         void push_back(const Value& val);
         Value& at(int idx);
@@ -133,55 +102,35 @@ namespace jc {
         void insert(int idx, const Value& val);
         void removeAt(int idx);
 
-        size_t size() const { return ptr->vec.size(); }
-        bool empty() const { return ptr->vec.empty(); }
+        size_t size() const;
+        bool empty() const;
         const std::vector<Value>& raw() const;
         std::vector<Value>& raw();
         const void* id() const { return ptr.get(); }
-        void clear() {
-            if (ptr->is_frozen) throw std::runtime_error("Runtime Error: Object is frozen.");
-            ptr->vec.clear();
-        }
+        void clear();
     };
 
     // =======================================================
     // 高级引用语义 Set (无序去重集合，O(1) 查找)
     // =======================================================
+    struct SetData;
     class Set {
     private:
-        struct SetData {
-            std::vector<Value> elements; // 保留插入顺序
-            std::unordered_set<Value, ValueHasher, ValueEqual> keys; // O(1) 查重索引
-            bool is_frozen = false;
-        };
         std::shared_ptr<SetData> ptr;
     public:
-        Set() : ptr(std::make_shared<SetData>()) {
-            GcHeap::get().track(
-                ptr.get(),
-                [w = std::weak_ptr<SetData>(ptr)]() { return !w.expired(); },
-                [w = std::weak_ptr<SetData>(ptr)]() {
-                    auto sp = w.lock();
-                    if (sp) { sp->elements.clear(); sp->keys.clear(); }
-                }
-            );
-        }
-
-        void freeze() { ptr->is_frozen = true; }
-        bool isFrozen() const { return ptr->is_frozen; }
+        Set();
+        void freeze();
+        bool isFrozen() const;
 
         bool insert(const Value& val);
         bool contains(const Value& val) const;
         bool erase(const Value& val);
 
-        size_t size() const { return ptr->elements.size(); }
-        bool empty() const { return ptr->elements.empty(); }
+        size_t size() const;
+        bool empty() const;
         const std::vector<Value>& raw() const;
         const void* id() const { return ptr.get(); }
-        void clear() {
-            if (ptr->is_frozen) throw std::runtime_error("Runtime Error: Object is frozen.");
-            ptr->elements.clear(); ptr->keys.clear();
-        }
+        void clear();
     };
 
     struct ClassDefinition {
@@ -702,8 +651,42 @@ namespace jc {
                 std::holds_alternative<std::monostate>(rhs.data))
                 return false;
 
-            try { return lhs.asComplex() == rhs.asComplex(); }
-            catch (...) { return false; }
+            // ★ 终极数值降维防线：安全处理极大 BigInt 与浮点/复数的跨类型比较
+            if (std::holds_alternative<BaseNum>(lhs.data)) return equals(Value(std::get<BaseNum>(lhs.data).getValue()), rhs);
+            if (std::holds_alternative<BaseNum>(rhs.data)) return equals(lhs, Value(std::get<BaseNum>(rhs.data).getValue()));
+
+            auto getNumeric = [](const Value& v) -> std::optional<Complex> {
+                try {
+                    if (std::holds_alternative<double>(v.data)) return Complex(std::get<double>(v.data));
+                    if (std::holds_alternative<Complex>(v.data)) return std::get<Complex>(v.data);
+                    if (std::holds_alternative<Fraction>(v.data)) return Complex(std::get<Fraction>(v.data).toDouble());
+                } catch (...) {}
+                return std::nullopt;
+            };
+
+            auto numL = getNumeric(lhs);
+            auto numR = getNumeric(rhs);
+
+            if (numL && numR) return *numL == *numR;
+
+            if (std::holds_alternative<BigInt>(lhs.data) && numR) {
+                const BigInt& b = std::get<BigInt>(lhs.data);
+                if (!Tol::isEq(numR->imag, 0.0)) return false;
+                double d = numR->real;
+                if (std::floor(d) != d) return false;
+                if (std::abs(d) < 9e15) return b == BigInt(static_cast<int64_t>(d));
+                try { return Tol::isEq(b.toDouble(), d); } catch (...) { return false; }
+            }
+            if (std::holds_alternative<BigInt>(rhs.data) && numL) {
+                const BigInt& b = std::get<BigInt>(rhs.data);
+                if (!Tol::isEq(numL->imag, 0.0)) return false;
+                double d = numL->real;
+                if (std::floor(d) != d) return false;
+                if (std::abs(d) < 9e15) return b == BigInt(static_cast<int64_t>(d));
+                try { return Tol::isEq(b.toDouble(), d); } catch (...) { return false; }
+            }
+
+            return false;
         }
 
         // Value.h 的 class Value 内部
@@ -1039,8 +1022,7 @@ namespace jc {
 // ==============================================================
                 else if constexpr (std::is_same_v<T1, BigInt> && std::is_same_v<T2, BigInt>) {
                     if (b.isNegative()) {
-                        Fraction res = Fraction(BigInt(1), a).pow(
-                            static_cast<int64_t>(b.abs().toDouble()));
+                        Fraction res = Fraction(BigInt(1), a).pow(b.abs().toInt64());
                         return Value::fromFraction(res);
                     }
                     return Value(a.pow(b));
@@ -1049,7 +1031,7 @@ namespace jc {
                 // 精确分数幂：Fraction ^ BigInt
                 // ==============================================================
                 else if constexpr (std::is_same_v<T1, Fraction> && std::is_same_v<T2, BigInt>) {
-                    Fraction res = a.pow(static_cast<int64_t>(b.toDouble()));
+                    Fraction res = a.pow(b.toInt64());
                     return Value::fromFraction(res);
                 }
                 // ==============================================================
@@ -1061,8 +1043,8 @@ namespace jc {
 
                     int64_t p = 0, q = 0;
                     try {
-                        p = static_cast<int64_t>(b.getNum().toDouble());
-                        q = static_cast<int64_t>(b.getDen().toDouble());
+                        p = b.getNum().toInt64();
+                        q = b.getDen().toInt64();
                         if (q < 0) { p = -p; q = -q; }
 
                         // 尝试彻底算尽（如 8^(1/3) -> 2）
@@ -1097,8 +1079,8 @@ namespace jc {
 
                     int64_t p = 0, q = 0;
                     try {
-                        p = static_cast<int64_t>(b.getNum().toDouble());
-                        q = static_cast<int64_t>(b.getDen().toDouble());
+                        p = b.getNum().toInt64();
+                        q = b.getDen().toInt64();
                         if (q < 0) { p = -p; q = -q; }
 
                         auto [ok, val] = Value::tryExactRationalPow(a.getNum(), a.getDen(), p, q);
@@ -1126,10 +1108,16 @@ namespace jc {
                 // double 参与：走普通浮点科学计算
                 // ==============================================================
                 else if constexpr (std::is_same_v<T1, double> && std::is_same_v<T2, Fraction>) {
-                    int64_t p = static_cast<int64_t>(b.getNum().toDouble());
-                    int64_t q = static_cast<int64_t>(b.getDen().toDouble());
-                    if (a < 0) return Value::negativePow(a, p, q);
-                    double res = std::pow(a, static_cast<double>(p) / static_cast<double>(q));
+                    if (a < 0) {
+                        try {
+                            int64_t p = b.getNum().toInt64();
+                            int64_t q = b.getDen().toInt64();
+                            return Value::negativePow(a, p, q);
+                        } catch (...) {
+                            return Value(Complex(a, 0.0) ^ Complex(b.toDouble(), 0.0));
+                        }
+                    }
+                    double res = std::pow(a, b.toDouble());
                     double rounded = std::round(res);
                     if (Tol::isEq(res, rounded, 1e5) && std::abs(rounded) < 9e15) {
                         return Value(BigInt(static_cast<int64_t>(rounded)));
@@ -1630,6 +1618,79 @@ namespace jc {
         data = std::move(val);
     }
 
+struct DictData {
+    std::vector<std::pair<Value, Value>> elements;
+    std::unordered_map<Value, size_t, ValueHasher, ValueEqual> keyMap;
+    bool is_frozen = false;
+};
+
+struct ListData {
+    std::vector<Value> vec;
+    bool is_frozen = false;
+};
+
+struct SetData {
+    std::vector<Value> elements;
+    std::unordered_set<Value, ValueHasher, ValueEqual> keys;
+    bool is_frozen = false;
+};
+
+inline Dict::Dict() : ptr(std::make_shared<DictData>()) {
+    GcHeap::get().track(
+        ptr.get(),
+        [w = std::weak_ptr<DictData>(ptr)]() { return !w.expired(); },
+        [w = std::weak_ptr<DictData>(ptr)]() {
+            auto sp = w.lock(); if (sp) { sp->elements.clear(); sp->keyMap.clear(); }
+        }
+    );
+}
+inline void Dict::freeze() { ptr->is_frozen = true; }
+inline bool Dict::isFrozen() const { return ptr->is_frozen; }
+inline size_t Dict::size() const { return ptr->elements.size(); }
+inline bool Dict::empty() const { return ptr->elements.empty(); }
+inline void Dict::clear() {
+    if (ptr->is_frozen) throw std::runtime_error("Runtime Error: Object is frozen.");
+    ptr->elements.clear();
+    ptr->keyMap.clear();
+}
+
+inline List::List() : ptr(std::make_shared<ListData>()) {
+    GcHeap::get().track(
+        ptr.get(),
+        [w = std::weak_ptr<ListData>(ptr)]() { return !w.expired(); },
+        [w = std::weak_ptr<ListData>(ptr)]() {
+            auto sp = w.lock(); if (sp) sp->vec.clear();
+        }
+    );
+}
+inline void List::freeze() { ptr->is_frozen = true; }
+inline bool List::isFrozen() const { return ptr->is_frozen; }
+inline size_t List::size() const { return ptr->vec.size(); }
+inline bool List::empty() const { return ptr->vec.empty(); }
+inline void List::clear() {
+    if (ptr->is_frozen) throw std::runtime_error("Runtime Error: Object is frozen.");
+    ptr->vec.clear();
+}
+
+inline Set::Set() : ptr(std::make_shared<SetData>()) {
+    GcHeap::get().track(
+        ptr.get(),
+        [w = std::weak_ptr<SetData>(ptr)]() { return !w.expired(); },
+        [w = std::weak_ptr<SetData>(ptr)]() {
+            auto sp = w.lock();
+            if (sp) { sp->elements.clear(); sp->keys.clear(); }
+        }
+    );
+}
+inline void Set::freeze() { ptr->is_frozen = true; }
+inline bool Set::isFrozen() const { return ptr->is_frozen; }
+inline size_t Set::size() const { return ptr->elements.size(); }
+inline bool Set::empty() const { return ptr->elements.empty(); }
+inline void Set::clear() {
+    if (ptr->is_frozen) throw std::runtime_error("Runtime Error: Object is frozen.");
+    ptr->elements.clear(); ptr->keys.clear();
+}
+
 inline size_t ValueHasher::operator()(const Value& v) const {
     if (v.isString()) return std::hash<std::string>{}(std::get<std::string>(v.data));
     if (v.isNone()) return 0;
@@ -1643,6 +1704,10 @@ inline size_t ValueHasher::operator()(const Value& v) const {
     if (std::holds_alternative<std::shared_ptr<ClassDefinition>>(v.data)) return std::hash<const void*>{}(std::get<std::shared_ptr<ClassDefinition>>(v.data).get());
     if (std::holds_alternative<std::shared_ptr<FunctionClosure>>(v.data)) return std::hash<const void*>{}(std::get<std::shared_ptr<FunctionClosure>>(v.data).get());
 
+    if (std::holds_alternative<BaseNum>(v.data)) {
+        return operator()(Value(std::get<BaseNum>(v.data).getValue()));
+    }
+
     if (std::holds_alternative<List>(v.data)) {
         size_t h = 0;
         for (const auto& e : std::get<List>(v.data).raw()) {
@@ -1653,17 +1718,57 @@ inline size_t ValueHasher::operator()(const Value& v) const {
     if (std::holds_alternative<Dict>(v.data)) {
         size_t h = 0;
         for (const auto& [k, val] : std::get<Dict>(v.data).getEntries()) {
-            h ^= operator()(k) + 0x9e3779b9 + (h << 6) + (h >> 2);
-            h ^= operator()(val) + 0x9e3779b9 + (h << 6) + (h >> 2);
+            size_t kv_hash = operator()(k);
+            kv_hash ^= operator()(val) + 0x9e3779b9 + (kv_hash << 6) + (kv_hash >> 2);
+            // MurmurHash3 风格的雪崩扰乱，打散位分布
+            kv_hash ^= (kv_hash >> 16);
+            kv_hash *= 0x85ebca6b;
+            kv_hash ^= (kv_hash >> 13);
+            kv_hash *= 0xc2b2ae35;
+            kv_hash ^= (kv_hash >> 16);
+            // 满足交换律的累加，彻底无视插入顺序
+            h += kv_hash;
         }
         return h;
     }
     if (std::holds_alternative<Set>(v.data)) {
         size_t h = 0;
         for (const auto& val : std::get<Set>(v.data).raw()) {
-            h ^= operator()(val) + 0x9e3779b9 + (h << 6) + (h >> 2);
+            size_t e_hash = operator()(val);
+            // 雪崩扰乱
+            e_hash ^= (e_hash >> 16);
+            e_hash *= 0x85ebca6b;
+            e_hash ^= (e_hash >> 13);
+            e_hash *= 0xc2b2ae35;
+            e_hash ^= (e_hash >> 16);
+            // 满足交换律的累加
+            h += e_hash;
         }
         return h;
+    }
+
+    if (std::holds_alternative<RealMatrix>(v.data)) {
+        const auto& m = std::get<RealMatrix>(v.data);
+        size_t h = std::hash<int>{}(m.getRows()) ^ (std::hash<int>{}(m.getCols()) << 1);
+        for (double d : m.rawData()) h ^= operator()(Value(d)) + 0x9e3779b9 + (h << 6) + (h >> 2);
+        return h;
+    }
+    if (std::holds_alternative<ComplexMatrix>(v.data)) {
+        const auto& m = std::get<ComplexMatrix>(v.data);
+        size_t h = std::hash<int>{}(m.getRows()) ^ (std::hash<int>{}(m.getCols()) << 1);
+        for (const Complex& c : m.rawData()) h ^= operator()(Value(c)) + 0x9e3779b9 + (h << 6) + (h >> 2);
+        return h;
+    }
+    if (std::holds_alternative<StringMatrix>(v.data)) {
+        const auto& m = std::get<StringMatrix>(v.data);
+        size_t h = std::hash<int>{}(m.getRows()) ^ (std::hash<int>{}(m.getCols()) << 1);
+        for (const std::string& s : m.rawData()) h ^= operator()(Value(s)) + 0x9e3779b9 + (h << 6) + (h >> 2);
+        return h;
+    }
+    if (std::holds_alternative<SymExpr>(v.data)) {
+        const auto& sym = std::get<SymExpr>(v.data);
+        if (sym.ptr) return std::hash<std::string>{}(sym.ptr->getSignature());
+        return 0;
     }
 
     try {
