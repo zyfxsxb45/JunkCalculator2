@@ -90,6 +90,11 @@ namespace jc {
                 oss << inst.get();
             }
         }
+        else if (std::holds_alternative<SymExpr>(v.data)) {
+            auto& sym = std::get<SymExpr>(v.data);
+            if (sym.ptr) oss << sym.ptr->getSignature();
+            else oss << "null";
+        }
         else {
             oss << v;
         }
