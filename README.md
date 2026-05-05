@@ -23,6 +23,7 @@ Developed by Yu Liangyang, Tsinghua University.
 - **Object-Oriented Programming**: Single inheritance (`extends`), `super` dispatching, and operator overloading via dunder methods (e.g., `__add__`). Instances support destructuring assignment.
 - **Control Flow**: `if/else`, `while`, `for`, `for-in`, `switch/case`, `break/continue/return`.
 - **Error Handling**: `try/catch/throw` constructs and functional `pcall` with stack tracebacks.
+- **Execution Control**: Robust `Ctrl+C` interrupt mechanism to safely halt infinite loops or heavy CAS computations without crashing the VM. Pressing `Ctrl+C` three times consecutively triggers an immediate hard exit.
 - **Functions**: Closures, lambdas `(x) => expr`, default parameters, variadic arguments (`...args`), and `ref` parameter binding.
 - **Generic Container API**: Array manipulation functions (`push`, `slice`, `map`, `filter`, `reduce`, `sort`, `join`, `zip`, etc.) operate across four container types: `RealMatrix`, `ComplexMatrix`, `StringMatrix`, and `List`.
 - **Set Algebra**: `Set` type with O(1) membership testing (`in`). Supports operators for union (`|`), intersection (`&`), difference (`-`), and Cartesian product (`*`). Includes powerset generation (`setPow`) and relation predicates.
@@ -69,7 +70,7 @@ Version 2.3.2.0 is a major update featuring a completely rewritten limit engine,
 - **Pythonic Comparisons:** Added support for chained comparison operators (e.g., `0 < x <= 10`).
 - **Dict & Set Refactoring:** Dictionaries now preserve insertion order. Introduced dynamic freezing mechanisms with `freeze()`, `val()` (deep copy + freeze snapshot), and `clone()` (deep copy + unlock).
 - **Hashable Types:** Matrices and `SymExpr` are now hashable. User-defined classes can implement the `__hash__` dunder method to be used in Sets and as Dict keys.
-- **Execution Control:** Implemented a robust `Ctrl+C` interrupt mechanism to safely halt infinite loops or heavy computations without crashing the VM.
+- **Execution Control:** Implemented a robust `Ctrl+C` interrupt mechanism to safely halt infinite loops or heavy computations without crashing the VM. Pressing `Ctrl+C` three times consecutively triggers an immediate hard exit.
 
 ### Computer Algebra System (CAS)
 - **Gruntz Limit Engine:** Completely replaced the L'Hôpital's rule engine with the industrial-grade Gruntz asymptotic expansion algorithm, eliminating stack overflows and deadlocks in complex limits.
@@ -125,6 +126,7 @@ Requires a C++20 compliant compiler and CMake 3.15+.
     +-- Integration.h/cpp           Symbolic integration and Risch algorithm
     +-- Factorization.h/cpp         Polynomial factorization logic
     +-- Groebner.h/cpp              Groebner basis and multivariate polynomial division
+    +-- EngineInterrupt.h           Ctrl+C signal handling and VM execution interruption
     +-- SymEval.h                   Independent numerical evaluation bridge
     +-- Value.h                     std::variant Type System, Callables, Dict, List & Set
     +-- Expr.h                      AST Object Nodes
