@@ -1967,7 +1967,6 @@ namespace jc {
     isFrozen(d)                         Returns 1 if locked, 0 otherwise.
     val(d)                              Returns a deep-copied, frozen snapshot.
     hash(x)                             Returns the native hash value of x (as BigInt).
-    hash(x)                             Returns the native hash value of x (as BigInt).
     
   Copying & Mutability Matrix
   ──────────────────────
@@ -2071,7 +2070,6 @@ namespace jc {
     freeze(s)               Locks the set permanently.
     isFrozen(s)             Returns 1 if locked, 0 otherwise.
     val(s)                  Returns a deep-copied, frozen snapshot of the set.
-    hash(x)                 Returns the native hash value of x (as BigInt).
     hash(x)                 Returns the native hash value of x (as BigInt).
     
   Copying & Mutability Matrix
@@ -2397,7 +2395,6 @@ namespace jc {
     isinstance(x)       Is x an instance of any class? (1 arg)
     isinstance(x, C)    Is x an instance of class C or its subclass? (2 args)
     issym(x)            Is x a Symbolic Expression (SymExpr)?
-    hash(x)             Returns the native hash value of x (throws if unhashable).
     hash(x)             Returns the native hash value of x (throws if unhashable).
 
   Floating-Point Checks
