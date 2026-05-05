@@ -1,8 +1,8 @@
 #ifndef JC2_MODULE_PROB_H
 #define JC2_MODULE_PROB_H
 
-#include "../Module.h"
-#include "../Probability.h"
+#include "Module.h"
+#include "Probability.h"
 
 namespace jc_prob {
     using namespace jc;

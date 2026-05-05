@@ -1,9 +1,9 @@
 //Vm.cpp
 #include "VM.h"
-#include "Module.h"
+#include "../modules/Module.h"
 #include "BuiltinRegistry.h"
-#include "Highlight.h"
-#include "GcHeap.h"
+#include "../frontend/Highlight.h"
+#include "../memory/GcHeap.h"
 #include <iostream>
 #include <cmath>
 #include <stdexcept>

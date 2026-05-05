@@ -22,29 +22,29 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # Core Sources & Headers Collection
 # ==============================================================================
 set(JC2_HEADERS
-    "Token.h" "Lexer.h" "Expr.h" "Parser.h" "Value.h"
-    "Complex.h" "Matrix.h" "BigInt.h" "Fraction.h" "Base.h"
-    "Tolerance.h" "Image.h" "Probability.h" "Highlight.h"
-    "HelpText.h" "Bytecode.h" "Compiler.h" "VM.h"
-    "Module.h" "GcHeap.h" "BuiltinRegistry.h" "Symbolic.h"
-    "Integration.h" "Factorization.h" "Groebner.h" "EngineInterrupt.h"
-    "modules/json_module.h"
-    "modules/image_module.h"
-    "modules/prob_module.h"
-    "modules/bytes_module.h" 
-    "modules/socket_module.h"
-    "modules/window_module.h"
-    "modules/latex_module.h"
+    "src/frontend/Token.h" "src/frontend/Lexer.h" "src/frontend/Expr.h" "src/frontend/Parser.h" "src/frontend/Highlight.h" "src/frontend/Compiler.h"
+    "src/memory/Value.h" "src/memory/GcHeap.h"
+    "src/math/Complex.h" "src/math/Matrix.h" "src/math/BigInt.h" "src/math/Fraction.h" "src/math/Base.h" "src/math/Tolerance.h"
+    "src/modules/Image.h" "src/modules/Probability.h" "src/modules/Module.h"
+    "src/vm/HelpText.h" "src/vm/Bytecode.h" "src/vm/VM.h" "src/vm/BuiltinRegistry.h" "src/vm/EngineInterrupt.h"
+    "src/cas/Symbolic.h" "src/cas/Integration.h" "src/cas/Factorization.h" "src/cas/Groebner.h"
+    "src/modules/json_module.h"
+    "src/modules/image_module.h"
+    "src/modules/prob_module.h"
+    "src/modules/bytes_module.h" 
+    "src/modules/socket_module.h"
+    "src/modules/window_module.h"
+    "src/modules/latex_module.h"
 )
 
 set(JC2_SOURCES
-    "Lexer.cpp" "Parser.cpp" "Compiler.cpp"
-    "VM.cpp" "BuiltinRegistry.cpp" "main.cpp"
-    "Symbolic.cpp" "Integration.cpp" "Factorization.cpp" "Groebner.cpp"
+    "src/frontend/Lexer.cpp" "src/frontend/Parser.cpp" "src/frontend/Compiler.cpp"
+    "src/vm/VM.cpp" "src/vm/BuiltinRegistry.cpp" "src/main.cpp"
+    "src/cas/Symbolic.cpp" "src/cas/Integration.cpp" "src/cas/Factorization.cpp" "src/cas/Groebner.cpp"
 )
 
 add_executable(JunkCalculator2 ${JC2_HEADERS} ${JC2_SOURCES})
-target_include_directories(JunkCalculator2 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories(JunkCalculator2 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
 # ★ Critical Linkage for Win32 OS:
 # ws2_32 (Networking), User32 & Gdi32 (Native GUI), imm32 (IME Focus Control)

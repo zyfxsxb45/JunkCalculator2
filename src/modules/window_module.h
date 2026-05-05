@@ -1,7 +1,7 @@
 #ifndef JC2_MODULE_WINDOW_H
 #define JC2_MODULE_WINDOW_H
 
-#include "../Module.h"
+#include "Module.h"
 #include "image_module.h"
 
 #ifdef _WIN32

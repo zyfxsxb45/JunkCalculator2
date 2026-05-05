@@ -1,8 +1,8 @@
 // Symbolic.cpp
 #include "Symbolic.h"
 #include "Factorization.h"
-#include "Value.h"          // ★ 新增：统一走 Value 运算
-#include "Tolerance.h"
+#include "../memory/Value.h"          // ★ 新增：统一走 Value 运算
+#include "../math/Tolerance.h"
 #include "SymEval.h"
 #include "SymRules.h"
 #include "Groebner.h"

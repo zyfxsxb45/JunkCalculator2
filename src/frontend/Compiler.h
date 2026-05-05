@@ -1,7 +1,7 @@
 #ifndef JC2_COMPILER_H
 #define JC2_COMPILER_H
 
-#include "Bytecode.h"
+#include "../vm/Bytecode.h"
 #include "Expr.h"
 #include <map>
 #include <string>

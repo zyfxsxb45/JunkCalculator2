@@ -1,7 +1,7 @@
 #ifndef JC2_MODULE_LATEX_H
 #define JC2_MODULE_LATEX_H
 
-#include "../Module.h"
+#include "Module.h"
 #include <sstream>
 #include <iomanip>
 #include <cctype>

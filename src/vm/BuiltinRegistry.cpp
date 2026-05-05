@@ -1,11 +1,11 @@
 #include "BuiltinRegistry.h"
-#include "SymEval.h"
-#include "Integration.h"
-#include "Factorization.h"
-#include "Highlight.h"          // ★ highlightCode(), colorsEnabled
-#include "Module.h"
+#include "../cas/SymEval.h"
+#include "../cas/Integration.h"
+#include "../cas/Factorization.h"
+#include "../frontend/Highlight.h"          // ★ highlightCode(), colorsEnabled
+#include "../modules/Module.h"
 #include "VM.h"
-#include "GcHeap.h"
+#include "../memory/GcHeap.h"
 #include "HelpText.h"           // ★ BuiltinHelp, DynamicHelp
 #ifdef _MSC_VER
 #pragma warning(disable: 4702)

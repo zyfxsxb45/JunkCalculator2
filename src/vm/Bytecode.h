@@ -1,7 +1,7 @@
 #ifndef JC2_BYTECODE_H
 #define JC2_BYTECODE_H
 
-#include "Value.h"
+#include "../memory/Value.h"
 #include <cstdint>
 #include <iomanip>
 #include <iostream>

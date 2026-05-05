@@ -1,8 +1,8 @@
 #ifndef JC2_MODULE_BYTES_H
 #define JC2_MODULE_BYTES_H
 
-#include "../Module.h"
-#include "../BuiltinRegistry.h"
+#include "Module.h"
+#include "../vm/BuiltinRegistry.h"
 #include <vector>
 #include <cstdint>
 #include <fstream>

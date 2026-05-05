@@ -1,7 +1,7 @@
 #ifndef JC2_BUILTIN_REGISTRY_H
 #define JC2_BUILTIN_REGISTRY_H
 
-#include "Value.h"
+#include "../memory/Value.h"
 #include <any>
 #include <functional>
 #include <map>

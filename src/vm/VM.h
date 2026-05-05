@@ -2,7 +2,7 @@
 #define JC2_VM_H
 
 #include "Bytecode.h"
-#include "Value.h"
+#include "../memory/Value.h"
 #include <chrono>
 #include <functional>
 #include <map>

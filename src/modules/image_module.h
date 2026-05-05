@@ -1,8 +1,8 @@
 #ifndef JC2_MODULE_IMAGE_H
 #define JC2_MODULE_IMAGE_H
 
-#include "../Module.h"
-#include "../Image.h"
+#include "Module.h"
+#include "Image.h"
 #include <fstream>
 #include <sstream>
 

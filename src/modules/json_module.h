@@ -1,7 +1,7 @@
 #ifndef JC2_MODULE_JSON_H
 #define JC2_MODULE_JSON_H
 
-#include "../Module.h"
+#include "Module.h"
 #include <sstream>
 #include <cmath>
 #include <iomanip>

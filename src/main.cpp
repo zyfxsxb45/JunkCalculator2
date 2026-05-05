@@ -7,15 +7,15 @@
 #include <chrono>
 #include <iomanip>
 #include <algorithm>
-#include "Lexer.h"
-#include "Parser.h"
-#include "Value.h"
-#include "HelpText.h"
-#include "Highlight.h"
-#include "Compiler.h"
-#include "VM.h"
-#include "Module.h"
-#include "BuiltinRegistry.h"
+#include "frontend/Lexer.h"
+#include "frontend/Parser.h"
+#include "memory/Value.h"
+#include "vm/HelpText.h"
+#include "frontend/Highlight.h"
+#include "frontend/Compiler.h"
+#include "vm/VM.h"
+#include "modules/Module.h"
+#include "vm/BuiltinRegistry.h"
 #include "modules/json_module.h"
 #include "modules/image_module.h"
 #include "modules/prob_module.h"
@@ -25,6 +25,10 @@
 #include <csignal>
 #include <atomic>
 
+namespace jc {
+    std::atomic<bool> g_isWaitingForInput{false};
+}
+
 // 信号处理
 static std::atomic<int> g_sigintCount{0};
 static auto g_lastSigintTime = std::chrono::steady_clock::now();
@@ -32,6 +36,12 @@ static auto g_lastSigintTime = std::chrono::steady_clock::now();
 void sigintHandler(int signum) {
     (void)signum;
     std::signal(SIGINT, sigintHandler); // 重新注册，防止某些平台恢复默认处理
+
+    if (jc::g_isWaitingForInput.load(std::memory_order_relaxed)) {
+        std::cout << "\nGoodbye!" << std::endl;
+        std::exit(0);
+    }
+
     auto now = std::chrono::steady_clock::now();
     if (std::chrono::duration_cast<std::chrono::milliseconds>(now - g_lastSigintTime).count() < 1000) {
         g_sigintCount++;
@@ -330,7 +340,12 @@ int main(int argc, char* argv[]) {
 
         std::string input;
         std::cout << "\n" << jc::col(jc::Ansi::BOLD) << jc::col(jc::Ansi::BRIGHT_CYAN) << "JC2> " << jc::col(jc::Ansi::RESET);
-        if (!std::getline(std::cin, input)) {
+        
+        jc::g_isWaitingForInput.store(true, std::memory_order_relaxed);
+        bool getlineResult = (bool)std::getline(std::cin, input);
+        jc::g_isWaitingForInput.store(false, std::memory_order_relaxed);
+
+        if (!getlineResult) {
             bool isInterrupt = jc::g_interruptRequested.load(std::memory_order_relaxed);
             bool isEof = std::cin.eof();
             std::cin.clear(); // 清除错误状态

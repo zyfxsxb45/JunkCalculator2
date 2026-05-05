@@ -14,6 +14,7 @@ namespace jc {
     };
 
     extern std::atomic<bool> g_interruptRequested;
+    extern std::atomic<bool> g_isWaitingForInput;
 
     inline void checkInterrupt() {
         if (g_interruptRequested.load(std::memory_order_relaxed)) {

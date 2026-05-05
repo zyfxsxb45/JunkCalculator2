@@ -19,17 +19,17 @@
 #include <numeric> 
 #include <map>
 #include <unordered_map>
-#include "Complex.h"
-#include "Matrix.h"
-#include "BigInt.h"
-#include "Expr.h"
-#include "Fraction.h"
-#include "Base.h"
-#include "Tolerance.h"
-#include "Image.h"
-#include "Probability.h"
+#include "../math/Complex.h"
+#include "../math/Matrix.h"
+#include "../math/BigInt.h"
+#include "../frontend/Expr.h"
+#include "../math/Fraction.h"
+#include "../math/Base.h"
+#include "../math/Tolerance.h"
+#include "../modules/Image.h"
+#include "../modules/Probability.h"
 #include "GcHeap.h"
-#include "Symbolic.h" 
+#include "../cas/Symbolic.h" 
 
 namespace jc {
     class Value;

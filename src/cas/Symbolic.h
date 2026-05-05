@@ -2,9 +2,9 @@
 #ifndef JC2_SYMBOLIC_H
 #define JC2_SYMBOLIC_H
 
-#include "BigInt.h"
-#include "Fraction.h"
-#include "Complex.h"
+#include "../math/BigInt.h"
+#include "../math/Fraction.h"
+#include "../math/Complex.h"
 #include <string>
 #include <vector>
 #include <memory>
@@ -16,7 +16,7 @@
 #include <set>
 #include <atomic>
 #include <stdexcept>
-#include "EngineInterrupt.h"
+#include "../vm/EngineInterrupt.h"
 
 namespace jc {
     class Value;

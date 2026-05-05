@@ -2,7 +2,7 @@
 #define JC2_SYMEVAL_H
 
 #include "Symbolic.h"
-#include "Value.h"
+#include "../memory/Value.h"
 #include <map>
 #include <string>
 #include <vector>

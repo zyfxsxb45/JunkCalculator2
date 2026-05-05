@@ -1,7 +1,7 @@
 #ifndef JC2_MODULE_H
 #define JC2_MODULE_H
 
-#include "Value.h"
+#include "../memory/Value.h"
 #include <functional>
 #include <map>
 #include <set>

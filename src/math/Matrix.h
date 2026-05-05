@@ -8,7 +8,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <vector>
-#include "EngineInterrupt.h"
+#include "../vm/EngineInterrupt.h"
 
 namespace jc {
 
