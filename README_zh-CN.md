@@ -124,36 +124,14 @@
 
 ## 项目代码结构
 
-    +-- main.cpp                    引擎入口，CLI 解析及工作区环境控制
-    +-- Lexer.h/cpp                 词法分析扫描逻辑
-    +-- Parser.h/cpp                递归下降树生成器
-    +-- Compiler.h/cpp              AST 访问者调度与字节码生成器
-    +-- VM.h/cpp                    核心栈式虚拟机无限运行循环
-    +-- Bytecode.h                  OpCode 指令集定义与 Chunk 内存表示
-    +-- BuiltinRegistry.h/cpp       无状态底层预置泛型挂载函数库
-    +-- Symbolic.h/cpp              计算机代数系统 (CAS) 符号推导中心
-    +-- SymRules.h                  预制启发式微积分消歧规则定义库
-    +-- Integration.h/cpp           积分代数引理模块与 Risch 算法执行流
-    +-- Factorization.h/cpp         多项式有限域分解数学中心
-    +-- Groebner.h/cpp              Gröbner 基求解方案与多元多项式除法
-    +-- EngineInterrupt.h           Ctrl+C 挂起及 VM 执行拦截断控信号处理
-    +-- SymEval.h                   非符号数学系（数值化）桥接评估器
-    +-- Value.h                     std::variant 动态类型系统，闭包机制，Dict、List 与 Set 实体
-    +-- Expr.h                      AST 对象多态封装节点
-    +-- Token.h                     词法枚举定义
-    +-- Complex.h                   复平面数据系统与通用多项式方程底层求解中心
-    +-- Matrix.h                    矩阵模板中心机制与核心线性代数方法挂载点
-    +-- BigInt.h                    大字长高精度标量容器与静态数论支撑
-    +-- Fraction.h                  精确无损重约分有理数数值型封装
-    +-- Base.h                      任意进制类型与底层位运算实现
-    +-- Tolerance.h                 IEEE-754 边缘偏差智能消除/对齐基准中心
-    +-- Image.h                     BMP 光栅化平面控制缓存类
-    +-- Probability.h               数理统计、PDF 分布函数底层评估驱动
-    +-- Highlight.h                 ANSI 彩色编码转接协议器
-    +-- HelpText.h                  编译期硬编码指令帮助档案文本中心
-    +-- Module.h                    C++ 底层高性能宏挂载模块注册器
-    +-- GcHeap.h                    环追踪/标记-清扫泛型垃圾回收处理器
-    +-- modules/                    原生 C++ 底层实现扩展模块区
+    +-- src/
+    |   +-- main.cpp                引擎入口，CLI 解析及工作区环境控制
+    |   +-- frontend/               前端编译组件 (Lexer, Parser, Compiler, AST, Highlight)
+    |   +-- vm/                     虚拟机核心 (VM, Bytecode, BuiltinRegistry, 中断控制)
+    |   +-- memory/                 内存与类型系统 (Value 动态类型, GcHeap 垃圾回收)
+    |   +-- math/                   基础数学库 (BigInt, Fraction, Complex, Matrix, Base)
+    |   +-- cas/                    计算机代数系统 (Symbolic, Integration, Factorization, Groebner)
+    |   +-- modules/                原生 C++ 扩展模块 (Image, Probability, JSON, Socket 等)
     +-- lib/                        标准 JC2 业务层逻辑库开发区
     +-- examples/                   内置展示用项目示例
     +-- jc2-language/               配套 Visual Studio Code 插件支持

@@ -124,36 +124,14 @@ Requires a C++20 compliant compiler and CMake 3.15+.
 
 ## Project Layout
 
-    +-- main.cpp                    Entry point, CLI parser, and Workspace I/O
-    +-- Lexer.h/cpp                 Tokenizer logic
-    +-- Parser.h/cpp                Recursive descent parser
-    +-- Compiler.h/cpp              AST traversal and Bytecode emitter
-    +-- VM.h/cpp                    Stack-based Virtual Machine execution loop
-    +-- Bytecode.h                  OpCode definitions and Chunk representations
-    +-- BuiltinRegistry.h/cpp       Generic & stateless built-in functions
-    +-- Symbolic.h/cpp              Computer Algebra System (CAS) core
-    +-- SymRules.h                  Pre-defined integration and simplification rules
-    +-- Integration.h/cpp           Symbolic integration and Risch algorithm
-    +-- Factorization.h/cpp         Polynomial factorization logic
-    +-- Groebner.h/cpp              Groebner basis and multivariate polynomial division
-    +-- EngineInterrupt.h           Ctrl+C signal handling and VM execution interruption
-    +-- SymEval.h                   Independent numerical evaluation bridge
-    +-- Value.h                     std::variant Type System, Callables, Dict, List & Set
-    +-- Expr.h                      AST Object Nodes
-    +-- Token.h                     Lexical Enums
-    +-- Complex.h                   Complex data and polynomial solvers
-    +-- Matrix.h                    Matrix template and Linear Algebra routines
-    +-- BigInt.h                    Large numerals and Number Theory engine
-    +-- Fraction.h                  Rational numeric wrapper
-    +-- Base.h                      Arbitrary-radix data types & bitwise ops
-    +-- Tolerance.h                 IEEE-754 dynamic floating point margins
-    +-- Image.h                     BMP memory buffer class
-    +-- Probability.h               Statistics distributions math backend
-    +-- Highlight.h                 ANSI sequence token colorizer
-    +-- HelpText.h                  Compile-time embedded help topics
-    +-- Module.h                    C++ module mounting macros
-    +-- GcHeap.h                    Mark-and-Sweep Garbage Collector
-    +-- modules/                    Native C++ extensions
+    +-- src/
+    |   +-- main.cpp                Entry point, CLI parser, and Workspace I/O
+    |   +-- frontend/               Frontend components (Lexer, Parser, Compiler, AST, Highlight)
+    |   +-- vm/                     Virtual Machine core (VM, Bytecode, Builtins, Interrupts)
+    |   +-- memory/                 Memory & Type System (Value variant, GcHeap)
+    |   +-- math/                   Math primitives (BigInt, Fraction, Complex, Matrix, Base)
+    |   +-- cas/                    Computer Algebra System (Symbolic, Integration, Factorization)
+    |   +-- modules/                Native C++ extensions (Image, Probability, JSON, Socket, etc.)
     +-- lib/                        Standard JC2 libraries
     +-- examples/                   Showcase scripts
     +-- jc2-language/               VS Code Language Support Extension
