@@ -866,6 +866,7 @@ namespace jc {
     diff(sin(x^2), x)            → 2 * x * cos(x^2)
     integ(exp(x^2), x)           → Risch Algorithm (Liouvillian extensions)
     integ(x^2, x, 0, 1)          → 1/3 (Definite integral)
+    verifyInteg(expr, x)         → 1 if diff(integ(expr, x), x) == expr, else 0
     limit(sin(x)/x, x, 0)        → 1 (Gruntz asymptotic expansion algorithm)
     taylor(sin(x), x, 0, 5)      → x - 1/6 * x^3 + 1/120 * x^5
     debugInteg("on")             → Print detailed integration steps & Risch algorithm trace
