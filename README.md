@@ -1,3 +1,7 @@
+<div align="right">
+  <strong>English</strong> | <a href="README_zh-CN.md">简体中文</a>
+</div>
+
 # Junk Calculator 2.3.2.0
 
 ![Version](https://img.shields.io/badge/Version-v2.3.2.0-orange.svg?style=flat-square)
