@@ -3019,7 +3019,6 @@ void BuiltinRegistry::registerSystemShell() {
     reg("imgPlot", { 7, 8 }, [](const std::vector<Value>& args) -> Value {
         auto inst = std::get<std::shared_ptr<Instance>>(args[0].data);
         auto& im = std::any_cast<std::shared_ptr<Image>&>(inst->nativeData);
-        auto fn = args[0].asFunction(); // 修正：应该是 args[1]
         auto fn_actual = args[1].asFunction();
         double xMin = args[2].asDouble(), xMax = args[3].asDouble();
         double yMin = args[4].asDouble(), yMax = args[5].asDouble();
