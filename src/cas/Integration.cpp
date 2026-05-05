@@ -607,6 +607,21 @@ namespace jc {
                         SymExpr exp_mx(std::make_shared<SymFunc>("exp", std::vector<std::shared_ptr<SymNode>>{(-arg).ptr}));
                         return (exp_x - exp_mx) / (exp_x + exp_mx);
                     }
+                    if (f->name == "coth") {
+                        SymExpr exp_x(std::make_shared<SymFunc>("exp", std::vector<std::shared_ptr<SymNode>>{arg.ptr}));
+                        SymExpr exp_mx(std::make_shared<SymFunc>("exp", std::vector<std::shared_ptr<SymNode>>{(-arg).ptr}));
+                        return (exp_x + exp_mx) / (exp_x - exp_mx);
+                    }
+                    if (f->name == "sech") {
+                        SymExpr exp_x(std::make_shared<SymFunc>("exp", std::vector<std::shared_ptr<SymNode>>{arg.ptr}));
+                        SymExpr exp_mx(std::make_shared<SymFunc>("exp", std::vector<std::shared_ptr<SymNode>>{(-arg).ptr}));
+                        return SymExpr(BigInt(2)) / (exp_x + exp_mx);
+                    }
+                    if (f->name == "csch") {
+                        SymExpr exp_x(std::make_shared<SymFunc>("exp", std::vector<std::shared_ptr<SymNode>>{arg.ptr}));
+                        SymExpr exp_mx(std::make_shared<SymFunc>("exp", std::vector<std::shared_ptr<SymNode>>{(-arg).ptr}));
+                        return SymExpr(BigInt(2)) / (exp_x - exp_mx);
+                    }
                 }
                 return SymExpr(std::make_shared<SymFunc>(f->name, std::move(nArgs)));
             }
@@ -2054,12 +2069,12 @@ namespace jc {
                     
                     if (A_pos && C_pos) {
                         SymExpr sqrtCA = simplifyCore((C / A) ^ SymExpr(Fraction(1, 2)));
-                        SymExpr tan_t(std::make_shared<SymFunc>("tan", std::vector<std::shared_ptr<SymNode>>{t.ptr}));
-                        SymExpr cos_t(std::make_shared<SymFunc>("cos", std::vector<std::shared_ptr<SymNode>>{t.ptr}));
-                        x_sub = sqrtCA * tan_t;
-                        dx_sub = sqrtCA / (cos_t * cos_t);
-                        SymExpr atan_arg = simplifyCore(SymExpr::makeVar(var) / sqrtCA);
-                        t_back = SymExpr(std::make_shared<SymFunc>("atan", std::vector<std::shared_ptr<SymNode>>{atan_arg.ptr}));
+                        SymExpr sinh_t(std::make_shared<SymFunc>("sinh", std::vector<std::shared_ptr<SymNode>>{t.ptr}));
+                        SymExpr cosh_t(std::make_shared<SymFunc>("cosh", std::vector<std::shared_ptr<SymNode>>{t.ptr}));
+                        x_sub = sqrtCA * sinh_t;
+                        dx_sub = sqrtCA * cosh_t;
+                        SymExpr asinh_arg = simplifyCore(SymExpr::makeVar(var) / sqrtCA);
+                        t_back = SymExpr(std::make_shared<SymFunc>("asinh", std::vector<std::shared_ptr<SymNode>>{asinh_arg.ptr}));
                         valid = true;
                     } else if (A_neg && C_pos) {
                         SymExpr sqrtCA = simplifyCore((-C / A) ^ SymExpr(Fraction(1, 2)));
@@ -2072,12 +2087,12 @@ namespace jc {
                         valid = true;
                     } else if (A_pos && C_neg) {
                         SymExpr sqrtCA = simplifyCore((-C / A) ^ SymExpr(Fraction(1, 2)));
-                        SymExpr cos_t(std::make_shared<SymFunc>("cos", std::vector<std::shared_ptr<SymNode>>{t.ptr}));
-                        SymExpr sin_t(std::make_shared<SymFunc>("sin", std::vector<std::shared_ptr<SymNode>>{t.ptr}));
-                        x_sub = sqrtCA / cos_t;
-                        dx_sub = sqrtCA * sin_t / (cos_t * cos_t);
-                        SymExpr acos_arg = simplifyCore(sqrtCA / SymExpr::makeVar(var));
-                        t_back = SymExpr(std::make_shared<SymFunc>("acos", std::vector<std::shared_ptr<SymNode>>{acos_arg.ptr}));
+                        SymExpr cosh_t(std::make_shared<SymFunc>("cosh", std::vector<std::shared_ptr<SymNode>>{t.ptr}));
+                        SymExpr sinh_t(std::make_shared<SymFunc>("sinh", std::vector<std::shared_ptr<SymNode>>{t.ptr}));
+                        x_sub = sqrtCA * cosh_t;
+                        dx_sub = sqrtCA * sinh_t;
+                        SymExpr acosh_arg = simplifyCore(SymExpr::makeVar(var) / sqrtCA);
+                        t_back = SymExpr(std::make_shared<SymFunc>("acosh", std::vector<std::shared_ptr<SymNode>>{acosh_arg.ptr}));
                         valid = true;
                     }
                     
@@ -2088,6 +2103,14 @@ namespace jc {
                             if (SymConfig::debugIntegration) std::cout << std::string(current_depth * 2, ' ') << "<- Trig Substitution Success" << std::endl;
                             SymExpr res = subs(*int_var, var, t_back);
                             return coeff * res;
+                        }
+                        SymExpr exp_subbed = trigToExp(subbed_var);
+                        if (exp_subbed != subbed_var) {
+                            if (auto int_exp = doInteg(exp_subbed, current_depth + 1)) {
+                                if (SymConfig::debugIntegration) std::cout << std::string(current_depth * 2, ' ') << "<- Trig Substitution (via Exp) Success" << std::endl;
+                                SymExpr res = subs(expToTrig(*int_exp), var, t_back);
+                                return coeff * res;
+                            }
                         }
                     }
                 }

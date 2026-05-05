@@ -173,6 +173,11 @@ namespace jc {
                 { func("cos", SymExpr(-1) * _x), cos_x },
                 { func("tan", SymExpr(-1) * _x), -tan_x },
 
+                // 半角反三角函数化简
+                { func("tan", func("atan", _x) / SymExpr(2)), (((_x ^ SymExpr(2)) + SymExpr(1)) ^ SymExpr(Fraction(1, 2)) - SymExpr(1)) / _x },
+                { func("tan", func("asin", _x) / SymExpr(2)), _x / (SymExpr(1) + ((SymExpr(1) - (_x ^ SymExpr(2))) ^ SymExpr(Fraction(1, 2)))) },
+                { func("tan", func("acos", _x) / SymExpr(2)), ((SymExpr(1) - _x) ^ SymExpr(Fraction(1, 2))) / ((SymExpr(1) + _x) ^ SymExpr(Fraction(1, 2))) },
+
                 // 反三角函数嵌套化简
                 { func("sin", func("asin", _x)), _x },
                 { func("cos", func("acos", _x)), _x },
@@ -185,7 +190,21 @@ namespace jc {
                 { func("sin", func("atan", _x)), _x / ((SymExpr(1) + (_x ^ SymExpr(2))) ^ SymExpr(Fraction(1, 2))) },
                 { func("cos", func("atan", _x)), SymExpr(1) / ((SymExpr(1) + (_x ^ SymExpr(2))) ^ SymExpr(Fraction(1, 2))) },
                 { func("tan", func("asin", _x)), _x / ((SymExpr(1) - (_x ^ SymExpr(2))) ^ SymExpr(Fraction(1, 2))) },
-                { func("tan", func("acos", _x)), ((SymExpr(1) - (_x ^ SymExpr(2))) ^ SymExpr(Fraction(1, 2))) / _x }
+                { func("tan", func("acos", _x)), ((SymExpr(1) - (_x ^ SymExpr(2))) ^ SymExpr(Fraction(1, 2))) / _x },
+
+                // 双曲-反双曲嵌套化简
+                { func("sinh", func("asinh", _x)), _x },
+                { func("cosh", func("acosh", _x)), _x },
+                { func("tanh", func("atanh", _x)), _x },
+                { func("asinh", func("sinh", _x)), _x },
+                { func("acosh", func("cosh", _x)), _x },
+                { func("atanh", func("tanh", _x)), _x },
+                { func("cosh", func("asinh", _x)), ((_x ^ SymExpr(2)) + SymExpr(1)) ^ SymExpr(Fraction(1, 2)) },
+                { func("sinh", func("acosh", _x)), ((_x ^ SymExpr(2)) - SymExpr(1)) ^ SymExpr(Fraction(1, 2)) },
+                { func("tanh", func("asinh", _x)), _x / (((_x ^ SymExpr(2)) + SymExpr(1)) ^ SymExpr(Fraction(1, 2))) },
+                { func("tanh", func("acosh", _x)), (((_x ^ SymExpr(2)) - SymExpr(1)) ^ SymExpr(Fraction(1, 2))) / _x },
+                { func("sinh", func("atanh", _x)), _x / ((SymExpr(1) - (_x ^ SymExpr(2))) ^ SymExpr(Fraction(1, 2))) },
+                { func("cosh", func("atanh", _x)), SymExpr(1) / ((SymExpr(1) - (_x ^ SymExpr(2))) ^ SymExpr(Fraction(1, 2))) }
             };
         }
         return rules;
