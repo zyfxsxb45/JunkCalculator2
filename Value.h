@@ -492,6 +492,7 @@ namespace jc {
                     return true;
                 }
                 else if constexpr (std::is_same_v<T, std::shared_ptr<Instance>>) {
+                    if (!arg) return false;
                     auto c = arg->classDef;
                     while (c) {
                         if (c->methods.count("__hash__")) return true;
@@ -649,6 +650,7 @@ namespace jc {
                 if (std::holds_alternative<SuperProxyPtr>(lhs.data)) {
                     auto sp1 = std::get<SuperProxyPtr>(lhs.data);
                     auto sp2 = std::get<SuperProxyPtr>(rhs.data);
+                    if (!sp1 || !sp2) return sp1 == sp2;
                     return sp1->instance.get() == sp2->instance.get() && sp1->parentClass.get() == sp2->parentClass.get();
                 }
                 return false;
@@ -698,7 +700,7 @@ namespace jc {
             if (std::holds_alternative<std::shared_ptr<FunctionClosure>>(data)) return "function";
             if (std::holds_alternative<std::shared_ptr<Instance>>(data)) {
                 auto inst = std::get<std::shared_ptr<Instance>>(data);
-                return inst->classDef ? inst->classDef->name : "instance";
+                return (inst && inst->classDef) ? inst->classDef->name : "instance";
             }
             if (std::holds_alternative<std::shared_ptr<ClassDefinition>>(data)) return "class";
             if (std::holds_alternative<BaseNum>(data)) return "BaseNum";
@@ -1229,7 +1231,10 @@ namespace jc {
                 else if constexpr (std::is_same_v<T, jc::RealMatrix>) os << arg;
                 else if constexpr (std::is_same_v<T, jc::ComplexMatrix>) os << arg;
                 else if constexpr (std::is_same_v<T, BigInt>) os << arg;
-                else if constexpr (std::is_same_v<T, std::shared_ptr<FunctionClosure>>) os << arg->toString();
+                else if constexpr (std::is_same_v<T, std::shared_ptr<FunctionClosure>>) {
+                    if (arg) os << arg->toString();
+                    else os << "<function null>";
+                }
                 else if constexpr (std::is_same_v<T, Fraction>) os << arg;
                 else if constexpr (std::is_same_v<T, BaseNum>) os << arg;
                 else if constexpr (std::is_same_v<T, jc::StringMatrix>) os << arg;
@@ -1265,12 +1270,15 @@ namespace jc {
                     os << "]";
                 }
                 else if constexpr (std::is_same_v<T, std::shared_ptr<ClassDefinition>>) {
-                    os << "<class " << arg->name << ">";
+                    if (!arg) os << "<class null>";
+                    else os << "<class " << arg->name << ">";
                 }
                 else if constexpr (std::is_same_v<T, std::shared_ptr<Instance>>) {
+                    if (!arg) { os << "<instance null>"; return; }
                     PrintGuard guard(visited, arg.get());
+                    std::string cname = arg->classDef ? arg->classDef->name : "unknown";
                     if (guard.isCycle) {
-                        os << "<" << arg->classDef->name << " {...}>";
+                        os << "<" << cname << " {...}>";
                         return;
                     }
                     bool printedNative = false;
@@ -1287,7 +1295,7 @@ namespace jc {
                         }
                     }
                     if (!printedNative) {
-                        os << "<" << arg->classDef->name << " {";
+                        os << "<" << cname << " {";
                         const auto& entries = arg->fields.getEntries();
                         for (size_t ii = 0; ii < entries.size(); ++ii) {
                             if (ii > 0) os << ", ";
@@ -1315,7 +1323,7 @@ namespace jc {
                     os << "}";
                 }
                 else if constexpr (std::is_same_v<T, SuperProxyPtr>) {
-                    os << "<super>";
+                    os << (arg ? "<super>" : "<super null>");
                 }
                 else if constexpr (std::is_same_v<T, SymExpr>) {
                     os << arg.toString();
@@ -1404,7 +1412,7 @@ namespace jc {
                     return res;
                 }
                 else if constexpr (std::is_same_v<T, std::shared_ptr<FunctionClosure>>) {
-                    return "\"<function>\"";
+                    return arg ? "\"<function>\"" : "\"<function null>\"";
                 }
                 else if constexpr (std::is_same_v<T, StringMatrix>) {
                     std::string res = "strmat(";
@@ -1460,13 +1468,15 @@ namespace jc {
                     return res;
                 }
                 else if constexpr (std::is_same_v<T, std::shared_ptr<ClassDefinition>>) {
-                    return "\"<class " + arg->name + ">\"";
+                    return arg ? "\"<class " + arg->name + ">\"" : "\"<class null>\"";
                 }
                 else if constexpr (std::is_same_v<T, std::shared_ptr<Instance>>) {
-                    return "\"<" + arg->classDef->name + " instance>\"";
+                    if (!arg) return "\"<instance null>\"";
+                    std::string cname = arg->classDef ? arg->classDef->name : "unknown";
+                    return "\"<" + cname + " instance>\"";
                 }
                 else if constexpr (std::is_same_v<T, SuperProxyPtr>) {
-                    return "\"<super>\"";
+                    return arg ? "\"<super>\"" : "\"<super null>\"";
                 }
                 else if constexpr (std::is_same_v<T, SymExpr>) {
                     return "sym(\" " + arg.toString() + "\")";
