@@ -1951,8 +1951,18 @@ namespace jc {
     graph where Dict A points to Dict B, and Dict B points back to Dict A will 
     never cause a memory leak when they go out of scope.
 
-  Immutability & Hashing
+  Immutability & Hashing (Native Value Hashing)
   ──────────────────────
+    JC2 uses a high-performance Native Value Hashing architecture.
+    Keys are hashed directly by their semantic value, meaning `1.0`, `BigInt(1)`, 
+    and `frac(1,1)` will all perfectly collide and map to the exact same key!
+
+    Keys MUST be hashable. Valid keys include:
+      • Numbers (double, BigInt, Fraction, Complex, BaseNum)
+      • Strings and Symbolic Expressions
+      • Frozen containers (frozen List, Dict, Set)
+      • Class Instances (ONLY if they define a `__hash__` dunder method)
+
     freeze(d)                           Locks the dictionary permanently.
     isFrozen(d)                         Returns 1 if locked, 0 otherwise.
     val(d)                              Returns a deep-copied, frozen snapshot.
@@ -1968,9 +1978,6 @@ namespace jc {
     b = clone(a)  Deep          Fully unfrozen      Complete rebirth. Fully mutable nested data.
       
     * Loop copy: b = dict(); for ([k, v] in a) b[k] = v
-    
-    * Keys MUST be hashable. Unfrozen Lists/Dicts/Sets will throw a TypeError 
-      if used as a key. Use freeze() or val() to make them hashable.
 )HELP"},
 
 { "set", R"HELP(
@@ -2049,8 +2056,16 @@ namespace jc {
       add(s2, 99)                  s1 now also contains 99
     Sets are tracked by the Garbage Collector (see: /help sys).
 
-  Immutability & Hashing
+  Immutability & Hashing (Native Value Hashing)
   ──────────────────────
+    Sets use the same Native Value Hashing engine as Dicts.
+    `Set(1.0, BigInt(1), frac(1,1))` will result in a Set with exactly ONE element.
+
+    Elements MUST be hashable. Unfrozen containers will throw a TypeError 
+    if inserted. Built-in functions that generate nested sets (like setPow 
+    or setProduct) automatically freeze their inner containers.
+    Class instances can be added ONLY if they define a `__hash__` method.
+
     freeze(s)               Locks the set permanently.
     isFrozen(s)             Returns 1 if locked, 0 otherwise.
     val(s)                  Returns a deep-copied, frozen snapshot of the set.
@@ -2064,10 +2079,6 @@ namespace jc {
     b = a | Set() Shallow       Outer unfrozen      Flat cloning, simple unfrozen shell.
     b = val(a)    Deep          Fully frozen        Read-only snapshots, safe Set elements.
     b = clone(a)  Deep          Fully unfrozen      Complete rebirth. Fully mutable nested data.
-    
-    * Elements MUST be hashable. Unfrozen containers will throw a TypeError 
-      if inserted. Built-in functions that generate nested sets (like setPow 
-      or setProduct) automatically freeze their inner containers.
 
   Examples
   ──────────────────────
@@ -2148,12 +2159,13 @@ namespace jc {
       __getitem__(i)               Called by:  obj[i]
       __setitem__(i, v)            Called by:  obj[i] = v
 
-    Conversion hooks (called by built-in functions):
+    Conversion & Hashing hooks:
       __str__()    → str(obj), print(obj), f"{obj}", format("{}", obj)
       __len__()    → len(obj)
       __abs__()    → abs(obj)
       __bool__()   → bool(obj)
-      __hash__()   → Allows the instance to be used as a Dict key or Set element.
+      __hash__()   → Returns a hashable value (number/string). Allows the instance 
+                     to be used as a Dict key or Set element. (Must be paired with __eq__)
 
 
   Chained Method Calls

@@ -198,7 +198,7 @@ namespace helpers {
                 const auto& b = std::get<Set>(rhs.data);
                 if (a.id() == b.id()) return true;
                 if (a.size() != b.size()) return false;
-                for (const auto& [key, val] : a.raw()) {
+                for (const auto& val : a.raw()) {
                     if (!b.contains(val)) return false;
                 }
                 return true;

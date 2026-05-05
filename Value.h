@@ -36,6 +36,13 @@ namespace jc {
     struct FunctionClosure;
     std::string setValueKey(const Value& v);
 
+    struct ValueHasher {
+        size_t operator()(const Value& v) const;
+    };
+    struct ValueEqual {
+        bool operator()(const Value& lhs, const Value& rhs) const;
+    };
+
     struct PrintGuard {
         std::vector<const void*>& vis;
         bool isCycle;
@@ -55,7 +62,7 @@ namespace jc {
     private:
         struct DictData {
             std::vector<std::pair<Value, Value>> elements;
-            std::unordered_map<std::string, size_t> keyMap;
+            std::unordered_map<Value, size_t, ValueHasher, ValueEqual> keyMap;
             bool is_frozen = false;
         };
         std::shared_ptr<DictData> ptr;
@@ -143,8 +150,8 @@ namespace jc {
     class Set {
     private:
         struct SetData {
-            std::vector<std::pair<std::string, Value>> elements; // (key, value) 保留插入顺序
-            std::unordered_set<std::string> keys;                   // O(1) 查重索引
+            std::vector<Value> elements; // 保留插入顺序
+            std::unordered_set<Value, ValueHasher, ValueEqual> keys; // O(1) 查重索引
             bool is_frozen = false;
         };
         std::shared_ptr<SetData> ptr;
@@ -169,7 +176,7 @@ namespace jc {
 
         size_t size() const { return ptr->elements.size(); }
         bool empty() const { return ptr->elements.empty(); }
-        const std::vector<std::pair<std::string, Value>>& raw() const;
+        const std::vector<Value>& raw() const;
         const void* id() const { return ptr.get(); }
         void clear() {
             if (ptr->is_frozen) throw std::runtime_error("Runtime Error: Object is frozen.");
@@ -206,6 +213,8 @@ namespace jc {
     >;
 
     template<typename> struct always_false : std::false_type {};
+
+    std::pair<bool, Value> invokeDunder(const std::shared_ptr<Instance>& inst, const std::string& methodName, const std::vector<Value>& args = {});
 
     class Value {
     private:
@@ -484,7 +493,7 @@ namespace jc {
                 }
                 else if constexpr (std::is_same_v<T, Set>) {
                     if (!arg.isFrozen()) return false;
-                    for (const auto& [k, v] : arg.raw()) {
+                    for (const auto& v : arg.raw()) {
                         try {
                             if (!v.isHashable()) return false;
                         } catch (...) { return false; }
@@ -633,14 +642,19 @@ namespace jc {
                     const auto& b = std::get<Set>(rhs.data);
                     if (a.id() == b.id()) return true;
                     if (a.size() != b.size()) return false;
-                    for (const auto& [key, val] : a.raw()) {
+                    for (const auto& val : a.raw()) {
                         if (!b.contains(val)) return false;
                     }
                     return true;
                 }
-                if (std::holds_alternative<std::shared_ptr<Instance>>(lhs.data))
-                    return std::get<std::shared_ptr<Instance>>(lhs.data).get() ==
-                    std::get<std::shared_ptr<Instance>>(rhs.data).get();
+                if (std::holds_alternative<std::shared_ptr<Instance>>(lhs.data)) {
+                    auto inst1 = std::get<std::shared_ptr<Instance>>(lhs.data);
+                    auto inst2 = std::get<std::shared_ptr<Instance>>(rhs.data);
+                    if (inst1.get() == inst2.get()) return true;
+                    auto [found, res] = invokeDunder(inst1, "__eq__", {rhs});
+                    if (found) return res.truthy();
+                    return false;
+                }
                 if (std::holds_alternative<std::shared_ptr<FunctionClosure>>(lhs.data))
                     return std::get<std::shared_ptr<FunctionClosure>>(lhs.data).get() ==
                     std::get<std::shared_ptr<FunctionClosure>>(rhs.data).get();
@@ -673,6 +687,15 @@ namespace jc {
                     return true;
                 }
                 catch (...) { return false; }
+            }
+
+            if (std::holds_alternative<std::shared_ptr<Instance>>(lhs.data)) {
+                auto [found, res] = invokeDunder(std::get<std::shared_ptr<Instance>>(lhs.data), "__eq__", {rhs});
+                if (found) return res.truthy();
+            }
+            if (std::holds_alternative<std::shared_ptr<Instance>>(rhs.data)) {
+                auto [found, res] = invokeDunder(std::get<std::shared_ptr<Instance>>(rhs.data), "__eq__", {lhs});
+                if (found) return res.truthy();
             }
 
             if (std::holds_alternative<std::monostate>(lhs.data) ||
@@ -803,7 +826,7 @@ namespace jc {
                 }
                 else if constexpr (std::is_same_v<T1, Set> && std::is_same_v<T2, Set>) {
                     Set result;
-                    for (const auto& [key, val] : a.raw()) {
+                    for (const auto& val : a.raw()) {
                         if (!b.contains(val)) result.insert(val);
                     }
                     return Value(result);
@@ -886,8 +909,8 @@ namespace jc {
                 else if constexpr (std::is_same_v<T1, Set> && std::is_same_v<T2, Set>) {
                     Set result;
                     // 笛卡尔积：返回由两两组合的 List(二元组) 构成的 Set
-                    for (const auto& [k1, v1Any] : a.raw()) {
-                        for (const auto& [k2, v2Any] : b.raw()) {
+                    for (const auto& v1Any : a.raw()) {
+                        for (const auto& v2Any : b.raw()) {
                             List pair;
                             pair.push_back(v1Any);
                             pair.push_back(v2Any);
@@ -1314,7 +1337,7 @@ namespace jc {
                     const auto& elems = arg.raw();
                     for (size_t ii = 0; ii < elems.size(); ++ii) {
                         try {
-                            const auto& v = elems[ii].second;
+                            const auto& v = elems[ii];
                             printNested(v);
                         }
                         catch (...) { os << "?"; }
@@ -1340,7 +1363,7 @@ namespace jc {
 
                 if constexpr (std::is_same_v<T1, Set> && std::is_same_v<T2, Set>) {
                     Set result;
-                    for (const auto& [key, val] : a.raw()) {
+                    for (const auto& val : a.raw()) {
                         if (b.contains(val)) result.insert(val);
                     }
                     return Value(result);
@@ -1361,8 +1384,8 @@ namespace jc {
 
                 if constexpr (std::is_same_v<T1, Set> && std::is_same_v<T2, Set>) {
                     Set result;
-                    for (const auto& [key, val] : a.raw()) result.insert(val);
-                    for (const auto& [key, val] : b.raw()) result.insert(val);
+                    for (const auto& val : a.raw()) result.insert(val);
+                    for (const auto& val : b.raw()) result.insert(val);
                     return Value(result);
                 }
                 else if constexpr (std::is_same_v<T1, BaseNum> && std::is_same_v<T2, BaseNum>) {
@@ -1458,7 +1481,7 @@ namespace jc {
                     const auto& elems = arg.raw();
                     for (size_t ii = 0; ii < elems.size(); ++ii) {
                         try {
-                            const auto& v = elems[ii].second;
+                            const auto& v = elems[ii];
                             res += v.toJC2Expression();
                         }
                         catch (...) { res += "0"; }
@@ -1607,50 +1630,99 @@ namespace jc {
         data = std::move(val);
     }
 
+inline size_t ValueHasher::operator()(const Value& v) const {
+    if (v.isString()) return std::hash<std::string>{}(std::get<std::string>(v.data));
+    if (v.isNone()) return 0;
+    
+    if (std::holds_alternative<std::shared_ptr<Instance>>(v.data)) {
+        auto inst = std::get<std::shared_ptr<Instance>>(v.data);
+        auto [found, res] = invokeDunder(inst, "__hash__");
+        if (found) return operator()(res); // 递归哈希其返回值（如数字或字符串）
+        return std::hash<const void*>{}(inst.get());
+    }
+    if (std::holds_alternative<std::shared_ptr<ClassDefinition>>(v.data)) return std::hash<const void*>{}(std::get<std::shared_ptr<ClassDefinition>>(v.data).get());
+    if (std::holds_alternative<std::shared_ptr<FunctionClosure>>(v.data)) return std::hash<const void*>{}(std::get<std::shared_ptr<FunctionClosure>>(v.data).get());
+
+    if (std::holds_alternative<List>(v.data)) {
+        size_t h = 0;
+        for (const auto& e : std::get<List>(v.data).raw()) {
+            h ^= operator()(e) + 0x9e3779b9 + (h << 6) + (h >> 2);
+        }
+        return h;
+    }
+    if (std::holds_alternative<Dict>(v.data)) {
+        size_t h = 0;
+        for (const auto& [k, val] : std::get<Dict>(v.data).getEntries()) {
+            h ^= operator()(k) + 0x9e3779b9 + (h << 6) + (h >> 2);
+            h ^= operator()(val) + 0x9e3779b9 + (h << 6) + (h >> 2);
+        }
+        return h;
+    }
+    if (std::holds_alternative<Set>(v.data)) {
+        size_t h = 0;
+        for (const auto& val : std::get<Set>(v.data).raw()) {
+            h ^= operator()(val) + 0x9e3779b9 + (h << 6) + (h >> 2);
+        }
+        return h;
+    }
+
+    try {
+        Complex c = v.asComplex();
+        double r = (c.real == 0.0) ? 0.0 : c.real; // 抹平 -0.0
+        if (Tol::isEq(r, std::round(r))) r = std::round(r); // 抹平 1.0 与 1 的差异
+        double i = (c.imag == 0.0) ? 0.0 : c.imag;
+        if (Tol::isEq(i, std::round(i))) i = std::round(i);
+        size_t h1 = std::hash<double>{}(r);
+        size_t h2 = std::hash<double>{}(i);
+        return h1 ^ (h2 << 1);
+    } catch (...) {
+        return std::hash<std::string>{}(v.toJC2Expression());
+    }
+}
+
+inline bool ValueEqual::operator()(const Value& lhs, const Value& rhs) const {
+    return Value::equals(lhs, rhs);
+}
+
 inline void Dict::set(const Value& key, const Value& val) {
     if (!key.isHashable()) throw std::runtime_error("TypeError: unhashable type as dict key.");
     if (ptr->is_frozen) throw std::runtime_error("Runtime Error: Object is frozen.");
-    std::string hashKey = setValueKey(key);
-    auto it = ptr->keyMap.find(hashKey);
+    auto it = ptr->keyMap.find(key);
     if (it != ptr->keyMap.end()) {
         ptr->elements[it->second].second = val;
     } else {
-        ptr->keyMap[hashKey] = ptr->elements.size();
+        ptr->keyMap[key] = ptr->elements.size();
         ptr->elements.push_back({key, val});
     }
 }
 
 inline Value* Dict::get(const Value& key) {
-    std::string hashKey = setValueKey(key);
-    auto it = ptr->keyMap.find(hashKey);
+    auto it = ptr->keyMap.find(key);
     if (it != ptr->keyMap.end()) return &ptr->elements[it->second].second;
     return nullptr;
 }
 
 inline const Value* Dict::get(const Value& key) const {
-    std::string hashKey = setValueKey(key);
-    auto it = ptr->keyMap.find(hashKey);
+    auto it = ptr->keyMap.find(key);
     if (it != ptr->keyMap.end()) return &ptr->elements[it->second].second;
     return nullptr;
 }
 
 inline bool Dict::has(const Value& key) const {
     if (!key.isHashable()) throw std::runtime_error("TypeError: unhashable type as dict key.");
-    std::string hashKey = setValueKey(key);
-    return ptr->keyMap.find(hashKey) != ptr->keyMap.end();
+    return ptr->keyMap.find(key) != ptr->keyMap.end();
 }
 
 inline bool Dict::remove(const Value& key) {
     if (!key.isHashable()) throw std::runtime_error("TypeError: unhashable type as dict key.");
     if (ptr->is_frozen) throw std::runtime_error("Runtime Error: Object is frozen.");
-    std::string hashKey = setValueKey(key);
-    auto it = ptr->keyMap.find(hashKey);
+    auto it = ptr->keyMap.find(key);
     if (it == ptr->keyMap.end()) return false;
     size_t idx = it->second;
     ptr->keyMap.erase(it);
     ptr->elements.erase(ptr->elements.begin() + idx);
     for (size_t i = idx; i < ptr->elements.size(); ++i) {
-        ptr->keyMap[setValueKey(ptr->elements[i].first)] = i;
+        ptr->keyMap[ptr->elements[i].first] = i;
     }
     return true;
 }
@@ -1669,31 +1741,28 @@ inline std::vector<std::pair<Value, Value>> Dict::getEntries() const {
 inline bool Set::insert(const Value& val) {
     if (!val.isHashable()) throw std::runtime_error("TypeError: unhashable type as set element.");
     if (ptr->is_frozen) throw std::runtime_error("Runtime Error: Object is frozen.");
-    std::string key = setValueKey(val);
-    if (ptr->keys.count(key)) return false;
-    ptr->keys.insert(key);
-    ptr->elements.push_back({ key, val });
+    if (ptr->keys.count(val)) return false;
+    ptr->keys.insert(val);
+    ptr->elements.push_back(val);
     return true;
 }
 
 inline bool Set::contains(const Value& val) const {
     if (!val.isHashable()) throw std::runtime_error("TypeError: unhashable type as set element.");
-    std::string key = setValueKey(val);
-    return ptr->keys.count(key) > 0;
+    return ptr->keys.count(val) > 0;
 }
 
 inline bool Set::erase(const Value& val) {
     if (!val.isHashable()) throw std::runtime_error("TypeError: unhashable type as set element.");
     if (ptr->is_frozen) throw std::runtime_error("Runtime Error: Object is frozen.");
-    std::string key = setValueKey(val);
-    if (!ptr->keys.erase(key)) return false;
+    if (!ptr->keys.erase(val)) return false;
     for (auto it = ptr->elements.begin(); it != ptr->elements.end(); ++it) {
-        if (it->first == key) { ptr->elements.erase(it); return true; }
+        if (Value::equals(*it, val)) { ptr->elements.erase(it); return true; }
     }
     return true;
 }
 
-inline const std::vector<std::pair<std::string, Value>>& Set::raw() const {
+inline const std::vector<Value>& Set::raw() const {
     return ptr->elements;
 }
 

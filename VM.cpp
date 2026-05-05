@@ -1286,8 +1286,8 @@ namespace jc {
                     }
                     else if (std::holds_alternative<Set>(iterable.data)) {
                         const auto& s = std::get<Set>(iterable.data);
-                        for (const auto& [key, val] : s.raw()) {
-                            elements.push_back(val);  // 只暴露值，不暴露内部 key
+                        for (const auto& val : s.raw()) {
+                            elements.push_back(val);
                         }
                     }
                     else {
@@ -1865,7 +1865,7 @@ namespace jc {
             const void* id = p->id();
             if (!id || marked.count(id)) return;
             marked.insert(id);
-            for (const auto& [key, elem] : p->raw()) {
+            for (const auto& elem : p->raw()) {
                 try { markValue(elem, marked); }
                 catch (...) {}
             }

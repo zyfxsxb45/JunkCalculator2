@@ -35,6 +35,13 @@ namespace jc {
     }
 
     // =================================================================
+    // 跨模块 Dunder 调用桥梁
+    // =================================================================
+    std::pair<bool, Value> invokeDunder(const std::shared_ptr<Instance>& inst, const std::string& methodName, const std::vector<Value>& args) {
+        return helpers::tryCallDunder(inst, methodName, args);
+    }
+
+    // =================================================================
     // 容器元素键生成器（保证内容相同的 Set/Dict 无论插入顺序如何，都能生成相同的键用于去重）
     // =================================================================
     std::string setValueKey(const Value& v) {
@@ -73,7 +80,7 @@ namespace jc {
             PrintGuard guard(visited, s.id());
             if (guard.isCycle) { oss << "CYCLE"; return oss.str(); }
             std::vector<std::string> elems;
-            for (const auto& [k, val] : s.raw()) {
+            for (const auto& val : s.raw()) {
                 elems.push_back(setValueKey(val));
             }
             std::sort(elems.begin(), elems.end());
@@ -1234,7 +1241,7 @@ void BuiltinRegistry::registerSystemUtils() {
             }
             if (std::holds_alternative<Set>(v.data)) {
                 Set newSet;
-                for (const auto& [k, val] : std::get<Set>(v.data).raw()) {
+                for (const auto& val : std::get<Set>(v.data).raw()) {
                     newSet.insert(deepCopy(val));
                 }
                 return Value(newSet);
@@ -1264,7 +1271,7 @@ void BuiltinRegistry::registerSystemUtils() {
             }
             if (std::holds_alternative<Set>(v.data)) {
                 Set newSet;
-                for (const auto& [k, val] : std::get<Set>(v.data).raw()) {
+                for (const auto& val : std::get<Set>(v.data).raw()) {
                     newSet.insert(deepCopyAndFreeze(val));
                 }
                 newSet.freeze();
@@ -2134,7 +2141,7 @@ void BuiltinRegistry::registerListConversion() {
                 List L; for (char c : arg) L.push_back(valToAny(Value(std::string(1, c)))); return Value(L);
             }
             else if constexpr (std::is_same_v<T, Set>) {
-                List L; for (const auto& [key, val] : arg.raw()) L.push_back(val); return Value(L);
+                List L; for (const auto& val : arg.raw()) L.push_back(val); return Value(L);
             }
             List L; L.push_back(valToAny(args[0])); return Value(L);  // ★ 修改2: 用 args[0] 替代 Value(arg)
             }, args[0].data);
@@ -3409,7 +3416,7 @@ void BuiltinRegistry::registerSetFunctions() {
         Set s = std::get<Set>(args[0].data);
         if (s.empty()) throw std::runtime_error("Runtime Error: setPop() on empty Set.");
         const auto& back = s.raw().back();
-        Value result = anyToVal(back.second);
+        Value result = anyToVal(back);
         s.erase(result);
         return result;
         });
@@ -3421,8 +3428,8 @@ void BuiltinRegistry::registerSetFunctions() {
         const auto& a = std::get<Set>(args[0].data);
         const auto& b = std::get<Set>(args[1].data);
         Set result;
-        for (const auto& [key, val] : a.raw()) result.insert(val);
-        for (const auto& [key, val] : b.raw()) result.insert(val);
+        for (const auto& val : a.raw()) result.insert(val);
+        for (const auto& val : b.raw()) result.insert(val);
         return Value(result);
         });
 
@@ -3432,7 +3439,7 @@ void BuiltinRegistry::registerSetFunctions() {
         const auto& a = std::get<Set>(args[0].data);
         const auto& b = std::get<Set>(args[1].data);
         Set result;
-        for (const auto& [key, val] : a.raw()) {
+        for (const auto& val : a.raw()) {
             if (b.contains(val)) result.insert(val);
         }
         return Value(result);
@@ -3444,7 +3451,7 @@ void BuiltinRegistry::registerSetFunctions() {
         const auto& a = std::get<Set>(args[0].data);
         const auto& b = std::get<Set>(args[1].data);
         Set result;
-        for (const auto& [key, val] : a.raw()) {
+        for (const auto& val : a.raw()) {
             if (!b.contains(val)) result.insert(val);
         }
         return Value(result);
@@ -3456,10 +3463,10 @@ void BuiltinRegistry::registerSetFunctions() {
         const auto& a = std::get<Set>(args[0].data);
         const auto& b = std::get<Set>(args[1].data);
         Set result;
-        for (const auto& [key, val] : a.raw()) {
+        for (const auto& val : a.raw()) {
             if (!b.contains(val)) result.insert(val);
         }
-        for (const auto& [key, val] : b.raw()) {
+        for (const auto& val : b.raw()) {
             if (!a.contains(val)) result.insert(val);
         }
         return Value(result);
@@ -3471,7 +3478,7 @@ void BuiltinRegistry::registerSetFunctions() {
             throw std::runtime_error("Type Error: isSubset() expects two Sets.");
         const auto& a = std::get<Set>(args[0].data);
         const auto& b = std::get<Set>(args[1].data);
-        for (const auto& [key, val] : a.raw()) {
+        for (const auto& val : a.raw()) {
             if (!b.contains(val)) return Value(0.0);
         }
         return Value(1.0);
@@ -3482,7 +3489,7 @@ void BuiltinRegistry::registerSetFunctions() {
             throw std::runtime_error("Type Error: isSuperset() expects two Sets.");
         const auto& a = std::get<Set>(args[0].data);
         const auto& b = std::get<Set>(args[1].data);
-        for (const auto& [key, val] : b.raw()) {
+        for (const auto& val : b.raw()) {
             if (!a.contains(val)) return Value(0.0);
         }
         return Value(1.0);
@@ -3493,7 +3500,7 @@ void BuiltinRegistry::registerSetFunctions() {
             throw std::runtime_error("Type Error: isDisjoint() expects two Sets.");
         const auto& a = std::get<Set>(args[0].data);
         const auto& b = std::get<Set>(args[1].data);
-        for (const auto& [key, val] : a.raw()) {
+        for (const auto& val : a.raw()) {
             if (b.contains(val)) return Value(0.0);
         }
         return Value(1.0);
@@ -3526,7 +3533,7 @@ void BuiltinRegistry::registerSetFunctions() {
             Set sub;
             for (int i = 0; i < n; ++i) {
                 if (mask & (1 << i)) {
-                    sub.insert(raw[i].second);
+                    sub.insert(raw[i]);
                 }
             }
             sub.freeze();
