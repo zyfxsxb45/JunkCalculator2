@@ -275,7 +275,7 @@ namespace jc {
         Value(RealMatrix val) : data(std::move(val)) {}
         Value(ComplexMatrix val) : data(std::move(val)) {}
         Value(BigInt val) : data(std::move(val)) {}
-        Value(std::shared_ptr<FunctionClosure> val) : data(std::move(val)) {}
+        Value(std::shared_ptr<FunctionClosure> val);
         Value(Fraction val) : data(std::move(val)) {}
         Value(BaseNum val) : data(std::move(val)) {}
         Value(StringMatrix val) : data(std::move(val)) {}
@@ -640,6 +640,17 @@ namespace jc {
                 if (std::holds_alternative<std::shared_ptr<Instance>>(lhs.data))
                     return std::get<std::shared_ptr<Instance>>(lhs.data).get() ==
                     std::get<std::shared_ptr<Instance>>(rhs.data).get();
+                if (std::holds_alternative<std::shared_ptr<FunctionClosure>>(lhs.data))
+                    return std::get<std::shared_ptr<FunctionClosure>>(lhs.data).get() ==
+                    std::get<std::shared_ptr<FunctionClosure>>(rhs.data).get();
+                if (std::holds_alternative<std::shared_ptr<ClassDefinition>>(lhs.data))
+                    return std::get<std::shared_ptr<ClassDefinition>>(lhs.data).get() ==
+                    std::get<std::shared_ptr<ClassDefinition>>(rhs.data).get();
+                if (std::holds_alternative<SuperProxyPtr>(lhs.data)) {
+                    auto sp1 = std::get<SuperProxyPtr>(lhs.data);
+                    auto sp2 = std::get<SuperProxyPtr>(rhs.data);
+                    return sp1->instance.get() == sp2->instance.get() && sp1->parentClass.get() == sp2->parentClass.get();
+                }
                 return false;
             }
 
@@ -1503,7 +1514,10 @@ namespace jc {
 
         int minArgs() const {
             int count = static_cast<int>(paramNames.size());
-            for (int i = static_cast<int>(paramNames.size()) - 1; i >= 0; --i) {
+            if (hasRestParam && count > 0) {
+                count--; // 可变参数本身是可选的
+            }
+            for (int i = count - 1; i >= 0; --i) {
                 if (i < static_cast<int>(defaultValues.size()) && !defaultValues[i].isNone())
                     count--;
                 else
@@ -1512,7 +1526,9 @@ namespace jc {
             return count;
         }
         int maxArgs() const { return static_cast<int>(paramNames.size()); }
-        bool acceptsArgCount(int n) const { return n >= minArgs() && n <= maxArgs(); }
+        bool acceptsArgCount(int n) const { 
+            return n >= minArgs() && (hasRestParam || n <= maxArgs()); 
+        }
         bool hasRef() const {
             for (bool b : isRef) if (b) return true;
             return false;
@@ -1562,6 +1578,24 @@ namespace jc {
         StackTracedException(const std::string& raw, const std::string& fullTraceText)
             : std::runtime_error(fullTraceText), rawMessage(raw) {}
     };
+
+    inline Value::Value(std::shared_ptr<FunctionClosure> val) {
+        if (val) {
+            GcHeap::get().track(
+                val.get(),
+                [w = std::weak_ptr<FunctionClosure>(val)]() { return !w.expired(); },
+                [w = std::weak_ptr<FunctionClosure>(val)]() {
+                    auto sp = w.lock();
+                    if (sp) {
+                        sp->boundSelf = Value::none();
+                        sp->boundClass = Value::none();
+                        sp->capturedEnv.reset();
+                    }
+                }
+            );
+        }
+        data = std::move(val);
+    }
 
 inline void Dict::set(const Value& key, const Value& val) {
     if (!key.isHashable()) throw std::runtime_error("TypeError: unhashable type as dict key.");
@@ -1709,5 +1743,67 @@ inline std::vector<Value>& List::raw() { return ptr->vec; }
 #ifdef _MSC_VER
 #pragma warning(pop)
 #endif
+
+// ============================================================================
+// 测试用例：闭包特性与 GC 循环引用测试
+// 可以取消注释并在 main() 中调用 jc::runClosureAndGcTests() 以验证健壮性修复
+// ============================================================================
+/*
+inline void runClosureAndGcTests() {
+    using namespace jc;
+    std::cout << "--- Running Closure & GC Tests ---\n";
+
+    // 1. 测试可变参数 (Rest Params) 校验
+    auto closure1 = std::make_shared<FunctionClosure>(
+        std::vector<std::string>{"a", "args"}, 
+        std::vector<bool>{false, false}, 
+        "test_rest", nullptr, true // hasRestParam = true
+    );
+    Value f1(closure1);
+    std::cout << "Rest param accepts 1 arg: " << closure1->acceptsArgCount(1) << " (Expected: 1)\n";
+    std::cout << "Rest param accepts 2 args: " << closure1->acceptsArgCount(2) << " (Expected: 1)\n";
+    std::cout << "Rest param accepts 5 args: " << closure1->acceptsArgCount(5) << " (Expected: 1)\n";
+    std::cout << "Rest param accepts 0 args: " << closure1->acceptsArgCount(0) << " (Expected: 0)\n";
+
+    // 2. 测试闭包相等性 (Closure Equality)
+    Value f2(closure1);
+    std::cout << "Closure equality (same): " << Value::equals(f1, f2) << " (Expected: 1)\n";
+
+    auto closure2 = std::make_shared<FunctionClosure>(
+        std::vector<std::string>{"a"}, std::vector<bool>{false}, "test2", nullptr, false
+    );
+    Value f3(closure2);
+    std::cout << "Closure equality (diff): " << Value::equals(f1, f3) << " (Expected: 0)\n";
+
+    // 3. 测试 GC 循环引用打破 (GC Circular Reference)
+    GcHeap::get().sweep({}); // 清理之前的状态
+    
+    {
+        Dict d;
+        Value dictVal(d);
+        
+        auto closure3 = std::make_shared<FunctionClosure>(
+            std::vector<std::string>{}, std::vector<bool>{}, "test_gc", nullptr, false
+        );
+        // 模拟闭包捕获了 dict (形成环: closure -> dict)
+        closure3->capturedEnv = dictVal; 
+        Value f4(closure3);
+        
+        // 模拟 dict 持有了闭包 (形成环: dict -> closure)
+        d.set(Value("func"), f4);
+        
+        std::cout << "Before GC sweep, tracked objects: " << GcHeap::get().trackedCount() << "\n";
+    }
+    
+    // 离开作用域后，由于循环引用，C++ shared_ptr 不会释放它们
+    // 模拟 GC 标记阶段：没有任何对象被标记为可达 (传入空的 markedIds)
+    std::unordered_set<const void*> marked;
+    int freed = GcHeap::get().sweep(marked);
+    
+    std::cout << "GC sweep freed objects: " << freed << "\n";
+    std::cout << "After GC sweep, tracked objects: " << GcHeap::get().trackedCount() << " (Expected: 0)\n";
+    std::cout << "--- Tests Finished ---\n";
+}
+*/
 
 #endif // JC2_VALUE_H
