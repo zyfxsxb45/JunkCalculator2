@@ -1717,14 +1717,14 @@ namespace jc {
     toMatrix(L)                    Convert nested List → Matrix/StringMatrix
     Auto-Degradation from [...]:
       JC2 automatically degrades a [...] literal to a List if any element
-      is a non-scalar type (List, Dict, Instance, Function, Matrix):
+      is a non-scalar type (List, Dict, Instance, Function, etc.):
         [1, 2, 3]                    → RealMatrix (all numbers)
         [1, "hello"]                 → StringMatrix (contains string)
         [1, list(2, 3)]              → List  (contains a List)
         [Point(1,2), Point(3,4)]     → List  (contains instances)
         [sin, cos, tan]              → List  (contains functions)
         [{a: 1}, {b: 2}]             → List  (contains Dicts)
-        [[1,2], [3,4]]               → List  (contains matrices)
+        [[1,2], [3,4]]               ★ RealMatrix [1,2,3,4] (Matrix concatenation, see `/help matrix`)
 
   Access & Modification (0-indexed, negative wraps)
   ──────────────────────
