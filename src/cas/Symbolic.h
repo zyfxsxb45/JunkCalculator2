@@ -37,7 +37,7 @@ namespace jc {
         static inline int64_t maxExpandTerms = 5000;
         static inline int maxAstNodes = 50000;
         static inline int maxIterations = 1000;
-        static inline int maxDepth = 20;
+        static inline int maxDepth = 10;
         static inline bool debugIntegration = false;
     };
 
