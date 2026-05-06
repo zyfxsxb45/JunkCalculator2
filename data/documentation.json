@@ -5467,7 +5467,7 @@
     "apply": {
       "signature": "apply(f, args)",
       "desc": "Calls function f with arguments unpacked from a list or array.",
-      "examples": ["apply(sum, [1, 2, 3])"]
+      "examples": ["apply(print, [1, 2, 3])"]
     },
     "any": {
       "signature": "any(f, v)",

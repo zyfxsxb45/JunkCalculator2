@@ -2370,7 +2370,7 @@ void BuiltinRegistry::registerHigherOrder() {
                 for (const auto& e : arg.raw()) unpackedArgs.push_back(std::any_cast<Value>(e));
             }
             else if constexpr (std::is_same_v<T, RealMatrix> || std::is_same_v<T, ComplexMatrix> || std::is_same_v<T, StringMatrix>) {
-                if (arg.getRows() != 1 && arg.getCols() != 1) throw std::runtime_error("Type Error: map() expects 1D vector.");
+                if (arg.getRows() != 1 && arg.getCols() != 1) throw std::runtime_error("Type Error: apply() expects 1D vector.");
                 for (const auto& d : arg.rawData()) unpackedArgs.push_back(Value(d));
             }
             else if constexpr (std::is_same_v<T, std::string>) {
