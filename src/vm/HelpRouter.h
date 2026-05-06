@@ -56,6 +56,20 @@ namespace jc {
             catch (...) { return Value::none(); }
         }
 
+        static int levenshtein(const std::string& s1, const std::string& s2) {
+            int len1 = static_cast<int>(s1.size()), len2 = static_cast<int>(s2.size());
+            std::vector<int> col(len2 + 1), prevCol(len2 + 1);
+            for (int i = 0; i <= len2; i++) prevCol[i] = i;
+            for (int i = 0; i < len1; i++) {
+                col[0] = i + 1;
+                for (int j = 0; j < len2; j++) {
+                    col[j + 1] = std::min({ prevCol[1 + j] + 1, col[j] + 1, prevCol[j] + (s1[i] == s2[j] ? 0 : 1) });
+                }
+                prevCol = col;
+            }
+            return prevCol[len2];
+        }
+
     public:
         static void printHelpTopic(const std::string& topic) {
             init();
@@ -175,6 +189,83 @@ namespace jc {
                         }
                     }
                 }
+            }
+
+            // 4. Did you mean? (Fuzzy matching)
+            std::vector<std::pair<std::string, std::string>> candidates;
+            if (root.has(Value("functions"))) {
+                Value funcsVal = *root.get(Value("functions"));
+                if (std::holds_alternative<Dict>(funcsVal.data)) {
+                    Dict funcs = std::get<Dict>(funcsVal.data);
+                    for (const auto& [k, v] : funcs.getEntries()) {
+                        if (std::holds_alternative<std::string>(k.data) && std::holds_alternative<Dict>(v.data)) {
+                            std::string funcName = std::get<std::string>(k.data);
+                            Dict fnDict = std::get<Dict>(v.data);
+                            std::string desc = "";
+                            if (fnDict.has(Value("desc"))) {
+                                Value descVal = *fnDict.get(Value("desc"));
+                                if (std::holds_alternative<std::string>(descVal.data)) {
+                                    desc = std::get<std::string>(descVal.data);
+                                } else if (std::holds_alternative<List>(descVal.data)) {
+                                    auto raw = std::get<List>(descVal.data).raw();
+                                    if (!raw.empty()) {
+                                        Value firstLine = extractAny(raw[0]);
+                                        if (std::holds_alternative<std::string>(firstLine.data)) {
+                                            desc = std::get<std::string>(firstLine.data);
+                                        }
+                                    }
+                                }
+                            }
+                            
+                            std::string lowerFuncName = funcName;
+                            std::transform(lowerFuncName.begin(), lowerFuncName.end(), lowerFuncName.begin(),
+                                [](unsigned char c) -> char { return static_cast<char>(std::tolower(c)); });
+                            
+                            bool isPrefix = lowerFuncName.find(lowerKey) == 0;
+                            bool isSubstr = lowerFuncName.find(lowerKey) != std::string::npos;
+                            int dist = levenshtein(lowerKey, lowerFuncName);
+                            
+                            if (isPrefix || isSubstr || dist <= 2) {
+                                candidates.push_back({funcName, desc});
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (!candidates.empty()) {
+                std::sort(candidates.begin(), candidates.end(), [&](const auto& a, const auto& b) {
+                    std::string la = a.first, lb = b.first;
+                    std::transform(la.begin(), la.end(), la.begin(), [](unsigned char c) -> char { return static_cast<char>(std::tolower(c)); });
+                    std::transform(lb.begin(), lb.end(), lb.begin(), [](unsigned char c) -> char { return static_cast<char>(std::tolower(c)); });
+                    
+                    bool aPref = la.find(lowerKey) == 0;
+                    bool bPref = lb.find(lowerKey) == 0;
+                    if (aPref != bPref) return aPref;
+                    
+                    bool aSub = la.find(lowerKey) != std::string::npos;
+                    bool bSub = lb.find(lowerKey) != std::string::npos;
+                    if (aSub != bSub) return aSub;
+                    
+                    return levenshtein(lowerKey, la) < levenshtein(lowerKey, lb);
+                });
+                
+                std::cout << "\n  No exact match found for '" << topic << "'.\n\n";
+                std::cout << "  Did you mean?\n";
+                int count = 0;
+                for (const auto& cand : candidates) {
+                    if (count++ >= 5) break;
+                    std::cout << col(Ansi::BRIGHT_GREEN) << "    > " << cand.first << col(Ansi::RESET);
+                    if (!cand.second.empty()) {
+                        std::string d = cand.second;
+                        if (d.length() > 60) d = d.substr(0, 57) + "...";
+                        int padding = std::max(1, 15 - static_cast<int>(cand.first.length()));
+                        std::cout << std::string(padding, ' ') << "(" << d << ")";
+                    }
+                    std::cout << "\n";
+                }
+                std::cout << std::endl;
+                return;
             }
 
             std::cout << "\n  No detailed help available for topic: '" << topic << "'\n";
