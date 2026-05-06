@@ -10,7 +10,7 @@
 #include "frontend/Lexer.h"
 #include "frontend/Parser.h"
 #include "memory/Value.h"
-#include "vm/HelpText.h"
+#include "vm/HelpRouter.h"
 #include "frontend/Highlight.h"
 #include "frontend/Compiler.h"
 #include "vm/VM.h"
@@ -82,32 +82,11 @@ std::string getExecutableDir() {
 }
 
 void printHelp() {
-    std::string_view helpText = jc::getBuiltinHelp("main");
-    if (!helpText.empty()) std::cout << "\n" << helpText << std::endl;
+    jc::HelpRouter::printMainHelp();
 }
 
-// 在 main.cpp 中找到 printHelpTopic 并修改为：
 void printHelpTopic(const std::string& topic) {
-    std::string key = topic;
-    size_t s = key.find_first_not_of(" \t");
-    size_t e = key.find_last_not_of(" \t");
-    if (s != std::string::npos) key = key.substr(s, e - s + 1);
-    else key.clear();
-
-    // ★ 1. 优先搜索脚本动态注册的库
-    auto itDyn = jc::DynamicHelp.find(key);
-    if (itDyn != jc::DynamicHelp.end()) {
-        std::cout << "\n" << itDyn->second << std::endl;
-        return;
-    }
-
-    // ★ 2. 搜索 C++ 静态库（且转为小写）
-    std::transform(key.begin(), key.end(), key.begin(),
-        [](unsigned char c) -> char { return static_cast<char>(std::tolower(c)); });
-
-    std::string_view helpText = jc::getBuiltinHelp(key);
-    if (!helpText.empty()) std::cout << "\n" << helpText << std::endl;
-    else std::cout << "\n  No detailed help available for topic: '" << topic << "'\n";
+    jc::HelpRouter::printHelpTopic(topic);
 }
 
 // 核心 VM 实例和全局上下文

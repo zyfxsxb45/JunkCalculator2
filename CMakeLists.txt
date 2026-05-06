@@ -19,6 +19,26 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 # ==============================================================================
+# Generate HelpText header from JSON (Configure Time)
+# ==============================================================================
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "data/documentation.json")
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/documentation.json")
+    # 读取文件为十六进制字符串 (例如 "7b2274...")
+    file(READ "data/documentation.json" HEX_CONTENT HEX)
+    # 使用正则将每两个字符替换为 "0xXX, " 格式
+    string(REGEX REPLACE "(..)" "0x\\1, " BYTE_ARRAY "${HEX_CONTENT}")
+    # 生成 C 风格的字节数组，彻底绕过 MSVC 字符串字面量 16KB 长度限制
+    file(WRITE "${CMAKE_CURRENT_SOURCE_DIR}/src/vm/GeneratedHelpText.h"
+        "// Auto-generated from documentation.json\n"
+        "namespace jc {\n"
+        "inline constexpr const unsigned char RAW_HELP_JSON[] = {\n"
+        "${BYTE_ARRAY}0x00\n"
+        "};\n"
+        "} // namespace jc\n"
+    )
+endif()
+
+# ==============================================================================
 # Core Sources & Headers Collection
 # ==============================================================================
 set(JC2_HEADERS
@@ -26,7 +46,7 @@ set(JC2_HEADERS
     "src/memory/Value.h" "src/memory/GcHeap.h"
     "src/math/Complex.h" "src/math/Matrix.h" "src/math/BigInt.h" "src/math/Fraction.h" "src/math/Base.h" "src/math/Tolerance.h"
     "src/modules/Image.h" "src/modules/Probability.h" "src/modules/Module.h"
-    "src/vm/HelpText.h" "src/vm/Bytecode.h" "src/vm/VM.h" "src/vm/BuiltinRegistry.h" "src/vm/EngineInterrupt.h"
+    "src/vm/HelpRouter.h" "src/vm/GeneratedHelpText.h" "src/vm/Bytecode.h" "src/vm/VM.h" "src/vm/BuiltinRegistry.h" "src/vm/EngineInterrupt.h"
     "src/cas/Symbolic.h" "src/cas/Integration.h" "src/cas/Factorization.h" "src/cas/Groebner.h"
     "src/modules/json_module.h"
     "src/modules/image_module.h"

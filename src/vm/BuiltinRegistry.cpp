@@ -6,7 +6,7 @@
 #include "../modules/Module.h"
 #include "VM.h"
 #include "../memory/GcHeap.h"
-#include "HelpText.h"           // ★ BuiltinHelp, DynamicHelp
+#include "HelpRouter.h"         // ★ HelpRouter, DynamicHelp
 #ifdef _MSC_VER
 #pragma warning(disable: 4702)
 #endif
@@ -1372,8 +1372,7 @@ void BuiltinRegistry::registerSystemUtils() {
     // ★ 暴露给用户的原生 help() 内置函数
     reg("help", { 0, 1 }, [](const std::vector<Value>& args) -> Value {
         if (args.empty()) {
-            std::string_view helpText = jc::getBuiltinHelp("main");
-            if (!helpText.empty()) std::cout << "\n" << helpText << std::endl;
+            jc::HelpRouter::printMainHelp();
             return Value::none();
         }
 
@@ -1381,26 +1380,7 @@ void BuiltinRegistry::registerSystemUtils() {
             throw std::runtime_error("Type Error: help() expects a string topic.");
 
         std::string topic = std::get<std::string>(args[0].data);
-
-        // 1. 优先查找脚本注册进来的动态函数库
-        auto itDyn = jc::DynamicHelp.find(topic);
-        if (itDyn != jc::DynamicHelp.end()) {
-            std::cout << "\n" << itDyn->second << std::endl;
-            return Value::none();
-        }
-
-        // 2. 其次查找 C++ 内置的文档 (支持忽略大小写)
-        std::string key = topic;
-        std::transform(key.begin(), key.end(), key.begin(),
-            [](unsigned char c) -> char { return static_cast<char>(std::tolower(c)); });
-
-        std::string_view helpText = jc::getBuiltinHelp(key);
-        if (!helpText.empty()) {
-            std::cout << "\n" << helpText << std::endl;
-            return Value::none();
-        }
-
-        std::cout << "\n  [System] No help found for topic: '" << topic << "'\n";
+        jc::HelpRouter::printHelpTopic(topic);
         return Value::none();
         });
 }

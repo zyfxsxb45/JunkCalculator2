@@ -1,0 +1,169 @@
+#ifndef JC2_HELP_ROUTER_H
+#define JC2_HELP_ROUTER_H
+
+#include <string>
+#include <iostream>
+#include <algorithm>
+#include <cctype>
+#include <map>
+#include <any>
+#include "GeneratedHelpText.h"
+#include "../modules/json_module.h"
+#include "../memory/Value.h"
+#include "../frontend/Highlight.h"
+
+namespace jc {
+    inline std::map<std::string, std::string> DynamicHelp;
+
+    class HelpRouter {
+    private:
+        static inline Value helpAst = Value::none();
+        static inline bool initialized = false;
+
+        static void init() {
+            if (initialized) return;
+            try {
+                JsonParser parser(reinterpret_cast<const char*>(RAW_HELP_JSON));
+                helpAst = parser.parseValue();
+            } catch (const std::exception& e) {
+                std::cerr << "[HelpRouter] Failed to parse documentation.json: " << e.what() << std::endl;
+            }
+            initialized = true;
+        }
+
+        static Value extractAny(const std::any& a) {
+            try { return std::any_cast<Value>(a); }
+            catch (...) { return Value::none(); }
+        }
+
+    public:
+        static void printHelpTopic(const std::string& topic) {
+            init();
+
+            std::string key = topic;
+            size_t s = key.find_first_not_of(" \t");
+            size_t e = key.find_last_not_of(" \t");
+            if (s != std::string::npos) key = key.substr(s, e - s + 1);
+            else key.clear();
+
+            // 1. Dynamic Help (Scripts)
+            auto itDyn = DynamicHelp.find(key);
+            if (itDyn != DynamicHelp.end()) {
+                std::cout << "\n" << itDyn->second << std::endl;
+                return;
+            }
+
+            if (helpAst.isNone() || !std::holds_alternative<Dict>(helpAst.data)) {
+                std::cout << "\n  [System] Documentation data is unavailable.\n";
+                return;
+            }
+
+            Dict root = std::get<Dict>(helpAst.data);
+
+            // 2. Search in "functions" (Exact match or alias)
+            if (root.has(Value("functions"))) {
+                Value funcsVal = *root.get(Value("functions"));
+                if (std::holds_alternative<Dict>(funcsVal.data)) {
+                    Dict funcs = std::get<Dict>(funcsVal.data);
+                    
+                    Value targetFn = Value::none();
+                    if (funcs.has(Value(key))) {
+                        targetFn = *funcs.get(Value(key));
+                    } else {
+                        for (const auto& [k, v] : funcs.getEntries()) {
+                            if (std::holds_alternative<Dict>(v.data)) {
+                                Dict fnDict = std::get<Dict>(v.data);
+                                if (fnDict.has(Value("aliases"))) {
+                                    Value aliasesVal = *fnDict.get(Value("aliases"));
+                                    if (std::holds_alternative<List>(aliasesVal.data)) {
+                                        for (const auto& aliasAny : std::get<List>(aliasesVal.data).raw()) {
+                                            Value aliasVal = extractAny(aliasAny);
+                                            if (std::holds_alternative<std::string>(aliasVal.data) && 
+                                                std::get<std::string>(aliasVal.data) == key) {
+                                                targetFn = v;
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            if (!targetFn.isNone()) break;
+                        }
+                    }
+
+                    if (!targetFn.isNone() && std::holds_alternative<Dict>(targetFn.data)) {
+                        Dict fn = std::get<Dict>(targetFn.data);
+                        std::cout << "\n";
+                        if (fn.has(Value("signature"))) {
+                            std::cout << col(Ansi::BRIGHT_GREEN) << std::get<std::string>(fn.get(Value("signature"))->data) << col(Ansi::RESET) << "\n";
+                        }
+                        if (fn.has(Value("desc"))) {
+                            Value descVal = *fn.get(Value("desc"));
+                            if (std::holds_alternative<std::string>(descVal.data)) {
+                                std::cout << "  " << std::get<std::string>(descVal.data) << "\n";
+                            } else if (std::holds_alternative<List>(descVal.data)) {
+                                for (const auto& lineAny : std::get<List>(descVal.data).raw()) {
+                                    Value lineVal = extractAny(lineAny);
+                                    if (std::holds_alternative<std::string>(lineVal.data)) {
+                                        std::cout << "  " << std::get<std::string>(lineVal.data) << "\n";
+                                    }
+                                }
+                            }
+                        }
+                        if (fn.has(Value("examples"))) {
+                            Value exVal = *fn.get(Value("examples"));
+                            if (std::holds_alternative<List>(exVal.data)) {
+                                std::cout << "\n  Examples:\n";
+                                for (const auto& exAny : std::get<List>(exVal.data).raw()) {
+                                    Value ex = extractAny(exAny);
+                                    if (std::holds_alternative<std::string>(ex.data)) {
+                                        std::cout << col(Ansi::BRIGHT_YELLOW) << "    " << std::get<std::string>(ex.data) << col(Ansi::RESET) << "\n";
+                                    }
+                                }
+                            }
+                        }
+                        std::cout << std::endl;
+                        return;
+                    }
+                }
+            }
+
+            // 3. Search in "topics" (Case-insensitive fallback)
+            std::string lowerKey = key;
+            std::transform(lowerKey.begin(), lowerKey.end(), lowerKey.begin(),
+                [](unsigned char c) -> char { return static_cast<char>(std::tolower(c)); });
+
+            if (root.has(Value("topics"))) {
+                Value topicsVal = *root.get(Value("topics"));
+                if (std::holds_alternative<Dict>(topicsVal.data)) {
+                    Dict topics = std::get<Dict>(topicsVal.data);
+                    if (topics.has(Value(lowerKey))) {
+                        Value topicVal = *topics.get(Value(lowerKey));
+                        if (std::holds_alternative<std::string>(topicVal.data)) {
+                            std::cout << "\n" << std::get<std::string>(topicVal.data) << std::endl;
+                            return;
+                        } else if (std::holds_alternative<List>(topicVal.data)) {
+                            std::cout << "\n";
+                            for (const auto& lineAny : std::get<List>(topicVal.data).raw()) {
+                                Value lineVal = extractAny(lineAny);
+                                if (std::holds_alternative<std::string>(lineVal.data)) {
+                                    std::cout << std::get<std::string>(lineVal.data) << "\n";
+                                }
+                            }
+                            std::cout << std::endl;
+                            return;
+                        }
+                    }
+                }
+            }
+
+            std::cout << "\n  No detailed help available for topic: '" << topic << "'\n";
+        }
+
+        static void printMainHelp() {
+            printHelpTopic("main");
+        }
+    };
+} // namespace jc
+
+#endif // JC2_HELP_ROUTER_H
