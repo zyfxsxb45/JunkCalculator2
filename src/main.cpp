@@ -326,7 +326,7 @@ int main(int argc, char* argv[]) {
     auto printBanner = []() {
         std::cout << jc::col(jc::Ansi::BRIGHT_CYAN)
             << "=================================================\n"
-            << "   Junk Calculator 2.3.2.0\n"
+            << "   Junk Calculator 2.3.2.1\n"
             << "   Developed by Yu Liangyang, Tsinghua University\n"
             << "=================================================\n" << jc::col(jc::Ansi::RESET)
             << "Type " << jc::col(jc::Ansi::BRIGHT_YELLOW) << "'/help'" << jc::col(jc::Ansi::RESET) << " for a list of commands." << std::endl;

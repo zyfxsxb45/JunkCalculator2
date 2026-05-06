@@ -12,7 +12,7 @@ namespace jc {
 
     inline constexpr std::array<std::pair<std::string_view, std::string_view>, 35> BuiltinHelp = {{
         {"main", R"HELP(
-=================== Junk Calculator 2.3.1.1 — Help ===================
+=================== Junk Calculator 2.3.2.1 — Help ===================
 
   Session Commands
   ────────────────────────────────────────────────────────────────────

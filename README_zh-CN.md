@@ -2,9 +2,9 @@
   <a href="README.md">English</a> | <strong>简体中文</strong>
 </div>
 
-# Junk Calculator 2.3.2.0
+# Junk Calculator 2.3.2.1
 
-![Version](https://img.shields.io/badge/Version-v2.3.2.0-orange.svg?style=flat-square)
+![Version](https://img.shields.io/badge/Version-v2.3.2.1-orange.svg?style=flat-square)
 ![C++20](https://img.shields.io/badge/C%2B%2B-20-00599C.svg?style=flat-square&logo=c%2B%2B)
 ![Zero Dependencies](https://img.shields.io/badge/Dependencies-0-brightgreen.svg?style=flat-square)
 ![CMake](https://img.shields.io/badge/CMake-3.15+-064F8C.svg?style=flat-square&logo=cmake)
@@ -67,34 +67,24 @@
 
 ---
 
-## v2.3.2.0 版本更新说明
+## v2.3.2.1 版本更新说明
 
-版本 2.3.2.0 是一次里程碑式的重大更新。本次发布包含彻底重写的数学极限引擎、Risch 积分算法的大规模强化，以及核心数据结构的底层架构重构。**请注意，此版本包含针对语言语法和终端命令的破坏性变更。**
+版本 2.3.2.1 是一个关键的架构与性能补丁，主要聚焦于符号积分引擎，并伴随了一次基于领域驱动设计 (DDD) 的大规模代码库重构。
 
-### ⚠️ 破坏性变更 (Breaking Changes)
-- **语法变更**：为追求更纯粹的语法美学，废弃了原有的“逗号表达式序列”语法。
-- **REPL CLI 指令变更**：当前所有控制台交互指令必须带有 `/` 前缀（例如：`/help`、`/clear`、`/cls`）。
-- **散列安全约束 (Hash Safety)**：引入严格的类型散列安全规则。未被冻结的引用类型（如动态突变的 List 或 Dict）将不再允许作为字典的键 (Key) 或 Set 的元素。
+### 计算机代数系统 (CAS)
+- **积分路由器 (Integration Router)：** 使用基于 AST 的启发式路由器取代了静态的顺序策略链。积分策略现在会被动态评分和优先级排序，大幅减少了无效的 DFS 递归开销。
+- **指数 RDE 启发式算法：** 为指数积分 $\int e^{c(x)}\frac{A(x)}{D(x)}dx$ 实现了一个统一的 $O(1)$ 启发式求解器。利用 `polyDiv` 进行无平方因式分解，它能瞬间解决 RDE 场景，而不会退化为分部积分循环。
+- **收紧积分限制 (Fail Fast)：** 调整了核心递归安全限制（`maxDepth=6`，`maxAstNodes=30k`，`maxExpandTerms=2000`）。引擎现在在遇到数学上非初等的积分时会安全停止并抛出异常，而不是导致死循环。
+- **双曲与根式增强：** 添加了 `asinh`、`acosh`、`atanh` 的形式原函数。添加了预处理代数化简（例如 $\cosh^2(x) - \sinh^2(x) = 1$），并通过双曲代换强化了二次根式规则。
+- **Risch 算法修复：** 修正了根式遍历、Trager 结式符号评估以及扩展欧几里得算法 (EGCD) 的回退机制。
 
-### 语言与虚拟机演进
-- **Python 风格链式比较**：引入全链条的比较运算符串联解包支持（例如 `0 < x <= 10`）。
-- **字典与集合重构**：字典 (Dict) 现在严格保持元素的插入顺序。新增动态内存锁定冻结机制：`freeze()`、`val()`（深拷贝+锁定快照）以及 `clone()`（深拷贝+解锁突变权）。
-- **散列化类型扩充**：`Matrix` 和符号抽象树 `SymExpr` 现已正式支持 Hash 散列化。通过实现 `__hash__` 魔术方法，用户自定义类 (Classes) 现在也可以无缝接入 Set 或 Dict。
-- **执行流安全**：引入强大的 `Ctrl+C` 信号中断防御机制。允许用户在不导致整个 VM 进程崩溃的前提下，拦截任何失控的无限计算循环。
-
-### 计算机代数系统 (CAS) 跃迁
-- **Gruntz 极限引擎**：彻底抛弃存在先天缺陷的 L'Hôpital 法则引擎，全面换装工业级的 Gruntz 渐进展开算法。根除了处理复杂嵌套极限时的栈溢出与死锁问题。
-- **高级符号积分引擎 (Risch & Trager)**：
-  - 为微分域引入**代数扩张 (Algebraic Extensions)**（基于 1984 年的 Trager 算法），正式支持代数曲线类符号的积分。
-  - 使用多项式度边界约束 (Degree Bounds) 重构升级了 Risch 微分方程 (RDE) 求解器。
-  - 新增对复平面内复杂嵌套对数扩张以及留数 (Residue) 提取的支持。
-  - 内置触发双向虚数三角/指数转换 (`sin/cos` <-> `exp(i*x)`)，以全面消除 Risch 算法理论上的作用域盲区。
-  - 内建针对不可积的高阶椭圆曲线 (genus $g=1$) 的无解拦截与侦测机制。
-- **代数范式与化简器进化**：
-  - 深度集成 **Gröbner 基** 引擎以计算代数范式，实现了针对复杂嵌套无理数的顶级分母有理化方案。
-  - 将 `RootSum` 隐式根节点重新引入积分树系，并支持由 `evalv` 函数通过显式代数基精确逼近结果。
-  - 引入 Risch 结构定理，排除数学节点间的伪代数依赖（例如底层可自动推演并折叠 `exp(ln(x)/2)` 还原为 `sqrt(x)`）。
-- **底层探针**：新增 `debugInteg` 与 `verifyInteg` 函数，允许开发者打印完整的微积分流向及 Risch 抽象推导踪迹。
+### 架构与核心重构
+- **领域驱动布局：** 源代码树已完全重构为领域驱动的架构布局（`frontend`、`vm`、`memory`、`math`、`cas`、`modules`），并更新了包含路径。
+- **提交规范：** 添加了 `COMMIT_CONVENTION.md` 指南以实现项目标准化。
+- **运行时优化与修复：**
+  - 将运行时字符串查找迁移为原生哈希查找，以获得最佳的遍历性能。
+  - 修复了函数闭包中的 GC 和相等性评估问题。
+  - 修复了 `imgPlot` 原生函数中不正确的参数类型检查。
 
 ---
 

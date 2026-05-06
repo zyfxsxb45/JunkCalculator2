@@ -2,9 +2,9 @@
   <strong>English</strong> | <a href="README_zh-CN.md">简体中文</a>
 </div>
 
-# Junk Calculator 2.3.2.0
+# Junk Calculator 2.3.2.1
 
-![Version](https://img.shields.io/badge/Version-v2.3.2.0-orange.svg?style=flat-square)
+![Version](https://img.shields.io/badge/Version-v2.3.2.1-orange.svg?style=flat-square)
 ![C++20](https://img.shields.io/badge/C%2B%2B-20-00599C.svg?style=flat-square&logo=c%2B%2B)
 ![Zero Dependencies](https://img.shields.io/badge/Dependencies-0-brightgreen.svg?style=flat-square)
 ![CMake](https://img.shields.io/badge/CMake-3.15+-064F8C.svg?style=flat-square&logo=cmake)
@@ -67,34 +67,24 @@ JC2 standard libraries loaded via `import`:
 
 ---
 
-## What's New in v2.3.2.0
+## What's New in v2.3.2.1
 
-Version 2.3.2.0 is a major update featuring a completely rewritten limit engine, massive enhancements to the Risch integration algorithm, and structural refactoring of core data structures. **Please note that this release contains breaking changes to the language syntax and REPL commands.**
-
-### ⚠️ Breaking Changes
-- **Syntax:** Abolished the comma expression syntax for cleaner syntax aesthetics.
-- **REPL Commands:** All interactive commands now require a `/` prefix (e.g., `/help`, `/clear`, `/cls`).
-- **Hash Safety:** Strict hashability rules are now enforced. Unfrozen reference types (like mutable Lists or Dicts) can no longer be used as Dictionary keys or Set elements.
-
-### Language & Virtual Machine
-- **Pythonic Comparisons:** Added support for chained comparison operators (e.g., `0 < x <= 10`).
-- **Dict & Set Refactoring:** Dictionaries now preserve insertion order. Introduced dynamic freezing mechanisms with `freeze()`, `val()` (deep copy + freeze snapshot), and `clone()` (deep copy + unlock).
-- **Hashable Types:** Matrices and `SymExpr` are now hashable. User-defined classes can implement the `__hash__` dunder method to be used in Sets and as Dict keys.
-- **Execution Control:** Implemented a robust `Ctrl+C` interrupt mechanism to safely halt infinite loops or heavy computations without crashing the VM. Pressing `Ctrl+C` three times consecutively triggers an immediate hard exit.
+Version 2.3.2.1 is a critical architecture and performance patch focusing on the Symbolic Integration engine, alongside a major Domain-Driven Design (DDD) codebase refactoring.
 
 ### Computer Algebra System (CAS)
-- **Gruntz Limit Engine:** Completely replaced the L'Hôpital's rule engine with the industrial-grade Gruntz asymptotic expansion algorithm, eliminating stack overflows and deadlocks in complex limits.
-- **Advanced Integration (Risch & Trager):** 
-  - Added Algebraic Extensions to the differential field (Trager's algorithm, 1984) for integrating algebraic curves.
-  - Upgraded the Risch Differential Equation (RDE) solver using polynomial degree bounds.
-  - Added support for complex nested Logarithmic Extensions and residue extraction.
-  - Bidirectional Trig/Complex exponential conversion (`sin/cos` <-> `exp(i*x)`) to eliminate Risch domain blind spots.
-  - Automatic detection of non-integrable elliptic curves (genus $g=1$).
-- **Algebra & Simplification:** 
-  - Deep integration of the Gröbner basis engine to compute Normal Forms, enabling denominator rationalization for complex nested irrationals.
-  - Re-applied `RootSum` nodes for integrals, supporting `evalv` for exact radical solutions.
-  - Applied the Risch structure theorem to eliminate pseudo-algebraic dependencies (e.g., automatically folding `exp(ln(x)/2)` to `sqrt(x)`).
-- **Diagnostics:** Added `debugInteg` and `verifyInteg` functions to trace and verify symbolic integration steps.
+- **Integration Router:** Replaced the static sequential strategy chaining with an AST-based heuristic router. Integration strategies are now dynamically scored and prioritized, drastically reducing invalid DFS recursion overhead.
+- **Exponential RDE Heuristic:** Implemented a unified $O(1)$ heuristic solver for exponential integrals $\int e^{c(x)}\frac{A(x)}{D(x)}dx$. Utilizing square-free factorization via `polyDiv`, it resolves RDE scenarios instantly without deteriorating into integration-by-parts cycles.
+- **Tightened Integration Limits (Fail Fast):** Adjusted core recursion safety limits (`maxDepth=6`, `maxAstNodes=30k`, `maxExpandTerms=2000`). The engine now safely halts and raises exceptions upon encountering mathematically non-elementary integrals instead of causing infinite loops.
+- **Hyperbolic & Radical Enhancements:** Added formal antiderivatives for `asinh`, `acosh`, `atanh`. Added pre-pass algebraic simplifications (e.g., $\cosh^2(x) - \sinh^2(x) = 1$) and fortified quadratic radical rules via hyperbolic substitutions.
+- **Risch Algorithm Fixes:** Corrected radical traversal, Trager resultant sign evaluation, and Extended GCD (EGCD) fallback mechanics.
+
+### Architecture & Core Refactoring
+- **Domain-Driven Layout:** The source code tree has been entirely restructured into a domain-driven architectural layout (`frontend`, `vm`, `memory`, `math`, `cas`, `modules`) with updated include paths.
+- **Commit Convention:** Added `COMMIT_CONVENTION.md` guidelines for project standardization.
+- **Runtime Optimizations & Fixes:** 
+  - Migrated runtime string lookups to native hash lookups for optimal traversal performance.
+  - Fixed GC and equality evaluation issues in function closures.
+  - Fixed an incorrect parameter type check in the `imgPlot` native function.
 
 ---
 
