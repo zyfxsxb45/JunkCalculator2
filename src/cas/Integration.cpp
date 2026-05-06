@@ -1480,7 +1480,7 @@ namespace jc {
                 return coeff * integratedPart;
             }
 
-            // --- 0.5 神级指数匹配公式 (Exponential Heuristic) ---
+            // --- 0.5 神级指数匹配公式 (Exponential RDE Heuristic) ---
             if (varPart.ptr->getType() == SymType::MUL) {
                 auto mul = std::static_pointer_cast<SymMul>(varPart.ptr);
                 SymExpr exp_factor;
@@ -1494,7 +1494,7 @@ namespace jc {
                         if (func->name == "exp" && func->args.size() == 1) {
                             SymExpr w = SymExpr(func->args[0]);
                             SymExpr dw = simplifyCore(diff(w, var));
-                            if (!dw.isZero() && !containsVar(dw.ptr, var)) {
+                            if (!dw.isZero()) {
                                 exp_factor = SymExpr(arg);
                                 w_arg = w;
                                 c_val = dw;
@@ -1506,97 +1506,73 @@ namespace jc {
                     rest_factor = rest_factor * SymExpr(arg);
                 }
                 if (found_exp) {
-                    // 1. 多项式特判: e^(cx) * P(x)
-                    if (isPolynomialIn(rest_factor, var)) {
-                        SymExpr f(BigInt(0));
-                        SymExpr current_deriv = rest_factor;
-                        SymExpr current_c_pow = c_val;
-                        int sign = 1;
-                        bool success = false;
-                        for (int i = 0; i <= 20; ++i) {
-                            if (current_deriv.isZero()) {
-                                success = true;
-                                break;
-                            }
-                            SymExpr term = simplifyCore(current_deriv / current_c_pow);
-                            if (sign == 1) f = f + term;
-                            else f = f - term;
-                            current_deriv = simplifyCore(diff(current_deriv, var));
-                            current_c_pow = simplifyCore(current_c_pow * c_val);
-                            sign = -sign;
-                        }
-                        if (success) {
-                            if (SymConfig::debugIntegration) std::cout << std::string(current_depth * 2, ' ') << "<- Exponential Polynomial Heuristic Success" << std::endl;
-                            return coeff * exp_factor * f;
-                        }
-                    }
-                    
-                    // 2. 有理分式 f(x) + f'(x) 探测 (广义 RDE 启发式)
                     auto [num, den] = getFraction(rest_factor);
                     if (isPolynomialIn(num, var) && isPolynomialIn(den, var)) {
-                        if (den.isOne()) {
-                            // 多项式情况已在 1 中处理
-                        } else {
-                            SymExpr d_den = diff(den, var);
-                            SymExpr gcd_den = polyGCD(den, d_den, var);
-                            SymExpr V = simplifyCore(expand_core(den / gcd_den, SymConfig::maxExpandTerms));
-                            SymExpr V2 = simplifyCore(expand_core(V * V, SymConfig::maxExpandTerms));
-                            auto [rhs_num, rhs_den] = getFraction(simplifyCore(num * V2 / den));
+                        SymExpr den_exp = simplifyCore(expand_core(den, SymConfig::maxExpandTerms));
+                        SymExpr d_den = diff(den_exp, var);
+                        SymExpr gcd_den = polyGCD(den_exp, d_den, var);
+                        SymExpr V = polyDiv(den_exp, gcd_den, var).first;
+                        SymExpr V2 = simplifyCore(expand_core(V * V, SymConfig::maxExpandTerms));
+                        SymExpr num_V2 = simplifyCore(expand_core(num * V2, SymConfig::maxExpandTerms));
+                        
+                        auto [RHS, R_rem] = polyDiv(num_V2, den_exp, var);
+                        
+                        if (R_rem.isZero()) {
+                            SymExpr dV = diff(V, var);
+                            SymExpr U(BigInt(0));
+                            SymExpr current_RHS = RHS;
+                            bool success = false;
                             
-                            if (rhs_den.isOne()) {
-                                SymExpr RHS = rhs_num;
-                                SymExpr dV = diff(V, var);
-                                SymExpr U(BigInt(0));
-                                SymExpr current_RHS = RHS;
-                                bool success = false;
+                            auto cV = extractCoeffs(V, var);
+                            auto cC = extractCoeffs(c_val, var);
+                            
+                            if (!cV.empty() && !cV.back().isZero() && !cC.empty() && !cC.back().isZero()) {
+                                SymExpr leadV = cV.back();
+                                SymExpr leadC = cC.back();
+                                int degV = static_cast<int>(cV.size()) - 1;
+                                int degC = static_cast<int>(cC.size()) - 1;
+                                int degRHS_init = getDegree(RHS, var);
+                                int degU = degRHS_init - degV - degC;
                                 
-                                auto cV = extractCoeffs(V, var);
-                                if (!cV.empty() && !cV.back().isZero()) {
-                                    SymExpr leadV = cV.back();
-                                    int degV = static_cast<int>(cV.size()) - 1;
-                                    int degRHS_init = getDegree(RHS, var);
-                                    int degU = degRHS_init - degV;
-                                    
-                                    if (degU >= 0 && degU <= 10) {
-                                        for (int step = 0; step <= degU + 1; ++step) {
-                                            if (current_RHS.isZero()) {
-                                                success = true;
-                                                break;
-                                            }
-                                            auto cRHS = extractCoeffs(current_RHS, var);
-                                            while (!cRHS.empty() && cRHS.back().isZero()) cRHS.pop_back();
-                                            if (cRHS.empty()) {
-                                                success = true;
-                                                break;
-                                            }
-                                            
-                                            int curDegRHS = static_cast<int>(cRHS.size()) - 1;
-                                            int d = curDegRHS - degV;
-                                            if (d < 0) break;
-                                            
-                                            SymExpr leadRHS = cRHS.back();
-                                            SymExpr c_d = simplifyCore(leadRHS / (c_val * leadV));
-                                            SymExpr U_term = simplifyCore(c_d * (SymExpr::makeVar(var) ^ SymExpr(BigInt(d))));
-                                            
-                                            U = U + U_term;
-                                            
-                                            SymExpr dU_term = diff(U_term, var);
-                                            SymExpr LHS_term = simplifyCore(expand_core(dU_term * V - U_term * dV + c_val * U_term * V, SymConfig::maxExpandTerms));
-                                            current_RHS = simplifyCore(expand_core(current_RHS - LHS_term, SymConfig::maxExpandTerms));
+                                if (degU >= 0 && degU <= 20) {
+                                    for (int step = 0; step <= degU + 1; ++step) {
+                                        if (current_RHS.isZero()) {
+                                            success = true;
+                                            break;
                                         }
+                                        auto cRHS = extractCoeffs(current_RHS, var);
+                                        while (!cRHS.empty() && cRHS.back().isZero()) cRHS.pop_back();
+                                        if (cRHS.empty()) {
+                                            success = true;
+                                            break;
+                                        }
+                                        
+                                        int curDegRHS = static_cast<int>(cRHS.size()) - 1;
+                                        int d = curDegRHS - degV - degC;
+                                        if (d < 0) break;
+                                        
+                                        SymExpr leadRHS = cRHS.back();
+                                        SymExpr c_d = simplifyCore(leadRHS / (leadC * leadV));
+                                        SymExpr U_term = simplifyCore(c_d * (SymExpr::makeVar(var) ^ SymExpr(BigInt(d))));
+                                        
+                                        U = U + U_term;
+                                        
+                                        SymExpr dU_term = diff(U_term, var);
+                                        SymExpr LHS_term = simplifyCore(expand_core(dU_term * V - U_term * dV + c_val * U_term * V, SymConfig::maxExpandTerms));
+                                        current_RHS = simplifyCore(expand_core(current_RHS - LHS_term, SymConfig::maxExpandTerms));
                                     }
                                 }
-                                
-                                if (success) {
-                                    SymExpr f = simplifyCore(U / V);
-                                    if (SymConfig::debugIntegration) std::cout << std::string(current_depth * 2, ' ') << "<- Exponential Rational RDE Heuristic Success" << std::endl;
-                                    return coeff * exp_factor * f;
-                                }
+                            }
+                            
+                            if (success) {
+                                SymExpr f = simplifyCore(U / V);
+                                if (SymConfig::debugIntegration) std::cout << std::string(current_depth * 2, ' ') << "<- Exponential RDE Heuristic Success" << std::endl;
+                                return coeff * exp_factor * f;
                             }
                         }
                     }
                     
-                    // 3. 兜底的 f(x) + f'(x) 探测 (针对非有理分式的简单 ADD 节点)
+                    // 兜底的 f(x) + f'(x) 探测 (针对非有理分式的简单 ADD 节点)
                     if (c_val.isOne()) {
                         SymExpr expanded_rest = simplifyCore(expand_core(rest_factor, SymConfig::maxExpandTerms));
                         if (expanded_rest.ptr->getType() == SymType::ADD) {
@@ -1615,8 +1591,41 @@ namespace jc {
                 }
             }
 
+            // --- 积分路由特征提取 (Feature Extraction for Routing) ---
+            bool has_trig = false, has_exp = false, has_log = false, has_radical = false;
+            std::unordered_set<const SymNode*> feat_visited;
+            std::function<void(const std::shared_ptr<SymNode>&)> extract_features = [&](const std::shared_ptr<SymNode>& node) {
+                if (!node || !feat_visited.insert(node.get()).second) return;
+                if (node->getType() == SymType::FUNC) {
+                    auto fn = std::static_pointer_cast<SymFunc>(node)->name;
+                    if (fn == "sin" || fn == "cos" || fn == "tan" || fn == "cot" || fn == "sec" || fn == "csc") has_trig = true;
+                    else if (fn == "exp") has_exp = true;
+                    else if (fn == "log") has_log = true;
+                    else if (fn == "sqrt" || fn == "cbrt" || fn == "root" || fn == "RootOf" || fn == "RootSum") has_radical = true;
+                } else if (node->getType() == SymType::POW) {
+                    auto powNode = std::static_pointer_cast<SymPow>(node);
+                    if (powNode->exp->getType() == SymType::NUM) {
+                        auto numVal = std::static_pointer_cast<SymNum>(powNode->exp)->value;
+                        if (std::holds_alternative<Fraction>(numVal) && std::get<Fraction>(numVal).getDen() > BigInt(1)) has_radical = true;
+                    }
+                }
+                if (node->getType() == SymType::ADD) for (auto& arg : std::static_pointer_cast<SymAdd>(node)->args) extract_features(arg);
+                else if (node->getType() == SymType::MUL) for (auto& arg : std::static_pointer_cast<SymMul>(node)->args) extract_features(arg);
+                else if (node->getType() == SymType::POW) { extract_features(std::static_pointer_cast<SymPow>(node)->base); extract_features(std::static_pointer_cast<SymPow>(node)->exp); }
+                else if (node->getType() == SymType::FUNC) for (auto& arg : std::static_pointer_cast<SymFunc>(node)->args) extract_features(arg);
+            };
+            extract_features(varPart.ptr);
+
+            struct IntegStrategy {
+                std::string name;
+                int score;
+                std::function<std::optional<SymExpr>()> execute;
+            };
+            std::vector<IntegStrategy> strats;
+
             // --- 1. 线性换元法 (Linear Substitution) ---
-            auto findLinearArg = [&](const std::shared_ptr<SymNode>& node, SymExpr& out_u, SymExpr& out_a) -> bool {
+            strats.push_back({"Linear Substitution", 1000, [&]() -> std::optional<SymExpr> {
+                auto findLinearArg = [&](const std::shared_ptr<SymNode>& node, SymExpr& out_u, SymExpr& out_a) -> bool {
                 if (!node) return false;
                 if (node->getType() == SymType::FUNC) {
                     auto func = std::static_pointer_cast<SymFunc>(node);
@@ -1698,8 +1707,11 @@ namespace jc {
                     }
                 }
             }
+            return std::nullopt;
+            }});
 
             // --- 1.5 广义换元法 (凑微分法) ---
+            strats.push_back({"Generalized Substitution", 900, [&]() -> std::optional<SymExpr> {
             if (varPart.ptr->getType() == SymType::MUL) {
                 auto mul = std::static_pointer_cast<SymMul>(varPart.ptr);
                 std::vector<SymExpr> candidate_us;
@@ -1825,8 +1837,11 @@ namespace jc {
                     }
                 }
             }
+            return std::nullopt;
+            }});
 
             // --- 1.6 根式整体换元 (Radical Substitution) ---
+            strats.push_back({"Radical Substitution", has_radical ? 800 : 0, [&]() -> std::optional<SymExpr> {
             SymExpr radicalBase;
             int radicalN = 0;
             bool foundRadical = false;
@@ -2146,8 +2161,11 @@ namespace jc {
                     }
                 }
             }
+            return std::nullopt;
+            }});
 
             // --- 1.7 同底数分数指数换元 (Common Fractional Power Substitution) ---
+            strats.push_back({"Common Fractional Power Substitution", has_radical ? 750 : 0, [&]() -> std::optional<SymExpr> {
             {
                 SymExpr commonBase;
                 bool baseConflict = false;
@@ -2339,8 +2357,11 @@ namespace jc {
                     }
                 }
             }
+            return std::nullopt;
+            }});
 
             // --- 1.8 三角函数高次幂降幂与拆分 ---
+            strats.push_back({"Trig Power Reduction", has_trig ? 700 : 0, [&]() -> std::optional<SymExpr> {
             if (varPart.ptr->getType() == SymType::POW) {
                 auto powNode = std::static_pointer_cast<SymPow>(varPart.ptr);
                 if (powNode->base->getType() == SymType::FUNC && powNode->exp->getType() == SymType::NUM) {
@@ -2399,8 +2420,11 @@ namespace jc {
                     }
                 }
             }
+            return std::nullopt;
+            }});
 
             // --- 1.9 二次根式三角换元 (Trigonometric Substitution) ---
+            strats.push_back({"Trigonometric Substitution", 650, [&]() -> std::optional<SymExpr> {
             if (var != "_t" && var != "_weierstrass_t") {
                 SymExpr quadBase;
                 bool foundQuad = false;
@@ -2543,8 +2567,11 @@ namespace jc {
                     }
                 }
             }
+            return std::nullopt;
+            }});
 
             // --- 1.94 双二次分式积分 (Biquadratic Fraction) ---
+            strats.push_back({"Biquadratic Fraction", 600, [&]() -> std::optional<SymExpr> {
             if (varPart.ptr->getType() == SymType::MUL || varPart.ptr->getType() == SymType::POW) {
                 SymExpr bqBase;
                 int bqM = 0;
@@ -2647,8 +2674,11 @@ namespace jc {
                     }
                 }
             }
+            return std::nullopt;
+            }});
 
             // --- 1.95 高次二项式分式积分 (Binomial Fraction Integration) ---
+            strats.push_back({"Binomial Fraction Integration", 550, [&]() -> std::optional<SymExpr> {
             if (varPart.ptr->getType() == SymType::POW) {
                 auto powNode = std::static_pointer_cast<SymPow>(varPart.ptr);
                 if (powNode->exp->getType() == SymType::NUM) {
@@ -2760,11 +2790,14 @@ namespace jc {
                     }
                 }
             }
+            return std::nullopt;
+            }});
 
-            // --- 1.98 二次配方法启发式 (Inverse Quadratic Integration) ---
             auto [num, den] = getFraction(varPart);
             bool isFraction = !den.isOne();
 
+            // --- 1.98 二次配方法启发式 (Inverse Quadratic Integration) ---
+            strats.push_back({"Inverse Quadratic Integration", isFraction ? 500 : 0, [&]() -> std::optional<SymExpr> {
             if (isFraction && !containsVar(num.ptr, var)) {
                 auto coeffs = extractCoeffs(den, var);
                 if (coeffs.size() == 3 && !coeffs[2].isZero()) {
@@ -2798,8 +2831,11 @@ namespace jc {
                     }
                 }
             }
+            return std::nullopt;
+            }});
 
             // --- 2. 有理分式积分引擎 (Rational Function Integration) ---
+            strats.push_back({"Rational Function Integration", isFraction ? 850 : 0, [&]() -> std::optional<SymExpr> {
             if (isFraction && containsVar(den.ptr, var)) {
                 // 参数化常数提取与隔离黑盒 (Symbolic Constant Blackboxing)
                 std::map<std::string, SymExpr> constDict;
@@ -2890,8 +2926,11 @@ namespace jc {
                     }
                 }
             }
+            return std::nullopt;
+            }});
 
             // --- 3. 万能公式换元 (Weierstrass Substitution) ---
+            strats.push_back({"Weierstrass Substitution", has_trig ? 400 : 0, [&]() -> std::optional<SymExpr> {
             bool hasTrig = false;
             std::function<bool(const std::shared_ptr<SymNode>&)> isRationalTrig = [&](const std::shared_ptr<SymNode>& node) -> bool {
                 if (!node) return true;
@@ -2999,8 +3038,11 @@ namespace jc {
                     throw;
                 } catch (...) {}
             }
+            return std::nullopt;
+            }});
 
             // --- 4. 启发式分部积分 (Integration by Parts) ---
+            strats.push_back({"Integration by Parts", 300, [&]() -> std::optional<SymExpr> {
             bool tryParts = false;
             std::vector<SymExpr> factors;
             if (varPart.ptr->getType() == SymType::MUL) {
@@ -3197,68 +3239,62 @@ namespace jc {
                     if (auto res = tryPartsWith(cand.first, cand.second)) return *res;
                 }
             }
+            return std::nullopt;
+            }});
 
-            // 启发式方法全部失效，移交 Risch 算法处理
-            // 剪枝：在深层递归中调用 Risch 算法极易导致指数级膨胀且通常无解
+            // --- 5. Risch 算法 (Risch Algorithm) ---
+            int risch_score = 100; // 基础兜底分数
             bool allow_deeper_risch = false;
             if (current_depth <= start_depth + 3) {
-                bool has_exp = false;
-                bool has_radical = false;
-                std::unordered_set<const SymNode*> visited;
-                std::function<void(const std::shared_ptr<SymNode>&)> check_risch_features = [&](const std::shared_ptr<SymNode>& node) {
-                    if (!node) return;
-                    if (!visited.insert(node.get()).second) return;
-                    if (node->getType() == SymType::FUNC) {
-                        auto func = std::static_pointer_cast<SymFunc>(node);
-                        if (func->name == "exp") has_exp = true;
-                        if (func->name == "sqrt" || func->name == "cbrt" || func->name == "root" || func->name == "RootOf" || func->name == "RootSum") has_radical = true;
-                    } else if (node->getType() == SymType::POW) {
-                        auto powNode = std::static_pointer_cast<SymPow>(node);
-                        if (powNode->exp->getType() == SymType::NUM) {
-                            auto numVal = std::static_pointer_cast<SymNum>(powNode->exp)->value;
-                            if (std::holds_alternative<Fraction>(numVal)) {
-                                Fraction frac = std::get<Fraction>(numVal);
-                                if (frac.getDen() > BigInt(1)) has_radical = true;
-                            }
-                        }
-                    }
-                    if (node->getType() == SymType::ADD) {
-                        for (auto& arg : std::static_pointer_cast<SymAdd>(node)->args) check_risch_features(arg);
-                    } else if (node->getType() == SymType::MUL) {
-                        for (auto& arg : std::static_pointer_cast<SymMul>(node)->args) check_risch_features(arg);
-                    } else if (node->getType() == SymType::POW) {
-                        auto powNode = std::static_pointer_cast<SymPow>(node);
-                        check_risch_features(powNode->base);
-                        check_risch_features(powNode->exp);
-                    } else if (node->getType() == SymType::FUNC) {
-                        for (auto& arg : std::static_pointer_cast<SymFunc>(node)->args) check_risch_features(arg);
-                    }
-                };
-                check_risch_features(varPart.ptr);
-                if (has_exp && !has_radical) {
+                if ((has_exp || has_log) && !has_radical) {
                     allow_deeper_risch = true;
+                    risch_score = 880; // 优先处理纯指数/对数
+                }
+            }
+            
+            if (current_depth > start_depth + 1 && !allow_deeper_risch) {
+                risch_score = 0; // 剪枝
+            }
+
+            std::optional<std::string> risch_error;
+
+            strats.push_back({"Risch Algorithm", risch_score, [&]() -> std::optional<SymExpr> {
+                if (SymConfig::debugIntegration) std::cout << std::string(current_depth * 2, ' ') << "-> Trying Risch Algorithm" << std::endl;
+                try {
+                    auto rischRes = coeff * rischIntegrate(varPart, var, current_depth + 1);
+                    if (SymConfig::debugIntegration) std::cout << std::string(current_depth * 2, ' ') << "<- Risch Algorithm Success" << std::endl;
+                    return rischRes;
+                } catch (const EngineInterruptError&) {
+                    throw;
+                } catch (const std::runtime_error& e) {
+                    if (SymConfig::debugIntegration) std::cout << std::string(current_depth * 2, ' ') << "<- Risch Algorithm Failed" << std::endl;
+                    risch_error = e.what();
+                    return std::nullopt;
+                } catch (...) {
+                    if (SymConfig::debugIntegration) std::cout << std::string(current_depth * 2, ' ') << "<- Risch Algorithm Failed" << std::endl;
+                    risch_error = "Unknown Risch Error";
+                    return std::nullopt;
+                }
+            }});
+
+            // --- 执行积分路由 (Execute Integration Routing) ---
+            std::sort(strats.begin(), strats.end(), [](const auto& a, const auto& b) {
+                return a.score > b.score;
+            });
+
+            for (auto& strat : strats) {
+                if (strat.score <= 0) continue;
+                if (SymConfig::debugIntegration) std::cout << std::string(current_depth * 2, ' ') << "-> Routing to: " << strat.name << " (Score: " << strat.score << ")" << std::endl;
+                if (auto res = strat.execute()) {
+                    return res;
                 }
             }
 
-            if (current_depth > start_depth + 1 && !allow_deeper_risch) {
-                if (SymConfig::debugIntegration) std::cout << std::string(current_depth * 2, ' ') << "<- Skip Risch Algorithm (Too deep)" << std::endl;
-                return std::nullopt;
+            if (current_depth == start_depth && risch_error) {
+                throw std::runtime_error(*risch_error);
             }
 
-            if (SymConfig::debugIntegration) std::cout << std::string(current_depth * 2, ' ') << "-> Fallback to Risch Algorithm" << std::endl;
-            try {
-                auto rischRes = coeff * rischIntegrate(varPart, var, current_depth + 1);
-                if (SymConfig::debugIntegration) std::cout << std::string(current_depth * 2, ' ') << "<- Risch Algorithm Success" << std::endl;
-                return rischRes;
-            } catch (const EngineInterruptError&) {
-                throw;
-            } catch (...) {
-                if (SymConfig::debugIntegration) std::cout << std::string(current_depth * 2, ' ') << "<- Risch Algorithm Failed" << std::endl;
-                // 如果是在递归深层，静默返回 nullopt 让上层继续尝试其他分支
-                // 如果是在最外层 (current_depth == start_depth)，则抛出异常以保留详细的 Risch 失败信息
-                if (current_depth == start_depth) throw;
-                return std::nullopt;
-            }
+            return std::nullopt;
         };
 
         doInteg = [&](const SymExpr& e, int current_depth) -> std::optional<SymExpr> {
