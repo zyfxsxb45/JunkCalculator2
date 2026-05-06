@@ -3682,17 +3682,19 @@
       ]
     },
     "mean": {
-      "signature": "mean(X)",
-      "desc": "Returns the arithmetic mean of a dataset.",
+      "signature": "mean(X) / dist.mean()",
+      "desc": "Returns the arithmetic mean of a dataset, or the theoretical mean of a Distribution.",
       "examples": [
-        "mean([1, 2, 3, 4, 5])"
+        "mean([1, 2, 3, 4, 5])",
+        "Normal(0, 1).mean()"
       ]
     },
     "var": {
-      "signature": "var(X)",
-      "desc": "Returns the population variance of a dataset (divided by N).",
+      "signature": "var(X) / dist.var()",
+      "desc": "Returns the population variance of a dataset (divided by N), or the theoretical variance of a Distribution.",
       "examples": [
-        "var([1, 2, 3, 4, 5])"
+        "var([1, 2, 3, 4, 5])",
+        "Normal(0, 1).var()"
       ]
     },
     "svar": {
@@ -3703,10 +3705,11 @@
       ]
     },
     "std": {
-      "signature": "std(X)",
-      "desc": "Returns the population standard deviation of a dataset.",
+      "signature": "std(X) / dist.std()",
+      "desc": "Returns the population standard deviation of a dataset, or the theoretical standard deviation of a Distribution.",
       "examples": [
-        "std([1, 2, 3, 4, 5])"
+        "std([1, 2, 3, 4, 5])",
+        "Normal(0, 1).std()"
       ]
     },
     "sstd": {
@@ -3836,6 +3839,1710 @@
       "examples": [
         "magic(3)"
       ]
+    },
+    "str": {
+      "signature": "str(x)",
+      "desc": "Converts any value to a string representation. Calls __str__ on instances if available.",
+      "examples": [
+        "str(42)",
+        "str([1, 2])"
+      ]
+    },
+    "len": {
+      "signature": "len(x)",
+      "desc": "Returns the length or element count of a string, vector, matrix, dict, list, or set.",
+      "examples": [
+        "len(\"hello\")",
+        "len([1, 2, 3])"
+      ]
+    },
+    "substr": {
+      "signature": "substr(s, start, [length])",
+      "desc": "Returns a substring starting at 'start'. If 'length' is provided, extracts that many characters.",
+      "examples": [
+        "substr(\"hello\", 1, 3)"
+      ]
+    },
+    "replace": {
+      "signature": "replace(s, old, new)",
+      "desc": "Replaces all occurrences of 'old' with 'new' in string 's'.",
+      "examples": [
+        "replace(\"hello\", \"l\", \"w\")"
+      ]
+    },
+    "format": {
+      "signature": "format(fmt, ...)",
+      "desc": "Formats a string using Python-style placeholders {}.",
+      "examples": [
+        "format(\"x = {:.2f}\", PI)"
+      ]
+    },
+    "type": {
+      "signature": "type(x)",
+      "desc": "Returns the type name of the given value as a string.",
+      "examples": [
+        "type(42)",
+        "type(\"hello\")"
+      ]
+    },
+    "split": {
+      "signature": "split(s, delim)",
+      "desc": "Splits a string into a List of substrings using the specified delimiter.",
+      "examples": [
+        "split(\"a,b,c\", \",\")"
+      ]
+    },
+    "join": {
+      "signature": "join(v, delim)",
+      "desc": "Joins elements of a list or array into a single string, separated by 'delim'.",
+      "examples": [
+        "join([1, 2, 3], \"-\")"
+      ]
+    },
+    "list": {
+      "signature": "list(...)",
+      "desc": "Constructs a heterogeneous List containing the provided arguments.",
+      "examples": [
+        "list(1, \"hello\", [1, 2])"
+      ]
+    },
+    "dict": {
+      "signature": "dict(...)",
+      "desc": "Constructs a Dictionary from key-value pairs.",
+      "examples": [
+        "dict(\"a\", 1, \"b\", 2)"
+      ]
+    },
+    "Set": {
+      "signature": "Set(...)",
+      "desc": "Constructs a Set containing unique elements.",
+      "examples": [
+        "Set(1, 2, 2, 3)"
+      ]
+    },
+    "push": {
+      "signature": "push(v, val)",
+      "desc": "Appends a value to the end of a list or array.",
+      "examples": [
+        "push([1, 2], 3)"
+      ]
+    },
+    "pop": {
+      "signature": "pop(v)",
+      "desc": "Removes and returns the last element of a list (mutates) or array (returns last).",
+      "examples": [
+        "pop(list(1, 2, 3))"
+      ]
+    },
+    "map": {
+      "signature": "map(f, v)",
+      "desc": "Applies function f to each element of v, returning a new container of the same type.",
+      "examples": [
+        "map((x) => x^2, [1, 2, 3])"
+      ]
+    },
+    "filter": {
+      "signature": "filter(f, v)",
+      "desc": "Keeps elements of v for which function f returns a truthy value.",
+      "examples": [
+        "filter((x) => x > 0, [-1, 0, 1])"
+      ]
+    },
+    "reduce": {
+      "signature": "reduce(f, v, [init])",
+      "desc": "Reduces v to a single value using a left fold with function f.",
+      "examples": [
+        "reduce((a, b) => a + b, [1, 2, 3])"
+      ]
+    },
+    "sort": {
+      "signature": "sort(v, [cmp])",
+      "desc": "Sorts a list or array. Optionally accepts a custom comparator function.",
+      "examples": [
+        "sort([3, 1, 2])"
+      ]
+    },
+    "keys": {
+      "signature": "keys(d)",
+      "desc": "Returns a List of all keys in a Dictionary.",
+      "aliases": ["getFields"],
+      "examples": [
+        "keys({a: 1, b: 2})"
+      ]
+    },
+    "values": {
+      "signature": "values(d)",
+      "desc": "Returns a List of all values in a Dictionary.",
+      "examples": [
+        "values({a: 1, b: 2})"
+      ]
+    },
+    "hasKey": {
+      "signature": "hasKey(d, key)",
+      "desc": "Returns 1 if the Dictionary contains the specified key, 0 otherwise.",
+      "aliases": ["has", "hasField"],
+      "examples": [
+        "hasKey({a: 1}, \"a\")"
+      ]
+    },
+    "setUnion": {
+      "signature": "setUnion(a, b)",
+      "desc": "Returns a new Set containing all elements from both sets.",
+      "examples": [
+        "setUnion(Set(1, 2), Set(2, 3))"
+      ]
+    },
+    "setIntersect": {
+      "signature": "setIntersect(a, b)",
+      "desc": "Returns a new Set containing elements present in both sets.",
+      "examples": [
+        "setIntersect(Set(1, 2), Set(2, 3))"
+      ]
+    },
+    "print": {
+      "signature": "print(...)",
+      "desc": "Prints arguments to the console, separated by spaces.",
+      "aliases": ["println"],
+      "examples": [
+        "print(\"Hello\", 42)"
+      ]
+    },
+    "readFile": {
+      "signature": "readFile(path)",
+      "desc": "Reads the entire contents of a file into a string.",
+      "examples": [
+        "readFile(\"data.txt\")"
+      ]
+    },
+    "writeFile": {
+      "signature": "writeFile(path, content)",
+      "desc": "Writes a string to a file, overwriting existing content.",
+      "examples": [
+        "writeFile(\"out.txt\", \"Hello\")"
+      ]
+    },
+    "readCSV": {
+      "signature": "readCSV(path, [delim])",
+      "desc": "Reads a CSV file into a List of Lists.",
+      "examples": [
+        "readCSV(\"data.csv\")"
+      ]
+    },
+    "pcall": {
+      "signature": "pcall(f)",
+      "desc": "Executes a zero-argument function safely. Returns [1, result] on success, [0, errorMsg] on failure.",
+      "examples": [
+        "pcall(() => 1 / 0)"
+      ]
+    },
+    "assert": {
+      "signature": "assert(cond, [msg])",
+      "desc": "Throws an error if the condition is falsy.",
+      "examples": [
+        "assert(1 > 0, \"Math is broken\")"
+      ]
+    },
+    "gc": {
+      "signature": "gc([aggressive])",
+      "desc": "Forces a Garbage Collection cycle. Returns the number of freed objects.",
+      "examples": [
+        "gc()"
+      ]
+    },
+    "help": {
+      "signature": "help([topic])",
+      "desc": "Prints the main help overview or details for a specific topic.",
+      "examples": [
+        "help(\"matrix\")"
+      ]
+    },
+    "run": {
+      "signature": "run(path)",
+      "desc": "Executes a .jc2 script file in the current environment.",
+      "examples": [
+        "run(\"script.jc2\")"
+      ]
+    },
+    "sym": {
+      "signature": "sym(name)",
+      "desc": "Creates a symbolic variable for CAS operations.",
+      "examples": [
+        "x = sym(\"x\")"
+      ]
+    },
+    "diff": {
+      "signature": "diff(expr, var)",
+      "desc": "Computes the symbolic or numerical derivative of an expression or function.",
+      "examples": [
+        "diff(x^2, x)"
+      ]
+    },
+    "integ": {
+      "signature": "integ(expr, var, [a, b])",
+      "desc": "Computes the symbolic indefinite/definite integral, or numerical definite integral.",
+      "examples": [
+        "integ(x^2, x)"
+      ]
+    },
+    "limit": {
+      "signature": "limit(expr, var, val, [dir])",
+      "desc": "Computes the symbolic or numerical limit of an expression as var approaches val.",
+      "examples": [
+        "limit(sin(x)/x, x, 0)"
+      ]
+    },
+    "solveEq": {
+      "signature": "solveEq(expr, var)",
+      "desc": "Symbolically solves an equation expr = 0 for the given variable.",
+      "examples": [
+        "solveEq(x^2 - 2, x)"
+      ]
+    },
+    "expand": {
+      "signature": "expand(expr)",
+      "desc": "Expands a symbolic algebraic expression.",
+      "examples": [
+        "expand((x + 1)^2)"
+      ]
+    },
+    "simplify": {
+      "signature": "simplify(expr)",
+      "desc": "Simplifies a symbolic algebraic expression.",
+      "examples": [
+        "simplify(x + x)"
+      ]
+    },
+    "subs": {
+      "signature": "subs(expr, var, val)",
+      "desc": "Substitutes a variable with a value in a symbolic expression.",
+      "examples": [
+        "subs(x^2, x, 3)"
+      ]
+    },
+    "evalf": {
+      "signature": "evalf(expr)",
+      "desc": "Forces numerical floating-point evaluation of a symbolic expression.",
+      "examples": [
+        "evalf(PI)"
+      ]
+    },
+    "json_encode": {
+      "signature": "json_encode(val)",
+      "desc": "Serializes a JC2 value into a JSON string.",
+      "aliases": ["stringify"],
+      "examples": [
+        "json_encode({a: 1})"
+      ]
+    },
+    "json_decode": {
+      "signature": "json_decode(str)",
+      "desc": "Parses a JSON string into a JC2 value.",
+      "aliases": ["parse"],
+      "examples": [
+        "json_decode(\"{\\\"a\\\": 1}\")"
+      ]
+    },
+    "to_latex": {
+      "signature": "to_latex(obj)",
+      "desc": "Serializes a JC2 value (matrix, fraction, complex) into LaTeX code.",
+      "examples": [
+        "to_latex(frac(1, 2))"
+      ]
+    },
+    "eval_latex": {
+      "signature": "eval_latex(formula)",
+      "desc": "Parses and evaluates a LaTeX math string directly.",
+      "examples": [
+        "eval_latex(r\"\\frac{1}{2}\")"
+      ]
+    },
+    "img": {
+      "signature": "img(width, height, [bg_color])",
+      "desc": "Allocates a new Image surface in RAM. Colors can be hex strings (e.g., \"#FF0000\") or names (e.g., \"red\").",
+      "examples": [
+        "im = img(800, 600, \"black\")"
+      ]
+    },
+    "width": {
+      "signature": "im.width()",
+      "desc": "Returns the width of the image in pixels.",
+      "examples": [
+        "w = im.width()"
+      ]
+    },
+    "height": {
+      "signature": "im.height()",
+      "desc": "Returns the height of the image in pixels.",
+      "examples": [
+        "h = im.height()"
+      ]
+    },
+    "setPixel": {
+      "signature": "im.setPixel(x, y, color)",
+      "desc": "Sets the color of a single pixel at (x, y).",
+      "examples": [
+        "im.setPixel(10, 10, \"red\")"
+      ]
+    },
+    "getPixel": {
+      "signature": "im.getPixel(x, y)",
+      "desc": "Returns the color of the pixel at (x, y) as a hex string.",
+      "examples": [
+        "c = im.getPixel(10, 10)"
+      ]
+    },
+    "clear": {
+      "signature": "im.clear(color) / clear(collection)",
+      "desc": "Fills the entire image with the specified color, or removes all elements from a Set, List, or Dict.",
+      "examples": [
+        "im.clear(\"white\")",
+        "clear(myList)"
+      ]
+    },
+    "line": {
+      "signature": "im.line(x0, y0, x1, y1, color, [thick])",
+      "desc": "Draws an anti-aliased line between two points.",
+      "examples": [
+        "im.line(10, 10, 100, 100, \"blue\", 2.5)"
+      ]
+    },
+    "rect": {
+      "signature": "im.rect(x, y, w, h, color, [thick])",
+      "desc": "Draws the outline of a rectangle.",
+      "examples": [
+        "im.rect(50, 50, 200, 100, \"green\")"
+      ]
+    },
+    "fillRect": {
+      "signature": "im.fillRect(x, y, w, h, color)",
+      "desc": "Draws a filled rectangle.",
+      "examples": [
+        "im.fillRect(50, 50, 200, 100, \"#00FF00\")"
+      ]
+    },
+    "circle": {
+      "signature": "im.circle(cx, cy, radius, color, [thick])",
+      "desc": "Draws an anti-aliased circle outline.",
+      "examples": [
+        "im.circle(400, 300, 50, \"red\", 1.5)"
+      ]
+    },
+    "fillCircle": {
+      "signature": "im.fillCircle(cx, cy, radius, color)",
+      "desc": "Draws a filled anti-aliased circle.",
+      "examples": [
+        "im.fillCircle(400, 300, 50, \"red\")"
+      ]
+    },
+    "text": {
+      "signature": "im.text(txt, x, y, color, [scale])",
+      "desc": "Renders text using a built-in 8x8 hardware font.",
+      "examples": [
+        "im.text(\"Hello\", 10, 10, \"white\", 2)"
+      ]
+    },
+    "axes": {
+      "signature": "im.axes(xMin, xMax, yMin, yMax, [color])",
+      "desc": "Draws Cartesian coordinate axes mapped to the specified range.",
+      "examples": [
+        "im.axes(-10, 10, -5, 5, \"gray\")"
+      ]
+    },
+    "save": {
+      "signature": "im.save(path)",
+      "desc": "Encodes and saves the image to a BMP file.",
+      "examples": [
+        "im.save(\"output.bmp\")"
+      ]
+    },
+    "Window": {
+      "signature": "Window(title, width, height)",
+      "desc": "Creates a new hardware-accelerated OS window.",
+      "examples": [
+        "win = Window(\"My Game\", 800, 600)"
+      ]
+    },
+    "isOpen": {
+      "signature": "win.isOpen()",
+      "desc": "Returns 1 if the window is still open, 0 if closed.",
+      "examples": [
+        "while (win.isOpen()) { ... }"
+      ]
+    },
+    "pollEvent": {
+      "signature": "win.pollEvent()",
+      "desc": "Pops the next input event from the window's queue. Returns a Dict or none.",
+      "examples": [
+        "ev = win.pollEvent()"
+      ]
+    },
+    "isKeyDown": {
+      "signature": "win.isKeyDown(key)",
+      "desc": "Returns 1 if the specified physical key is currently pressed.",
+      "examples": [
+        "if (win.isKeyDown(\"W\")) moveUp()"
+      ]
+    },
+    "show": {
+      "signature": "win.show(img)",
+      "desc": "Blits an Image object's buffer directly to the window.",
+      "examples": [
+        "win.show(im)"
+      ]
+    },
+    "setImeEnabled": {
+      "signature": "win.setImeEnabled(enable)",
+      "desc": "Enables or disables the OS Input Method Editor (IME) for the window.",
+      "examples": [
+        "win.setImeEnabled(0)"
+      ]
+    },
+    "showCursor": {
+      "signature": "win.showCursor(show)",
+      "desc": "Hides or shows the OS mouse cursor over the window.",
+      "examples": [
+        "win.showCursor(0)"
+      ]
+    },
+    "setCursorPos": {
+      "signature": "win.setCursorPos(x, y)",
+      "desc": "Teleports the OS mouse cursor to the specified window coordinates.",
+      "examples": [
+        "win.setCursorPos(400, 300)"
+      ]
+    },
+    "pdf": {
+      "signature": "dist.pdf(x)",
+      "desc": "Returns the Probability Density Function (or PMF) evaluated at x.",
+      "aliases": ["pmf"],
+      "examples": [
+        "Normal(0, 1).pdf(0)"
+      ]
+    },
+    "cdf": {
+      "signature": "dist.cdf(x)",
+      "desc": "Returns the Cumulative Distribution Function evaluated at x.",
+      "examples": [
+        "Normal(0, 1).cdf(1.96)"
+      ]
+    },
+    "quantile": {
+      "signature": "dist.quantile(p)",
+      "desc": "Returns the inverse CDF (quantile) for probability p (0 < p < 1).",
+      "examples": [
+        "Normal(0, 1).quantile(0.95)"
+      ]
+    },
+    "sample": {
+      "signature": "dist.sample(n)",
+      "desc": "Draws n random samples from the distribution and returns them as a row vector.",
+      "examples": [
+        "Normal(100, 15).sample(10)"
+      ]
+    },
+    "add": {
+      "signature": "add(collection, val) / dict.add(key, val)",
+      "desc": "Adds an element to a Set or List, or a key-value pair to a Dict.",
+      "examples": [
+        "add(mySet, 42)"
+      ]
+    },
+    "remove": {
+      "signature": "remove(collection, val_or_key)",
+      "desc": "Removes an element from a Set, an index from a List, or a key from a Dict. Throws an error if not found.",
+      "examples": [
+        "remove(myDict, \"age\")"
+      ]
+    },
+    "discard": {
+      "signature": "discard(collection, val_or_key)",
+      "desc": "Removes an element from a Set or a key from a Dict silently (no error if not found).",
+      "examples": [
+        "discard(mySet, 99)"
+      ]
+    },
+    "eval": {
+      "signature": "eval(expr)",
+      "desc": "Parses and evaluates a string as JC2 code.",
+      "examples": ["eval(\"1 + 2\")"]
+    },
+    "charAt": {
+      "signature": "charAt(s, i)",
+      "desc": "Returns the character at index i.",
+      "examples": ["charAt(\"hello\", 1)"]
+    },
+    "upper": {
+      "signature": "upper(s)",
+      "desc": "Converts a string to uppercase.",
+      "examples": ["upper(\"hello\")"]
+    },
+    "lower": {
+      "signature": "lower(s)",
+      "desc": "Converts a string to lowercase.",
+      "examples": ["lower(\"HELLO\")"]
+    },
+    "trim": {
+      "signature": "trim(s)",
+      "desc": "Removes leading and trailing whitespace from a string.",
+      "examples": ["trim(\"  hello  \")"]
+    },
+    "find": {
+      "signature": "find(s, sub, [pos])",
+      "desc": "Returns the index of the first match of sub in s, or -1 if absent.",
+      "examples": ["find(\"hello\", \"l\")"]
+    },
+    "contains": {
+      "signature": "contains(s, sub)",
+      "desc": "Returns 1 if sub is found in s, 0 otherwise.",
+      "examples": ["contains(\"hello\", \"ell\")"]
+    },
+    "repeat": {
+      "signature": "repeat(s, n)",
+      "desc": "Repeats string s n times.",
+      "examples": ["repeat(\"ha\", 3)"]
+    },
+    "concat": {
+      "signature": "concat(...)",
+      "desc": "Concatenates arbitrary types into a single string.",
+      "examples": ["concat(\"A\", 1, \"B\")"]
+    },
+    "startsWith": {
+      "signature": "startsWith(s, prefix)",
+      "desc": "Returns 1 if string s starts with prefix.",
+      "examples": ["startsWith(\"hello\", \"he\")"]
+    },
+    "endsWith": {
+      "signature": "endsWith(s, suffix)",
+      "desc": "Returns 1 if string s ends with suffix.",
+      "examples": ["endsWith(\"hello\", \"lo\")"]
+    },
+    "ord": {
+      "signature": "ord(s)",
+      "desc": "Returns the ASCII code of the first character of s.",
+      "examples": ["ord(\"A\")"]
+    },
+    "chr": {
+      "signature": "chr(code)",
+      "desc": "Converts an ASCII code to a string.",
+      "examples": ["chr(65)"]
+    },
+    "parseNum": {
+      "signature": "parseNum(s)",
+      "desc": "Parses a string into a number (double or BigInt).",
+      "examples": ["parseNum(\"42.5\")"]
+    },
+    "first": {
+      "signature": "first(v)",
+      "desc": "Returns the first element of a list or array.",
+      "examples": ["first([1, 2, 3])"]
+    },
+    "last": {
+      "signature": "last(v)",
+      "desc": "Returns the last element of a list or array.",
+      "examples": ["last([1, 2, 3])"]
+    },
+    "shift": {
+      "signature": "shift(v)",
+      "desc": "Removes and returns the first element of a list (mutates) or array (returns first).",
+      "examples": ["shift(myList)"]
+    },
+    "prepend": {
+      "signature": "prepend(v, val)",
+      "desc": "Inserts a value at the beginning of a list or array.",
+      "examples": ["prepend([2, 3], 1)"]
+    },
+    "insert": {
+      "signature": "insert(v, idx, val)",
+      "desc": "Inserts a value at the specified index.",
+      "examples": ["insert([1, 3], 1, 2)"]
+    },
+    "removeAt": {
+      "signature": "removeAt(v, idx)",
+      "desc": "Removes the element at the specified index.",
+      "examples": ["removeAt([1, 2, 3], 1)"]
+    },
+    "slice": {
+      "signature": "slice(v, start, [end])",
+      "desc": "Extracts a slice of the container from start to end.",
+      "examples": ["slice([1, 2, 3, 4], 1, 3)"]
+    },
+    "reverse": {
+      "signature": "reverse(v)",
+      "desc": "Returns a reversed copy of the container or string.",
+      "examples": ["reverse([1, 2, 3])"]
+    },
+    "flatten": {
+      "signature": "flatten(v)",
+      "desc": "Recursively flattens nested containers into a 1D array or list.",
+      "examples": ["flatten([[1, 2], [3, 4]])"]
+    },
+    "unique": {
+      "signature": "unique(v)",
+      "desc": "Removes duplicate elements from a list or array.",
+      "examples": ["unique([1, 2, 2, 3])"]
+    },
+    "indexOf": {
+      "signature": "indexOf(v, val)",
+      "desc": "Returns the first index of val in v, or -1 if absent.",
+      "examples": ["indexOf([1, 2, 3], 2)"]
+    },
+    "count": {
+      "signature": "count(v, val)",
+      "desc": "Counts the occurrences of val in v.",
+      "examples": ["count([1, 2, 2, 3], 2)"]
+    },
+    "cumsum": {
+      "signature": "cumsum(v)",
+      "desc": "Returns the cumulative sum of the elements.",
+      "examples": ["cumsum([1, 2, 3])"]
+    },
+    "cumprod": {
+      "signature": "cumprod(v)",
+      "desc": "Returns the cumulative product of the elements.",
+      "examples": ["cumprod([1, 2, 3])"]
+    },
+    "diffs": {
+      "signature": "diffs(v)",
+      "desc": "Returns the adjacent differences of the elements.",
+      "examples": ["diffs([1, 3, 6])"]
+    },
+    "range": {
+      "signature": "range([start], end, [step])",
+      "desc": "Generates a sequence of numbers.",
+      "examples": ["range(5)", "range(1, 10, 2)"]
+    },
+    "fill": {
+      "signature": "fill(val, n)",
+      "desc": "Creates an array with n copies of val.",
+      "examples": ["fill(0, 5)"]
+    },
+    "linspace": {
+      "signature": "linspace(a, b, n)",
+      "desc": "Generates n evenly-spaced points from a to b.",
+      "examples": ["linspace(0, 1, 5)"]
+    },
+    "strmat": {
+      "signature": "strmat(r, c, ...)",
+      "desc": "Constructs a StringMatrix with r rows and c columns.",
+      "examples": ["strmat(2, 2, \"a\", \"b\", \"c\", \"d\")"]
+    },
+    "strvec": {
+      "signature": "strvec(...)",
+      "desc": "Constructs a column StringMatrix.",
+      "examples": ["strvec(\"a\", \"b\")"]
+    },
+    "strrow": {
+      "signature": "strrow(...)",
+      "desc": "Constructs a row StringMatrix.",
+      "examples": ["strrow(\"a\", \"b\")"]
+    },
+    "strfill": {
+      "signature": "strfill(str, n)",
+      "desc": "Creates a 1xN StringMatrix filled with str.",
+      "examples": ["strfill(\"x\", 3)"]
+    },
+    "strfind": {
+      "signature": "strfind(mat, str)",
+      "desc": "Finds a string in a StringMatrix, returning its [row, col] or -1.",
+      "examples": ["strfind(M, \"target\")"]
+    },
+    "strjoin": {
+      "signature": "strjoin(mat, delim)",
+      "desc": "Joins all elements of a StringMatrix with a delimiter.",
+      "examples": ["strjoin(M, \",\")"]
+    },
+    "strsort": {
+      "signature": "strsort(mat)",
+      "desc": "Sorts the elements of a StringMatrix lexicographically.",
+      "examples": ["strsort(M)"]
+    },
+    "toStrMat": {
+      "signature": "toStrMat(A)",
+      "desc": "Converts any matrix to a StringMatrix.",
+      "examples": ["toStrMat([1, 2; 3, 4])"]
+    },
+    "dictSize": {
+      "signature": "dictSize(d)",
+      "desc": "Returns the number of key-value entries in a Dict.",
+      "aliases": ["size"],
+      "examples": ["dictSize({a: 1})"]
+    },
+    "dictMerge": {
+      "signature": "dictMerge(d1, d2)",
+      "desc": "Merges d2 into d1, overwriting existing keys.",
+      "examples": ["dictMerge(d1, d2)"]
+    },
+    "dictPairs": {
+      "signature": "dictPairs(d)",
+      "desc": "Returns a List of [key, value] pairs from a Dict.",
+      "examples": ["dictPairs({a: 1})"]
+    },
+    "toList": {
+      "signature": "toList(v)",
+      "desc": "Converts an array, matrix, string, or set to a List.",
+      "examples": ["toList([1, 2, 3])"]
+    },
+    "toStrVec": {
+      "signature": "toStrVec(v)",
+      "desc": "Converts a List or StringMatrix to a column StringMatrix.",
+      "examples": ["toStrVec(list(\"a\", \"b\"))"]
+    },
+    "toArray": {
+      "signature": "toArray(v)",
+      "desc": "Converts a flat List to a numeric row vector.",
+      "examples": ["toArray(list(1, 2, 3))"]
+    },
+    "toMatrix": {
+      "signature": "toMatrix(v)",
+      "desc": "Converts a nested List to a Matrix.",
+      "examples": ["toMatrix(list(list(1, 2), list(3, 4)))"]
+    },
+    "zip": {
+      "signature": "zip(a, b)",
+      "desc": "Pair-wise merges two arrays or lists.",
+      "examples": ["zip([1, 2], [3, 4])"]
+    },
+    "cat": {
+      "signature": "cat(...)",
+      "desc": "Concatenates multiple arrays or lists into one.",
+      "examples": ["cat([1, 2], [3, 4])"]
+    },
+    "isinstance": {
+      "signature": "isinstance(obj, [cls])",
+      "desc": "Checks if obj is an instance of cls (or any class if cls is omitted).",
+      "examples": ["isinstance(p, Point)"]
+    },
+    "getClass": {
+      "signature": "getClass(obj)",
+      "desc": "Returns the class definition of an instance.",
+      "examples": ["getClass(p)"]
+    },
+    "getParent": {
+      "signature": "getParent(cls)",
+      "desc": "Returns the parent class of a class definition.",
+      "examples": ["getParent(Dog)"]
+    },
+    "setDiff": {
+      "signature": "setDiff(a, b)",
+      "desc": "Returns a Set of elements in a but not in b.",
+      "examples": ["setDiff(Set(1, 2), Set(2, 3))"]
+    },
+    "setSymDiff": {
+      "signature": "setSymDiff(a, b)",
+      "desc": "Returns a Set of elements in exactly one of the sets.",
+      "examples": ["setSymDiff(Set(1, 2), Set(2, 3))"]
+    },
+    "isSubset": {
+      "signature": "isSubset(a, b)",
+      "desc": "Returns 1 if a is a subset of b.",
+      "examples": ["isSubset(Set(1), Set(1, 2))"]
+    },
+    "isSuperset": {
+      "signature": "isSuperset(a, b)",
+      "desc": "Returns 1 if a is a superset of b.",
+      "examples": ["isSuperset(Set(1, 2), Set(1))"]
+    },
+    "isDisjoint": {
+      "signature": "isDisjoint(a, b)",
+      "desc": "Returns 1 if a and b share no elements.",
+      "examples": ["isDisjoint(Set(1), Set(2))"]
+    },
+    "setProduct": {
+      "signature": "setProduct(a, b)",
+      "desc": "Returns the Cartesian product of two sets.",
+      "examples": ["setProduct(Set(1), Set(\"a\"))"]
+    },
+    "setPow": {
+      "signature": "setPow(s)",
+      "desc": "Returns the powerset of s (Set of all subsets).",
+      "examples": ["setPow(Set(1, 2))"]
+    },
+    "appendFile": {
+      "signature": "appendFile(path, content)",
+      "desc": "Appends a string to the end of a file.",
+      "examples": ["appendFile(\"log.txt\", \"Error\\n\")"]
+    },
+    "readLines": {
+      "signature": "readLines(path)",
+      "desc": "Reads a file line-by-line into a List of strings.",
+      "examples": ["readLines(\"data.txt\")"]
+    },
+    "writeLines": {
+      "signature": "writeLines(path, list)",
+      "desc": "Writes a List of elements as separate lines to a file.",
+      "examples": ["writeLines(\"out.txt\", myList)"]
+    },
+    "fileExists": {
+      "signature": "fileExists(path)",
+      "desc": "Returns 1 if the file or directory exists, 0 otherwise.",
+      "examples": ["fileExists(\"data.txt\")"]
+    },
+    "deleteFile": {
+      "signature": "deleteFile(path)",
+      "desc": "Permanently deletes the specified file.",
+      "examples": ["deleteFile(\"temp.txt\")"]
+    },
+    "fileSize": {
+      "signature": "fileSize(path)",
+      "desc": "Returns the physical file size in bytes.",
+      "examples": ["fileSize(\"data.txt\")"]
+    },
+    "listDir": {
+      "signature": "listDir([path])",
+      "desc": "Returns a List of filenames in the specified directory.",
+      "examples": ["listDir(\"./data\")"]
+    },
+    "readCSVMat": {
+      "signature": "readCSVMat(path, [delim])",
+      "desc": "Reads a CSV file directly into a StringMatrix.",
+      "examples": ["readCSVMat(\"data.csv\")"]
+    },
+    "parseCSVNum": {
+      "signature": "parseCSVNum(path, [delim])",
+      "desc": "Reads a CSV file into a mathematical RealMatrix.",
+      "examples": ["parseCSVNum(\"data.csv\")"]
+    },
+    "writeCSV": {
+      "signature": "writeCSV(path, data, [delim])",
+      "desc": "Writes a Matrix or List out to a CSV file.",
+      "examples": ["writeCSV(\"out.csv\", M)"]
+    },
+    "RootOf": {
+      "signature": "RootOf(poly, var, k)",
+      "desc": "Represents the k-th exact root of the polynomial.",
+      "examples": ["RootOf(x^5 - x + 1, x, 1)"]
+    },
+    "RootSum": {
+      "signature": "RootSum(expr, var, poly)",
+      "desc": "Represents the sum of expr evaluated over all roots of poly.",
+      "examples": ["RootSum(x^2, x, x^3 - 2)"]
+    },
+    "contract": {
+      "signature": "contract(expr)",
+      "desc": "Contracts logarithmic and trigonometric expressions.",
+      "examples": ["contract(2*log(x) + log(y))"]
+    },
+    "trigsimp": {
+      "signature": "trigsimp(expr)",
+      "desc": "Simplifies trigonometric expressions.",
+      "examples": ["trigsimp(sin(x)^2 + cos(x)^2)"]
+    },
+    "toFunc": {
+      "signature": "toFunc(expr, vars)",
+      "desc": "Compiles a symbolic AST to a blazing-fast VM closure.",
+      "examples": ["f = toFunc(x^2 + y, [\"x\", \"y\"])"]
+    },
+    "evalv": {
+      "signature": "evalv(expr)",
+      "desc": "Evaluates a symbolic expression preserving exact types (Fraction/Complex).",
+      "examples": ["evalv(x + 1)"]
+    },
+    "replaceRule": {
+      "signature": "replaceRule(expr, pat, tgt)",
+      "desc": "Pattern matching replacement in a symbolic expression.",
+      "examples": ["replaceRule(sin(x)^2, sin(x)^2, 1 - cos(x)^2)"]
+    },
+    "polyDiv": {
+      "signature": "polyDiv(A, B, var)",
+      "desc": "Polynomial division, returning [quotient, remainder].",
+      "examples": ["polyDiv(x^2 - 1, x - 1, x)"]
+    },
+    "polyGCD": {
+      "signature": "polyGCD(A, B, var)",
+      "desc": "Polynomial greatest common divisor.",
+      "examples": ["polyGCD(x^2 - 1, x^2 + 2*x + 1, x)"]
+    },
+    "resultant": {
+      "signature": "resultant(A, B, var)",
+      "desc": "Sylvester resultant of two polynomials.",
+      "examples": ["resultant(x^2 - 1, x^2 + 1, x)"]
+    },
+    "factor": {
+      "signature": "factor(expr)",
+      "desc": "Factors a polynomial or an integer.",
+      "examples": ["factor(x^4 - 1)"]
+    },
+    "factorReal": {
+      "signature": "factorReal(expr)",
+      "desc": "Factors a polynomial over the real numbers.",
+      "examples": ["factorReal(x^2 + 1)"]
+    },
+    "taylor": {
+      "signature": "taylor(expr, var, a, [order])",
+      "desc": "Computes the Taylor series expansion of expr around a.",
+      "examples": ["taylor(sin(x), x, 0, 5)"]
+    },
+    "verifyInteg": {
+      "signature": "verifyInteg(expr, var)",
+      "desc": "Verifies if the derivative of the integral matches the original expression.",
+      "examples": ["verifyInteg(x^2, x)"]
+    },
+    "isError": {
+      "signature": "isError(status)",
+      "desc": "Returns 1 if the pcall status array indicates an error.",
+      "examples": ["isError(pcall(f))"]
+    },
+    "resetConst": {
+      "signature": "resetConst()",
+      "desc": "Restores system constants PI, E, i, I, true, false.",
+      "examples": ["resetConst()"]
+    },
+    "setWorkspace": {
+      "signature": "setWorkspace(path)",
+      "desc": "Changes the workspace directory.",
+      "examples": ["setWorkspace(\"./my_project\")"]
+    },
+    "getWorkspace": {
+      "signature": "getWorkspace()",
+      "desc": "Returns the current workspace path.",
+      "examples": ["getWorkspace()"]
+    },
+    "pwd": {
+      "signature": "pwd()",
+      "desc": "Prints the script directory and workspace directory.",
+      "examples": ["pwd()"]
+    },
+    "cls": {
+      "signature": "cls()",
+      "desc": "Clears the console screen.",
+      "examples": ["cls()"]
+    },
+    "modules": {
+      "signature": "modules()",
+      "desc": "Lists all available native modules.",
+      "examples": ["modules()"]
+    },
+    "imgPlot": {
+      "signature": "imgPlot(im, f, xMin, xMax, yMin, yMax, color, [thick])",
+      "desc": "Plots a function f(x) onto an image canvas.",
+      "examples": ["imgPlot(im, sin, -10, 10, -2, 2, \"red\")"]
+    },
+    "breakpoint": {
+      "signature": "breakpoint()",
+      "desc": "Suspends VM execution and opens the interactive step-debugger.",
+      "aliases": ["debugger"],
+      "examples": ["breakpoint()"]
+    },
+    "buildIndex": {
+      "signature": "buildIndex()",
+      "desc": "Builds an O(1) anchor tree in RAM for the prime database.",
+      "aliases": ["loadPrimes"],
+      "examples": ["buildIndex()"]
+    },
+    "mountPrimes": {
+      "signature": "mountPrimes(path)",
+      "desc": "Redirects the prime engine to a custom Prime.txt file.",
+      "examples": ["mountPrimes(\"Prime.txt\")"]
+    },
+    "sysinfo": {
+      "signature": "sysinfo()",
+      "desc": "Prints current system and prime database status.",
+      "examples": ["sysinfo()"]
+    },
+    "freeze": {
+      "signature": "freeze(obj)",
+      "desc": "Locks a container permanently, preventing modification.",
+      "examples": ["freeze(myList)"]
+    },
+    "isFrozen": {
+      "signature": "isFrozen(obj)",
+      "desc": "Returns 1 if the container is locked, 0 otherwise.",
+      "examples": ["isFrozen(myList)"]
+    },
+    "hash": {
+      "signature": "hash(x)",
+      "desc": "Returns the native hash value of x as a BigInt.",
+      "examples": ["hash(\"hello\")"]
+    },
+    "clone": {
+      "signature": "clone(obj)",
+      "desc": "Returns a deep-copied, fully unfrozen clone of the object.",
+      "examples": ["clone(myDict)"]
+    },
+    "val": {
+      "signature": "val(obj)",
+      "desc": "Returns a deep-copied, fully frozen snapshot of the object.",
+      "examples": ["val(myDict)"]
+    },
+    "symconfig": {
+      "signature": "symconfig([dict_or_default])",
+      "desc": "Gets or sets CAS limits. Pass \"default\" to reset.",
+      "examples": ["symconfig(\"default\")"]
+    },
+    "setSymLimit": {
+      "signature": "setSymLimit(key, val)",
+      "desc": "Sets a specific CAS limit.",
+      "examples": ["setSymLimit(\"maxDepth\", 10)"]
+    },
+    "isint": {
+      "signature": "isint(x)",
+      "desc": "Returns 1 if x is an integer (BigInt, integer-valued double, or Fraction with den=1).",
+      "examples": ["isint(42)"]
+    },
+    "isfloat": {
+      "signature": "isfloat(x)",
+      "desc": "Returns 1 if x is a double.",
+      "examples": ["isfloat(3.14)"]
+    },
+    "isnumeric": {
+      "signature": "isnumeric(x)",
+      "desc": "Returns 1 if x is any numeric type.",
+      "examples": ["isnumeric(1+2i)"]
+    },
+    "iscomplex": {
+      "signature": "iscomplex(x)",
+      "desc": "Returns 1 if x is specifically a Complex type.",
+      "examples": ["iscomplex(1+2i)"]
+    },
+    "isreal": {
+      "signature": "isreal(x)",
+      "desc": "Returns 1 if x is a real number (imaginary part is 0).",
+      "examples": ["isreal(42)"]
+    },
+    "isfrac": {
+      "signature": "isfrac(x)",
+      "desc": "Returns 1 if x is specifically a Fraction type.",
+      "examples": ["isfrac(frac(1, 2))"]
+    },
+    "isbigint": {
+      "signature": "isbigint(x)",
+      "desc": "Returns 1 if x is specifically a BigInt type.",
+      "examples": ["isbigint(42)"]
+    },
+    "isbase": {
+      "signature": "isbase(x)",
+      "desc": "Returns 1 if x is specifically a BaseNum type.",
+      "examples": ["isbase(base(255, 16))"]
+    },
+    "ismatrix": {
+      "signature": "ismatrix(x)",
+      "desc": "Returns 1 if x is any matrix type.",
+      "examples": ["ismatrix([1, 2])"]
+    },
+    "isrealmat": {
+      "signature": "isrealmat(x)",
+      "desc": "Returns 1 if x is specifically a RealMatrix.",
+      "examples": ["isrealmat([1, 2])"]
+    },
+    "iscomplexmat": {
+      "signature": "iscomplexmat(x)",
+      "desc": "Returns 1 if x is specifically a ComplexMatrix.",
+      "examples": ["iscomplexmat([1i, 2i])"]
+    },
+    "isstringmat": {
+      "signature": "isstringmat(x)",
+      "desc": "Returns 1 if x is specifically a StringMatrix.",
+      "examples": ["isstringmat([\"a\", \"b\"])"]
+    },
+    "isvector": {
+      "signature": "isvector(x)",
+      "desc": "Returns 1 if x is a 1D row or column vector.",
+      "examples": ["isvector([1, 2, 3])"]
+    },
+    "issquare": {
+      "signature": "issquare(x)",
+      "desc": "Returns 1 if x is a square matrix.",
+      "examples": ["issquare([1, 2; 3, 4])"]
+    },
+    "islist": {
+      "signature": "islist(x)",
+      "desc": "Returns 1 if x is a List.",
+      "examples": ["islist(list(1, 2))"]
+    },
+    "isdict": {
+      "signature": "isdict(x)",
+      "desc": "Returns 1 if x is a Dict.",
+      "examples": ["isdict({a: 1})"]
+    },
+    "isstring": {
+      "signature": "isstring(x)",
+      "desc": "Returns 1 if x is a String.",
+      "examples": ["isstring(\"hello\")"]
+    },
+    "isalpha": {
+      "signature": "isalpha(s)",
+      "desc": "Returns 1 if all characters in s are alphabetic.",
+      "examples": ["isalpha(\"abc\")"]
+    },
+    "isdigit": {
+      "signature": "isdigit(s)",
+      "desc": "Returns 1 if all characters in s are digits.",
+      "examples": ["isdigit(\"123\")"]
+    },
+    "isalnum": {
+      "signature": "isalnum(s)",
+      "desc": "Returns 1 if all characters in s are alphanumeric.",
+      "examples": ["isalnum(\"abc123\")"]
+    },
+    "isspace": {
+      "signature": "isspace(s)",
+      "desc": "Returns 1 if all characters in s are whitespace.",
+      "examples": ["isspace(\"  \\t\")"]
+    },
+    "isupper": {
+      "signature": "isupper(s)",
+      "desc": "Returns 1 if all alphabetic characters in s are uppercase.",
+      "examples": ["isupper(\"ABC\")"]
+    },
+    "islower": {
+      "signature": "islower(s)",
+      "desc": "Returns 1 if all alphabetic characters in s are lowercase.",
+      "examples": ["islower(\"abc\")"]
+    },
+    "isempty": {
+      "signature": "isempty(x)",
+      "desc": "Returns 1 if the string, list, dict, or matrix is empty.",
+      "examples": ["isempty(\"\")"]
+    },
+    "isnone": {
+      "signature": "isnone(x)",
+      "desc": "Returns 1 if x is the none value.",
+      "examples": ["isnone(none())"]
+    },
+    "isfunction": {
+      "signature": "isfunction(x)",
+      "desc": "Returns 1 if x is a function or closure.",
+      "examples": ["isfunction(sin)"]
+    },
+    "isclass": {
+      "signature": "isclass(x)",
+      "desc": "Returns 1 if x is a class definition.",
+      "examples": ["isclass(Point)"]
+    },
+    "issym": {
+      "signature": "issym(x)",
+      "desc": "Returns 1 if x is a Symbolic Expression.",
+      "examples": ["issym(sym(\"x\"))"]
+    },
+    "isnan": {
+      "signature": "isnan(x)",
+      "desc": "Returns 1 if x is NaN (Not a Number).",
+      "examples": ["isnan(0/0)"]
+    },
+    "isinf": {
+      "signature": "isinf(x)",
+      "desc": "Returns 1 if x is +/- Infinity.",
+      "examples": ["isinf(1/0)"]
+    },
+    "isfinite": {
+      "signature": "isfinite(x)",
+      "desc": "Returns 1 if x is a finite number.",
+      "examples": ["isfinite(42)"]
+    },
+    "isprime": {
+      "signature": "isprime(x)",
+      "desc": "Returns 1 if x is a prime number.",
+      "examples": ["isprime(7)"]
+    },
+    "iseven": {
+      "signature": "iseven(x)",
+      "desc": "Returns 1 if x is an even integer.",
+      "examples": ["iseven(4)"]
+    },
+    "isodd": {
+      "signature": "isodd(x)",
+      "desc": "Returns 1 if x is an odd integer.",
+      "examples": ["isodd(3)"]
+    },
+    "ispositive": {
+      "signature": "ispositive(x)",
+      "desc": "Returns 1 if x > 0.",
+      "examples": ["ispositive(5)"]
+    },
+    "isnegative": {
+      "signature": "isnegative(x)",
+      "desc": "Returns 1 if x < 0.",
+      "examples": ["isnegative(-5)"]
+    },
+    "iszero": {
+      "signature": "iszero(x)",
+      "desc": "Returns 1 if x is equal to zero.",
+      "examples": ["iszero(0)"]
+    },
+    "isset": {
+      "signature": "isset(x)",
+      "desc": "Returns 1 if x is a Set.",
+      "examples": ["isset(Set(1))"]
+    },
+    "Normal": {
+      "signature": "Normal([mu], [sigma])",
+      "desc": "Constructs a Normal distribution N(mu, sigma^2).",
+      "examples": ["Normal(0, 1)"]
+    },
+    "TDist": {
+      "signature": "TDist(df)",
+      "desc": "Constructs a Student's t-distribution.",
+      "examples": ["TDist(10)"]
+    },
+    "Chi2": {
+      "signature": "Chi2(df)",
+      "desc": "Constructs a Chi-squared distribution.",
+      "examples": ["Chi2(5)"]
+    },
+    "FDist": {
+      "signature": "FDist(d1, d2)",
+      "desc": "Constructs an F-distribution.",
+      "examples": ["FDist(5, 10)"]
+    },
+    "ExpDist": {
+      "signature": "ExpDist(lambda)",
+      "desc": "Constructs an Exponential distribution.",
+      "examples": ["ExpDist(1.5)"]
+    },
+    "GammaDist": {
+      "signature": "GammaDist(shape, rate)",
+      "desc": "Constructs a Gamma distribution.",
+      "examples": ["GammaDist(2, 1)"]
+    },
+    "BetaDist": {
+      "signature": "BetaDist(a, b)",
+      "desc": "Constructs a Beta distribution.",
+      "examples": ["BetaDist(2, 5)"]
+    },
+    "Uniform": {
+      "signature": "Uniform(a, b)",
+      "desc": "Constructs a Continuous Uniform distribution on [a, b).",
+      "examples": ["Uniform(0, 10)"]
+    },
+    "Binom": {
+      "signature": "Binom(n, p)",
+      "desc": "Constructs a Binomial distribution.",
+      "examples": ["Binom(10, 0.5)"]
+    },
+    "Poisson": {
+      "signature": "Poisson(lambda)",
+      "desc": "Constructs a Poisson distribution.",
+      "examples": ["Poisson(3)"]
+    },
+    "Geom": {
+      "signature": "Geom(p)",
+      "desc": "Constructs a Geometric distribution.",
+      "examples": ["Geom(0.5)"]
+    },
+    "gamma": {
+      "signature": "gamma(x)",
+      "desc": "Returns the Gamma function evaluated at x.",
+      "examples": ["gamma(5)"]
+    },
+    "lgamma": {
+      "signature": "lgamma(x)",
+      "desc": "Returns the natural logarithm of the absolute value of the Gamma function.",
+      "examples": ["lgamma(5)"]
+    },
+    "betaFn": {
+      "signature": "betaFn(a, b)",
+      "desc": "Returns the Beta function evaluated at a and b.",
+      "examples": ["betaFn(2, 5)"]
+    },
+    "erfc": {
+      "signature": "erfc(x)",
+      "desc": "Returns the complementary error function of x.",
+      "examples": ["erfc(1)"]
+    },
+    "ttest": {
+      "signature": "ttest(X, [mu0])",
+      "desc": "Performs a one-sample t-test.",
+      "examples": ["ttest(data, 0)"]
+    },
+    "ttest2": {
+      "signature": "ttest2(X, Y)",
+      "desc": "Performs a Welch two-sample t-test.",
+      "examples": ["ttest2(group1, group2)"]
+    },
+    "ttestP": {
+      "signature": "ttestP(X, Y)",
+      "desc": "Performs a paired t-test.",
+      "examples": ["ttestP(pre, post)"]
+    },
+    "chi2test": {
+      "signature": "chi2test(obs, exp)",
+      "desc": "Performs a Chi-squared goodness-of-fit test.",
+      "examples": ["chi2test(observed, expected)"]
+    },
+    "distInfo": {
+      "signature": "distInfo(dist)",
+      "desc": "Prints information about a Distribution.",
+      "examples": ["distInfo(Normal(0, 1))"]
+    },
+    "b_alloc": {
+      "signature": "b_alloc(size)",
+      "desc": "Allocates a zeroed byte buffer of the specified size.",
+      "examples": ["b_alloc(1024)"]
+    },
+    "b_pack": {
+      "signature": "b_pack(array)",
+      "desc": "Creates a byte buffer from an array of 8-bit integers.",
+      "examples": ["b_pack([255, 0, 128])"]
+    },
+    "readFileBytes": {
+      "signature": "readFileBytes(path)",
+      "desc": "Reads an entire file into a byte buffer.",
+      "examples": ["readFileBytes(\"data.bin\")"]
+    },
+    "writeFileBytes": {
+      "signature": "writeFileBytes(path, buf)",
+      "desc": "Writes a byte buffer to a file.",
+      "examples": ["writeFileBytes(\"out.bin\", buf)"]
+    },
+    "b_set": {
+      "signature": "b_set(buf, offset, val, type)",
+      "desc": "Writes a value into the buffer at the specified offset.",
+      "examples": ["b_set(buf, 0, 255, \"u8\")"]
+    },
+    "b_write_arr": {
+      "signature": "b_write_arr(buf, offset, arr, type)",
+      "desc": "Directly copies an array into the buffer at C++ speeds.",
+      "examples": ["b_write_arr(buf, 0, data, \"f64\")"]
+    },
+    "b_get": {
+      "signature": "b_get(buf, offset, type, [len])",
+      "desc": "Reads a value from the buffer at the specified offset.",
+      "examples": ["b_get(buf, 0, \"u16\")"]
+    },
+    "b_len": {
+      "signature": "b_len(buf)",
+      "desc": "Returns the total size of the buffer in bytes.",
+      "examples": ["b_len(buf)"]
+    },
+    "net_tcp_connect": {
+      "signature": "net_tcp_connect(host, port)",
+      "desc": "Dials a TCP stream to the remote peer.",
+      "examples": ["net_tcp_connect(\"127.0.0.1\", 8080)"]
+    },
+    "net_send": {
+      "signature": "net_send(socket, text)",
+      "desc": "Sends a string over the TCP socket.",
+      "examples": ["net_send(sock, \"Hello\")"]
+    },
+    "net_recv": {
+      "signature": "net_recv(socket, max_bytes)",
+      "desc": "Blocks and reads incoming packets from the socket.",
+      "examples": ["net_recv(sock, 1024)"]
+    },
+    "net_close": {
+      "signature": "net_close(socket)",
+      "desc": "Closes the network socket.",
+      "examples": ["net_close(sock)"]
+    },
+    "net_tcp_server": {
+      "signature": "net_tcp_server(host, port)",
+      "desc": "Binds to a local interface and listens for incoming TCP connections.",
+      "examples": ["net_tcp_server(\"0.0.0.0\", 8080)"]
+    },
+    "net_tcp_accept": {
+      "signature": "net_tcp_accept(server_socket)",
+      "desc": "Blocks and accepts an incoming connection, returning a client socket.",
+      "examples": ["net_tcp_accept(server)"]
+    },
+    "compile_latex": {
+      "signature": "compile_latex(formula, vars)",
+      "desc": "Compiles a parameterized LaTeX formula into an executable JC2 closure.",
+      "examples": ["compile_latex(r\"\\sin(x)\", [\"x\"])"]
+    },
+    "json_pretty": {
+      "signature": "json_pretty(val, [indent])",
+      "desc": "Serializes a JC2 value into a pretty-printed JSON string.",
+      "examples": ["json_pretty({a: 1}, 2)"]
+    },
+    "addS": {
+      "signature": "addS(A, c)",
+      "desc": "Element-wise scalar addition for matrices.",
+      "examples": ["addS([1, 2], 3)"]
+    },
+    "subS": {
+      "signature": "subS(A, c)",
+      "desc": "Element-wise scalar subtraction for matrices.",
+      "examples": ["subS([1, 2], 3)"]
+    },
+    "mulS": {
+      "signature": "mulS(A, c)",
+      "desc": "Element-wise scalar multiplication for matrices.",
+      "examples": ["mulS([1, 2], 3)"]
+    },
+    "divS": {
+      "signature": "divS(A, c)",
+      "desc": "Element-wise scalar division for matrices.",
+      "examples": ["divS([1, 2], 3)"]
+    },
+    "powS": {
+      "signature": "powS(A, c)",
+      "desc": "Element-wise scalar power for matrices.",
+      "examples": ["powS([1, 2], 3)"]
+    },
+    "modS": {
+      "signature": "modS(A, c)",
+      "desc": "Element-wise scalar modulo for matrices.",
+      "examples": ["modS([1, 2], 3)"]
+    },
+    "perm": {
+      "signature": "perm(A)",
+      "desc": "Returns the permanent of a square matrix.",
+      "examples": ["perm([1, 2; 3, 4])"]
+    },
+    "get": {
+      "signature": "get(A, r, c)",
+      "desc": "Returns the element at row r and column c of a matrix.",
+      "examples": ["get(A, 0, 1)"]
+    },
+    "set": {
+      "signature": "set(A, r, c, val)",
+      "desc": "Returns a new matrix with the element at row r and column c set to val.",
+      "examples": ["set(A, 0, 1, 99)"]
+    },
+    "getR": {
+      "signature": "getR(A, r)",
+      "desc": "Extracts row r from a matrix.",
+      "examples": ["getR(A, 0)"]
+    },
+    "getC": {
+      "signature": "getC(A, c)",
+      "desc": "Extracts column c from a matrix.",
+      "examples": ["getC(A, 0)"]
+    },
+    "delR": {
+      "signature": "delR(A, r)",
+      "desc": "Deletes row r from a matrix.",
+      "examples": ["delR(A, 0)"]
+    },
+    "delC": {
+      "signature": "delC(A, c)",
+      "desc": "Deletes column c from a matrix.",
+      "examples": ["delC(A, 0)"]
+    },
+    "swapR": {
+      "signature": "swapR(A, r1, r2)",
+      "desc": "Swaps row r1 and row r2 in a matrix.",
+      "examples": ["swapR(A, 0, 1)"]
+    },
+    "swapC": {
+      "signature": "swapC(A, c1, c2)",
+      "desc": "Swaps column c1 and column c2 in a matrix.",
+      "examples": ["swapC(A, 0, 1)"]
+    },
+    "multiR": {
+      "signature": "multiR(A, r, scalar)",
+      "desc": "Multiplies row r by a scalar.",
+      "examples": ["multiR(A, 0, 2)"]
+    },
+    "multiC": {
+      "signature": "multiC(A, c, scalar)",
+      "desc": "Multiplies column c by a scalar.",
+      "examples": ["multiC(A, 0, 2)"]
+    },
+    "addR": {
+      "signature": "addR(A, r1, r2, scalar)",
+      "desc": "Adds scalar * row r2 to row r1.",
+      "examples": ["addR(A, 0, 1, 2)"]
+    },
+    "addC": {
+      "signature": "addC(A, c1, c2, scalar)",
+      "desc": "Adds scalar * column c2 to column c1.",
+      "examples": ["addC(A, 0, 1, 2)"]
+    },
+    "sub": {
+      "signature": "sub(A, r, c)",
+      "desc": "Returns the submatrix with row r and column c removed.",
+      "examples": ["sub(A, 0, 0)"]
+    },
+    "cof": {
+      "signature": "cof(A, r, c)",
+      "desc": "Returns the cofactor of the element at row r and column c.",
+      "examples": ["cof(A, 0, 0)"]
+    },
+    "Acof": {
+      "signature": "Acof(A, r, c)",
+      "desc": "Returns the algebraic cofactor of the element at row r and column c.",
+      "examples": ["Acof(A, 0, 0)"]
+    },
+    "integD": {
+      "signature": "integD(A, B)",
+      "desc": "Returns the block diagonal concatenation of matrices A and B.",
+      "examples": ["integD(A, B)"]
+    },
+    "qr_Q": {
+      "signature": "qr_Q(A)",
+      "desc": "Returns the orthogonal matrix Q from the QR decomposition of A.",
+      "examples": ["qr_Q(A)"]
+    },
+    "qr_R": {
+      "signature": "qr_R(A)",
+      "desc": "Returns the upper triangular matrix R from the QR decomposition of A.",
+      "examples": ["qr_R(A)"]
+    },
+    "lu_L": {
+      "signature": "lu_L(A)",
+      "desc": "Returns the lower triangular matrix L from the LU decomposition of A.",
+      "examples": ["lu_L(A)"]
+    },
+    "lu_U": {
+      "signature": "lu_U(A)",
+      "desc": "Returns the upper triangular matrix U from the LU decomposition of A.",
+      "examples": ["lu_U(A)"]
+    },
+    "lu_P": {
+      "signature": "lu_P(A)",
+      "desc": "Returns the permutation matrix P from the LU decomposition of A.",
+      "examples": ["lu_P(A)"]
+    },
+    "linfo": {
+      "signature": "linfo(A, b)",
+      "desc": "Prints rank information and classifies the linear system Ax = b.",
+      "examples": ["linfo(A, b)"]
+    },
+    "residual": {
+      "signature": "residual(A, x, b)",
+      "desc": "Returns the residual vector r = b - A*x.",
+      "examples": ["residual(A, x, b)"]
+    },
+    "gcinfo": {
+      "signature": "gcinfo()",
+      "desc": "Prints the current status of the Garbage Collector.",
+      "examples": ["gcinfo()"]
+    },
+    "bool": {
+      "signature": "bool(x)",
+      "desc": "Converts a value to its boolean equivalent (1.0 for true, 0.0 for false).",
+      "examples": ["bool(42)"]
+    },
+    "not": {
+      "signature": "not(x)",
+      "desc": "Logical NOT function.",
+      "examples": ["not(1)"]
+    },
+    "and": {
+      "signature": "and(a, b)",
+      "desc": "Logical AND function (no short-circuit).",
+      "examples": ["and(1, 0)"]
+    },
+    "or": {
+      "signature": "or(a, b)",
+      "desc": "Logical OR function (no short-circuit).",
+      "examples": ["or(1, 0)"]
+    },
+    "seq": {
+      "signature": "seq(start, [step], end)",
+      "desc": "Generates a column vector sequence from start to end.",
+      "examples": ["seq(1, 3)"]
+    },
+    "error": {
+      "signature": "error(msg)",
+      "desc": "Throws a runtime error with the specified message.",
+      "examples": ["error(\"Invalid input\")"]
+    },
+    "input": {
+      "signature": "input([prompt])",
+      "desc": "Reads a line of text from standard input.",
+      "examples": ["input(\"Name: \")"]
+    },
+    "clock": {
+      "signature": "clock()",
+      "desc": "Returns the high-resolution time in seconds since the epoch.",
+      "examples": ["clock()"]
+    },
+    "sleep": {
+      "signature": "sleep(seconds)",
+      "desc": "Pauses execution for the specified number of seconds.",
+      "examples": ["sleep(1.5)"]
+    },
+    "highlight": {
+      "signature": "highlight(code)",
+      "desc": "Returns a syntax-highlighted version of the JC2 code string.",
+      "examples": ["highlight(\"x = 1\")"]
+    },
+    "color": {
+      "signature": "color(state)",
+      "desc": "Enables (\"on\") or disables (\"off\") REPL syntax highlighting.",
+      "examples": ["color(\"on\")"]
+    },
+    "debugInteg": {
+      "signature": "debugInteg(state)",
+      "desc": "Enables (\"on\") or disables (\"off\") verbose integration debug output.",
+      "examples": ["debugInteg(\"on\")"]
+    },
+    "removeKey": {
+      "signature": "removeKey(d, key)",
+      "desc": "Removes a key from a Dictionary. Throws an error if absent.",
+      "examples": ["removeKey(d, \"a\")"]
+    },
+    "apply": {
+      "signature": "apply(f, args)",
+      "desc": "Calls function f with arguments unpacked from a list or array.",
+      "examples": ["apply(sum, [1, 2, 3])"]
+    },
+    "any": {
+      "signature": "any(f, v)",
+      "desc": "Returns 1 if any element in v satisfies function f.",
+      "examples": ["any((x) => x > 0, [-1, 1])"]
+    },
+    "all": {
+      "signature": "all(f, v)",
+      "desc": "Returns 1 if all elements in v satisfy function f.",
+      "examples": ["all((x) => x > 0, [1, 2])"]
+    },
+    "countIf": {
+      "signature": "countIf(f, v)",
+      "desc": "Counts the number of elements in v that satisfy function f.",
+      "examples": ["countIf((x) => x > 0, [-1, 1, 2])"]
+    },
+    "solveE": {
+      "signature": "solveE(f, x0)",
+      "desc": "Numerically finds a root of f(x) = 0 near x0 using Newton-Raphson.",
+      "examples": ["solveE((x) => x^2 - 4, 3)"]
+    },
+    "table": {
+      "signature": "table(f, ...)",
+      "desc": "Evaluates function f over a sequence or matrix of inputs.",
+      "examples": ["table((x) => x^2, 1, 1, 5)"]
+    },
+    "setAdd": {
+      "signature": "setAdd(s, val)",
+      "desc": "Adds an element to a Set (legacy alias for add).",
+      "examples": ["setAdd(s, 1)"]
+    },
+    "setRemove": {
+      "signature": "setRemove(s, val)",
+      "desc": "Removes an element from a Set (legacy alias for remove).",
+      "examples": ["setRemove(s, 1)"]
+    },
+    "setDiscard": {
+      "signature": "setDiscard(s, val)",
+      "desc": "Silently removes an element from a Set (legacy alias for discard).",
+      "examples": ["setDiscard(s, 1)"]
+    },
+    "setClear": {
+      "signature": "setClear(s)",
+      "desc": "Clears all elements from a Set (legacy alias for clear).",
+      "examples": ["setClear(s)"]
+    },
+    "setPop": {
+      "signature": "setPop(s)",
+      "desc": "Removes and returns an arbitrary element from a Set.",
+      "examples": ["setPop(s)"]
+    },
+    "matpow": {
+      "signature": "matpow(A, B)",
+      "desc": "Computes the general matrix-to-matrix power: exp(B * ln(A)).",
+      "examples": ["matpow(A, B)"]
+    },
+    "toSet": {
+      "signature": "toSet(v)",
+      "desc": "Converts a list, array, or string into a Set, removing duplicates.",
+      "examples": ["toSet([3, 1, 4, 1, 5])", "toSet(\"hello\")"]
+    },
+    "dmean": {
+      "signature": "dmean(dist)",
+      "desc": "Returns the theoretical mean of a Distribution (global function variant).",
+      "examples": ["dmean(Normal(0, 1))"]
+    },
+    "dvar": {
+      "signature": "dvar(dist)",
+      "desc": "Returns the theoretical variance of a Distribution (global function variant).",
+      "examples": ["dvar(Normal(0, 1))"]
+    },
+    "dstd": {
+      "signature": "dstd(dist)",
+      "desc": "Returns the theoretical standard deviation of a Distribution (global function variant).",
+      "examples": ["dstd(Normal(0, 1))"]
     }
   }
 }
