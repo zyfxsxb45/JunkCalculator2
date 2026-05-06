@@ -5543,6 +5543,106 @@
       "signature": "dstd(dist)",
       "desc": "Returns the theoretical standard deviation of a Distribution (global function variant).",
       "examples": ["dstd(Normal(0, 1))"]
+    },
+    "init": {
+      "signature": "init(...)",
+      "desc": "Constructor method. Called automatically when a new class instance is created.",
+      "examples": ["init(x, y) = { self.x = x; self.y = y }"]
+    },
+    "__add__": {
+      "signature": "__add__(other)",
+      "desc": "Dunder method: Overloads the addition operator (+).",
+      "examples": ["__add__(o) = Point(self.x + o.x, self.y + o.y)"]
+    },
+    "__sub__": {
+      "signature": "__sub__(other)",
+      "desc": "Dunder method: Overloads the subtraction operator (-).",
+      "examples": ["__sub__(o) = Point(self.x - o.x, self.y - o.y)"]
+    },
+    "__mul__": {
+      "signature": "__mul__(other)",
+      "desc": "Dunder method: Overloads the multiplication operator (*).",
+      "examples": ["__mul__(scalar) = Point(self.x * scalar, self.y * scalar)"]
+    },
+    "__div__": {
+      "signature": "__div__(other)",
+      "desc": "Dunder method: Overloads the division operator (/).",
+      "examples": ["__div__(scalar) = Point(self.x / scalar, self.y / scalar)"]
+    },
+    "__mod__": {
+      "signature": "__mod__(other)",
+      "desc": "Dunder method: Overloads the modulo operator (%).",
+      "examples": ["__mod__(m) = self.val % m"]
+    },
+    "__pow__": {
+      "signature": "__pow__(other)",
+      "desc": "Dunder method: Overloads the power operator (^).",
+      "examples": ["__pow__(p) = self.val ^ p"]
+    },
+    "__radd__": {
+      "signature": "__radd__(other)",
+      "desc": "Dunder method: Overloads reverse addition (other + self) when 'other' is not an instance.",
+      "examples": ["__radd__(o) = self.__add__(o)"]
+    },
+    "__rmul__": {
+      "signature": "__rmul__(other)",
+      "desc": "Dunder method: Overloads reverse multiplication (other * self) when 'other' is not an instance.",
+      "examples": ["__rmul__(o) = self.__mul__(o)"]
+    },
+    "__neg__": {
+      "signature": "__neg__()",
+      "desc": "Dunder method: Overloads the unary minus operator (-self).",
+      "examples": ["__neg__() = Point(-self.x, -self.y)"]
+    },
+    "__eq__": {
+      "signature": "__eq__(other)",
+      "desc": "Dunder method: Overloads the equality operator (==).",
+      "examples": ["__eq__(o) = self.x == o.x && self.y == o.y"]
+    },
+    "__lt__": {
+      "signature": "__lt__(other)",
+      "desc": "Dunder method: Overloads the less-than operator (<).",
+      "examples": ["__lt__(o) = self.val < o.val"]
+    },
+    "__contains__": {
+      "signature": "__contains__(val)",
+      "desc": "Dunder method: Overloads the 'in' operator (val in self).",
+      "examples": ["__contains__(v) = v in self.items"]
+    },
+    "__getitem__": {
+      "signature": "__getitem__(key)",
+      "desc": "Dunder method: Overloads index/key access (self[key]).",
+      "examples": ["__getitem__(i) = self.items[i]"]
+    },
+    "__setitem__": {
+      "signature": "__setitem__(key, val)",
+      "desc": "Dunder method: Overloads index/key assignment (self[key] = val).",
+      "examples": ["__setitem__(i, v) = { self.items[i] = v }"]
+    },
+    "__str__": {
+      "signature": "__str__()",
+      "desc": "Dunder method: Overloads string conversion (str(self), print, f-strings).",
+      "examples": ["__str__() = f\"Point({self.x}, {self.y})\""]
+    },
+    "__len__": {
+      "signature": "__len__()",
+      "desc": "Dunder method: Overloads the len() function.",
+      "examples": ["__len__() = len(self.items)"]
+    },
+    "__abs__": {
+      "signature": "__abs__()",
+      "desc": "Dunder method: Overloads the abs() function.",
+      "examples": ["__abs__() = sqrt(self.x^2 + self.y^2)"]
+    },
+    "__bool__": {
+      "signature": "__bool__()",
+      "desc": "Dunder method: Overloads truthiness evaluation (if, while, bool()).",
+      "examples": ["__bool__() = len(self.items) > 0"]
+    },
+    "__hash__": {
+      "signature": "__hash__()",
+      "desc": "Dunder method: Provides a hash value for Dict keys and Set elements. Must return a hashable type.",
+      "examples": ["__hash__() = hash(self.id)"]
     }
   }
 }
