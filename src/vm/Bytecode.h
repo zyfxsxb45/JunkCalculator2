@@ -60,9 +60,6 @@ namespace jc {
         OP_CALL,            // [arg_count:8bit]
         OP_RETURN,
 
-        // 内建函数
-        OP_CALL_BUILTIN,    // [name_idx:16bit, arg_count:8bit]
-
         // 输出（临时，调试用）
         OP_PRINT,
 
@@ -76,7 +73,6 @@ namespace jc {
 
         // 函数（扩展）
         OP_CLOSURE,         // 创建闭包: [func_idx:16bit]
-        OP_CALL_USER,       // 用户函数调用: [arg_count:8bit]
 
         // 复合赋值辅助
         OP_DUP,             // 复制栈顶
@@ -174,14 +170,12 @@ namespace jc {
         case OpCode::OP_LOOP: return "OP_LOOP";
         case OpCode::OP_CALL: return "OP_CALL";
         case OpCode::OP_RETURN: return "OP_RETURN";
-        case OpCode::OP_CALL_BUILTIN: return "OP_CALL_BUILTIN";
         case OpCode::OP_PRINT: return "OP_PRINT";
         case OpCode::OP_INDEX_GET: return "OP_INDEX_GET";
         case OpCode::OP_INDEX_SET: return "OP_INDEX_SET";
         case OpCode::OP_BUILD_LIST: return "OP_BUILD_LIST";
         case OpCode::OP_BUILD_MATRIX: return "OP_BUILD_MATRIX";
         case OpCode::OP_CLOSURE: return "OP_CLOSURE";
-        case OpCode::OP_CALL_USER: return "OP_CALL_USER";
         case OpCode::OP_DUP: return "OP_DUP";
         case OpCode::OP_BREAK: return "OP_BREAK";
         case OpCode::OP_CONTINUE: return "OP_CONTINUE";
@@ -340,8 +334,7 @@ namespace jc {
             // ============================================
             // 格式 1: 1 个 uint8_t 操作数 (2 字节)
             // ============================================
-            case OpCode::OP_CALL:
-            case OpCode::OP_CALL_USER: {
+            case OpCode::OP_CALL: {
                 uint8_t argc = code[offset + 1];
                 std::cout << static_cast<int>(argc) << " args" << std::endl;
                 return offset + 2;
@@ -431,7 +424,6 @@ namespace jc {
             // ============================================
             // 格式 4: uint16_t 名称索引 + uint8_t 参数个数 (4 字节)
             // ============================================
-            case OpCode::OP_CALL_BUILTIN:
             case OpCode::OP_INVOKE:
             case OpCode::OP_SUPER_INVOKE: {
                 uint16_t idx = read16(offset + 1);

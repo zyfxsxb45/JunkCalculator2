@@ -1012,19 +1012,6 @@ namespace jc {
                     break;
                 }
 
-                case OpCode::OP_CALL_BUILTIN: {
-                    uint16_t nameIdx = readShort();
-                    std::string name = std::get<std::string>(currentChunk().constants[nameIdx].data);
-                    uint8_t argc = readByte();
-                    std::vector<Value> args(argc);
-                    for (int j = argc - 1; j >= 0; --j) args[j] = pop();
-                    auto it = nativeBuiltins.find(name);
-                    if (it == nativeBuiltins.end())
-                        throw std::runtime_error("VM Error: Unknown builtin '" + name + "'.");
-                    push(it->second(args));
-                    break;
-                }
-
                 case OpCode::OP_REF_WRITEBACK: {
                     uint8_t count = readByte();
 

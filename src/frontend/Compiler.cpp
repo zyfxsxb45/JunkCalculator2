@@ -1341,10 +1341,11 @@ namespace jc {
 
     std::any Compiler::visitDeleteExpr(DeleteExpr* expr) {
         for (auto& tok : expr->names) {
-            chunk()->emitConstant(Value(tok.lexeme), lastLine);
             uint16_t fnIdx = identifierConstant("__vm_delete__");
-            emit(OpCode::OP_CALL_BUILTIN, lastLine);
+            emit(OpCode::OP_CONSTANT, lastLine);
             emit16(fnIdx, lastLine);
+            chunk()->emitConstant(Value(tok.lexeme), lastLine);
+            emit(OpCode::OP_CALL, lastLine);
             emit(static_cast<uint8_t>(1), lastLine);
             emit(OpCode::OP_POP, lastLine);
         }
