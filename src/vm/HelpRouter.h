@@ -22,11 +22,31 @@ namespace jc {
 
         static void init() {
             if (initialized) return;
+            // 1. 将 CMake 生成的字节数组转为标准 C++ 字符串
+            // 使用 sizeof 确保即使中间有 \0 也不会被截断
+            std::string jsonStr(reinterpret_cast<const char*>(RAW_HELP_JSON), sizeof(RAW_HELP_JSON) - 1);
+            
+            // 2. 擦除所有的 UTF-8 BOM 头（如果存在）
+            size_t pos = 0;
+            while ((pos = jsonStr.find("\xEF\xBB\xBF", pos)) != std::string::npos) {
+                jsonStr.erase(pos, 3);
+            }
+            
+            // 3. 净化所有的控制字符 (解决纯手写 JSON 解析器对不可见字符处理不严格的 Bug)
+            // JSON 规范允许在内部任意添加空白，将 \r, \t, \0 等替换为空格绝对安全
+            for (char& c : jsonStr) {
+                unsigned char uc = static_cast<unsigned char>(c);
+                if (uc < 32 && uc != '\n') {
+                    c = ' ';
+                }
+            }
             try {
-                JsonParser parser(reinterpret_cast<const char*>(RAW_HELP_JSON));
+                // 将极其干净的字符串喂给你的 Parser
+                JsonParser parser(jsonStr);
                 helpAst = parser.parseValue();
-            } catch (const std::exception& e) {
-                std::cerr << "[HelpRouter] Failed to parse documentation.json: " << e.what() << std::endl;
+            }
+            catch (const std::exception& e) {
+                std::cerr << "\n[HelpRouter] Failed to parse documentation.json: " << e.what() << "\n";
             }
             initialized = true;
         }

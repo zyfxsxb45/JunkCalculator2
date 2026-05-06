@@ -155,9 +155,30 @@ namespace jc {
                     case 'n':  result += '\n'; break;
                     case 'r':  result += '\r'; break;
                     case 't':  result += '\t'; break;
-                    case 'u':
-                        pos += 4; // 只跳过Unicode，不做转码防崩溃
+                    case 'u': {
+                        std::string hexStr;
+                        for (int i = 0; i < 4; ++i) {
+                            pos++;
+                            if (pos >= s.size()) throw std::runtime_error("JSON Parse Error: Unexpected end inside string.");
+                            hexStr += s[pos];
+                        }
+                        try {
+                            int cp = std::stoi(hexStr, nullptr, 16);
+                            if (cp <= 0x7F) {
+                                result += static_cast<char>(cp);
+                            } else if (cp <= 0x7FF) {
+                                result += static_cast<char>(0xC0 | ((cp >> 6) & 0x1F));
+                                result += static_cast<char>(0x80 | (cp & 0x3F));
+                            } else {
+                                result += static_cast<char>(0xE0 | ((cp >> 12) & 0x0F));
+                                result += static_cast<char>(0x80 | ((cp >> 6) & 0x3F));
+                                result += static_cast<char>(0x80 | (cp & 0x3F));
+                            }
+                        } catch (...) {
+                            result += "\\u" + hexStr; // 解析失败则原样保留
+                        }
                         break;
+                    }
                     default:
                         result += '\\'; result += esc; break;
                     }
@@ -191,10 +212,16 @@ namespace jc {
             std::string numStr = s.substr(start, pos - start);
             if (numStr == "-" || numStr.empty()) throw std::runtime_error("JSON Parse Error: Invalid number structure.");
 
-            if (isFloat) return jc::Value(std::stod(numStr));
+            if (isFloat) {
+                try { return jc::Value(std::stod(numStr)); }
+                catch (...) { throw std::runtime_error("JSON Parse Error: Float out of range."); }
+            }
 
             try { return jc::Value(jc::BigInt(numStr)); }
-            catch (...) { return jc::Value(std::stod(numStr)); }
+            catch (...) { 
+                try { return jc::Value(std::stod(numStr)); }
+                catch (...) { throw std::runtime_error("JSON Parse Error: Number out of range."); }
+            }
         }
 
         jc::Value parseArray() {
@@ -209,7 +236,11 @@ namespace jc {
             while (true) {
                 elements.push_back(parseValue());
                 skipWS();
-                if (pos < s.size() && s[pos] == ',') { pos++; skipWS(); }
+                if (pos < s.size() && s[pos] == ',') { 
+                    pos++; 
+                    skipWS(); 
+                    if (pos < s.size() && s[pos] == ']') break; // 允许尾随逗号
+                }
                 else break;
             }
             if (pos >= s.size() || s[pos] != ']') throw std::runtime_error("JSON Parse Error: Expected ']' array closer.");
@@ -237,7 +268,11 @@ namespace jc {
                 d.set(jc::Value(key), parseValue());
                 skipWS();
 
-                if (pos < s.size() && s[pos] == ',') { pos++; }
+                if (pos < s.size() && s[pos] == ',') { 
+                    pos++; 
+                    skipWS();
+                    if (pos < s.size() && s[pos] == '}') break; // 允许尾随逗号
+                }
                 else break;
             }
             if (pos >= s.size() || s[pos] != '}') throw std::runtime_error("JSON Parse Error: Expected '}' object closer.");

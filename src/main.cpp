@@ -390,60 +390,65 @@ int main(int argc, char* argv[]) {
         }
         if (inputAborted) continue;
 
-        if (input == "/color on") { jc::colorsEnabled = true; continue; }
-        if (input == "/color off") { jc::colorsEnabled = false; continue; }
+        if (!input.empty() && input[0] == '/') {
+            if (input == "/color on") { jc::colorsEnabled = true; continue; }
+            if (input == "/color off") { jc::colorsEnabled = false; continue; }
 
-        // ★ 随时开关 Disassembly 打印
-        if (input == "/d on") {
-            g_showDisasm = true;
-            std::cout << "Bytecode disassembly enabled.\n";
-            continue;
-        }
-        if (input == "/d off") {
-            g_showDisasm = false;
-            std::cout << "Bytecode disassembly disabled.\n";
-            continue;
-        }
+            // ★ 随时开关 Disassembly 打印
+            if (input == "/d on") {
+                g_showDisasm = true;
+                std::cout << "Bytecode disassembly enabled.\n";
+                continue;
+            }
+            if (input == "/d off") {
+                g_showDisasm = false;
+                std::cout << "Bytecode disassembly disabled.\n";
+                continue;
+            }
 
-        // ★ 随时开关全局单步 Debugger
-        if (input == "/debug on") {
-            g_autoDebug = true;
-            std::cout << "Interactive Step-Debugger enabled. (Will break on next evaluated line)\n";
-            continue;
-        }
-        if (input == "/debug off") {
-            g_autoDebug = false;
-            if (jc::VM::activeVM) jc::VM::activeVM->disableDebugger(); // ★ 强制拉闸
-            std::cout << "Interactive Step-Debugger disabled.\n";
-            continue;
-        }
-        if (input == "/profile on") {
-            g_profile = true;
-            if (jc::VM::activeVM) jc::VM::activeVM->enableProfiler(true);
-            std::cout << "Profiler enabled. Will print report after execution.\n";
-            continue;
-        }
-        if (input == "/profile off") {
-            g_profile = false;
-            if (jc::VM::activeVM) jc::VM::activeVM->enableProfiler(false);
-            std::cout << "Profiler disabled.\n";
-            continue;
-        }
-        if (input == "/exit" || input == "/quit") break;
-        if (input == "/help") { printHelp(); continue; }
-        if (input.substr(0, 6) == "/help ") { printHelpTopic(input.substr(6)); continue; }
-        if (input == "/clear") { vm.clearGlobals(); std::cout << "All variables cleared.\n"; continue; }
-        if (input == "/cls") {
+            // ★ 随时开关全局单步 Debugger
+            if (input == "/debug on") {
+                g_autoDebug = true;
+                std::cout << "Interactive Step-Debugger enabled. (Will break on next evaluated line)\n";
+                continue;
+            }
+            if (input == "/debug off") {
+                g_autoDebug = false;
+                if (jc::VM::activeVM) jc::VM::activeVM->disableDebugger(); // ★ 强制拉闸
+                std::cout << "Interactive Step-Debugger disabled.\n";
+                continue;
+            }
+            if (input == "/profile on") {
+                g_profile = true;
+                if (jc::VM::activeVM) jc::VM::activeVM->enableProfiler(true);
+                std::cout << "Profiler enabled. Will print report after execution.\n";
+                continue;
+            }
+            if (input == "/profile off") {
+                g_profile = false;
+                if (jc::VM::activeVM) jc::VM::activeVM->enableProfiler(false);
+                std::cout << "Profiler disabled.\n";
+                continue;
+            }
+            if (input == "/exit" || input == "/quit") break;
+            if (input == "/help") { printHelp(); continue; }
+            if (input.substr(0, 6) == "/help ") { printHelpTopic(input.substr(6)); continue; }
+            if (input == "/clear") { vm.clearGlobals(); std::cout << "All variables cleared.\n"; continue; }
+            if (input == "/cls") {
 #ifdef _WIN32
-            std::system("cls");
+                std::system("cls");
 #else
-            std::system("clear");
+                std::system("clear");
 #endif
-            printBanner();
+                printBanner();
+                continue;
+            }
+            if (input.substr(0, 6) == "/save ") { saveWorkspace(input.substr(6)); continue; }
+            if (input.substr(0, 6) == "/load ") { loadWorkspace(input.substr(6)); continue; }
+            
+            std::cerr << jc::col(jc::Ansi::BRIGHT_RED) << "Unknown command: " << input << jc::col(jc::Ansi::RESET) << "\nType '/help' for a list of commands.\n";
             continue;
         }
-        if (input.substr(0, 6) == "/save ") { saveWorkspace(input.substr(6)); continue; }
-        if (input.substr(0, 6) == "/load ") { loadWorkspace(input.substr(6)); continue; }
 
         try {
             jc::Value result = evalCode(input, "REPL", false);
