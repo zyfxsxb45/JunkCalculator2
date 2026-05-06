@@ -34,10 +34,10 @@ namespace jc {
     // 符号计算全局动态限制配置
     // ==========================================
     struct SymConfig {
-        static inline int64_t maxExpandTerms = 5000;
-        static inline int maxAstNodes = 50000;
-        static inline int maxIterations = 1000;
-        static inline int maxDepth = 10;
+        static inline int64_t maxExpandTerms = 2000;
+        static inline int maxAstNodes = 30000;
+        static inline int maxIterations = 200;
+        static inline int maxDepth = 6;
         static inline bool debugIntegration = false;
     };
 

@@ -1299,10 +1299,10 @@ void BuiltinRegistry::registerSystemUtils() {
             return Value(d);
         }
         if (std::holds_alternative<std::string>(args[0].data) && std::get<std::string>(args[0].data) == "default") {
-            SymConfig::maxExpandTerms = 5000;
-            SymConfig::maxAstNodes = 50000;
-            SymConfig::maxIterations = 1000;
-            SymConfig::maxDepth = 20;
+            SymConfig::maxExpandTerms = 2000;
+            SymConfig::maxAstNodes = 30000;
+            SymConfig::maxIterations = 200;
+            SymConfig::maxDepth = 6;
             SymConfig::debugIntegration = false;
             return Value::none();
         }
@@ -1325,10 +1325,10 @@ void BuiltinRegistry::registerSystemUtils() {
         
         if (args.size() == 1) {
             if (key == "default") {
-                SymConfig::maxExpandTerms = 5000;
-                SymConfig::maxAstNodes = 50000;
-                SymConfig::maxIterations = 1000;
-                SymConfig::maxDepth = 20;
+                SymConfig::maxExpandTerms = 2000;
+                SymConfig::maxAstNodes = 30000;
+                SymConfig::maxIterations = 200;
+                SymConfig::maxDepth = 6;
                 SymConfig::debugIntegration = false;
                 return Value::none();
             }
