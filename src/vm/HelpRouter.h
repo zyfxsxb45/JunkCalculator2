@@ -258,7 +258,14 @@ namespace jc {
                     std::cout << col(Ansi::BRIGHT_GREEN) << "    > " << cand.first << col(Ansi::RESET);
                     if (!cand.second.empty()) {
                         std::string d = cand.second;
-                        if (d.length() > 60) d = d.substr(0, 57) + "...";
+                        if (d.length() > 60) {
+                            size_t cutPos = 57;
+                            size_t lastSpace = d.find_last_of(" \t", 57);
+                            if (lastSpace != std::string::npos && lastSpace > 30) {
+                                cutPos = lastSpace;
+                            }
+                            d = d.substr(0, cutPos) + "...";
+                        }
                         int padding = std::max(1, 15 - static_cast<int>(cand.first.length()));
                         std::cout << std::string(padding, ' ') << "(" << d << ")";
                     }
