@@ -178,6 +178,14 @@ namespace jc {
                 { func("cos", SymExpr(-1) * _x), cos_x },
                 { func("tan", SymExpr(-1) * _x), -tan_x },
 
+                // 双曲函数平方关系
+                { (func("cosh", _x) ^ SymExpr(2)) - (func("sinh", _x) ^ SymExpr(2)), SymExpr(1) },
+                { _c * (func("cosh", _x) ^ SymExpr(2)) - _c * (func("sinh", _x) ^ SymExpr(2)), _c },
+                { (func("sinh", _x) ^ SymExpr(2)) + SymExpr(1), func("cosh", _x) ^ SymExpr(2) },
+                { (func("cosh", _x) ^ SymExpr(2)) - SymExpr(1), func("sinh", _x) ^ SymExpr(2) },
+                { _c * (func("sinh", _x) ^ SymExpr(2)) + _c, _c * (func("cosh", _x) ^ SymExpr(2)) },
+                { _c * (func("cosh", _x) ^ SymExpr(2)) - _c, _c * (func("sinh", _x) ^ SymExpr(2)) },
+
                 // 半角反三角函数化简
                 { func("tan", func("atan", _x) / SymExpr(2)), (((_x ^ SymExpr(2)) + SymExpr(1)) ^ SymExpr(Fraction(1, 2)) - SymExpr(1)) / _x },
                 { func("tan", func("asin", _x) / SymExpr(2)), _x / (SymExpr(1) + ((SymExpr(1) - (_x ^ SymExpr(2))) ^ SymExpr(Fraction(1, 2)))) },

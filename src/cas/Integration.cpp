@@ -1504,7 +1504,6 @@ namespace jc {
                 auto mul = std::static_pointer_cast<SymMul>(varPart.ptr);
                 std::vector<SymExpr> candidate_us;
                 for (auto& arg : mul->args) {
-                    candidate_us.push_back(SymExpr(arg));
                     if (arg->getType() == SymType::POW) {
                         candidate_us.push_back(SymExpr(std::static_pointer_cast<SymPow>(arg)->base));
                     } else if (arg->getType() == SymType::FUNC) {
@@ -1513,6 +1512,9 @@ namespace jc {
                             candidate_us.push_back(SymExpr(func->args[0]));
                         }
                     }
+                }
+                for (auto& arg : mul->args) {
+                    candidate_us.push_back(SymExpr(arg));
                 }
                 
                 for (const auto& u : candidate_us) {
@@ -2110,9 +2112,15 @@ namespace jc {
                             SymExpr cosh_x = func("cosh", _x);
                             
                             SymExpr res = e;
+                            // 基础平方关系
+                            res = applyRule(res, (sinh_x ^ SymExpr(BigInt(2))) + SymExpr(BigInt(1)), cosh_x ^ SymExpr(BigInt(2)));
+                            res = applyRule(res, (cosh_x ^ SymExpr(BigInt(2))) - SymExpr(BigInt(1)), sinh_x ^ SymExpr(BigInt(2)));
+                            res = applyRule(res, _c * (sinh_x ^ SymExpr(BigInt(2))) + _c, _c * (cosh_x ^ SymExpr(BigInt(2))));
+                            res = applyRule(res, _c * (cosh_x ^ SymExpr(BigInt(2))) - _c, _c * (sinh_x ^ SymExpr(BigInt(2))));
+
+                            // 根式关系
                             res = applyRule(res, ((sinh_x ^ SymExpr(BigInt(2))) + SymExpr(BigInt(1))) ^ SymExpr(Fraction(1, 2)), cosh_x);
                             res = applyRule(res, ((cosh_x ^ SymExpr(BigInt(2))) - SymExpr(BigInt(1))) ^ SymExpr(Fraction(1, 2)), sinh_x);
-                            
                             res = applyRule(res, (_c * (sinh_x ^ SymExpr(BigInt(2))) + _c) ^ SymExpr(Fraction(1, 2)), (_c ^ SymExpr(Fraction(1, 2))) * cosh_x);
                             res = applyRule(res, (_c * (cosh_x ^ SymExpr(BigInt(2))) - _c) ^ SymExpr(Fraction(1, 2)), (_c ^ SymExpr(Fraction(1, 2))) * sinh_x);
                             
