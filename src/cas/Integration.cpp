@@ -2606,12 +2606,12 @@ namespace jc {
                 bool isGoodForIBP = false;
                 if (varPart.ptr->getType() == SymType::FUNC) {
                     auto fn = std::static_pointer_cast<SymFunc>(varPart.ptr);
-                    if (fn->name == "log" || fn->name == "asin" || fn->name == "acos" || fn->name == "atan") isGoodForIBP = true;
+                    if (fn->name == "log" || fn->name == "asin" || fn->name == "acos" || fn->name == "atan" || fn->name == "asinh" || fn->name == "acosh" || fn->name == "atanh") isGoodForIBP = true;
                 } else if (varPart.ptr->getType() == SymType::POW) {
                     auto p = std::static_pointer_cast<SymPow>(varPart.ptr);
                     if (p->base->getType() == SymType::FUNC) {
                         auto fn = std::static_pointer_cast<SymFunc>(p->base);
-                        if (fn->name == "log" || fn->name == "asin" || fn->name == "acos" || fn->name == "atan") isGoodForIBP = true;
+                        if (fn->name == "log" || fn->name == "asin" || fn->name == "acos" || fn->name == "atan" || fn->name == "asinh" || fn->name == "acosh" || fn->name == "atanh") isGoodForIBP = true;
                     }
                 }
                 if (isGoodForIBP) {
@@ -2654,7 +2654,7 @@ namespace jc {
                 auto getPriority = [&](const SymExpr& f) -> int {
                     if (f.ptr->getType() == SymType::FUNC) {
                         auto fn = std::static_pointer_cast<SymFunc>(f.ptr);
-                        if (fn->name == "log" || fn->name == "asin" || fn->name == "acos" || fn->name == "atan") return 1;
+                        if (fn->name == "log" || fn->name == "asin" || fn->name == "acos" || fn->name == "atan" || fn->name == "asinh" || fn->name == "acosh" || fn->name == "atanh") return 1;
                     }
                     if (f.ptr->getType() == SymType::POW) {
                         auto p = std::static_pointer_cast<SymPow>(f.ptr);

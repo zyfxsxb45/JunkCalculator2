@@ -44,6 +44,11 @@ namespace jc {
             { func("acos", x), x * func("acos", x) - ((SymExpr(1) - (x ^ SymExpr(2))) ^ SymExpr(Fraction(1, 2))) },
             { func("atan", x), x * func("atan", x) - (SymExpr(1) / SymExpr(2)) * func("log", SymExpr(1) + (x ^ SymExpr(2))) },
 
+            // 反双曲函数积分
+            { func("asinh", x), x * func("asinh", x) - (((x ^ SymExpr(2)) + SymExpr(1)) ^ SymExpr(Fraction(1, 2))) },
+            { func("acosh", x), x * func("acosh", x) - (((x ^ SymExpr(2)) - SymExpr(1)) ^ SymExpr(Fraction(1, 2))) },
+            { func("atanh", x), x * func("atanh", x) + (SymExpr(1) / SymExpr(2)) * func("log", SymExpr(1) - (x ^ SymExpr(2))) },
+
             // 基础三角函数
             { func("sin", x), -func("cos", x) },
             { func("cos", x), func("sin", x) },
@@ -204,7 +209,11 @@ namespace jc {
                 { func("tanh", func("asinh", _x)), _x / (((_x ^ SymExpr(2)) + SymExpr(1)) ^ SymExpr(Fraction(1, 2))) },
                 { func("tanh", func("acosh", _x)), (((_x ^ SymExpr(2)) - SymExpr(1)) ^ SymExpr(Fraction(1, 2))) / _x },
                 { func("sinh", func("atanh", _x)), _x / ((SymExpr(1) - (_x ^ SymExpr(2))) ^ SymExpr(Fraction(1, 2))) },
-                { func("cosh", func("atanh", _x)), SymExpr(1) / ((SymExpr(1) - (_x ^ SymExpr(2))) ^ SymExpr(Fraction(1, 2))) }
+                { func("cosh", func("atanh", _x)), SymExpr(1) / ((SymExpr(1) - (_x ^ SymExpr(2))) ^ SymExpr(Fraction(1, 2))) },
+
+                // 反双曲函数与根式嵌套化简
+                { func("asinh", ((_x ^ SymExpr(2)) - SymExpr(1)) ^ SymExpr(Fraction(1, 2))), func("acosh", _x) },
+                { func("acosh", ((_x ^ SymExpr(2)) + SymExpr(1)) ^ SymExpr(Fraction(1, 2))), func("asinh", _x) }
             };
         }
         return rules;
