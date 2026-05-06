@@ -4012,10 +4012,19 @@ namespace jc {
                 auto coeffs = extractCoeffs(polyExpr, "~z_inv");
                 if (coeffs.size() == 2) {
                     SymExpr c = coeffs[1];
-                    SymExpr U = coeffs[0];
-                    invD = simplifyCore(expand_core(-U / c, SymConfig::maxExpandTerms));
-                    found = true;
-                    break;
+                    bool c_has_t = false;
+                    for (const auto& kv : tToMinPoly) {
+                        if (containsVar(c.ptr, kv.first)) {
+                            c_has_t = true;
+                            break;
+                        }
+                    }
+                    if (!c_has_t) {
+                        SymExpr U = coeffs[0];
+                        invD = simplifyCore(expand_core(-U / c, SymConfig::maxExpandTerms));
+                        found = true;
+                        break;
+                    }
                 }
             } else if (poly.terms.size() == 1 && poly.terms[0].mono.isOne()) {
                 throw std::runtime_error("Math Error: Division by zero (denominator is algebraically zero).");

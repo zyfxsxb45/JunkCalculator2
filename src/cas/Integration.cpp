@@ -978,16 +978,75 @@ namespace jc {
                 }
                 
                 // 1. 分母有理化 (Rationalize Denominator)
-                auto [gcd_D, U, V] = polyEGCD(D, minPoly, topExt.name);
-                SymExpr res_D = simplifyCore(expand_core(U * D + V * minPoly, SymConfig::maxExpandTerms));
+                // 使用 Gröbner 基求逆元，避免 polyEGCD 导致的有理函数系数指数级爆炸 (Coefficient Swell)
+                std::vector<MultiPoly> generators;
+                SymExpr z_inv = SymExpr::makeVar("~z_inv");
+                
+                // 清除 D 和 minPoly 的分母，转为纯多项式
+                SymExpr D_clear = getFraction(D).first;
+                SymExpr minPoly_clear = getFraction(minPoly).first;
+                
+                generators.push_back(MultiPoly(simplifyCore(expand_core(z_inv * D_clear - SymExpr(BigInt(1)), SymConfig::maxExpandTerms))));
+                generators.push_back(MultiPoly(simplifyCore(expand_core(minPoly_clear, SymConfig::maxExpandTerms))));
+                
+                // 将底层所有代数扩张的极小多项式也加入理想，确保 Gröbner 基能在全代数域上正确约化
+                for (const auto& ext : field.tower) {
+                    if (ext.type == RischExtType::ALG && ext.name != topExt.name) {
+                        SymExpr extMinPoly_clear = getFraction(field.rewrite(ext.minPoly)).first;
+                        generators.push_back(MultiPoly(simplifyCore(expand_core(extMinPoly_clear, SymConfig::maxExpandTerms))));
+                    }
+                }
+                
+                std::vector<MultiPoly> rgb;
+                try {
+                    rgb = computeGroebnerBasis(generators);
+                } catch (...) {}
+                
+                SymExpr invD(BigInt(0));
+                bool found_inv = false;
+                for (const auto& poly : rgb) {
+                    if (poly.isZero()) continue;
+                    Term lt = poly.leadingTerm();
+                    if (lt.mono.powers.count("~z_inv") > 0) {
+                        SymExpr polyExpr = poly.toSymExpr();
+                        auto coeffs = extractCoeffs(polyExpr, "~z_inv");
+                        if (coeffs.size() == 2) {
+                            SymExpr c = coeffs[1];
+                            // 确保提取出的逆元分母中不再包含当前扩张变量 topExt.name
+                            if (!containsVar(c.ptr, topExt.name)) {
+                                SymExpr U_gb = coeffs[0];
+                                invD = simplifyCore(expand_core(-U_gb / c, SymConfig::maxExpandTerms));
+                                found_inv = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+                
+                SymExpr res_D(BigInt(0));
+                SymExpr newA = A;
+                SymExpr newD = D;
+                
+                if (found_inv) {
+                    // D_clear * invD = 1 (mod minPoly) => D * (D_clear / D) * invD = 1 => 1/D = (D_clear / D) * invD
+                    SymExpr D_ratio = simplifyCore(D_clear / D);
+                    SymExpr true_invD = simplifyCore(expand_core(D_ratio * invD, SymConfig::maxExpandTerms));
+                    newA = simplifyCore(expand_core(A * true_invD, SymConfig::maxExpandTerms));
+                    newD = SymExpr(BigInt(1));
+                    res_D = SymExpr(BigInt(1));
+                } else {
+                    // Fallback to EGCD if GB fails (though it might swell)
+                    auto [gcd_D, U, V] = polyEGCD(D, minPoly, topExt.name);
+                    res_D = gcd_D; // 直接使用 EGCD 返回的 GCD，避免重新展开引入未化简的代数数
+                    newA = simplifyCore(expand_core(A * U, SymConfig::maxExpandTerms));
+                    newD = res_D;
+                }
                 
                 if (SymConfig::debugIntegration) {
                     std::cout << std::string(depth * 2, ' ') << "   [Risch] Rationalized D: " << res_D.toString() << std::endl;
                 }
 
                 if (!res_D.isZero() && !containsVar(res_D.ptr, topExt.name)) {
-                    SymExpr newA = simplifyCore(expand_core(A * U, SymConfig::maxExpandTerms));
-                    SymExpr newD = res_D;
                     
                     // 2. 伪化简 (Pseudo-reduction) 降次
                     auto [Q, R] = polyDiv(newA, minPoly, topExt.name);
@@ -1094,16 +1153,22 @@ namespace jc {
                                 SymExpr coeff_c = simplifyCore(leadW / lead_deriv);
                                 SymExpr Y_term = coeff_c * (SymExpr::makeVar(var) ^ SymExpr(BigInt(k)));
                                 
-                                alg_result = alg_result + Y_term * (t_sym ^ SymExpr(BigInt(i)));
-                                
                                 SymExpr Y_prime = field.derive(Y_term);
                                 SymExpr sub_term = simplifyCore(expand_core(Y_prime * P_x + Y_term * i_n * P_prime, SymConfig::maxExpandTerms));
-                                W = simplifyCore(expand_core(W - sub_term, SymConfig::maxExpandTerms));
+                                SymExpr next_W = simplifyCore(expand_core(W - sub_term, SymConfig::maxExpandTerms));
+                                
+                                // 严格防死锁：如果度数没有下降，说明遇到了代数死锁，立即中断
+                                if (!next_W.isZero() && getDegree(next_W, var) >= degW) {
+                                    break;
+                                }
+                                
+                                alg_result = alg_result + Y_term * (t_sym ^ SymExpr(BigInt(i)));
+                                W = next_W;
                             }
                             
-                            SymExpr rem_A = simplifyCore(W / P_x);
-                            if (!rem_A.isZero()) {
-                                SymExpr rem = simplifyCore(rem_A / current_D);
+                            // 剩余部分直接作为对数积分的被积函数，不再强行除以 P_x
+                            if (!W.isZero()) {
+                                SymExpr rem = simplifyCore(W / (P_x * current_D));
                                 log_integrand = log_integrand + rem * (t_sym ^ SymExpr(BigInt(i)));
                             }
                         }
@@ -1132,15 +1197,15 @@ namespace jc {
                     SymExpr dP_dx = field.derive(minPoly, topExt.name);
                     SymExpr dP_dt = diff(minPoly, topExt.name);
                     
-                    // Trager 核心方程: z * D_red * dP/dx - A_red * dP/dt
-                    SymExpr trager_poly = simplifyCore(expand_core(z * D_red * dP_dx - A_red * dP_dt, SymConfig::maxExpandTerms));
+                    // Trager 核心方程: A_red * dP/dt - z * D_red * dP/dx
+                    SymExpr trager_poly = simplifyCore(expand_core(A_red * dP_dt - z * D_red * dP_dx, SymConfig::maxExpandTerms));
                     trager_poly = getFraction(trager_poly).first; // 提前清除分母，防止结式计算时系数膨胀
                     
                     if (SymConfig::debugIntegration) {
                         std::cout << std::string(depth * 2, ' ') << "   [Risch] Trager poly: " << trager_poly.toString() << std::endl;
                     }
 
-                    SymExpr minPoly_clear = getFraction(minPoly).first; // 清除 minPoly 的分母，极大加速结式计算
+                    minPoly_clear = getFraction(minPoly).first; // 清除 minPoly 的分母，极大加速结式计算
                     SymExpr R_z = polyResultant(minPoly_clear, trager_poly, topExt.name);
                     
                     if (SymConfig::debugIntegration) {
@@ -1844,6 +1909,10 @@ namespace jc {
                     for (auto& arg : std::static_pointer_cast<SymAdd>(node)->args) findRadical(arg);
                 } else if (node->getType() == SymType::MUL) {
                     for (auto& arg : std::static_pointer_cast<SymMul>(node)->args) findRadical(arg);
+                } else if (node->getType() == SymType::POW) {
+                    auto powNode = std::static_pointer_cast<SymPow>(node);
+                    findRadical(powNode->base);
+                    findRadical(powNode->exp);
                 } else if (node->getType() == SymType::FUNC) {
                     for (auto& arg : std::static_pointer_cast<SymFunc>(node)->args) findRadical(arg);
                 }
@@ -1938,6 +2007,199 @@ namespace jc {
                             if (SymConfig::debugIntegration) std::cout << std::string(current_depth * 2, ' ') << "<- Radical Substitution Success" << std::endl;
                             SymExpr back_sub = radicalBase ^ SymExpr(Fraction(BigInt(1), BigInt(radicalN)));
                             return coeff * simplify(subs(*int_var, var, back_sub));
+                        }
+                    }
+                }
+            }
+
+            // --- 1.7 同底数分数指数换元 (Common Fractional Power Substitution) ---
+            {
+                SymExpr commonBase;
+                bool baseConflict = false;
+                std::vector<BigInt> denominators;
+                
+                std::function<void(const std::shared_ptr<SymNode>&)> findFracPowers = [&](const std::shared_ptr<SymNode>& node) {
+                    if (!node || baseConflict) return;
+                    if (node->getType() == SymType::POW) {
+                        auto powNode = std::static_pointer_cast<SymPow>(node);
+                        if (powNode->exp->getType() == SymType::NUM) {
+                            auto numVal = std::static_pointer_cast<SymNum>(powNode->exp)->value;
+                            if (std::holds_alternative<Fraction>(numVal)) {
+                                Fraction frac = std::get<Fraction>(numVal);
+                                if (frac.getDen() > BigInt(1) && containsVar(powNode->base, var)) {
+                                    if (!commonBase.ptr) {
+                                        commonBase = SymExpr(powNode->base);
+                                    } else if (commonBase != SymExpr(powNode->base)) {
+                                        baseConflict = true;
+                                        return;
+                                    }
+                                    denominators.push_back(frac.getDen());
+                                }
+                            }
+                        }
+                    } else if (node->getType() == SymType::FUNC) {
+                        auto func = std::static_pointer_cast<SymFunc>(node);
+                        if ((func->name == "sqrt" || func->name == "cbrt") && func->args.size() == 1 && containsVar(func->args[0], var)) {
+                            if (!commonBase.ptr) {
+                                commonBase = SymExpr(func->args[0]);
+                            } else if (commonBase != SymExpr(func->args[0])) {
+                                baseConflict = true;
+                                return;
+                            }
+                            denominators.push_back(func->name == "sqrt" ? BigInt(2) : BigInt(3));
+                        }
+                    }
+                    
+                    if (node->getType() == SymType::ADD) {
+                        for (auto& arg : std::static_pointer_cast<SymAdd>(node)->args) findFracPowers(arg);
+                    } else if (node->getType() == SymType::MUL) {
+                        for (auto& arg : std::static_pointer_cast<SymMul>(node)->args) findFracPowers(arg);
+                    } else if (node->getType() == SymType::POW) {
+                        auto powNode = std::static_pointer_cast<SymPow>(node);
+                        findFracPowers(powNode->base);
+                        findFracPowers(powNode->exp);
+                    } else if (node->getType() == SymType::FUNC) {
+                        for (auto& arg : std::static_pointer_cast<SymFunc>(node)->args) findFracPowers(arg);
+                    }
+                };
+                
+                findFracPowers(varPart.ptr);
+                
+                if (commonBase.ptr && !baseConflict && denominators.size() > 1) {
+                    BigInt lcm_den = denominators[0];
+                    for (size_t i = 1; i < denominators.size(); ++i) {
+                        lcm_den = BigInt::lcm(lcm_den, denominators[i]);
+                    }
+                    
+                    if (lcm_den > BigInt(1) && lcm_den <= BigInt(20)) { // 限制 LCM 大小，防止指数爆炸
+                        int L = static_cast<int>(lcm_den.toDouble());
+                        if (SymConfig::debugIntegration) std::cout << std::string(current_depth * 2, ' ') << "-> Trying Common Fractional Power Substitution: u = (" << commonBase.toString() << ")^(1/" << L << ")" << std::endl;
+                        
+                        std::string u_var_frac = "_u_frac";
+                        SymExpr u_sym_frac = SymExpr::makeVar(u_var_frac);
+                        
+                        std::function<SymExpr(const SymExpr&)> replaceFrac = [&](const SymExpr& e) -> SymExpr {
+                            if (!e.ptr) return e;
+                            if (e.ptr->getType() == SymType::POW) {
+                                auto pNode = std::static_pointer_cast<SymPow>(e.ptr);
+                                if (SymExpr(pNode->base) == commonBase && pNode->exp->getType() == SymType::NUM) {
+                                    auto nVal = std::static_pointer_cast<SymNum>(pNode->exp)->value;
+                                    if (std::holds_alternative<Fraction>(nVal)) {
+                                        Fraction f = std::get<Fraction>(nVal);
+                                        BigInt newNum = f.getNum() * (lcm_den / f.getDen());
+                                        return u_sym_frac ^ SymExpr(newNum);
+                                    } else if (std::holds_alternative<BigInt>(nVal)) {
+                                        BigInt newNum = std::get<BigInt>(nVal) * lcm_den;
+                                        return u_sym_frac ^ SymExpr(newNum);
+                                    }
+                                }
+                            } else if (e.ptr->getType() == SymType::FUNC) {
+                                auto fNode = std::static_pointer_cast<SymFunc>(e.ptr);
+                                if (fNode->name == "sqrt" && fNode->args.size() == 1 && SymExpr(fNode->args[0]) == commonBase) {
+                                    return u_sym_frac ^ SymExpr(lcm_den / BigInt(2));
+                                } else if (fNode->name == "cbrt" && fNode->args.size() == 1 && SymExpr(fNode->args[0]) == commonBase) {
+                                    return u_sym_frac ^ SymExpr(lcm_den / BigInt(3));
+                                }
+                            }
+                            if (e == commonBase) {
+                                return u_sym_frac ^ SymExpr(lcm_den);
+                            }
+                            switch (e.ptr->getType()) {
+                                case SymType::ADD: {
+                                    SymExpr res(BigInt(0));
+                                    for (auto& a : std::static_pointer_cast<SymAdd>(e.ptr)->args) res = res + replaceFrac(SymExpr(a));
+                                    return res;
+                                }
+                                case SymType::MUL: {
+                                    SymExpr res(BigInt(1));
+                                    for (auto& a : std::static_pointer_cast<SymMul>(e.ptr)->args) res = res * replaceFrac(SymExpr(a));
+                                    return res;
+                                }
+                                case SymType::POW: {
+                                    auto pNode = std::static_pointer_cast<SymPow>(e.ptr);
+                                    return replaceFrac(SymExpr(pNode->base)) ^ replaceFrac(SymExpr(pNode->exp));
+                                }
+                                case SymType::FUNC: {
+                                    auto fNode = std::static_pointer_cast<SymFunc>(e.ptr);
+                                    std::vector<std::shared_ptr<SymNode>> nArgs;
+                                    for (auto& a : fNode->args) nArgs.push_back(replaceFrac(SymExpr(a)).ptr);
+                                    return SymExpr(std::make_shared<SymFunc>(fNode->name, std::move(nArgs)));
+                                }
+                                default: return e;
+                            }
+                        };
+                        
+                        SymExpr varPart_u_frac = replaceFrac(varPart);
+                        
+                        auto invertFunction = [&](SymExpr f, SymExpr target, std::string v) -> std::optional<SymExpr> {
+                            try {
+                                auto [num, den] = getFraction(simplifyCore(f - target));
+                                auto roots = solveEq(num, v);
+                                if (roots.size() == 1) {
+                                    return roots[0];
+                                }
+                            } catch (...) {}
+                            int iters = 0;
+                            while (f.ptr->getType() != SymType::VAR && iters++ < 10) {
+                                if (f.ptr->getType() == SymType::ADD) {
+                                    auto add = std::static_pointer_cast<SymAdd>(f.ptr);
+                                    SymExpr withV(BigInt(0)), withoutV(BigInt(0));
+                                    int countV = 0;
+                                    for (auto& arg : add->args) {
+                                        if (containsVar(arg, v)) { withV = SymExpr(arg); countV++; }
+                                        else withoutV = withoutV + SymExpr(arg);
+                                    }
+                                    if (countV != 1) return std::nullopt;
+                                    target = target - withoutV;
+                                    f = withV;
+                                } else if (f.ptr->getType() == SymType::MUL) {
+                                    auto mul = std::static_pointer_cast<SymMul>(f.ptr);
+                                    SymExpr withV(BigInt(1)), withoutV(BigInt(1));
+                                    int countV = 0;
+                                    for (auto& arg : mul->args) {
+                                        if (containsVar(arg, v)) { withV = SymExpr(arg); countV++; }
+                                        else withoutV = withoutV * SymExpr(arg);
+                                    }
+                                    if (countV != 1) return std::nullopt;
+                                    target = target / withoutV;
+                                    f = withV;
+                                } else if (f.ptr->getType() == SymType::POW) {
+                                    auto powNode = std::static_pointer_cast<SymPow>(f.ptr);
+                                    bool baseHasV = containsVar(powNode->base, v);
+                                    bool expHasV = containsVar(powNode->exp, v);
+                                    if (baseHasV && !expHasV) {
+                                        target = target ^ (SymExpr(BigInt(1)) / SymExpr(powNode->exp));
+                                        f = SymExpr(powNode->base);
+                                    } else if (!baseHasV && expHasV) {
+                                        SymExpr log_target(std::make_shared<SymFunc>("log", std::vector<std::shared_ptr<SymNode>>{target.ptr}));
+                                        SymExpr log_base(std::make_shared<SymFunc>("log", std::vector<std::shared_ptr<SymNode>>{powNode->base}));
+                                        target = log_target / log_base;
+                                        f = SymExpr(powNode->exp);
+                                    } else {
+                                        return std::nullopt;
+                                    }
+                                } else {
+                                    return std::nullopt;
+                                }
+                            }
+                            if (f.ptr->getType() == SymType::VAR && std::static_pointer_cast<SymVar>(f.ptr)->name == v) {
+                                return target;
+                            }
+                            return std::nullopt;
+                        };
+                        
+                        SymExpr target = u_sym_frac ^ SymExpr(lcm_den);
+                        if (auto x_sol = invertFunction(commonBase, target, var)) {
+                            SymExpr dx_du = simplify(diff(*x_sol, u_var_frac));
+                            if (!dx_du.isZero()) {
+                                SymExpr new_integrand = simplify(subs(varPart_u_frac, var, *x_sol) * dx_du);
+                                SymExpr integrand_var = subs(new_integrand, u_var_frac, SymExpr::makeVar(var));
+                                if (auto int_var = doInteg(integrand_var, current_depth + 1)) {
+                                    if (SymConfig::debugIntegration) std::cout << std::string(current_depth * 2, ' ') << "<- Common Fractional Power Substitution Success" << std::endl;
+                                    SymExpr back_sub = commonBase ^ SymExpr(Fraction(BigInt(1), lcm_den));
+                                    return coeff * simplify(subs(*int_var, var, back_sub));
+                                }
+                            }
                         }
                     }
                 }
