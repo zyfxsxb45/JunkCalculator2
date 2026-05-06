@@ -2788,12 +2788,1053 @@
     ]
   },
   "functions": {
-    "example_function": {
-      "signature": "func(args)",
-      "returns": "any",
-      "desc": "This is a placeholder for future specific function documentations.",
+    "pi": {
+      "signature": "pi()",
+      "desc": "Returns the mathematical constant π (Pi) ≈ 3.14159265...",
       "examples": [
-        "func(1, 2)"
+        "PI = pi()"
+      ]
+    },
+    "e": {
+      "signature": "e()",
+      "desc": "Returns Euler's number e ≈ 2.71828182...",
+      "examples": [
+        "E = e()"
+      ]
+    },
+    "i": {
+      "signature": "i()",
+      "desc": "Returns the imaginary unit (0 + 1i).",
+      "examples": [
+        "z = 3 + 4 * i()"
+      ]
+    },
+    "none": {
+      "signature": "none()",
+      "desc": "Returns the 'none' value, representing the absence of a value.",
+      "examples": [
+        "x = none()"
+      ]
+    },
+    "complex": {
+      "signature": "complex(real, [imag])",
+      "desc": "Constructs a complex number. If imag is omitted, it defaults to 0.",
+      "examples": [
+        "complex(3, 4)",
+        "complex(5)"
+      ]
+    },
+    "double": {
+      "signature": "double(x)",
+      "desc": "Converts a value to a floating-point number (double).",
+      "examples": [
+        "double(frac(1, 3))",
+        "double(42)"
+      ]
+    },
+    "int": {
+      "signature": "int(x)",
+      "desc": "Truncates a value to an integer (BigInt) towards zero.",
+      "examples": [
+        "int(3.7)",
+        "int(-3.7)",
+        "int(\"123\")"
+      ]
+    },
+    "abs": {
+      "signature": "abs(x)",
+      "desc": "Returns the absolute value or complex modulus of x.",
+      "examples": [
+        "abs(-5)",
+        "abs(3 + 4i)"
+      ]
+    },
+    "sqrt": {
+      "signature": "sqrt(x)",
+      "desc": "Returns the principal square root of x. Auto-promotes to complex for negative inputs.",
+      "examples": [
+        "sqrt(16)",
+        "sqrt(-4)"
+      ]
+    },
+    "cbrt": {
+      "signature": "cbrt(x)",
+      "desc": "Returns the cube root of x.",
+      "examples": [
+        "cbrt(27)"
+      ]
+    },
+    "root": {
+      "signature": "root(x, y)",
+      "desc": "Returns the y-th root of x.",
+      "examples": [
+        "root(8, 3)"
+      ]
+    },
+    "pow": {
+      "signature": "pow(x, y)",
+      "desc": "Returns x raised to the power of y. Equivalent to the ^ operator.",
+      "examples": [
+        "pow(2, 10)"
+      ]
+    },
+    "log": {
+      "signature": "log(x) / log(base, x)",
+      "desc": "Returns the natural logarithm of x, or the logarithm of x to the specified base.",
+      "aliases": ["ln"],
+      "examples": [
+        "log(E)",
+        "log(2, 1024)"
+      ]
+    },
+    "round": {
+      "signature": "round(x, [n])",
+      "desc": "Rounds x to the nearest integer, or to n decimal places if n is provided.",
+      "examples": [
+        "round(3.14159, 2)",
+        "round(3.5)"
+      ]
+    },
+    "floor": {
+      "signature": "floor(x, [n])",
+      "desc": "Returns the largest integer less than or equal to x. Can optionally floor to n decimal places.",
+      "examples": [
+        "floor(3.9)",
+        "floor(-3.1)"
+      ]
+    },
+    "ceil": {
+      "signature": "ceil(x, [n])",
+      "desc": "Returns the smallest integer greater than or equal to x. Can optionally ceil to n decimal places.",
+      "examples": [
+        "ceil(3.1)",
+        "ceil(-3.9)"
+      ]
+    },
+    "trunc": {
+      "signature": "trunc(x, [n])",
+      "desc": "Truncates the fractional part of x, rounding towards zero.",
+      "examples": [
+        "trunc(3.9)",
+        "trunc(-3.9)"
+      ]
+    },
+    "sgn": {
+      "signature": "sgn(x)",
+      "desc": "Returns the sign of x: 1 if positive, -1 if negative, 0 if zero.",
+      "examples": [
+        "sgn(-42)",
+        "sgn(0)"
+      ]
+    },
+    "deg": {
+      "signature": "deg(x)",
+      "desc": "Converts an angle from radians to degrees.",
+      "examples": [
+        "deg(PI)"
+      ]
+    },
+    "rad": {
+      "signature": "rad(x)",
+      "desc": "Converts an angle from degrees to radians.",
+      "examples": [
+        "rad(180)"
+      ]
+    },
+    "idiv": {
+      "signature": "idiv(a, b)",
+      "desc": "Performs integer division (truncating towards zero). Exact for BigInts.",
+      "examples": [
+        "idiv(10, 3)"
+      ]
+    },
+    "sin": {
+      "signature": "sin(x)",
+      "desc": "Returns the sine of x (in radians). Supports complex numbers and matrices.",
+      "examples": [
+        "sin(PI / 2)"
+      ]
+    },
+    "cos": {
+      "signature": "cos(x)",
+      "desc": "Returns the cosine of x (in radians). Supports complex numbers and matrices.",
+      "examples": [
+        "cos(PI)"
+      ]
+    },
+    "tan": {
+      "signature": "tan(x)",
+      "desc": "Returns the tangent of x (in radians). Supports complex numbers and matrices.",
+      "examples": [
+        "tan(PI / 4)"
+      ]
+    },
+    "sec": {
+      "signature": "sec(x)",
+      "desc": "Returns the secant of x (1 / cos(x)).",
+      "examples": [
+        "sec(0)"
+      ]
+    },
+    "csc": {
+      "signature": "csc(x)",
+      "desc": "Returns the cosecant of x (1 / sin(x)).",
+      "examples": [
+        "csc(PI / 2)"
+      ]
+    },
+    "cot": {
+      "signature": "cot(x)",
+      "desc": "Returns the cotangent of x (1 / tan(x)).",
+      "examples": [
+        "cot(PI / 4)"
+      ]
+    },
+    "asin": {
+      "signature": "asin(x)",
+      "desc": "Returns the inverse sine (arcsine) of x. Auto-promotes to complex if |x| > 1.",
+      "examples": [
+        "asin(1)"
+      ]
+    },
+    "acos": {
+      "signature": "acos(x)",
+      "desc": "Returns the inverse cosine (arccosine) of x. Auto-promotes to complex if |x| > 1.",
+      "examples": [
+        "acos(0)"
+      ]
+    },
+    "atan": {
+      "signature": "atan(x)",
+      "desc": "Returns the inverse tangent (arctangent) of x.",
+      "examples": [
+        "atan(1)"
+      ]
+    },
+    "atan2": {
+      "signature": "atan2(y, x)",
+      "desc": "Returns the 2-argument arctangent, which is the angle in the Euclidean plane.",
+      "examples": [
+        "atan2(1, 1)"
+      ]
+    },
+    "sinh": {
+      "signature": "sinh(x)",
+      "desc": "Returns the hyperbolic sine of x. Supports complex numbers and matrices.",
+      "examples": [
+        "sinh(1)"
+      ]
+    },
+    "cosh": {
+      "signature": "cosh(x)",
+      "desc": "Returns the hyperbolic cosine of x. Supports complex numbers and matrices.",
+      "examples": [
+        "cosh(0)"
+      ]
+    },
+    "tanh": {
+      "signature": "tanh(x)",
+      "desc": "Returns the hyperbolic tangent of x. Supports complex numbers and matrices.",
+      "examples": [
+        "tanh(1)"
+      ]
+    },
+    "asinh": {
+      "signature": "asinh(x)",
+      "desc": "Returns the inverse hyperbolic sine of x.",
+      "examples": [
+        "asinh(0)"
+      ]
+    },
+    "acosh": {
+      "signature": "acosh(x)",
+      "desc": "Returns the inverse hyperbolic cosine of x. Auto-promotes to complex if x < 1.",
+      "examples": [
+        "acosh(1)"
+      ]
+    },
+    "atanh": {
+      "signature": "atanh(x)",
+      "desc": "Returns the inverse hyperbolic tangent of x. Auto-promotes to complex if |x| >= 1.",
+      "examples": [
+        "atanh(0)"
+      ]
+    },
+    "exp": {
+      "signature": "exp(x)",
+      "desc": "Returns Euler's number e raised to the power of x. Supports complex numbers and matrices.",
+      "examples": [
+        "exp(1)",
+        "exp(PI * i)"
+      ]
+    },
+    "erf": {
+      "signature": "erf(x)",
+      "desc": "Returns the error function of x.",
+      "examples": [
+        "erf(1)"
+      ]
+    },
+    "fresnel_s": {
+      "signature": "fresnel_s(x)",
+      "desc": "Returns the Fresnel sine integral of x.",
+      "examples": [
+        "fresnel_s(1)"
+      ]
+    },
+    "fresnel_c": {
+      "signature": "fresnel_c(x)",
+      "desc": "Returns the Fresnel cosine integral of x.",
+      "examples": [
+        "fresnel_c(1)"
+      ]
+    },
+    "Si": {
+      "signature": "Si(x)",
+      "desc": "Returns the Sine integral of x.",
+      "examples": [
+        "Si(PI)"
+      ]
+    },
+    "Ci": {
+      "signature": "Ci(x)",
+      "desc": "Returns the Cosine integral of x. Defined for x > 0.",
+      "examples": [
+        "Ci(PI)"
+      ]
+    },
+    "Ei": {
+      "signature": "Ei(x)",
+      "desc": "Returns the Exponential integral of x. Undefined for x = 0.",
+      "examples": [
+        "Ei(1)"
+      ]
+    },
+    "Li": {
+      "signature": "Li(x)",
+      "desc": "Returns the Logarithmic integral of x. Defined for x > 0 and x != 1.",
+      "examples": [
+        "Li(2)"
+      ]
+    },
+    "Re": {
+      "signature": "Re(z)",
+      "desc": "Returns the real part of a complex number.",
+      "examples": [
+        "Re(3 + 4i)"
+      ]
+    },
+    "Im": {
+      "signature": "Im(z)",
+      "desc": "Returns the imaginary part of a complex number.",
+      "examples": [
+        "Im(3 + 4i)"
+      ]
+    },
+    "arg": {
+      "signature": "arg(z)",
+      "desc": "Returns the argument (phase angle in radians) of a complex number.",
+      "examples": [
+        "arg(1 + i)"
+      ]
+    },
+    "conj": {
+      "signature": "conj(z)",
+      "desc": "Returns the complex conjugate of a complex number.",
+      "examples": [
+        "conj(3 + 4i)"
+      ]
+    },
+    "frac": {
+      "signature": "frac(n, d)",
+      "desc": "Constructs an exact fraction (rational number) from numerator n and denominator d. Auto-reduces to simplest form.",
+      "examples": [
+        "frac(1, 3)",
+        "frac(10, 4)"
+      ]
+    },
+    "num": {
+      "signature": "num(f)",
+      "desc": "Returns the numerator of a fraction.",
+      "examples": [
+        "num(frac(3, 4))"
+      ]
+    },
+    "den": {
+      "signature": "den(f)",
+      "desc": "Returns the denominator of a fraction.",
+      "examples": [
+        "den(frac(3, 4))"
+      ]
+    },
+    "matrix": {
+      "signature": "matrix(rows, cols, [elements...])",
+      "desc": "Constructs a matrix with the specified dimensions and elements. Auto-detects Real, Complex, or String matrices.",
+      "examples": [
+        "matrix(2, 2, 1, 2, 3, 4)"
+      ]
+    },
+    "det": {
+      "signature": "det(A)",
+      "desc": "Returns the determinant of a square matrix.",
+      "examples": [
+        "det([1, 2; 3, 4])"
+      ]
+    },
+    "inv": {
+      "signature": "inv(A)",
+      "desc": "Returns the inverse of a square matrix.",
+      "examples": [
+        "inv([1, 2; 3, 4])"
+      ]
+    },
+    "trans": {
+      "signature": "trans(A)",
+      "desc": "Returns the transpose of a matrix.",
+      "examples": [
+        "trans([1, 2, 3])"
+      ]
+    },
+    "ctrans": {
+      "signature": "ctrans(A)",
+      "desc": "Returns the conjugate transpose (Hermitian transpose) of a complex matrix.",
+      "examples": [
+        "ctrans([1+i, 2-i])"
+      ]
+    },
+    "gauss": {
+      "signature": "gauss(A)",
+      "desc": "Returns the reduced row echelon form (RREF) of a matrix via Gaussian elimination.",
+      "examples": [
+        "gauss([1, 2, 3; 4, 5, 6])"
+      ]
+    },
+    "rank": {
+      "signature": "rank(A)",
+      "desc": "Returns the rank of a matrix.",
+      "examples": [
+        "rank([1, 2; 2, 4])"
+      ]
+    },
+    "tr": {
+      "signature": "tr(A)",
+      "desc": "Returns the trace (sum of diagonal elements) of a square matrix.",
+      "examples": [
+        "tr([1, 2; 3, 4])"
+      ]
+    },
+    "norm": {
+      "signature": "norm(A)",
+      "desc": "Returns the Frobenius norm of a matrix.",
+      "examples": [
+        "norm([3, 4])"
+      ]
+    },
+    "cond": {
+      "signature": "cond(A)",
+      "desc": "Returns the condition number of a matrix.",
+      "examples": [
+        "cond([1, 2; 3, 4])"
+      ]
+    },
+    "adj": {
+      "signature": "adj(A)",
+      "desc": "Returns the classical adjugate of a square matrix.",
+      "examples": [
+        "adj([1, 2; 3, 4])"
+      ]
+    },
+    "sum": {
+      "signature": "sum(A)",
+      "desc": "Returns the sum of all elements in a matrix or list.",
+      "examples": [
+        "sum([1, 2, 3])"
+      ]
+    },
+    "prod": {
+      "signature": "prod(A)",
+      "desc": "Returns the product of all elements in a matrix or list.",
+      "examples": [
+        "prod([1, 2, 3, 4])"
+      ]
+    },
+    "null": {
+      "signature": "null(A)",
+      "desc": "Returns a basis for the null space of a matrix.",
+      "examples": [
+        "null([1, 2; 2, 4])"
+      ]
+    },
+    "orth": {
+      "signature": "orth(A)",
+      "desc": "Returns an orthonormal basis for the range of a matrix.",
+      "examples": [
+        "orth([1, 1; 0, 1])"
+      ]
+    },
+    "mpow": {
+      "signature": "mpow(A, n)",
+      "desc": "Raises a square matrix to an integer power n.",
+      "examples": [
+        "mpow([1, 1; 0, 1], 10)"
+      ]
+    },
+    "row": {
+      "signature": "row(A)",
+      "desc": "Returns the number of rows in a matrix.",
+      "aliases": [
+        "rows"
+      ],
+      "examples": [
+        "row([1, 2; 3, 4])"
+      ]
+    },
+    "col": {
+      "signature": "col(A)",
+      "desc": "Returns the number of columns in a matrix.",
+      "aliases": [
+        "cols"
+      ],
+      "examples": [
+        "col([1, 2; 3, 4])"
+      ]
+    },
+    "reshape": {
+      "signature": "reshape(A, r, c)",
+      "desc": "Reshapes a matrix to r rows and c columns. Total element count must match.",
+      "examples": [
+        "reshape([1, 2, 3, 4], 2, 2)"
+      ]
+    },
+    "integR": {
+      "signature": "integR(A, B)",
+      "desc": "Horizontally concatenates two matrices [A | B].",
+      "examples": [
+        "integR([1; 2], [3; 4])"
+      ]
+    },
+    "integC": {
+      "signature": "integC(A, B)",
+      "desc": "Vertically concatenates two matrices [A ; B].",
+      "examples": [
+        "integC([1, 2], [3, 4])"
+      ]
+    },
+    "id": {
+      "signature": "id(n)",
+      "desc": "Returns an n x n identity matrix.",
+      "examples": [
+        "id(3)"
+      ]
+    },
+    "ones": {
+      "signature": "ones(r, [c])",
+      "desc": "Returns a matrix of all ones. If c is omitted, returns an r x r square matrix.",
+      "examples": [
+        "ones(2, 3)"
+      ]
+    },
+    "zeros": {
+      "signature": "zeros(r, [c])",
+      "desc": "Returns a matrix of all zeros. If c is omitted, returns an r x r square matrix.",
+      "examples": [
+        "zeros(3)"
+      ]
+    },
+    "eig": {
+      "signature": "eig(A)",
+      "desc": "Returns a column vector containing the eigenvalues of a square matrix.",
+      "examples": [
+        "eig([0, 1; -2, -3])"
+      ]
+    },
+    "eigvec": {
+      "signature": "eigvec(A)",
+      "desc": "Returns a matrix whose columns are the eigenvectors of A.",
+      "examples": [
+        "eigvec([0, 1; -2, -3])"
+      ]
+    },
+    "diag": {
+      "signature": "diag(A)",
+      "desc": "Returns the diagonal eigenvalue matrix D such that A = P * D * inv(P).",
+      "examples": [
+        "diag([0, 1; -2, -3])"
+      ]
+    },
+    "diagP": {
+      "signature": "diagP(A)",
+      "desc": "Returns the change-of-basis matrix P (eigenvectors) such that A = P * D * inv(P).",
+      "examples": [
+        "diagP([0, 1; -2, -3])"
+      ]
+    },
+    "lsolve": {
+      "signature": "lsolve(A, b)",
+      "desc": "Solves the linear system Ax = b. Returns exact solution, particular solution, or least-squares approximation.",
+      "examples": [
+        "lsolve([1, 2; 3, 4], [5; 11])"
+      ]
+    },
+    "lstsq": {
+      "signature": "lstsq(A, b)",
+      "desc": "Solves the linear system Ax = b using the least-squares method (Normal Equations).",
+      "examples": [
+        "lstsq([1, 1; 1, 2; 1, 3], [1; 2; 2])"
+      ]
+    },
+    "dim": {
+      "signature": "dim(v)",
+      "desc": "Returns the number of components (rows) in a column vector, or elements in a list.",
+      "examples": [
+        "dim([1; 2; 3])"
+      ]
+    },
+    "dot": {
+      "signature": "dot(a, b)",
+      "desc": "Returns the Hermitian inner product (dot product) of two vectors.",
+      "examples": [
+        "dot([1; 2], [3; 4])"
+      ]
+    },
+    "vnorm": {
+      "signature": "vnorm(v)",
+      "desc": "Returns the Euclidean length (magnitude) of a vector.",
+      "examples": [
+        "vnorm([3; 4])"
+      ]
+    },
+    "normalize": {
+      "signature": "normalize(v)",
+      "desc": "Returns a unit vector in the same direction as v.",
+      "examples": [
+        "normalize([3; 4])"
+      ]
+    },
+    "cross": {
+      "signature": "cross(a, b)",
+      "desc": "Returns the cross product of two 3D vectors.",
+      "examples": [
+        "cross([1; 0; 0], [0; 1; 0])"
+      ]
+    },
+    "angle": {
+      "signature": "angle(a, b)",
+      "desc": "Returns the angle between two vectors in radians.",
+      "examples": [
+        "angle([1; 0], [0; 1])"
+      ]
+    },
+    "sproj": {
+      "signature": "sproj(a, b)",
+      "desc": "Returns the scalar projection of vector a onto vector b.",
+      "examples": [
+        "sproj([3; 4], [1; 0])"
+      ]
+    },
+    "vproj": {
+      "signature": "vproj(a, b)",
+      "desc": "Returns the vector projection of vector a onto vector b.",
+      "examples": [
+        "vproj([3; 4], [1; 0])"
+      ]
+    },
+    "triple": {
+      "signature": "triple(a, b, c)",
+      "desc": "Returns the scalar triple product of three 3D vectors: dot(a, cross(b, c)).",
+      "examples": [
+        "triple([1; 0; 0], [0; 1; 0], [0; 0; 1])"
+      ]
+    },
+    "isperp": {
+      "signature": "isperp(a, b)",
+      "desc": "Returns 1 if vectors a and b are perpendicular (orthogonal), 0 otherwise.",
+      "examples": [
+        "isperp([1; 0], [0; 1])"
+      ]
+    },
+    "isparallel": {
+      "signature": "isparallel(a, b)",
+      "desc": "Returns 1 if vectors a and b are parallel, 0 otherwise.",
+      "examples": [
+        "isparallel([1; 2], [2; 4])"
+      ]
+    },
+    "solve": {
+      "signature": "solve(a, b, [c, d, e])",
+      "desc": "Finds all complex roots of a polynomial up to degree 4. E.g., solve(a,b,c) solves ax^2 + bx + c = 0.",
+      "examples": [
+        "solve(1, 0, -1)",
+        "solve(1, 0, 0, -1)"
+      ]
+    },
+    "factorial": {
+      "signature": "factorial(n)",
+      "desc": "Returns the factorial of n (n!). Exact for BigInts.",
+      "examples": [
+        "factorial(100)"
+      ]
+    },
+    "fib": {
+      "signature": "fib(n)",
+      "desc": "Returns the n-th Fibonacci number.",
+      "examples": [
+        "fib(10)"
+      ]
+    },
+    "gcd": {
+      "signature": "gcd(a, b)",
+      "desc": "Returns the greatest common divisor of a and b.",
+      "examples": [
+        "gcd(48, 18)"
+      ]
+    },
+    "lcm": {
+      "signature": "lcm(a, b)",
+      "desc": "Returns the least common multiple of a and b.",
+      "examples": [
+        "lcm(4, 6)"
+      ]
+    },
+    "digits": {
+      "signature": "digits(n)",
+      "desc": "Returns the number of base-10 digits in a BigInt.",
+      "examples": [
+        "digits(factorial(100))"
+      ]
+    },
+    "isPrime": {
+      "signature": "isPrime(n)",
+      "desc": "Returns 1 if n is a prime number (via Miller-Rabin test), 0 otherwise.",
+      "aliases": [
+        "isprime"
+      ],
+      "examples": [
+        "isPrime(10^9 + 7)"
+      ]
+    },
+    "nextPrime": {
+      "signature": "nextPrime(n)",
+      "desc": "Returns the smallest prime number strictly greater than n.",
+      "examples": [
+        "nextPrime(100)"
+      ]
+    },
+    "nthPrime": {
+      "signature": "nthPrime(k)",
+      "desc": "Returns the k-th prime number. Uses a mounted Prime.txt database if available, otherwise computes dynamically.",
+      "examples": [
+        "nthPrime(1000)"
+      ]
+    },
+    "primePi": {
+      "signature": "primePi(n)",
+      "desc": "Returns the number of primes less than or equal to n (Prime Counting Function).",
+      "examples": [
+        "primePi(100)"
+      ]
+    },
+    "phi": {
+      "signature": "phi(n)",
+      "desc": "Returns Euler's totient function (number of integers up to n that are coprime to n).",
+      "examples": [
+        "phi(100)"
+      ]
+    },
+    "divisors": {
+      "signature": "divisors(n)",
+      "desc": "Returns the number of positive divisors of n.",
+      "examples": [
+        "divisors(12)"
+      ]
+    },
+    "sigma": {
+      "signature": "sigma(n, [k])",
+      "desc": "Returns the sum of the k-th powers of the positive divisors of n. k defaults to 1.",
+      "examples": [
+        "sigma(12)"
+      ]
+    },
+    "omega": {
+      "signature": "omega(n)",
+      "desc": "Returns the number of distinct prime factors of n.",
+      "examples": [
+        "omega(12)"
+      ]
+    },
+    "bigOmega": {
+      "signature": "bigOmega(n)",
+      "desc": "Returns the total number of prime factors of n (counted with multiplicity).",
+      "examples": [
+        "bigOmega(12)"
+      ]
+    },
+    "mobius": {
+      "signature": "mobius(n)",
+      "desc": "Returns the Möbius function of n: 0 if n has a squared prime factor, else (-1)^omega(n).",
+      "examples": [
+        "mobius(10)"
+      ]
+    },
+    "isPerfect": {
+      "signature": "isPerfect(n)",
+      "desc": "Returns 1 if n is a perfect number (sum of proper divisors equals n), 0 otherwise.",
+      "examples": [
+        "isPerfect(28)"
+      ]
+    },
+    "mod": {
+      "signature": "mod(a, b)",
+      "desc": "Returns the mathematical modulo of a w.r.t b. The result is always non-negative.",
+      "examples": [
+        "mod(-7, 3)"
+      ]
+    },
+    "modpow": {
+      "signature": "modpow(a, e, m)",
+      "desc": "Returns (a^e) mod m efficiently.",
+      "examples": [
+        "modpow(2, 10, 1000)"
+      ]
+    },
+    "C": {
+      "signature": "C(n, k)",
+      "desc": "Returns the binomial coefficient (n choose k).",
+      "examples": [
+        "C(5, 2)"
+      ]
+    },
+    "A": {
+      "signature": "A(n, k)",
+      "desc": "Returns the number of k-permutations of n.",
+      "examples": [
+        "A(5, 2)"
+      ]
+    },
+    "catalan": {
+      "signature": "catalan(n)",
+      "desc": "Returns the n-th Catalan number.",
+      "examples": [
+        "catalan(5)"
+      ]
+    },
+    "base": {
+      "signature": "base(val, r)",
+      "desc": "Wraps an integer in a base-r display shell.",
+      "examples": [
+        "base(255, 16)"
+      ]
+    },
+    "bnum": {
+      "signature": "bnum(str, r)",
+      "desc": "Parses a string directly as a base-r number.",
+      "examples": [
+        "bnum(\"FF\", 16)"
+      ]
+    },
+    "changeBase": {
+      "signature": "changeBase(v, r)",
+      "desc": "Re-displays an existing BaseNum in a new base r.",
+      "examples": [
+        "changeBase(base(255, 16), 2)"
+      ]
+    },
+    "data": {
+      "signature": "data(b)",
+      "desc": "Strips the radix shell from a BaseNum, returning a plain BigInt.",
+      "examples": [
+        "data(base(255, 16))"
+      ]
+    },
+    "bitand": {
+      "signature": "bitand(a, b)",
+      "desc": "Returns the bitwise AND of two numbers.",
+      "examples": [
+        "bitand(base(12, 2), base(10, 2))"
+      ]
+    },
+    "bitor": {
+      "signature": "bitor(a, b)",
+      "desc": "Returns the bitwise OR of two numbers.",
+      "examples": [
+        "bitor(base(12, 2), base(10, 2))"
+      ]
+    },
+    "bitxor": {
+      "signature": "bitxor(a, b)",
+      "desc": "Returns the bitwise XOR of two numbers.",
+      "examples": [
+        "bitxor(base(12, 2), base(10, 2))"
+      ]
+    },
+    "bitnot": {
+      "signature": "bitnot(a, [w])",
+      "desc": "Returns the bitwise NOT of a number. Auto-aligns to bytes, or explicitly w-bits.",
+      "examples": [
+        "bitnot(base(0, 2), 8)"
+      ]
+    },
+    "bitshift": {
+      "signature": "bitshift(a, n)",
+      "desc": "Logical shift: Left if n > 0, Right if n < 0.",
+      "examples": [
+        "bitshift(base(1, 2), 3)"
+      ]
+    },
+    "mean": {
+      "signature": "mean(X)",
+      "desc": "Returns the arithmetic mean of a dataset.",
+      "examples": [
+        "mean([1, 2, 3, 4, 5])"
+      ]
+    },
+    "var": {
+      "signature": "var(X)",
+      "desc": "Returns the population variance of a dataset (divided by N).",
+      "examples": [
+        "var([1, 2, 3, 4, 5])"
+      ]
+    },
+    "svar": {
+      "signature": "svar(X)",
+      "desc": "Returns the sample variance of a dataset (divided by N-1).",
+      "examples": [
+        "svar([1, 2, 3, 4, 5])"
+      ]
+    },
+    "std": {
+      "signature": "std(X)",
+      "desc": "Returns the population standard deviation of a dataset.",
+      "examples": [
+        "std([1, 2, 3, 4, 5])"
+      ]
+    },
+    "sstd": {
+      "signature": "sstd(X)",
+      "desc": "Returns the sample standard deviation of a dataset.",
+      "examples": [
+        "sstd([1, 2, 3, 4, 5])"
+      ]
+    },
+    "max": {
+      "signature": "max(X)",
+      "desc": "Returns the maximum value in a dataset or list.",
+      "examples": [
+        "max([1, 5, 3])"
+      ]
+    },
+    "min": {
+      "signature": "min(X)",
+      "desc": "Returns the minimum value in a dataset or list.",
+      "examples": [
+        "min([1, 5, 3])"
+      ]
+    },
+    "span": {
+      "signature": "span(X)",
+      "desc": "Returns the statistical range (max - min) of a dataset.",
+      "examples": [
+        "span([1, 5, 3])"
+      ]
+    },
+    "perc": {
+      "signature": "perc(X, p)",
+      "desc": "Returns the p-th percentile of a dataset (0 <= p <= 100).",
+      "examples": [
+        "perc([1, 2, 3, 4, 5], 90)"
+      ]
+    },
+    "median": {
+      "signature": "median(X)",
+      "desc": "Returns the median (50th percentile) of a dataset.",
+      "examples": [
+        "median([1, 3, 10])"
+      ]
+    },
+    "mode": {
+      "signature": "mode(X)",
+      "desc": "Returns the mode(s) of a dataset. Returns a row vector if multimodal.",
+      "examples": [
+        "mode([1, 2, 2, 3])"
+      ]
+    },
+    "cov": {
+      "signature": "cov(X, Y)",
+      "desc": "Returns the population covariance between two datasets.",
+      "examples": [
+        "cov([1, 2, 3], [2, 4, 5])"
+      ]
+    },
+    "corr": {
+      "signature": "corr(X, Y)",
+      "desc": "Returns the Pearson correlation coefficient (r) between two datasets.",
+      "examples": [
+        "corr([1, 2, 3], [2, 4, 5])"
+      ]
+    },
+    "rsq": {
+      "signature": "rsq(X, Y)",
+      "desc": "Returns the coefficient of determination (R^2) between two datasets.",
+      "examples": [
+        "rsq([1, 2, 3], [2, 4, 5])"
+      ]
+    },
+    "regress": {
+      "signature": "regress(X, Y)",
+      "desc": "Performs linear regression Y = a + bX. Prints the model and returns [a, b].",
+      "examples": [
+        "regress([1, 2, 3], [2, 4, 5])"
+      ]
+    },
+    "rand": {
+      "signature": "rand([min, max])",
+      "desc": "Returns a random continuous double. Defaults to [0, 1) if no arguments provided.",
+      "examples": [
+        "rand()",
+        "rand(10, 20)"
+      ]
+    },
+    "randint": {
+      "signature": "randint(min, max)",
+      "desc": "Returns a random discrete integer in the closed interval [min, max].",
+      "examples": [
+        "randint(1, 6)"
+      ]
+    },
+    "randc": {
+      "signature": "randc([min, max])",
+      "desc": "Returns a random complex number with real and imaginary parts in [min, max).",
+      "examples": [
+        "randc()"
+      ]
+    },
+    "randmat": {
+      "signature": "randmat(r, c, [min, max])",
+      "desc": "Returns an r x c matrix of random continuous doubles.",
+      "examples": [
+        "randmat(3, 3)",
+        "randmat(2, 2, -10, 10)"
+      ]
+    },
+    "randimat": {
+      "signature": "randimat(r, c, [min, max])",
+      "desc": "Returns an r x c matrix of random discrete integers. Defaults to [0, 10].",
+      "examples": [
+        "randimat(3, 3, 1, 100)"
+      ]
+    },
+    "randcmat": {
+      "signature": "randcmat(r, c, [min, max])",
+      "desc": "Returns an r x c matrix of random complex numbers.",
+      "examples": [
+        "randcmat(2, 2)"
+      ]
+    },
+    "magic": {
+      "signature": "magic(n)",
+      "desc": "Returns an n x n magic square matrix (n >= 3).",
+      "examples": [
+        "magic(3)"
       ]
     }
   }
