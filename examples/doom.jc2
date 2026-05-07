@@ -20,7 +20,7 @@ class Raycaster3D extends GameEngine {
         
         // ★ Game State Machine
         self.MAX_LEVEL = 5
-        self.state = "PLAYING" // PLAYING, TRANSITION, GAME_OVER
+        self.status = "PLAYING" // PLAYING, TRANSITION, GAME_OVER
         self.trans_timer = 0.0
         
         self.generateLevel(1)
@@ -98,7 +98,7 @@ class Raycaster3D extends GameEngine {
     // 🖱️ Modern FPS Mouse Control Events
     // ==========================================
     onMouseDown(x, y, btn) = {
-        if (btn == 0 && self.state == "PLAYING") {
+        if (btn == 0 && self.status == "PLAYING") {
             self.mouse_locked = true
             self.win.showCursor(0.0) 
             self.win.setCursorPos(int(self.W / 2), int(self.H / 2)) 
@@ -112,7 +112,7 @@ class Raycaster3D extends GameEngine {
 
     onMouseMove(x, y) = {
         // Freeze mouse view during transition or game over
-        if (!self.mouse_locked || self.state != "PLAYING") return none
+        if (!self.mouse_locked || self.status != "PLAYING") return none
         
         center_x = int(self.W / 2); center_y = int(self.H / 2)
         delta_x = x - center_x
@@ -140,14 +140,14 @@ class Raycaster3D extends GameEngine {
         val = self.map[int(new_x), int(new_y)]
         
         if (val == 5.0) { 
-            // 🔮 Hit the Portal! Determine game state
+            // 🔮 Hit the Portal! Determine game status
             if (self.level >= self.MAX_LEVEL) {
-                self.state = "GAME_OVER"
+                self.status = "GAME_OVER"
                 // Force unlock mouse
                 self.mouse_locked = false
                 self.win.showCursor(1.0)
             } else {
-                self.state = "TRANSITION"
+                self.status = "TRANSITION"
                 self.trans_timer = 2.5 // Pause for 2.5 seconds
             }
             return 1 
@@ -162,16 +162,16 @@ class Raycaster3D extends GameEngine {
     update(dt) = {
         self.fps_timer = dt
         
-        // ★ State Machine Dispatch
-        if (self.state == "TRANSITION") {
+        // ★ status Machine Dispatch
+        if (self.status == "TRANSITION") {
             self.trans_timer -= dt
             if (self.trans_timer <= 0.0) {
                 self.generateLevel(self.level + 1)
-                self.state = "PLAYING"
+                self.status = "PLAYING"
             }
             return none // Freeze movement
         }
-        if (self.state == "GAME_OVER") {
+        if (self.status == "GAME_OVER") {
             return none // Freeze movement
         }
 
@@ -262,7 +262,7 @@ class Raycaster3D extends GameEngine {
         // 🏅 Status Information
         im.text(f"SECTOR: {self.level} / {self.MAX_LEVEL}", 20, self.H - 40, "#FFCC00", 2)
         
-        if (self.state == "PLAYING") {
+        if (self.status == "PLAYING") {
             if (self.mouse_locked) im.text("SYSTEM ARMED (ESC TO ABORT)", 250, self.H - 40, "#00FFCC", 2)
             else im.text("[L_CLICK] TO OVERRIDE MOUSE", 250, self.H - 40, "#FFFFFF", 2)
         }
@@ -289,14 +289,14 @@ class Raycaster3D extends GameEngine {
         // ==========================================
         // 🎞️ Epic Center-Screen System Popups
         // ==========================================
-        if (self.state == "TRANSITION") {
+        if (self.status == "TRANSITION") {
             im.fillRect(0, 200, self.W, 140, "#111115")
             im.line(0, 200, self.W, 200, "#00FFCC", 3)
             im.line(0, 340, self.W, 340, "#00FFCC", 3)
             self.drawCentered(im, f"SECTOR {self.level} CLEARED!", 240, "#00FFCC", 3)
             self.drawCentered(im, "WARPING TO NEXT SECTOR...", 290, "#FFFFFF", 2)
         }
-        else if (self.state == "GAME_OVER") {
+        else if (self.status == "GAME_OVER") {
             im.fillRect(0, 180, self.W, 180, "#0A0A0A")
             im.line(0, 180, self.W, 180, "#FFCC00", 4)
             im.line(0, 360, self.W, 360, "#FFCC00", 4)
