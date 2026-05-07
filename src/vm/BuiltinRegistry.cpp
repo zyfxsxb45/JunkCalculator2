@@ -1230,27 +1230,40 @@ void BuiltinRegistry::registerSystemUtils() {
         });
 
     reg("clone", { 1 }, [](const std::vector<Value>& args) -> Value {
+        std::map<const void*, Value> visited;
         std::function<Value(const Value&)> deepCopy = [&](const Value& v) -> Value {
             if (std::holds_alternative<List>(v.data)) {
+                auto& l = std::get<List>(v.data);
+                if (visited.count(l.id())) return visited[l.id()];
                 List newList;
-                for (const auto& e : std::get<List>(v.data).raw()) {
+                Value newVal(newList);
+                visited[l.id()] = newVal;
+                for (const auto& e : l.raw()) {
                     newList.push_back(deepCopy(e));
                 }
-                return Value(newList);
+                return newVal;
             }
             if (std::holds_alternative<Dict>(v.data)) {
+                auto& d = std::get<Dict>(v.data);
+                if (visited.count(d.id())) return visited[d.id()];
                 Dict newDict;
-                for (const auto& [k, val] : std::get<Dict>(v.data).getEntries()) {
+                Value newVal(newDict);
+                visited[d.id()] = newVal;
+                for (const auto& [k, val] : d.getEntries()) {
                     newDict.set(deepCopy(k), deepCopy(val));
                 }
-                return Value(newDict);
+                return newVal;
             }
             if (std::holds_alternative<Set>(v.data)) {
+                auto& s = std::get<Set>(v.data);
+                if (visited.count(s.id())) return visited[s.id()];
                 Set newSet;
-                for (const auto& val : std::get<Set>(v.data).raw()) {
+                Value newVal(newSet);
+                visited[s.id()] = newVal;
+                for (const auto& val : s.raw()) {
                     newSet.insert(deepCopy(val));
                 }
-                return Value(newSet);
+                return newVal;
             }
             return v;
         };
@@ -1258,30 +1271,43 @@ void BuiltinRegistry::registerSystemUtils() {
         });
 
     reg("val", { 1 }, [](const std::vector<Value>& args) -> Value {
+        std::map<const void*, Value> visited;
         std::function<Value(const Value&)> deepCopyAndFreeze = [&](const Value& v) -> Value {
             if (std::holds_alternative<List>(v.data)) {
+                auto& l = std::get<List>(v.data);
+                if (visited.count(l.id())) return visited[l.id()];
                 List newList;
-                for (const auto& e : std::get<List>(v.data).raw()) {
+                Value newVal(newList);
+                visited[l.id()] = newVal;
+                for (const auto& e : l.raw()) {
                     newList.push_back(deepCopyAndFreeze(e));
                 }
                 newList.freeze();
-                return Value(newList);
+                return newVal;
             }
             if (std::holds_alternative<Dict>(v.data)) {
+                auto& d = std::get<Dict>(v.data);
+                if (visited.count(d.id())) return visited[d.id()];
                 Dict newDict;
-                for (const auto& [k, val] : std::get<Dict>(v.data).getEntries()) {
+                Value newVal(newDict);
+                visited[d.id()] = newVal;
+                for (const auto& [k, val] : d.getEntries()) {
                     newDict.set(deepCopyAndFreeze(k), deepCopyAndFreeze(val));
                 }
                 newDict.freeze();
-                return Value(newDict);
+                return newVal;
             }
             if (std::holds_alternative<Set>(v.data)) {
+                auto& s = std::get<Set>(v.data);
+                if (visited.count(s.id())) return visited[s.id()];
                 Set newSet;
-                for (const auto& val : std::get<Set>(v.data).raw()) {
+                Value newVal(newSet);
+                visited[s.id()] = newVal;
+                for (const auto& val : s.raw()) {
                     newSet.insert(deepCopyAndFreeze(val));
                 }
                 newSet.freeze();
-                return Value(newSet);
+                return newVal;
             }
             return v;
         };
