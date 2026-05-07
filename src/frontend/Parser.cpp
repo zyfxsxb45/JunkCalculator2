@@ -895,12 +895,12 @@ namespace jc {
                 !check(TokenType::SEMICOLON) &&
                 !check(TokenType::NEWLINE) &&      // ★ 新增
                 !check(TokenType::END_OF_FILE)) {
-                value = expression();
+                value = assignment();  // ★ 降级：防止逗号被误吞
             }
             return std::make_unique<ReturnExpr>(std::move(value));
         }
         if (match({ TokenType::THROW })) {
-            auto value = expression();
+            auto value = assignment();  // ★ 降级：防止逗号被误吞
             return std::make_unique<ThrowExpr>(std::move(value));
         }
         if (match({ TokenType::TRY })) {
@@ -914,7 +914,7 @@ namespace jc {
             return std::make_unique<TryCatchExpr>(std::move(tryBody), catchName, std::move(catchBody));
         }
         if (match({ TokenType::IMPORT })) {
-            auto path = expression();
+            auto path = assignment();  // ★ 降级：防止逗号被误吞
             return std::make_unique<ImportExpr>(std::move(path));
         }
         if (match({ TokenType::SWITCH })) return switchExpr();
@@ -927,7 +927,7 @@ namespace jc {
         if (match({ TokenType::CONST })) {
             Token name = consume(TokenType::IDENTIFIER, "Parser Error: Expect variable name after 'const'.");
             consume(TokenType::ASSIGN, "Parser Error: 'const' declaration requires '= value'.");
-            auto value = expression();
+            auto value = assignment();  // ★ 降级：防止逗号被误吞
             return std::make_unique<ConstDecl>(name, std::move(value));
         }
         if (match({ TokenType::DELETE })) {
