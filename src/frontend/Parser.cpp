@@ -5,35 +5,13 @@
 namespace jc {
 
     std::unique_ptr<Expr> Parser::expression() {
-        bool isRef = match({ TokenType::REF });
-        bool isState = !isRef && match({ TokenType::STATE });
-
-        auto parseItem = [&]() {
-            auto expr = assignment();
-            if (isRef || isState) {
-                if (auto* assign = dynamic_cast<Assign*>(expr.get())) {
-                    assign->isRef = isRef;
-                    assign->isState = isState;
-                } else if (auto* compAssign = dynamic_cast<CompoundAssign*>(expr.get())) {
-                    compAssign->isRef = isRef;
-                    compAssign->isState = isState;
-                } else if (auto* var = dynamic_cast<Variable*>(expr.get())) {
-                    if (isRef) expr = std::make_unique<RefDecl>(var->name);
-                    else expr = std::make_unique<StateDecl>(var->name);
-                } else {
-                    throw std::runtime_error("Parser Error: 'ref' or 'state' must be followed by a variable or assignment.");
-                }
-            }
-            return expr;
-        };
-
-        auto expr = parseItem();
+        auto expr = assignment();
         if (match({ TokenType::COMMA })) {
             std::vector<std::unique_ptr<Expr>> exprs;
             exprs.push_back(std::move(expr));
             do {
                 while (match({ TokenType::NEWLINE })) {}
-                exprs.push_back(parseItem());
+                exprs.push_back(assignment());
             } while (match({ TokenType::COMMA }));
             return std::make_unique<SequenceExpr>(std::move(exprs));
         }
@@ -147,6 +125,8 @@ namespace jc {
     }
 
     std::unique_ptr<Expr> Parser::assignment() {
+        bool isRef = match({ TokenType::REF });
+        bool isState = !isRef && match({ TokenType::STATE });
 
         // ★ 特权推测解析：精准捕获带类型注解的函数定义 f(x: int) -> int = ...
         if (check(TokenType::IDENTIFIER) &&
@@ -194,11 +174,11 @@ namespace jc {
                             while (match({ TokenType::NEWLINE })) {}
                             if (hasRestParam) throw std::runtime_error("Parser Error: Rest parameter must be last.");
 
-                            bool isRef = match({ TokenType::REF });
+                            bool isParamRef = match({ TokenType::REF });
 
                             // 1. 变长参数 ...args
                             if (match({ TokenType::ELLIPSIS })) {
-                                if (isRef) throw std::runtime_error("Parser Error: Rest parameter cannot be ref.");
+                                if (isParamRef) throw std::runtime_error("Parser Error: Rest parameter cannot be ref.");
                                 params.push_back(consume(TokenType::IDENTIFIER, "Expect parameter name."));
                                 paramIsRef.push_back(false);
                                 paramTypes.push_back(""); // 变长暂不强校验类型
@@ -209,7 +189,7 @@ namespace jc {
 
                             // 2. 字典解构参数 {a, b}
                             if (check(TokenType::LBRACE)) {
-                                if (isRef) throw std::runtime_error("Destructured dict cannot be ref.");
+                                if (isParamRef) throw std::runtime_error("Destructured dict cannot be ref.");
                                 auto dictNode = parseDictLiteral();
 
                                 std::string phName = "__param_dict_" + std::to_string(destructCounter++);
@@ -235,7 +215,7 @@ namespace jc {
                             // 3. 通规变量参数 x : int = 10
                             Token paramName = consume(TokenType::IDENTIFIER, "Parser Error: Expect parameter name.");
                             params.push_back(paramName);
-                            paramIsRef.push_back(isRef);
+                            paramIsRef.push_back(isParamRef);
 
                             std::string pType = "";
                             if (match({ TokenType::COLON })) {
@@ -282,6 +262,10 @@ namespace jc {
                     }
                     else {
                         finalBody = std::shared_ptr<Expr>(rawB.release());
+                    }
+
+                    if (isRef || isState) {
+                        throw std::runtime_error("Parser Error: 'ref' or 'state' cannot be applied to function definition.");
                     }
 
                     return std::make_unique<FunctionDef>(
@@ -390,6 +374,22 @@ namespace jc {
 
             throw std::runtime_error("Parser Error: Invalid assignment target at '" + equals.lexeme + "'.");
         }
+
+        if (isRef || isState) {
+            if (auto* assign = dynamic_cast<Assign*>(expr.get())) {
+                assign->isRef = isRef;
+                assign->isState = isState;
+            } else if (auto* compAssign = dynamic_cast<CompoundAssign*>(expr.get())) {
+                compAssign->isRef = isRef;
+                compAssign->isState = isState;
+            } else if (auto* var = dynamic_cast<Variable*>(expr.get())) {
+                if (isRef) expr = std::make_unique<RefDecl>(var->name);
+                else expr = std::make_unique<StateDecl>(var->name);
+            } else {
+                throw std::runtime_error("Parser Error: 'ref' or 'state' must be followed by a variable or assignment.");
+            }
+        }
+
         return expr;
     }
 
