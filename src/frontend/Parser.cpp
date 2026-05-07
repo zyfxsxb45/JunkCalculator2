@@ -5,7 +5,39 @@
 namespace jc {
 
     std::unique_ptr<Expr> Parser::expression() {
-        return assignment();
+        bool isRef = match({ TokenType::REF });
+        bool isState = !isRef && match({ TokenType::STATE });
+
+        auto parseItem = [&]() {
+            auto expr = assignment();
+            if (isRef || isState) {
+                if (auto* assign = dynamic_cast<Assign*>(expr.get())) {
+                    assign->isRef = isRef;
+                    assign->isState = isState;
+                } else if (auto* compAssign = dynamic_cast<CompoundAssign*>(expr.get())) {
+                    compAssign->isRef = isRef;
+                    compAssign->isState = isState;
+                } else if (auto* var = dynamic_cast<Variable*>(expr.get())) {
+                    if (isRef) expr = std::make_unique<RefDecl>(var->name);
+                    else expr = std::make_unique<StateDecl>(var->name);
+                } else {
+                    throw std::runtime_error("Parser Error: 'ref' or 'state' must be followed by a variable or assignment.");
+                }
+            }
+            return expr;
+        };
+
+        auto expr = parseItem();
+        if (match({ TokenType::COMMA })) {
+            std::vector<std::unique_ptr<Expr>> exprs;
+            exprs.push_back(std::move(expr));
+            do {
+                while (match({ TokenType::NEWLINE })) {}
+                exprs.push_back(parseItem());
+            } while (match({ TokenType::COMMA }));
+            return std::make_unique<SequenceExpr>(std::move(exprs));
+        }
+        return expr;
     }
 
     std::unique_ptr<Expr> Parser::pipe() {
@@ -111,20 +143,6 @@ namespace jc {
                 std::move(elseBranch));
         }
 
-        return expr;
-    }
-
-    std::unique_ptr<Expr> Parser::parseForInitOrUpdate() {
-        auto expr = assignment();
-        if (match({ TokenType::COMMA })) {
-            std::vector<std::unique_ptr<Expr>> exprs;
-            exprs.push_back(std::move(expr));
-            do {
-                while (match({ TokenType::NEWLINE })) {} // 容忍逗号后的换行
-                exprs.push_back(assignment());
-            } while (match({ TokenType::COMMA }));
-            return std::make_unique<SequenceExpr>(std::move(exprs));
-        }
         return expr;
     }
 
@@ -298,17 +316,7 @@ namespace jc {
 
             auto value = assignment();
 
-            bool isRef = false;
-            bool isState = false;
-            if (auto* refDecl = dynamic_cast<RefDecl*>(expr.get())) {
-                isRef = true;
-                expr = std::make_unique<Variable>(refDecl->name);
-            } else if (auto* stateDecl = dynamic_cast<StateDecl*>(expr.get())) {
-                isState = true;
-                expr = std::make_unique<Variable>(stateDecl->name);
-            }
-
-            return std::make_unique<CompoundAssign>(std::move(expr), baseOp, std::move(value), isRef, isState);
+            return std::make_unique<CompoundAssign>(std::move(expr), baseOp, std::move(value), false, false);
         }
 
         // ── 处理标准赋值 (=) ──
@@ -316,23 +324,11 @@ namespace jc {
             Token equals = previous();
             auto value = assignment();  // ★ 直接读取右值即可，把上下两行记录 index 的删掉
 
-            bool isRef = false;
-            bool isState = false;
-            if (auto* refDecl = dynamic_cast<RefDecl*>(expr.get())) {
-                isRef = true;
-                expr = std::make_unique<Variable>(refDecl->name);
-            } else if (auto* stateDecl = dynamic_cast<StateDecl*>(expr.get())) {
-                isState = true;
-                expr = std::make_unique<Variable>(stateDecl->name);
-            }
-
             if (auto* dotExpr = dynamic_cast<DotAccess*>(expr.get())) {
-                if (isRef || isState) throw std::runtime_error("Parser Error: 'ref' or 'state' can only modify a variable, not a property.");
                 return std::make_unique<DotAssign>(std::move(dotExpr->object), std::move(dotExpr->field), std::move(value));
             }
 
             if (auto* indexExpr = dynamic_cast<IndexAccess*>(expr.get())) {
-                if (isRef || isState) throw std::runtime_error("Parser Error: 'ref' or 'state' can only modify a variable, not an index.");
                 std::vector<std::vector<std::unique_ptr<Expr>>> chain;
                 IndexAccess* currentIA = indexExpr;
                 chain.push_back(std::move(currentIA->indices));
@@ -351,7 +347,6 @@ namespace jc {
             }
 
             if (auto* matNode = dynamic_cast<MatrixNode*>(expr.get())) {
-                if (isRef || isState) throw std::runtime_error("Parser Error: 'ref' or 'state' cannot be used with destructuring assignment.");
                 std::vector<Token> names;
                 bool validDestruct = true;
 
@@ -369,7 +364,6 @@ namespace jc {
             }
 
             if (auto* dictNode = dynamic_cast<DictLiteral*>(expr.get())) {
-                if (isRef || isState) throw std::runtime_error("Parser Error: 'ref' or 'state' cannot be used with destructuring assignment.");
                 std::vector<std::pair<std::string, Token>> targets;
                 bool validDestruct = true;
                 for (auto& entry : dictNode->entries) {
@@ -389,7 +383,7 @@ namespace jc {
             }
 
             if (auto* varExpr = dynamic_cast<Variable*>(expr.get())) {
-                return std::make_unique<Assign>(varExpr->name, std::move(value), isRef, isState);
+                return std::make_unique<Assign>(varExpr->name, std::move(value), false, false);
             }
 
             // ★ （旧的 Call 拦截已经被上面顶端安全取代，这里删去原来的 Call if 分支即可！）
@@ -834,11 +828,11 @@ namespace jc {
         }
 
         // 传统三段式 for
-        auto init = parseForInitOrUpdate();
+        auto init = expression();
         consume(TokenType::SEMICOLON, "Parser Error: Expect ';' after for-initializer.");
         auto cond = expression();
         consume(TokenType::SEMICOLON, "Parser Error: Expect ';' after for-condition.");
-        auto update = parseForInitOrUpdate();
+        auto update = expression();
         consume(TokenType::RPAREN, "Parser Error: Expect ')' after for-clauses.");
         auto body = parseStatementOrBlock();
         return std::make_unique<ForExpr>(std::move(init), std::move(cond), std::move(update), std::move(body));
@@ -935,14 +929,6 @@ namespace jc {
             consume(TokenType::ASSIGN, "Parser Error: 'const' declaration requires '= value'.");
             auto value = expression();
             return std::make_unique<ConstDecl>(name, std::move(value));
-        }
-        if (match({ TokenType::REF })) {
-            Token name = consume(TokenType::IDENTIFIER, "Parser Error: Expect variable name after 'ref'.");
-            return std::make_unique<RefDecl>(name);
-        }
-        if (match({ TokenType::STATE })) {
-            Token name = consume(TokenType::IDENTIFIER, "Parser Error: Expect variable name after 'state'.");
-            return std::make_unique<StateDecl>(name);
         }
         if (match({ TokenType::DELETE })) {
             std::vector<Token> names;

@@ -76,7 +76,7 @@ namespace jc {
                 slot = resolveLocal(name);
             }
 
-            if (slot != -1) {
+            if (slot != -1 && current().refNames.count(name) == 0 && current().stateNames.count(name) == 0) {
                 emit(OpCode::OP_SET_LOCAL, lastLine);
                 emit16(static_cast<uint16_t>(slot), lastLine);
             }
@@ -308,7 +308,7 @@ namespace jc {
         lastLine = expr->name.line;
         const std::string& name = expr->name.lexeme;
         int slot = resolveLocal(name);
-        if (slot != -1) {
+        if (slot != -1 && current().refNames.count(name) == 0 && current().stateNames.count(name) == 0) {
             emit(OpCode::OP_GET_LOCAL, expr->name.line);
             emit16(static_cast<uint16_t>(slot), expr->name.line);
         }
@@ -355,7 +355,7 @@ namespace jc {
             }
         }
 
-        if (slot != -1 && !expr->isRef && !expr->isState) {
+        if (slot != -1 && current().refNames.count(name) == 0 && current().stateNames.count(name) == 0) {
             emit(OpCode::OP_SET_LOCAL, expr->name.line);
             emit16(static_cast<uint16_t>(slot), expr->name.line);
         }
@@ -914,7 +914,7 @@ namespace jc {
             }
 
             // 读取当前值
-            if (slot != -1 && !expr->isRef && !expr->isState) {
+            if (slot != -1 && current().refNames.count(name) == 0 && current().stateNames.count(name) == 0) {
                 emit(OpCode::OP_GET_LOCAL, lastLine);
                 emit16(static_cast<uint16_t>(slot), lastLine);
             }
@@ -934,14 +934,12 @@ namespace jc {
             compileNode(expr->value.get());
             emitOp(expr->op);
 
-            if (!expr->isRef && !expr->isState) {
-                if (stateStack.size() > 1 && slot == -1 && current().refNames.count(name) == 0 && current().stateNames.count(name) == 0) {
-                    addLocal(name);
-                    slot = resolveLocal(name);
-                }
+            if (stateStack.size() > 1 && slot == -1 && current().refNames.count(name) == 0 && current().stateNames.count(name) == 0) {
+                addLocal(name);
+                slot = resolveLocal(name);
             }
 
-            if (slot != -1 && !expr->isRef && !expr->isState) {
+            if (slot != -1 && current().refNames.count(name) == 0 && current().stateNames.count(name) == 0) {
                 emit(OpCode::OP_SET_LOCAL, lastLine);
                 emit16(static_cast<uint16_t>(slot), lastLine);
             }
