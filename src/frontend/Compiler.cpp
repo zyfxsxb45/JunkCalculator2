@@ -671,18 +671,6 @@ namespace jc {
         initCompiler(fn.get());
         beginScope();
 
-        // ★ 自动将自身函数名加入 refNames，以支持局部函数的递归调用
-        bool paramShadowsFunc = false;
-        for (const auto& p : expr->params) {
-            if (p.lexeme == funcName) {
-                paramShadowsFunc = true;
-                break;
-            }
-        }
-        if (!paramShadowsFunc) {
-            current().refNames.insert(funcName);
-        }
-
         for (size_t i = 0; i < expr->params.size(); ++i) {
             addLocal(expr->params[i].lexeme);
         }
@@ -851,6 +839,13 @@ namespace jc {
         int currentLevel = static_cast<int>(stateStack.size()) - 1;
         bool isRef = stateStack[currentLevel].refNames.count(name) > 0;
         bool isState = stateStack[currentLevel].stateNames.count(name) > 0;
+        
+        // ★ 规避副作用：仅在闭包捕获自身函数名时，临时强制按引用捕获。
+        // 这样既支持了递归，又不会污染 refNames 导致无法创建同名局部变量。
+        if (stateStack[currentLevel].function && name == stateStack[currentLevel].function->name) {
+            isRef = true;
+        }
+        
         int uv = resolveUpvalueAt(currentLevel, name, isRef, isState);
         if (uv == -2) return -1;
         return uv;
