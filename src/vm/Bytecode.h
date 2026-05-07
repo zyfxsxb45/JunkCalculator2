@@ -502,6 +502,7 @@ namespace jc {
             std::string name;
             bool isLocal;   // true=来自外层局部变量, false=来自外层上值
             int index;      // 对应的 slot 或 upvalue index
+            bool isRef = false; // ★ 新增：是否按引用捕获
         };
         std::vector<UpvalueInfo> upvalues;
         std::vector<bool> paramIsRef;
@@ -510,11 +511,17 @@ namespace jc {
     // ═══════════════════════════════════════════
     // 调用帧 (Call Frame)
     // ═══════════════════════════════════════════
+    struct UpVal {
+        Value* location = nullptr;
+        Value closed = Value::none();
+        int stackIndex = -1;
+    };
+
     struct CallFrame {
         const CompiledFunction* function = nullptr;
         int ip = 0;
         int stackBase = 0;
-        std::shared_ptr<std::vector<Value>> upvalues;
+        std::shared_ptr<std::vector<std::shared_ptr<UpVal>>> upvalues;
 
         // ★ 新增：独立与当前调用帧绑定的物理上下文寄存器！
         Value selfContext = Value::none();

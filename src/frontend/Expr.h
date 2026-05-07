@@ -26,7 +26,7 @@ namespace jc {
     struct BreakExpr;      // ★ 新增
     struct ContinueExpr;   // ★ 新增
     struct ReturnExpr;
-    struct RefParam;
+    struct RefDecl;
     struct IndexAccess;      // ★ 新增
     struct IndexAssign;      // ★ 新增
     struct ConstDecl;
@@ -75,6 +75,7 @@ namespace jc {
         virtual std::any visitIndexAccess(IndexAccess* expr) = 0;    // ★ 新增
         virtual std::any visitIndexAssign(IndexAssign* expr) = 0;    // ★ 新增
         virtual std::any visitConstDecl(ConstDecl* expr) = 0;   // ★ 新增
+        virtual std::any visitRefDecl(RefDecl* expr) = 0;       // ★ 新增
         virtual std::any visitDeleteExpr(DeleteExpr* expr) = 0;   // ★ 新增
         virtual std::any visitCompoundAssign(CompoundAssign* expr) = 0;
         virtual std::any visitLambdaExpr(LambdaExpr* expr) = 0;
@@ -144,8 +145,9 @@ namespace jc {
     struct Assign : public Expr {
         Token name;
         std::unique_ptr<Expr> value;
-        Assign(Token name, std::unique_ptr<Expr> value)
-            : name(std::move(name)), value(std::move(value)) {
+        bool isRef; // ★ 新增
+        Assign(Token name, std::unique_ptr<Expr> value, bool isRef = false)
+            : name(std::move(name)), value(std::move(value)), isRef(isRef) {
         }
         std::any accept(ExprVisitor& visitor) override { return visitor.visitAssign(this); }
     };
@@ -260,12 +262,10 @@ namespace jc {
         std::any accept(ExprVisitor& visitor) override { return visitor.visitReturnExpr(this); }
     };
 
-    struct RefParam : public Expr {
+    struct RefDecl : public Expr {
         Token name;
-        explicit RefParam(Token name) : name(std::move(name)) {}
-        std::any accept(ExprVisitor&) override {
-            throw std::runtime_error("Syntax Error: 'ref' can only be used in function parameter declarations.");
-        }
+        explicit RefDecl(Token name) : name(std::move(name)) {}
+        std::any accept(ExprVisitor& visitor) override { return visitor.visitRefDecl(this); }
     };
 
     struct IndexAccess : public Expr {
@@ -324,8 +324,9 @@ namespace jc {
         std::unique_ptr<Expr> target;   // Variable 或 IndexAccess
         TokenType op;                    // PLUS, MINUS, STAR, SLASH, PERCENT, CARET
         std::unique_ptr<Expr> value;
-        CompoundAssign(std::unique_ptr<Expr> target, TokenType op, std::unique_ptr<Expr> value)
-            : target(std::move(target)), op(op), value(std::move(value)) {
+        bool isRef; // ★ 新增
+        CompoundAssign(std::unique_ptr<Expr> target, TokenType op, std::unique_ptr<Expr> value, bool isRef = false)
+            : target(std::move(target)), op(op), value(std::move(value)), isRef(isRef) {
         }
         std::any accept(ExprVisitor& visitor) override { return visitor.visitCompoundAssign(this); }
     };

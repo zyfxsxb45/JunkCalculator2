@@ -298,6 +298,12 @@ namespace jc {
 
             auto value = assignment();
 
+            bool isRef = false;
+            if (auto* refDecl = dynamic_cast<RefDecl*>(expr.get())) {
+                isRef = true;
+                expr = std::make_unique<Variable>(refDecl->name);
+            }
+
             if (auto* gdecl = dynamic_cast<GlobalDecl*>(expr.get())) {
                 if (gdecl->names.size() != 1) {
                     throw std::runtime_error("Parser Error: Cannot use compound assignment on multiple global declarations.");
@@ -306,10 +312,10 @@ namespace jc {
                 std::vector<std::unique_ptr<Expr>> stmts;
                 stmts.push_back(std::move(expr));
                 stmts.push_back(std::make_unique<CompoundAssign>(
-                    std::make_unique<Variable>(varTok), baseOp, std::move(value)));
+                    std::make_unique<Variable>(varTok), baseOp, std::move(value), isRef));
                 return std::make_unique<Block>(std::move(stmts));
             }
-            return std::make_unique<CompoundAssign>(std::move(expr), baseOp, std::move(value));
+            return std::make_unique<CompoundAssign>(std::move(expr), baseOp, std::move(value), isRef);
         }
 
         // ── 处理标准赋值 (=) ──
@@ -317,20 +323,28 @@ namespace jc {
             Token equals = previous();
             auto value = assignment();  // ★ 直接读取右值即可，把上下两行记录 index 的删掉
 
+            bool isRef = false;
+            if (auto* refDecl = dynamic_cast<RefDecl*>(expr.get())) {
+                isRef = true;
+                expr = std::make_unique<Variable>(refDecl->name);
+            }
+
             if (auto* gdecl = dynamic_cast<GlobalDecl*>(expr.get())) {
                 if (gdecl->names.size() != 1) throw std::runtime_error("Parser Error: Cannot assign to multiple global declarations at once.");
                 Token varTok = gdecl->names[0];
                 std::vector<std::unique_ptr<Expr>> stmts;
                 stmts.push_back(std::move(expr));
-                stmts.push_back(std::make_unique<Assign>(varTok, std::move(value)));
+                stmts.push_back(std::make_unique<Assign>(varTok, std::move(value), isRef));
                 return std::make_unique<Block>(std::move(stmts));
             }
 
             if (auto* dotExpr = dynamic_cast<DotAccess*>(expr.get())) {
+                if (isRef) throw std::runtime_error("Parser Error: 'ref' can only modify a variable, not a property.");
                 return std::make_unique<DotAssign>(std::move(dotExpr->object), std::move(dotExpr->field), std::move(value));
             }
 
             if (auto* indexExpr = dynamic_cast<IndexAccess*>(expr.get())) {
+                if (isRef) throw std::runtime_error("Parser Error: 'ref' can only modify a variable, not an index.");
                 std::vector<std::vector<std::unique_ptr<Expr>>> chain;
                 IndexAccess* currentIA = indexExpr;
                 chain.push_back(std::move(currentIA->indices));
@@ -349,6 +363,7 @@ namespace jc {
             }
 
             if (auto* matNode = dynamic_cast<MatrixNode*>(expr.get())) {
+                if (isRef) throw std::runtime_error("Parser Error: 'ref' cannot be used with destructuring assignment.");
                 std::vector<Token> names;
                 bool validDestruct = true;
 
@@ -366,6 +381,7 @@ namespace jc {
             }
 
             if (auto* dictNode = dynamic_cast<DictLiteral*>(expr.get())) {
+                if (isRef) throw std::runtime_error("Parser Error: 'ref' cannot be used with destructuring assignment.");
                 std::vector<std::pair<std::string, Token>> targets;
                 bool validDestruct = true;
                 for (auto& entry : dictNode->entries) {
@@ -385,7 +401,7 @@ namespace jc {
             }
 
             if (auto* varExpr = dynamic_cast<Variable*>(expr.get())) {
-                return std::make_unique<Assign>(varExpr->name, std::move(value));
+                return std::make_unique<Assign>(varExpr->name, std::move(value), isRef);
             }
 
             // ★ （旧的 Call 拦截已经被上面顶端安全取代，这里删去原来的 Call if 分支即可！）
@@ -942,7 +958,7 @@ namespace jc {
         }
         if (match({ TokenType::REF })) {
             Token name = consume(TokenType::IDENTIFIER, "Parser Error: Expect variable name after 'ref'.");
-            return std::make_unique<RefParam>(name);
+            return std::make_unique<RefDecl>(name);
         }
         if (match({ TokenType::DELETE })) {
             std::vector<Token> names;

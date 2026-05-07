@@ -23,6 +23,7 @@ namespace jc {
             std::vector<Local> locals;
             int maxLocals = 0;                  // ★ 新增：跟踪该函数所使用的最大局部变量数
             std::set<std::string> globalNames;
+            std::set<std::string> refNames;     // ★ 新增：跟踪当前作用域显式 ref 的外部变量
             int tryDepth = 0;
             std::string expectedReturnType = "";
         };
@@ -44,6 +45,7 @@ namespace jc {
         int functionIndexOffset = 0;
         int lastLine = 0;
         std::string currentSourceFile;
+        std::set<std::string> knownGlobals; // ★ 跟踪已知的全局变量
 
         CompilerState& current() { return stateStack.back(); }
         Chunk* chunk() { return &current().function->chunk; }
@@ -65,8 +67,8 @@ namespace jc {
         void compileCompClause(ListCompExpr* expr, size_t clauseIdx);
         void emitDefaultPreamble(const std::vector<std::shared_ptr<Expr>>& defaultExprs, int paramCount);
         int resolveUpvalue(const std::string& name);
-        int resolveUpvalueAt(int level, const std::string& name);
-        int addUpvalue(int level, const std::string& name, bool isLocal, int index);
+        int resolveUpvalueAt(int level, const std::string& name, bool isRef);
+        int addUpvalue(int level, const std::string& name, bool isLocal, int index, bool isRef);
         void emitStoreTarget(Expr* target);
 
     public:
@@ -94,6 +96,7 @@ namespace jc {
         std::any visitIndexAccess(IndexAccess*) override;
         std::any visitIndexAssign(IndexAssign*) override;
         std::any visitConstDecl(ConstDecl*) override;
+        std::any visitRefDecl(RefDecl*) override;
         std::any visitDeleteExpr(DeleteExpr*) override;
         std::any visitCompoundAssign(CompoundAssign*) override;
         std::any visitLambdaExpr(LambdaExpr*) override;

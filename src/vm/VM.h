@@ -63,6 +63,11 @@ namespace jc {
             std::string catchVarName = ""; // catch 变量名（空则不绑定）
         };
         std::vector<ExceptionHandler> exceptionHandlers;
+
+        // ★ 开放上值追踪 (Open Upvalues)
+        std::vector<std::shared_ptr<UpVal>> openUpvalues;
+        void closeUpvalues(int lastStackIndex);
+
         // ==============================================================
         // ★ 新增：干净统一的异常回滚处理与栈轨迹抓取 (Stack Trace)
         // ==============================================================
@@ -135,7 +140,7 @@ namespace jc {
             compiledFunctions = fns;  // ★ 拷贝，不移动
         }
         Value callVMFunction(int fnIdx, const std::vector<Value>& args,
-            std::shared_ptr<std::vector<Value>> upvalues = nullptr,
+            std::shared_ptr<std::vector<std::shared_ptr<UpVal>>> upvalues = nullptr,
             Value boundSelf = Value::none(), Value boundClass = Value::none());
         const std::map<std::string, NativeCallable>& getNativeBuiltins() const { return nativeBuiltins; }
 
@@ -147,6 +152,7 @@ namespace jc {
             globals.clear();
             constGlobals.clear();
             importedModules.clear(); // ★ 核心修复：彻底粉碎模块导入的防环缓存！
+            openUpvalues.clear();
             // ★ 贴心修复：清理全局变量后，自动把系统必不可少的基础常量重新注入环境
             globals["PI"] = Value(3.14159265358979323846);
             globals["E"] = Value(2.71828182845904523536);
