@@ -2887,6 +2887,32 @@ namespace jc {
                 }
             }
             
+            // 复分母有理化 (Complex Denominator Rationalization)
+            if (exp.ptr->getType() == SymType::NUM) {
+                auto [isInt, n] = extractExactInt(std::static_pointer_cast<SymNum>(exp.ptr)->value);
+                if (isInt && n < 0) {
+                    if (isPolynomialIn(base, "i")) {
+                        auto coeffs = extractCoeffs(base, "i");
+                        if (coeffs.size() == 2 && !coeffs[1].isZero()) {
+                            SymExpr A = coeffs[0];
+                            SymExpr B = coeffs[1];
+                            if (!containsVar(A.ptr, "i") && !containsVar(B.ptr, "i")) {
+                                SymExpr den = simplifyCore(A * A + B * B);
+                                if (!den.isZero()) {
+                                    SymExpr conj = simplifyCore(A - SymExpr::makeVar("i") * B);
+                                    SymExpr inv = simplifyCore(expand_core(conj * (den ^ SymExpr(BigInt(-1))), SymConfig::maxExpandTerms));
+                                    SymExpr res(BigInt(1));
+                                    for (int64_t i = 0; i < -n; ++i) {
+                                        res = simplifyCore(expand_core(res * inv, SymConfig::maxExpandTerms));
+                                    }
+                                    return res;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            
             newNode = (base ^ exp).ptr;
             break;
         }

@@ -1598,7 +1598,8 @@ namespace jc {
                 if (!node || !feat_visited.insert(node.get()).second) return;
                 if (node->getType() == SymType::FUNC) {
                     auto fn = std::static_pointer_cast<SymFunc>(node)->name;
-                    if (fn == "sin" || fn == "cos" || fn == "tan" || fn == "cot" || fn == "sec" || fn == "csc") has_trig = true;
+                    if (fn == "sin" || fn == "cos" || fn == "tan" || fn == "cot" || fn == "sec" || fn == "csc" ||
+                        fn == "sinh" || fn == "cosh" || fn == "tanh" || fn == "coth" || fn == "sech" || fn == "csch") has_trig = true;
                     else if (fn == "exp") has_exp = true;
                     else if (fn == "log") has_log = true;
                     else if (fn == "sqrt" || fn == "cbrt" || fn == "root" || fn == "RootOf" || fn == "RootSum") has_radical = true;
@@ -2828,6 +2829,143 @@ namespace jc {
                         SymExpr res = simplifyCore((SymExpr(BigInt(2)) * num / sqrtNegDelta) * atan_term);
                         if (SymConfig::debugIntegration) std::cout << std::string(current_depth * 2, ' ') << "<- Inverse Quadratic Success" << std::endl;
                         return coeff * res;
+                    }
+                }
+            }
+            return std::nullopt;
+            }});
+
+            // --- 1.99 多项式-指数型速通 (Poly-Exp Fast Path) ---
+            strats.push_back({"Poly-Exp Fast Path", (has_exp || has_trig) ? 880 : 0, [&]() -> std::optional<SymExpr> {
+            if (varPart.ptr->getType() == SymType::MUL || varPart.ptr->getType() == SymType::FUNC || varPart.ptr->getType() == SymType::POW) {
+                SymExpr exp_varPart = simplifyCore(expand_core(trigToExp(varPart), SymConfig::maxExpandTerms));
+                
+                auto processTerm = [&](const SymExpr& term) -> std::optional<SymExpr> {
+                    SymExpr poly_factor(BigInt(1));
+                    SymExpr total_w(BigInt(0));
+                    bool found_exp = false;
+                    
+                    auto checkExp = [&](const SymExpr& arg) -> bool {
+                        if (arg.ptr->getType() == SymType::FUNC) {
+                            auto func = std::static_pointer_cast<SymFunc>(arg.ptr);
+                            if (func->name == "exp" && func->args.size() == 1) {
+                                SymExpr w = SymExpr(func->args[0]);
+                                SymExpr dw = simplifyCore(diff(w, var));
+                                if (!containsVar(dw.ptr, var)) {
+                                    total_w = simplifyCore(total_w + w);
+                                    found_exp = true;
+                                    return true;
+                                }
+                            }
+                        }
+                        return false;
+                    };
+
+                    if (term.ptr->getType() == SymType::MUL) {
+                        auto mul = std::static_pointer_cast<SymMul>(term.ptr);
+                        for (auto& arg : mul->args) {
+                            if (!checkExp(SymExpr(arg))) {
+                                poly_factor = poly_factor * SymExpr(arg);
+                            }
+                        }
+                    } else if (term.ptr->getType() == SymType::FUNC) {
+                        if (!checkExp(term)) {
+                            poly_factor = term;
+                        }
+                    } else {
+                        poly_factor = term;
+                    }
+
+                    poly_factor = simplifyCore(expand_core(poly_factor, SymConfig::maxExpandTerms));
+                    
+                    if (found_exp) {
+                        SymExpr c_val = simplifyCore(diff(total_w, var));
+                        if (!c_val.isZero()) {
+                            SymExpr exp_factor(std::make_shared<SymFunc>("exp", std::vector<std::shared_ptr<SymNode>>{total_w.ptr}));
+                            if (isPolynomialIn(poly_factor, var)) {
+                                auto coeffs = extractCoeffs(poly_factor, var);
+                                SymExpr result(BigInt(0));
+                                
+                                for (size_t n = 0; n < coeffs.size(); ++n) {
+                                    if (coeffs[n].isZero()) continue;
+                                    
+                                    SymExpr termSum(BigInt(0));
+                                    BigInt perm(1);
+                                    
+                                    for (size_t k = 0; k <= n; ++k) {
+                                        int sign = (k % 2 == 0) ? 1 : -1;
+                                        SymExpr inv_c_pow = c_val ^ SymExpr(BigInt(-static_cast<int64_t>(k + 1)));
+                                        SymExpr termCoeff = simplifyCore(SymExpr(BigInt(sign) * perm) * inv_c_pow);
+                                        SymExpr term_x = termCoeff * (SymExpr::makeVar(var) ^ SymExpr(BigInt(static_cast<int64_t>(n - k))));
+                                        termSum = termSum + term_x;
+                                        
+                                        perm = perm * BigInt(static_cast<int64_t>(n - k));
+                                    }
+                                    result = result + coeffs[n] * termSum;
+                                }
+                                return simplifyCore(result * exp_factor);
+                            }
+                        } else {
+                            SymExpr exp_factor(std::make_shared<SymFunc>("exp", std::vector<std::shared_ptr<SymNode>>{total_w.ptr}));
+                            poly_factor = simplifyCore(poly_factor * exp_factor);
+                            if (isPolynomialIn(poly_factor, var)) {
+                                auto coeffs = extractCoeffs(poly_factor, var);
+                                SymExpr result(BigInt(0));
+                                for (size_t n = 0; n < coeffs.size(); ++n) {
+                                    if (coeffs[n].isZero()) continue;
+                                    result = result + coeffs[n] * (SymExpr::makeVar(var) ^ SymExpr(BigInt(static_cast<int64_t>(n + 1)))) / SymExpr(BigInt(static_cast<int64_t>(n + 1)));
+                                }
+                                return result;
+                            }
+                        }
+                    } else {
+                        if (isPolynomialIn(poly_factor, var)) {
+                            auto coeffs = extractCoeffs(poly_factor, var);
+                            SymExpr result(BigInt(0));
+                            for (size_t n = 0; n < coeffs.size(); ++n) {
+                                if (coeffs[n].isZero()) continue;
+                                result = result + coeffs[n] * (SymExpr::makeVar(var) ^ SymExpr(BigInt(static_cast<int64_t>(n + 1)))) / SymExpr(BigInt(static_cast<int64_t>(n + 1)));
+                            }
+                            return result;
+                        }
+                    }
+                    return std::nullopt;
+                };
+
+                if (SymConfig::debugIntegration) std::cout << std::string(current_depth * 2, ' ') << "-> Trying Poly-Exp Fast Path" << std::endl;
+
+                auto simplifyComplex = [](const SymExpr& e) -> SymExpr {
+                    SymExpr expanded = simplifyCore(expand_core(e, SymConfig::maxExpandTerms));
+                    auto coeffs = extractCoeffs(expanded, "i");
+                    SymExpr real_part(BigInt(0)), imag_part(BigInt(0));
+                    for (size_t k = 0; k < coeffs.size(); ++k) {
+                        if (k % 4 == 0) real_part = real_part + coeffs[k];
+                        else if (k % 4 == 1) imag_part = imag_part + coeffs[k];
+                        else if (k % 4 == 2) real_part = real_part - coeffs[k];
+                        else if (k % 4 == 3) imag_part = imag_part - coeffs[k];
+                    }
+                    SymExpr res = simplifyCore(real_part);
+                    if (!imag_part.isZero()) {
+                        res = res + simplifyCore(imag_part) * SymExpr::makeVar("i");
+                    }
+                    return res;
+                };
+
+                if (exp_varPart.ptr->getType() == SymType::ADD) {
+                    SymExpr totalRes(BigInt(0));
+                    auto add = std::static_pointer_cast<SymAdd>(exp_varPart.ptr);
+                    for (auto& arg : add->args) {
+                        auto termRes = processTerm(SymExpr(arg));
+                        if (!termRes) return std::nullopt;
+                        totalRes = totalRes + *termRes;
+                    }
+                    if (SymConfig::debugIntegration) std::cout << std::string(current_depth * 2, ' ') << "<- Poly-Exp Fast Path Success (ADD)" << std::endl;
+                    return coeff * simplifyComplex(expToTrig(totalRes));
+                } else {
+                    auto termRes = processTerm(exp_varPart);
+                    if (termRes) {
+                        if (SymConfig::debugIntegration) std::cout << std::string(current_depth * 2, ' ') << "<- Poly-Exp Fast Path Success" << std::endl;
+                        return coeff * simplifyComplex(expToTrig(*termRes));
                     }
                 }
             }
