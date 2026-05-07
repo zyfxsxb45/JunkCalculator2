@@ -55,14 +55,31 @@ function runFile(filePath, cwd, extraFlags = "") {
 
 function activate(context) {
     // ★ 新增：自动补全 (从 documentation.json 加载函数列表)
-    const docPath = path.join(__dirname, '../data/documentation.json');
     let functions = {};
     try {
-        if (fs.existsSync(docPath)) {
-            const docData = JSON.parse(fs.readFileSync(docPath, 'utf-8'));
-            if (docData && docData.functions) {
-                functions = docData.functions;
+        const possiblePaths = [
+            path.join(__dirname, '../data/documentation.json'), // 源码仓库相对路径
+            path.join(__dirname, 'documentation.json')          // 插件打包后的内部路径
+        ];
+        
+        if (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0) {
+            possiblePaths.push(path.join(vscode.workspace.workspaceFolders[0].uri.fsPath, 'data/documentation.json'));
+        }
+
+        let loaded = false;
+        for (const docPath of possiblePaths) {
+            if (fs.existsSync(docPath)) {
+                const docData = JSON.parse(fs.readFileSync(docPath, 'utf-8'));
+                if (docData && docData.functions) {
+                    functions = docData.functions;
+                    loaded = true;
+                    break;
+                }
             }
+        }
+        
+        if (!loaded) {
+            vscode.window.showWarningMessage("JC2 Extension: Could not find documentation.json. Function autocompletion will be disabled.");
         }
     } catch (e) {
         console.error("Failed to load documentation.json for autocompletion", e);

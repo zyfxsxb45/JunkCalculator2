@@ -4,6 +4,10 @@
     "description": "Syntax highlighting and script runner for Junk Calculator 2.3 [VM Edition]",
     "version": "2.3.3",
     "publisher": "yuliangyang",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/YuDan256/JunkCalculator2.git"
+    },
     "engines": {
         "vscode": "^1.80.0"
     },
@@ -101,6 +105,7 @@
         }
     },
     "scripts": {
+        "vscode:prepublish": "copy ..\\data\\documentation.json .\\documentation.json /Y",
         "test": "echo \"Error: no test specified\" && exit 1"
     },
     "keywords": [],
