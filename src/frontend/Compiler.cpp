@@ -329,8 +329,18 @@ namespace jc {
 
     std::any Compiler::visitAssign(Assign* expr) {
         lastLine = expr->name.line;
-        compileNode(expr->value.get());
         const std::string& name = expr->name.lexeme;
+
+        // ★ Pre-register ref/state BEFORE compiling RHS so variable reads resolve to upvalue
+        if (expr->isRef) {
+            if (current().stateNames.count(name) > 0) throw std::runtime_error("Compiler Error: Cannot declare variable as both 'ref' and 'state'.");
+            current().refNames.insert(name);
+        } else if (expr->isState) {
+            if (current().refNames.count(name) > 0) throw std::runtime_error("Compiler Error: Cannot declare variable as both 'ref' and 'state'.");
+            current().stateNames.insert(name);
+        }
+
+        compileNode(expr->value.get());
 
         if (stateStack.size() == 1) {
             knownGlobals.insert(name);
@@ -339,13 +349,7 @@ namespace jc {
         int slot = resolveLocal(name);
         int upvalue = -1;
 
-        if (expr->isRef) {
-            if (current().stateNames.count(name) > 0) throw std::runtime_error("Compiler Error: Cannot declare variable as both 'ref' and 'state'.");
-            current().refNames.insert(name); // ★ 提前注册，确保 resolveUpvalue 能感知到 isRef
-            upvalue = resolveUpvalue(name);
-        } else if (expr->isState) {
-            if (current().refNames.count(name) > 0) throw std::runtime_error("Compiler Error: Cannot declare variable as both 'ref' and 'state'.");
-            current().stateNames.insert(name);
+        if (expr->isRef || expr->isState) {
             upvalue = resolveUpvalue(name);
         } else {
             // ★ Auto-local Write (Shadowing)
@@ -1260,25 +1264,66 @@ namespace jc {
     }
 
     std::any Compiler::visitDestructAssign(DestructAssign* expr) {
+        int n = static_cast<int>(expr->targets.size());
+
+        // ★ Pre-register ref/state names BEFORE compiling RHS so reads resolve to upvalues
+        for (int i = 0; i < n; ++i) {
+            const std::string& name = expr->targets[i].name.lexeme;
+            if (name == "_") continue;
+            if (expr->targets[i].isRef) {
+                if (current().stateNames.count(name) > 0) throw std::runtime_error("Compiler Error: Cannot declare variable as both 'ref' and 'state'.");
+                current().refNames.insert(name);
+            } else if (expr->targets[i].isState) {
+                if (current().refNames.count(name) > 0) throw std::runtime_error("Compiler Error: Cannot declare variable as both 'ref' and 'state'.");
+                current().stateNames.insert(name);
+            }
+        }
+
         compileNode(expr->value.get());
-        int n = static_cast<int>(expr->names.size());
         emit(OpCode::OP_DESTRUCT, lastLine);
         emit(static_cast<uint8_t>(n), lastLine);
 
         for (int i = n - 1; i >= 0; --i) {
-            const std::string& name = expr->names[i].lexeme;
+            const std::string& name = expr->targets[i].name.lexeme;
+            bool isRef = expr->targets[i].isRef;
+            bool isState = expr->targets[i].isState;
+
             if (name == "_") { emit(OpCode::OP_POP, lastLine); continue; }
 
             if (stateStack.size() == 1) knownGlobals.insert(name);
 
             int slot = resolveLocal(name);
-            if (stateStack.size() > 1 && slot == -1 && current().refNames.count(name) == 0 && current().stateNames.count(name) == 0) {
-                addLocal(name);
-                slot = resolveLocal(name);
+            int upvalue = -1;
+
+            if (isRef) {
+                if (current().stateNames.count(name) > 0) throw std::runtime_error("Compiler Error: Cannot declare variable as both 'ref' and 'state'.");
+                current().refNames.insert(name);
+                upvalue = resolveUpvalue(name);
+            } else if (isState) {
+                if (current().refNames.count(name) > 0) throw std::runtime_error("Compiler Error: Cannot declare variable as both 'ref' and 'state'.");
+                current().stateNames.insert(name);
+                upvalue = resolveUpvalue(name);
+            } else {
+                if (stateStack.size() > 1 && slot == -1 && current().refNames.count(name) == 0 && current().stateNames.count(name) == 0) {
+                    addLocal(name);
+                    slot = resolveLocal(name);
+                }
             }
 
-            if (slot != -1) { emit(OpCode::OP_SET_LOCAL, lastLine); emit16(static_cast<uint16_t>(slot), lastLine); }
-            else { uint16_t idx = identifierConstant(name); emit(OpCode::OP_SET_GLOBAL, lastLine); emit16(idx, lastLine); }
+            if (slot != -1 && current().refNames.count(name) == 0 && current().stateNames.count(name) == 0) {
+                emit(OpCode::OP_SET_LOCAL, lastLine);
+                emit16(static_cast<uint16_t>(slot), lastLine);
+            } else {
+                if (upvalue == -1) upvalue = resolveUpvalue(name);
+                if (upvalue != -1) {
+                    emit(OpCode::OP_SET_UPVALUE, lastLine);
+                    emit16(static_cast<uint16_t>(upvalue), lastLine);
+                } else {
+                    uint16_t idx = identifierConstant(name);
+                    emit(OpCode::OP_SET_GLOBAL, lastLine);
+                    emit16(idx, lastLine);
+                }
+            }
             emit(OpCode::OP_POP, lastLine);
         }
         return {};
@@ -1644,16 +1689,30 @@ namespace jc {
     }
 
     std::any Compiler::visitDictDestructAssign(DictDestructAssign* expr) {
-        lastLine = expr->targets.front().second.line;
+        lastLine = expr->targets.front().name.line;
+
+        // ★ Pre-register ref/state names BEFORE compiling RHS so reads resolve to upvalues
+        for (auto& target : expr->targets) {
+            const std::string& varName = target.name.lexeme;
+            if (varName == "_") continue;
+            if (target.isRef) {
+                if (current().stateNames.count(varName) > 0) throw std::runtime_error("Compiler Error: Cannot declare variable as both 'ref' and 'state'.");
+                current().refNames.insert(varName);
+            } else if (target.isState) {
+                if (current().refNames.count(varName) > 0) throw std::runtime_error("Compiler Error: Cannot declare variable as both 'ref' and 'state'.");
+                current().stateNames.insert(varName);
+            }
+        }
 
         // 1. 将右侧要解构的数据源（Dict 或 Instance）解析并压入栈顶
         compileNode(expr->value.get());
 
         // 2. 依次扒取属性并分配
-        for (auto& pair : expr->targets) {
-            const std::string& fieldName = pair.first;
-            const Token& varTok = pair.second;
-            const std::string& varName = varTok.lexeme;
+        for (auto& target : expr->targets) {
+            const std::string& fieldName = target.key;
+            const std::string& varName = target.name.lexeme;
+            bool isRef = target.isRef;
+            bool isState = target.isState;
 
             // 将数据源 DUP 复制一份到栈顶，用来提取属性（因为 GET_PROPERTY 会吃掉原对象）
             emit(OpCode::OP_DUP, lastLine);
@@ -1663,24 +1722,40 @@ namespace jc {
             emit(OpCode::OP_GET_PROPERTY, lastLine);
             emit16(nameIdx, lastLine);
 
+            if (varName == "_") {
+                emit(OpCode::OP_POP, lastLine);
+                continue;
+            }
+
             if (stateStack.size() == 1) knownGlobals.insert(varName);
 
             // 此时提取到的数值在栈顶，准备塞入目标变量 varName 中
             int slot = resolveLocal(varName);
+            int upvalue = -1;
 
-            // Auto-local 拦截：如果我们是在局部作用域遇到新变量，自动设为 Local
-            if (stateStack.size() > 1 && slot == -1 && current().refNames.count(varName) == 0 && current().stateNames.count(varName) == 0) {
-                addLocal(varName);
-                slot = resolveLocal(varName);
+            if (isRef) {
+                if (current().stateNames.count(varName) > 0) throw std::runtime_error("Compiler Error: Cannot declare variable as both 'ref' and 'state'.");
+                current().refNames.insert(varName);
+                upvalue = resolveUpvalue(varName);
+            } else if (isState) {
+                if (current().refNames.count(varName) > 0) throw std::runtime_error("Compiler Error: Cannot declare variable as both 'ref' and 'state'.");
+                current().stateNames.insert(varName);
+                upvalue = resolveUpvalue(varName);
+            } else {
+                // Auto-local 拦截：如果我们是在局部作用域遇到新变量，自动设为 Local
+                if (stateStack.size() > 1 && slot == -1 && current().refNames.count(varName) == 0 && current().stateNames.count(varName) == 0) {
+                    addLocal(varName);
+                    slot = resolveLocal(varName);
+                }
             }
 
             // 存入变量体系
-            if (slot != -1) {
+            if (slot != -1 && current().refNames.count(varName) == 0 && current().stateNames.count(varName) == 0) {
                 emit(OpCode::OP_SET_LOCAL, lastLine);
                 emit16(static_cast<uint16_t>(slot), lastLine);
             }
             else {
-                int upvalue = resolveUpvalue(varName);
+                if (upvalue == -1) upvalue = resolveUpvalue(varName);
                 if (upvalue != -1) {
                     emit(OpCode::OP_SET_UPVALUE, lastLine);
                     emit16(static_cast<uint16_t>(upvalue), lastLine);

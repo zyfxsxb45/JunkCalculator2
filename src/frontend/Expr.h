@@ -502,10 +502,15 @@ namespace jc {
 
     // ★ [a, b, c] = expr
     struct DestructAssign : public Expr {
-        std::vector<Token> names;
+        struct Target {
+            Token name;
+            bool isRef;
+            bool isState;
+        };
+        std::vector<Target> targets;
         std::unique_ptr<Expr> value;
-        DestructAssign(std::vector<Token> names, std::unique_ptr<Expr> value)
-            : names(std::move(names)), value(std::move(value)) {
+        DestructAssign(std::vector<Target> targets, std::unique_ptr<Expr> value)
+            : targets(std::move(targets)), value(std::move(value)) {
         }
         std::any accept(ExprVisitor& visitor) override { return visitor.visitDestructAssign(this); }
     };
@@ -576,10 +581,15 @@ namespace jc {
     };
 
     struct DictDestructAssign : public Expr {
-        // 保存解析出的对子：<提取的属性名 (比如 "name"), 变量占位符 (比如 n)>
-        std::vector<std::pair<std::string, Token>> targets;
+        struct Target {
+            std::string key;
+            Token name;
+            bool isRef;
+            bool isState;
+        };
+        std::vector<Target> targets;
         std::unique_ptr<Expr> value;
-        DictDestructAssign(std::vector<std::pair<std::string, Token>> targets, std::unique_ptr<Expr> value)
+        DictDestructAssign(std::vector<Target> targets, std::unique_ptr<Expr> value)
             : targets(std::move(targets)), value(std::move(value)) {
         }
         std::any accept(ExprVisitor& visitor) override { return visitor.visitDictDestructAssign(this); }

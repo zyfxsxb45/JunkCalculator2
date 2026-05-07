@@ -200,11 +200,11 @@ namespace jc {
                                 defaultExprs.push_back(nullptr);
 
                                 auto* dl = dynamic_cast<DictLiteral*>(dictNode.get());
-                                std::vector<std::pair<std::string, Token>> targets;
+                                std::vector<DictDestructAssign::Target> targets;
                                 for (auto& entry : dl->entries) {
                                     auto* litKey = dynamic_cast<Literal*>(entry.first.get());
                                     auto* varVal = dynamic_cast<Variable*>(entry.second.get());
-                                    if (litKey && varVal) targets.push_back({ litKey->value, varVal->name });
+                                    if (litKey && varVal) targets.push_back({ litKey->value, varVal->name, false, false });
                                     else throw std::runtime_error("Invalid dict destructuring format.");
                                 }
                                 auto rhs = std::make_unique<Variable>(phTok);
@@ -338,33 +338,48 @@ namespace jc {
 
             if (auto* matNode = dynamic_cast<MatrixNode*>(expr.get())) {
                 if (isRef || isState) throw std::runtime_error("Parser Error: 'ref' or 'state' cannot be applied to destructuring.");
-                std::vector<Token> names;
+                std::vector<DestructAssign::Target> targets;
                 bool validDestruct = true;
 
                 for (auto& row : matNode->elements) {
                     for (auto& elem : row) {
-                        if (auto* v = dynamic_cast<Variable*>(elem.get())) names.push_back(v->name);
-                        else { validDestruct = false; break; }
+                        if (auto* v = dynamic_cast<Variable*>(elem.get())) {
+                            targets.push_back({v->name, false, false});
+                        } else if (auto* r = dynamic_cast<RefDecl*>(elem.get())) {
+                            targets.push_back({r->name, true, false});
+                        } else if (auto* s = dynamic_cast<StateDecl*>(elem.get())) {
+                            targets.push_back({s->name, false, true});
+                        } else {
+                            validDestruct = false; break;
+                        }
                     }
                     if (!validDestruct) break;
                 }
 
-                if (validDestruct && !names.empty()) {
-                    return std::make_unique<DestructAssign>(std::move(names), std::move(value));
+                if (validDestruct && !targets.empty()) {
+                    return std::make_unique<DestructAssign>(std::move(targets), std::move(value));
                 }
             }
 
             if (auto* dictNode = dynamic_cast<DictLiteral*>(expr.get())) {
                 if (isRef || isState) throw std::runtime_error("Parser Error: 'ref' or 'state' cannot be applied to destructuring.");
-                std::vector<std::pair<std::string, Token>> targets;
+                std::vector<DictDestructAssign::Target> targets;
                 bool validDestruct = true;
                 for (auto& entry : dictNode->entries) {
                     auto* litKey = dynamic_cast<Literal*>(entry.first.get());
-                    auto* varVal = dynamic_cast<Variable*>(entry.second.get());
-                    if (litKey && litKey->isString && varVal) {
-                        targets.push_back({ litKey->value, varVal->name });
+                    if (litKey && litKey->isString) {
+                        if (auto* varVal = dynamic_cast<Variable*>(entry.second.get())) {
+                            targets.push_back({ litKey->value, varVal->name, false, false });
+                        } else if (auto* refVal = dynamic_cast<RefDecl*>(entry.second.get())) {
+                            targets.push_back({ litKey->value, refVal->name, true, false });
+                        } else if (auto* stateVal = dynamic_cast<StateDecl*>(entry.second.get())) {
+                            targets.push_back({ litKey->value, stateVal->name, false, true });
+                        } else {
+                            validDestruct = false; break;
+                        }
+                    } else {
+                        validDestruct = false; break;
                     }
-                    else { validDestruct = false; break; }
                 }
                 if (validDestruct && !targets.empty()) {
                     return std::make_unique<DictDestructAssign>(std::move(targets), std::move(value));
@@ -1517,7 +1532,7 @@ namespace jc {
                     // 把刚才吞掉的标识符转为字符串常数作为 key
                     key = std::make_unique<Literal>(maybeIdTok.lexeme, true);
                 }
-                value = ternary();
+                value = assignment();
             }
             else if (isSimpleId) {
                 // ★ 它是简写的 "{ name }" 模式（没遇到冒号！）

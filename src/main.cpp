@@ -390,6 +390,8 @@ int main(int argc, char* argv[]) {
         }
         if (inputAborted) continue;
 
+        if (input.length() >= 2 && input[0] == '/' && input[1] == '/') continue;
+
         if (!input.empty() && input[0] == '/') {
             if (input == "/color on") { jc::colorsEnabled = true; continue; }
             if (input == "/color off") { jc::colorsEnabled = false; continue; }
