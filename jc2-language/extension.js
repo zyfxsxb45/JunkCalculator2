@@ -54,6 +54,53 @@ function runFile(filePath, cwd, extraFlags = "") {
 }
 
 function activate(context) {
+    // ★ 新增：自动补全 (从 documentation.json 加载函数列表)
+    const docPath = path.join(__dirname, '../data/documentation.json');
+    let functions = {};
+    try {
+        if (fs.existsSync(docPath)) {
+            const docData = JSON.parse(fs.readFileSync(docPath, 'utf-8'));
+            if (docData && docData.functions) {
+                functions = docData.functions;
+            }
+        }
+    } catch (e) {
+        console.error("Failed to load documentation.json for autocompletion", e);
+    }
+
+    const provider = vscode.languages.registerCompletionItemProvider('jc2', {
+        provideCompletionItems(document, position) {
+            const completionItems = [];
+            for (const [funcName, funcData] of Object.entries(functions)) {
+                // 忽略 dunder methods (如 __add__)
+                if (funcName.startsWith('__') && funcName.endsWith('__')) continue;
+
+                const item = new vscode.CompletionItem(funcName, vscode.CompletionItemKind.Function);
+                item.detail = funcData.signature;
+                item.documentation = new vscode.MarkdownString(funcData.desc);
+                if (funcData.examples && funcData.examples.length > 0) {
+                    item.documentation.appendCodeblock(funcData.examples.join('\n'), 'jc2');
+                }
+                completionItems.push(item);
+
+                // 处理别名
+                if (funcData.aliases) {
+                    for (const alias of funcData.aliases) {
+                        const aliasItem = new vscode.CompletionItem(alias, vscode.CompletionItemKind.Function);
+                        aliasItem.detail = funcData.signature + ` (alias for ${funcName})`;
+                        aliasItem.documentation = new vscode.MarkdownString(funcData.desc);
+                        if (funcData.examples && funcData.examples.length > 0) {
+                            aliasItem.documentation.appendCodeblock(funcData.examples.join('\n'), 'jc2');
+                        }
+                        completionItems.push(aliasItem);
+                    }
+                }
+            }
+            return completionItems;
+        }
+    });
+    context.subscriptions.push(provider);
+
     context.subscriptions.push(
         vscode.commands.registerCommand('jc2.run', () => {
             const editor = vscode.window.activeTextEditor;
