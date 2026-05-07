@@ -671,6 +671,18 @@ namespace jc {
         initCompiler(fn.get());
         beginScope();
 
+        // ★ 自动将自身函数名加入 refNames，以支持局部函数的递归调用
+        bool paramShadowsFunc = false;
+        for (const auto& p : expr->params) {
+            if (p.lexeme == funcName) {
+                paramShadowsFunc = true;
+                break;
+            }
+        }
+        if (!paramShadowsFunc) {
+            current().refNames.insert(funcName);
+        }
+
         for (size_t i = 0; i < expr->params.size(); ++i) {
             addLocal(expr->params[i].lexeme);
         }
