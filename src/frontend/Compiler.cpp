@@ -343,16 +343,10 @@ namespace jc {
             if (current().stateNames.count(name) > 0) throw std::runtime_error("Compiler Error: Cannot declare variable as both 'ref' and 'state'.");
             current().refNames.insert(name); // ★ 提前注册，确保 resolveUpvalue 能感知到 isRef
             upvalue = resolveUpvalue(name);
-            if (upvalue == -1 && knownGlobals.count(name) == 0) {
-                throw std::runtime_error("Compiler Error: Cannot ref undefined outer variable '" + name + "'.");
-            }
         } else if (expr->isState) {
             if (current().refNames.count(name) > 0) throw std::runtime_error("Compiler Error: Cannot declare variable as both 'ref' and 'state'.");
             current().stateNames.insert(name);
             upvalue = resolveUpvalue(name);
-            if (upvalue == -1 && knownGlobals.count(name) == 0) {
-                throw std::runtime_error("Compiler Error: Cannot state undefined outer variable '" + name + "'.");
-            }
         } else {
             // ★ Auto-local Write (Shadowing)
             if (stateStack.size() > 1 && slot == -1 && current().refNames.count(name) == 0 && current().stateNames.count(name) == 0) {
@@ -913,16 +907,10 @@ namespace jc {
                 if (current().stateNames.count(name) > 0) throw std::runtime_error("Compiler Error: Cannot declare variable as both 'ref' and 'state'.");
                 current().refNames.insert(name); // ★ 提前注册
                 upvalue = resolveUpvalue(name);
-                if (upvalue == -1 && knownGlobals.count(name) == 0) {
-                    throw std::runtime_error("Compiler Error: Cannot ref undefined outer variable '" + name + "'.");
-                }
             } else if (expr->isState) {
                 if (current().refNames.count(name) > 0) throw std::runtime_error("Compiler Error: Cannot declare variable as both 'ref' and 'state'.");
                 current().stateNames.insert(name);
                 upvalue = resolveUpvalue(name);
-                if (upvalue == -1 && knownGlobals.count(name) == 0) {
-                    throw std::runtime_error("Compiler Error: Cannot state undefined outer variable '" + name + "'.");
-                }
             }
 
             // 读取当前值
@@ -1396,10 +1384,7 @@ namespace jc {
         if (current().stateNames.count(name) > 0) {
             throw std::runtime_error("Compiler Error: Cannot declare variable as both 'ref' and 'state'.");
         }
-        int upvalue = resolveUpvalue(name);
-        if (upvalue == -1 && knownGlobals.count(name) == 0) {
-            throw std::runtime_error("Compiler Error: Cannot ref undefined outer variable '" + name + "'.");
-        }
+        resolveUpvalue(name);
         current().refNames.insert(name);
         emit(OpCode::OP_NONE, lastLine);
         return {};
@@ -1411,10 +1396,7 @@ namespace jc {
         if (current().refNames.count(name) > 0) {
             throw std::runtime_error("Compiler Error: Cannot declare variable as both 'ref' and 'state'.");
         }
-        int upvalue = resolveUpvalue(name);
-        if (upvalue == -1 && knownGlobals.count(name) == 0) {
-            throw std::runtime_error("Compiler Error: Cannot state undefined outer variable '" + name + "'.");
-        }
+        resolveUpvalue(name);
         current().stateNames.insert(name);
         emit(OpCode::OP_NONE, lastLine);
         return {};
