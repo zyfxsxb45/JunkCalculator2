@@ -838,7 +838,11 @@ namespace jc {
                             } else {
                                 // ★ 默认按值捕获 (立即 Closed Upvalue)
                                 auto dummy = std::make_shared<UpVal>();
-                                if (uv.isLocal) {
+                                if (uv.isGlobal) {
+                                    auto it = globals.find(uv.name);
+                                    if (it != globals.end()) dummy->closed = it->second;
+                                    else dummy->closed = Value::none();
+                                } else if (uv.isLocal) {
                                     int captureIdx = frame().stackBase + uv.index;
                                     dummy->closed = stack[captureIdx];
                                 } else {

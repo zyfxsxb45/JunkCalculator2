@@ -16,6 +16,7 @@ namespace jc {
         {"return",   TokenType::RETURN},
         {"local",    TokenType::LOCAL},
         {"ref",      TokenType::REF},
+        {"state",    TokenType::STATE},
         {"const",    TokenType::CONST},
         {"delete",   TokenType::DELETE},
         {"global",   TokenType::GLOBAL},

@@ -503,6 +503,7 @@ namespace jc {
             bool isLocal;   // true=来自外层局部变量, false=来自外层上值
             int index;      // 对应的 slot 或 upvalue index
             bool isRef = false; // ★ 新增：是否按引用捕获
+            bool isGlobal = false; // ★ 新增：是否来自全局变量
         };
         std::vector<UpvalueInfo> upvalues;
         std::vector<bool> paramIsRef;

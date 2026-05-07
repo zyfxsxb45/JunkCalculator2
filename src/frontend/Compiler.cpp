@@ -71,11 +71,9 @@ namespace jc {
             const std::string& name = var->name.lexeme;
             int slot = resolveLocal(name);
 
-            if (stateStack.size() > 1 && slot == -1 && current().globalNames.count(name) == 0 && current().refNames.count(name) == 0) {
-                if (resolveUpvalue(name) == -1) {
-                    addLocal(name);
-                    slot = resolveLocal(name);
-                }
+            if (stateStack.size() > 1 && slot == -1 && current().globalNames.count(name) == 0 && current().refNames.count(name) == 0 && current().stateNames.count(name) == 0) {
+                addLocal(name);
+                slot = resolveLocal(name);
             }
 
             if (slot != -1) {
@@ -188,11 +186,9 @@ namespace jc {
                 if (name == "_") { emit(OpCode::OP_POP, lastLine); continue; }
 
                 int slot = resolveLocal(name);
-                if (stateStack.size() > 1 && slot == -1 && current().globalNames.count(name) == 0 && current().refNames.count(name) == 0) {
-                    if (resolveUpvalue(name) == -1) {
-                        addLocal(name);
-                        slot = resolveLocal(name);
-                    }
+                if (stateStack.size() > 1 && slot == -1 && current().globalNames.count(name) == 0 && current().refNames.count(name) == 0 && current().stateNames.count(name) == 0) {
+                    addLocal(name);
+                    slot = resolveLocal(name);
                 }
                 if (slot != -1) {
                     emit(OpCode::OP_SET_LOCAL, lastLine);
@@ -210,11 +206,9 @@ namespace jc {
         else {
             const std::string& varName = clause.varName.lexeme;
             int slot = resolveLocal(varName);
-            if (stateStack.size() > 1 && slot == -1 && current().globalNames.count(varName) == 0 && current().refNames.count(varName) == 0) {
-                if (resolveUpvalue(varName) == -1) {
-                    addLocal(varName);
-                    slot = resolveLocal(varName);
-                }
+            if (stateStack.size() > 1 && slot == -1 && current().globalNames.count(varName) == 0 && current().refNames.count(varName) == 0 && current().stateNames.count(varName) == 0) {
+                addLocal(varName);
+                slot = resolveLocal(varName);
             }
             if (slot != -1) {
                 emit(OpCode::OP_SET_LOCAL, lastLine);
@@ -349,20 +343,31 @@ namespace jc {
             if (stateStack.size() <= 1) {
                 throw std::runtime_error("Compiler Error: Cannot use 'ref' in global scope.");
             }
+            if (current().stateNames.count(name) > 0) throw std::runtime_error("Compiler Error: Cannot declare variable as both 'ref' and 'state'.");
             current().refNames.insert(name); // ★ 提前注册，确保 resolveUpvalue 能感知到 isRef
             upvalue = resolveUpvalue(name);
             if (upvalue == -1 && current().globalNames.count(name) == 0 && knownGlobals.count(name) == 0) {
                 throw std::runtime_error("Compiler Error: Cannot ref undefined outer variable '" + name + "'.");
             }
+        } else if (expr->isState) {
+            if (stateStack.size() <= 1) {
+                throw std::runtime_error("Compiler Error: Cannot use 'state' in global scope.");
+            }
+            if (current().refNames.count(name) > 0) throw std::runtime_error("Compiler Error: Cannot declare variable as both 'ref' and 'state'.");
+            current().stateNames.insert(name);
+            upvalue = resolveUpvalue(name);
+            if (upvalue == -1 && current().globalNames.count(name) == 0 && knownGlobals.count(name) == 0) {
+                throw std::runtime_error("Compiler Error: Cannot state undefined outer variable '" + name + "'.");
+            }
         } else {
             // ★ Auto-local Write (Shadowing)
-            if (stateStack.size() > 1 && slot == -1 && current().globalNames.count(name) == 0 && current().refNames.count(name) == 0) {
+            if (stateStack.size() > 1 && slot == -1 && current().globalNames.count(name) == 0 && current().refNames.count(name) == 0 && current().stateNames.count(name) == 0) {
                 addLocal(name);
                 slot = resolveLocal(name);
             }
         }
 
-        if (slot != -1 && !expr->isRef) {
+        if (slot != -1 && !expr->isRef && !expr->isState) {
             emit(OpCode::OP_SET_LOCAL, expr->name.line);
             emit16(static_cast<uint16_t>(slot), expr->name.line);
         }
@@ -646,10 +651,8 @@ namespace jc {
 
         // ★ 修复：先在当前外层注册函数的 Local / Upvalue 引用权限，确保允许在内部自递归捕获
         int outerSlot = resolveLocal(funcName);
-        if (stateStack.size() > 1 && outerSlot == -1 && current().globalNames.count(funcName) == 0 && current().refNames.count(funcName) == 0) {
-            if (resolveUpvalue(funcName) == -1) {
-                addLocal(funcName);
-            }
+        if (stateStack.size() > 1 && outerSlot == -1 && current().globalNames.count(funcName) == 0 && current().refNames.count(funcName) == 0 && current().stateNames.count(funcName) == 0) {
+            addLocal(funcName);
         }
         outerSlot = resolveLocal(funcName);
         // ★ 加强版初始化：包含变长标志透传与必填项扣除
@@ -804,29 +807,38 @@ namespace jc {
     }
 
     int Compiler::addUpvalue(int level, const std::string& name,
-        bool isLocal, int index, bool isRef) {
+        bool isLocal, int index, bool isRef, bool isGlobal) {
         auto* fn = stateStack[level].function;
         for (int j = 0; j < static_cast<int>(fn->upvalues.size()); ++j) {
             if (fn->upvalues[j].name == name) {
                 if (isRef) fn->upvalues[j].isRef = true; // ★ 升级为引用捕获
+                if (isGlobal) fn->upvalues[j].isGlobal = true;
                 return j;
             }
         }
-        fn->upvalues.push_back({ name, isLocal, index, isRef });
+        fn->upvalues.push_back({ name, isLocal, index, isRef, isGlobal });
         return static_cast<int>(fn->upvalues.size()) - 1;
     }
 
-    int Compiler::resolveUpvalueAt(int level, const std::string& name, bool isRef) {
-        if (level <= 0) return -1;
+    int Compiler::resolveUpvalueAt(int level, const std::string& name, bool isRef, bool isState) {
+        if (level <= 0) {
+            if (isState) return -2;
+            return -1;
+        }
         int enclosingLevel = level - 1;
         auto& enclosing = stateStack[enclosingLevel];
 
         for (int i = static_cast<int>(enclosing.locals.size()) - 1; i >= 0; --i) {
-            if (enclosing.locals[i].name == name) return addUpvalue(level, name, true, i, isRef);
+            if (enclosing.locals[i].name == name) return addUpvalue(level, name, true, i, isRef, false);
         }
 
-        int upvalueInEnclosing = resolveUpvalueAt(enclosingLevel, name, isRef);
-        if (upvalueInEnclosing != -1) return addUpvalue(level, name, false, upvalueInEnclosing, isRef);
+        int upvalueInEnclosing = resolveUpvalueAt(enclosingLevel, name, isRef, isState);
+        if (upvalueInEnclosing != -1) {
+            if (upvalueInEnclosing == -2) {
+                return addUpvalue(level, name, false, -1, isRef, true);
+            }
+            return addUpvalue(level, name, false, upvalueInEnclosing, isRef, false);
+        }
 
         return -1;
     }
@@ -834,7 +846,10 @@ namespace jc {
     int Compiler::resolveUpvalue(const std::string& name) {
         int currentLevel = static_cast<int>(stateStack.size()) - 1;
         bool isRef = stateStack[currentLevel].refNames.count(name) > 0;
-        return resolveUpvalueAt(currentLevel, name, isRef);
+        bool isState = stateStack[currentLevel].stateNames.count(name) > 0;
+        int uv = resolveUpvalueAt(currentLevel, name, isRef, isState);
+        if (uv == -2) return -1;
+        return uv;
     }
 
     std::any Compiler::visitReturnExpr(ReturnExpr* expr) {
@@ -904,15 +919,26 @@ namespace jc {
                 if (stateStack.size() <= 1) {
                     throw std::runtime_error("Compiler Error: Cannot use 'ref' in global scope.");
                 }
+                if (current().stateNames.count(name) > 0) throw std::runtime_error("Compiler Error: Cannot declare variable as both 'ref' and 'state'.");
                 current().refNames.insert(name); // ★ 提前注册
                 upvalue = resolveUpvalue(name);
                 if (upvalue == -1 && current().globalNames.count(name) == 0 && knownGlobals.count(name) == 0) {
                     throw std::runtime_error("Compiler Error: Cannot ref undefined outer variable '" + name + "'.");
                 }
+            } else if (expr->isState) {
+                if (stateStack.size() <= 1) {
+                    throw std::runtime_error("Compiler Error: Cannot use 'state' in global scope.");
+                }
+                if (current().refNames.count(name) > 0) throw std::runtime_error("Compiler Error: Cannot declare variable as both 'ref' and 'state'.");
+                current().stateNames.insert(name);
+                upvalue = resolveUpvalue(name);
+                if (upvalue == -1 && current().globalNames.count(name) == 0 && knownGlobals.count(name) == 0) {
+                    throw std::runtime_error("Compiler Error: Cannot state undefined outer variable '" + name + "'.");
+                }
             }
 
             // 读取当前值
-            if (slot != -1 && !expr->isRef) {
+            if (slot != -1 && !expr->isRef && !expr->isState) {
                 emit(OpCode::OP_GET_LOCAL, lastLine);
                 emit16(static_cast<uint16_t>(slot), lastLine);
             }
@@ -932,16 +958,14 @@ namespace jc {
             compileNode(expr->value.get());
             emitOp(expr->op);
 
-            if (!expr->isRef) {
-                if (stateStack.size() > 1 && slot == -1 && current().globalNames.count(name) == 0 && current().refNames.count(name) == 0) {
-                    if (resolveUpvalue(name) == -1) {
-                        addLocal(name);
-                        slot = resolveLocal(name);
-                    }
+            if (!expr->isRef && !expr->isState) {
+                if (stateStack.size() > 1 && slot == -1 && current().globalNames.count(name) == 0 && current().refNames.count(name) == 0 && current().stateNames.count(name) == 0) {
+                    addLocal(name);
+                    slot = resolveLocal(name);
                 }
             }
 
-            if (slot != -1 && !expr->isRef) {
+            if (slot != -1 && !expr->isRef && !expr->isState) {
                 emit(OpCode::OP_SET_LOCAL, lastLine);
                 emit16(static_cast<uint16_t>(slot), lastLine);
             }
@@ -1003,10 +1027,8 @@ namespace jc {
                 if (stateStack.size() == 1) knownGlobals.insert(name);
 
                 int slot = resolveLocal(name);
-                if (stateStack.size() > 1 && slot == -1 && current().globalNames.count(name) == 0 && current().refNames.count(name) == 0) {
-                    if (resolveUpvalue(name) == -1) {
-                        addLocal(name); slot = resolveLocal(name);
-                    }
+                if (stateStack.size() > 1 && slot == -1 && current().globalNames.count(name) == 0 && current().refNames.count(name) == 0 && current().stateNames.count(name) == 0) {
+                    addLocal(name); slot = resolveLocal(name);
                 }
                 if (slot != -1) { emit(OpCode::OP_SET_LOCAL, lastLine); emit16(static_cast<uint16_t>(slot), lastLine); }
                 else { uint16_t idx = identifierConstant(name); emit(OpCode::OP_SET_GLOBAL, lastLine); emit16(idx, lastLine); }
@@ -1020,10 +1042,8 @@ namespace jc {
             if (stateStack.size() == 1) knownGlobals.insert(varName);
 
             int slot = resolveLocal(varName);
-            if (stateStack.size() > 1 && slot == -1 && current().globalNames.count(varName) == 0 && current().refNames.count(varName) == 0) {
-                if (resolveUpvalue(varName) == -1) {
-                    addLocal(varName); slot = resolveLocal(varName);
-                }
+            if (stateStack.size() > 1 && slot == -1 && current().globalNames.count(varName) == 0 && current().refNames.count(varName) == 0 && current().stateNames.count(varName) == 0) {
+                addLocal(varName); slot = resolveLocal(varName);
             }
             if (slot != -1) { emit(OpCode::OP_SET_LOCAL, lastLine); emit16(static_cast<uint16_t>(slot), lastLine); }
             else { uint16_t idx = identifierConstant(varName); emit(OpCode::OP_SET_GLOBAL, lastLine); emit16(idx, lastLine); }
@@ -1145,10 +1165,8 @@ namespace jc {
 
             if (!expr->hasObjectExpr()) {
                 int slot = resolveLocal(expr->name.lexeme);
-                if (stateStack.size() > 1 && slot == -1 && current().globalNames.count(expr->name.lexeme) == 0 && current().refNames.count(expr->name.lexeme) == 0) {
-                    if (resolveUpvalue(expr->name.lexeme) == -1) {
-                        addLocal(expr->name.lexeme); slot = resolveLocal(expr->name.lexeme);
-                    }
+                if (stateStack.size() > 1 && slot == -1 && current().globalNames.count(expr->name.lexeme) == 0 && current().refNames.count(expr->name.lexeme) == 0 && current().stateNames.count(expr->name.lexeme) == 0) {
+                    addLocal(expr->name.lexeme); slot = resolveLocal(expr->name.lexeme);
                 }
                 if (slot != -1) { emit(OpCode::OP_SET_LOCAL, lastLine); emit16(static_cast<uint16_t>(slot), lastLine); }
                 else {
@@ -1180,10 +1198,8 @@ namespace jc {
         auto emitStoreRoot = [&]() {
             if (!expr->hasObjectExpr()) {
                 int slot = resolveLocal(expr->name.lexeme);
-                if (stateStack.size() > 1 && slot == -1 && current().globalNames.count(expr->name.lexeme) == 0 && current().refNames.count(expr->name.lexeme) == 0) {
-                    if (resolveUpvalue(expr->name.lexeme) == -1) {
-                        addLocal(expr->name.lexeme); slot = resolveLocal(expr->name.lexeme);
-                    }
+                if (stateStack.size() > 1 && slot == -1 && current().globalNames.count(expr->name.lexeme) == 0 && current().refNames.count(expr->name.lexeme) == 0 && current().stateNames.count(expr->name.lexeme) == 0) {
+                    addLocal(expr->name.lexeme); slot = resolveLocal(expr->name.lexeme);
                 }
                 if (slot != -1) { emit(OpCode::OP_SET_LOCAL, lastLine); emit16(static_cast<uint16_t>(slot), lastLine); }
                 else {
@@ -1282,11 +1298,9 @@ namespace jc {
             if (stateStack.size() == 1) knownGlobals.insert(name);
 
             int slot = resolveLocal(name);
-            if (stateStack.size() > 1 && slot == -1 && current().globalNames.count(name) == 0 && current().refNames.count(name) == 0) {
-                if (resolveUpvalue(name) == -1) {
-                    addLocal(name);
-                    slot = resolveLocal(name);
-                }
+            if (stateStack.size() > 1 && slot == -1 && current().globalNames.count(name) == 0 && current().refNames.count(name) == 0 && current().stateNames.count(name) == 0) {
+                addLocal(name);
+                slot = resolveLocal(name);
             }
 
             if (slot != -1) { emit(OpCode::OP_SET_LOCAL, lastLine); emit16(static_cast<uint16_t>(slot), lastLine); }
@@ -1357,11 +1371,9 @@ namespace jc {
         if (stateStack.size() == 1) knownGlobals.insert(expr->catchName.lexeme);
 
         int slot = resolveLocal(expr->catchName.lexeme);
-        if (stateStack.size() > 1 && slot == -1 && current().globalNames.count(expr->catchName.lexeme) == 0 && current().refNames.count(expr->catchName.lexeme) == 0) {
-            if (resolveUpvalue(expr->catchName.lexeme) == -1) {
-                addLocal(expr->catchName.lexeme);
-                slot = resolveLocal(expr->catchName.lexeme);
-            }
+        if (stateStack.size() > 1 && slot == -1 && current().globalNames.count(expr->catchName.lexeme) == 0 && current().refNames.count(expr->catchName.lexeme) == 0 && current().stateNames.count(expr->catchName.lexeme) == 0) {
+            addLocal(expr->catchName.lexeme);
+            slot = resolveLocal(expr->catchName.lexeme);
         }
         if (slot != -1) {
             emit(OpCode::OP_SET_LOCAL, lastLine);
@@ -1396,11 +1408,32 @@ namespace jc {
         if (stateStack.size() <= 1) {
             throw std::runtime_error("Compiler Error: Cannot use 'ref' in global scope.");
         }
+        if (current().stateNames.count(name) > 0) {
+            throw std::runtime_error("Compiler Error: Cannot declare variable as both 'ref' and 'state'.");
+        }
         int upvalue = resolveUpvalue(name);
         if (upvalue == -1 && current().globalNames.count(name) == 0 && knownGlobals.count(name) == 0) {
             throw std::runtime_error("Compiler Error: Cannot ref undefined outer variable '" + name + "'.");
         }
         current().refNames.insert(name);
+        emit(OpCode::OP_NONE, lastLine);
+        return {};
+    }
+
+    std::any Compiler::visitStateDecl(StateDecl* expr) {
+        lastLine = expr->name.line;
+        const std::string& name = expr->name.lexeme;
+        if (stateStack.size() <= 1) {
+            throw std::runtime_error("Compiler Error: Cannot use 'state' in global scope.");
+        }
+        if (current().refNames.count(name) > 0) {
+            throw std::runtime_error("Compiler Error: Cannot declare variable as both 'ref' and 'state'.");
+        }
+        int upvalue = resolveUpvalue(name);
+        if (upvalue == -1 && current().globalNames.count(name) == 0 && knownGlobals.count(name) == 0) {
+            throw std::runtime_error("Compiler Error: Cannot state undefined outer variable '" + name + "'.");
+        }
+        current().stateNames.insert(name);
         emit(OpCode::OP_NONE, lastLine);
         return {};
     }
@@ -1491,11 +1524,9 @@ namespace jc {
 
         // 2. 将类保存进环境（局部/闭包/全局 安全判定）
         int slot = resolveLocal(className);
-        if (stateStack.size() > 1 && slot == -1 && current().globalNames.count(className) == 0 && current().refNames.count(className) == 0) {
-            if (resolveUpvalue(className) == -1) {
-                addLocal(className);
-                slot = resolveLocal(className);
-            }
+        if (stateStack.size() > 1 && slot == -1 && current().globalNames.count(className) == 0 && current().refNames.count(className) == 0 && current().stateNames.count(className) == 0) {
+            addLocal(className);
+            slot = resolveLocal(className);
         }
         if (slot != -1) {
             emit(OpCode::OP_SET_LOCAL, lastLine); emit16(static_cast<uint16_t>(slot), lastLine);
@@ -1684,11 +1715,9 @@ namespace jc {
             int slot = resolveLocal(varName);
 
             // Auto-local 拦截：如果我们是在局部作用域遇到新变量，自动设为 Local
-            if (stateStack.size() > 1 && slot == -1 && current().globalNames.count(varName) == 0 && current().refNames.count(varName) == 0) {
-                if (resolveUpvalue(varName) == -1) {
-                    addLocal(varName);
-                    slot = resolveLocal(varName);
-                }
+            if (stateStack.size() > 1 && slot == -1 && current().globalNames.count(varName) == 0 && current().refNames.count(varName) == 0 && current().stateNames.count(varName) == 0) {
+                addLocal(varName);
+                slot = resolveLocal(varName);
             }
 
             // 存入变量体系
