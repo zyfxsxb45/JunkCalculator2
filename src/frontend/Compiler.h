@@ -89,7 +89,6 @@ namespace jc {
         std::any visitForExpr(ForExpr* expr) override;
 
         std::any visitMatrixNode(MatrixNode*) override;
-        std::any visitFunctionDef(FunctionDef*) override;
         std::any visitBreakExpr(BreakExpr*) override;
         std::any visitContinueExpr(ContinueExpr*) override;
         std::any visitReturnExpr(ReturnExpr*) override;

@@ -63,7 +63,6 @@ namespace jc {
         virtual std::any visitAssign(Assign* expr) = 0;
         virtual std::any visitCall(Call* expr) = 0;
         virtual std::any visitMatrixNode(MatrixNode* expr) = 0;
-        virtual std::any visitFunctionDef(FunctionDef* expr) = 0;
         // ★ 新增 6 个访问者接口
         virtual std::any visitBlock(Block* expr) = 0;
         virtual std::any visitIfExpr(IfExpr* expr) = 0;
@@ -168,33 +167,6 @@ namespace jc {
             : elements(std::move(elements)) {
         }
         std::any accept(ExprVisitor& visitor) override { return visitor.visitMatrixNode(this); }
-    };
-
-    struct FunctionDef : public Expr {
-        Token name;
-        std::vector<Token> params;
-        std::vector<bool> paramIsRef;
-        std::vector<std::shared_ptr<Expr>> defaultExprs;
-        bool hasRestParam;
-
-        std::vector<std::string> paramTypes; // ★ 新增：参数类型约束   
-        std::string returnType;              // ★ 新增：返回值约束     
-
-        std::string rawBody;
-        std::shared_ptr<Expr> body;
-
-        FunctionDef(Token name, std::vector<Token> params, std::vector<bool> paramIsRef,
-            std::vector<std::shared_ptr<Expr>> defaultExprs, bool hasRestParam,
-            std::vector<std::string> paramTypes, std::string returnType, // ★ 新增
-            std::string rawBody, std::shared_ptr<Expr> body)
-            : name(std::move(name)), params(std::move(params)),
-            paramIsRef(std::move(paramIsRef)),
-            defaultExprs(std::move(defaultExprs)),
-            hasRestParam(hasRestParam),
-            paramTypes(std::move(paramTypes)), returnType(std::move(returnType)), // ★ 新增
-            rawBody(std::move(rawBody)), body(std::move(body)) {
-        }
-        std::any accept(ExprVisitor& visitor) override { return visitor.visitFunctionDef(this); }
     };
 
     // ======== ★ 新增控制流节点 ========
@@ -340,7 +312,9 @@ namespace jc {
     };
 
     struct LambdaExpr : public Expr {
+        std::string name;
         std::vector<Token> params;
+        std::vector<bool> paramIsRef;
         std::vector<std::shared_ptr<Expr>> defaultExprs;
         bool hasRestParam;
 
@@ -350,11 +324,12 @@ namespace jc {
         std::string rawBody;
         std::shared_ptr<Expr> body;
 
-        LambdaExpr(std::vector<Token> params,
+        LambdaExpr(std::string name, std::vector<Token> params, std::vector<bool> paramIsRef,
             std::vector<std::shared_ptr<Expr>> defaultExprs, bool hasRestParam,
             std::vector<std::string> paramTypes, std::string returnType, // ★ 新增
             std::string rawBody, std::shared_ptr<Expr> body)
-            : params(std::move(params)), defaultExprs(std::move(defaultExprs)),
+            : name(std::move(name)), params(std::move(params)), paramIsRef(std::move(paramIsRef)),
+            defaultExprs(std::move(defaultExprs)),
             hasRestParam(hasRestParam),
             paramTypes(std::move(paramTypes)), returnType(std::move(returnType)), // ★ 新增
             rawBody(std::move(rawBody)), body(std::move(body)) {

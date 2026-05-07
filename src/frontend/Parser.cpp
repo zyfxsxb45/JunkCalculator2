@@ -127,6 +127,7 @@ namespace jc {
     std::unique_ptr<Expr> Parser::assignment() {
         bool isRef = match({ TokenType::REF });
         bool isState = !isRef && match({ TokenType::STATE });
+        bool isConst = !isRef && !isState && match({ TokenType::CONST });
 
         // ★ 特权推测解析：精准捕获带类型注解的函数定义 f(x: int) -> int = ...
         if (check(TokenType::IDENTIFIER) &&
@@ -264,14 +265,13 @@ namespace jc {
                         finalBody = std::shared_ptr<Expr>(rawB.release());
                     }
 
-                    if (isRef || isState) {
-                        throw std::runtime_error("Parser Error: 'ref' or 'state' cannot be applied to function definition.");
-                    }
-
-                    return std::make_unique<FunctionDef>(
-                        funcName, params, paramIsRef, defaultExprs, hasRestParam,
+                    auto lambda = std::make_unique<LambdaExpr>(
+                        funcName.lexeme, params, paramIsRef, defaultExprs, hasRestParam,
                         paramTypes, retType, rawBodyStr, std::move(finalBody)
                     );
+
+                    if (isConst) return std::make_unique<ConstDecl>(funcName, std::move(lambda));
+                    return std::make_unique<Assign>(funcName, std::move(lambda), isRef, isState);
                 }
             }
         }
@@ -283,6 +283,7 @@ namespace jc {
                     TokenType::STAR_ASSIGN, TokenType::SLASH_ASSIGN,
                     TokenType::PERCENT_ASSIGN, TokenType::CARET_ASSIGN,
                     TokenType::BIT_AND_ASSIGN, TokenType::BIT_OR_ASSIGN })) {
+            if (isConst) throw std::runtime_error("Parser Error: 'const' cannot be applied to compound assignment.");
             Token compOp = previous();
 
             TokenType baseOp;
@@ -313,12 +314,12 @@ namespace jc {
             auto value = assignment();  // ★ 直接读取右值即可，把上下两行记录 index 的删掉
 
             if (auto* dotExpr = dynamic_cast<DotAccess*>(expr.get())) {
-                if (isRef || isState) throw std::runtime_error("Parser Error: 'ref' or 'state' cannot be applied to object properties.");
+                if (isRef || isState || isConst) throw std::runtime_error("Parser Error: 'ref', 'state', or 'const' cannot be applied to object properties.");
                 return std::make_unique<DotAssign>(std::move(dotExpr->object), std::move(dotExpr->field), std::move(value));
             }
 
             if (auto* indexExpr = dynamic_cast<IndexAccess*>(expr.get())) {
-                if (isRef || isState) throw std::runtime_error("Parser Error: 'ref' or 'state' cannot be applied to array elements.");
+                if (isRef || isState || isConst) throw std::runtime_error("Parser Error: 'ref', 'state', or 'const' cannot be applied to array elements.");
                 std::vector<std::vector<std::unique_ptr<Expr>>> chain;
                 IndexAccess* currentIA = indexExpr;
                 chain.push_back(std::move(currentIA->indices));
@@ -337,7 +338,7 @@ namespace jc {
             }
 
             if (auto* matNode = dynamic_cast<MatrixNode*>(expr.get())) {
-                if (isRef || isState) throw std::runtime_error("Parser Error: 'ref' or 'state' cannot be applied to destructuring.");
+                if (isRef || isState || isConst) throw std::runtime_error("Parser Error: 'ref', 'state', or 'const' cannot be applied to destructuring.");
                 std::vector<DestructAssign::Target> targets;
                 bool validDestruct = true;
 
@@ -362,7 +363,7 @@ namespace jc {
             }
 
             if (auto* dictNode = dynamic_cast<DictLiteral*>(expr.get())) {
-                if (isRef || isState) throw std::runtime_error("Parser Error: 'ref' or 'state' cannot be applied to destructuring.");
+                if (isRef || isState || isConst) throw std::runtime_error("Parser Error: 'ref', 'state', or 'const' cannot be applied to destructuring.");
                 std::vector<DictDestructAssign::Target> targets;
                 bool validDestruct = true;
                 for (auto& entry : dictNode->entries) {
@@ -390,6 +391,7 @@ namespace jc {
             }
 
             if (auto* varExpr = dynamic_cast<Variable*>(expr.get())) {
+                if (isConst) return std::make_unique<ConstDecl>(varExpr->name, std::move(value));
                 return std::make_unique<Assign>(varExpr->name, std::move(value), isRef, isState);
             }
 
@@ -398,12 +400,13 @@ namespace jc {
             throw std::runtime_error("Parser Error: Invalid assignment target at '" + equals.lexeme + "'.");
         }
 
-        if (isRef || isState) {
+        if (isRef || isState || isConst) {
             if (auto* var = dynamic_cast<Variable*>(expr.get())) {
+                if (isConst) throw std::runtime_error("Parser Error: 'const' declaration requires '= value'.");
                 if (isRef) expr = std::make_unique<RefDecl>(var->name);
                 else expr = std::make_unique<StateDecl>(var->name);
             } else {
-                throw std::runtime_error("Parser Error: 'ref' or 'state' must be followed by a variable or assignment.");
+                throw std::runtime_error("Parser Error: 'ref', 'state', or 'const' must be followed by a variable or assignment.");
             }
         }
 
@@ -552,8 +555,9 @@ namespace jc {
                     std::unique_ptr<Expr> methodNode = std::make_unique<MethodCallExpr>(std::move(expr), field, std::move(args));
 
                     if (isPartial) {
+                        std::vector<bool> phIsRef(phParams.size(), false);
                         expr = std::make_unique<LambdaExpr>(
-                            std::move(phParams), std::move(phDefaults), false,
+                            "<partial_method>", std::move(phParams), std::move(phIsRef), std::move(phDefaults), false,
                             std::vector<std::string>(phParams.size(), ""), "",  // ★★★ 补上: 空参数类型数组，空返回类型
                             "<partial_method>", std::shared_ptr<Expr>(methodNode.release())
                         );
@@ -604,8 +608,9 @@ namespace jc {
                     callNode = std::make_unique<InvokeExpr>(std::move(expr), std::move(args));
                 }
                 if (isPartial) {
+                    std::vector<bool> phIsRef(phParams.size(), false);
                     expr = std::make_unique<LambdaExpr>(
-                        std::move(phParams), std::move(phDefaults), false,
+                        "<partial_apply>", std::move(phParams), std::move(phIsRef), std::move(phDefaults), false,
                         std::vector<std::string>(phParams.size(), ""), "", // ★★★ 补上: 空参数类型数组，空返回类型
                         "<partial_apply>", std::shared_ptr<Expr>(callNode.release())
                     );
@@ -941,12 +946,6 @@ namespace jc {
                 "Variables inside functions are now auto-local. "
                 "Use 'ref x' to modify outer variables.");
         }
-        if (match({ TokenType::CONST })) {
-            Token name = consume(TokenType::IDENTIFIER, "Parser Error: Expect variable name after 'const'.");
-            consume(TokenType::ASSIGN, "Parser Error: 'const' declaration requires '= value'.");
-            auto value = assignment();  // ★ 降级：防止逗号被误吞
-            return std::make_unique<ConstDecl>(name, std::move(value));
-        }
         if (match({ TokenType::DELETE })) {
             std::vector<Token> names;
             names.push_back(consume(TokenType::IDENTIFIER, "Parser Error: Expect variable name after 'delete'."));
@@ -1086,6 +1085,7 @@ namespace jc {
             if (isLambda) {
                 current = savedPos; // 回退，开启真正无坚不摧的 Lambda 解析！
                 lambdaParams.clear();
+                std::vector<bool> lambdaParamIsRef;
                 std::vector<std::shared_ptr<Expr>> lambdaDefaults;
                 std::vector<std::string> paramTypes; // ★
                 bool hasRestParam = false;
@@ -1094,9 +1094,13 @@ namespace jc {
                     do {
                         if (hasRestParam) throw std::runtime_error("Parser Error: Rest parameter must be last.");
 
+                        bool isRef = match({ TokenType::REF });
+
                         if (match({ TokenType::ELLIPSIS })) {
+                            if (isRef) throw std::runtime_error("Parser Error: Rest parameter cannot be ref.");
                             Token param = consume(TokenType::IDENTIFIER, "Parser Error: Expect parameter name after '...'.");
                             lambdaParams.push_back(param);
+                            lambdaParamIsRef.push_back(false);
                             paramTypes.push_back("");
                             lambdaDefaults.push_back(nullptr);
                             hasRestParam = true;
@@ -1105,6 +1109,7 @@ namespace jc {
 
                         Token param = consume(TokenType::IDENTIFIER, "Parser Error: Expect parameter name.");
                         lambdaParams.push_back(param);
+                        lambdaParamIsRef.push_back(isRef);
 
                         std::string pType = "";
                         if (match({ TokenType::COLON })) pType = consume(TokenType::IDENTIFIER, "Expect type after ':'.").lexeme;
@@ -1140,7 +1145,9 @@ namespace jc {
                 }
 
                 return std::make_unique<LambdaExpr>(
+                    "<lambda>",
                     std::move(lambdaParams),
+                    std::move(lambdaParamIsRef),
                     std::move(lambdaDefaults),
                     hasRestParam,
                     paramTypes, retType,  // ★

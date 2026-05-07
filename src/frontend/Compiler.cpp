@@ -340,6 +340,14 @@ namespace jc {
             current().stateNames.insert(name);
         }
 
+        // ★ Pre-declare local variable if RHS is a Lambda, to support local recursion
+        if (dynamic_cast<LambdaExpr*>(expr->value.get())) {
+            int slot = resolveLocal(name);
+            if (!expr->isRef && !expr->isState && stateStack.size() > 1 && slot == -1 && current().refNames.count(name) == 0 && current().stateNames.count(name) == 0) {
+                addLocal(name);
+            }
+        }
+
         compileNode(expr->value.get());
 
         if (stateStack.size() == 1) {
@@ -633,111 +641,9 @@ namespace jc {
         return {};
     }
 
-    std::any Compiler::visitFunctionDef(FunctionDef* expr) {
-        lastLine = expr->name.line;
-        const std::string& funcName = expr->name.lexeme;
-        
-        if (stateStack.size() == 1) {
-            knownGlobals.insert(funcName);
-        }
-
-        // ★ 修复：先在当前外层注册函数的 Local / Upvalue 引用权限，确保允许在内部自递归捕获
-        int outerSlot = resolveLocal(funcName);
-        if (stateStack.size() > 1 && outerSlot == -1 && current().refNames.count(funcName) == 0 && current().stateNames.count(funcName) == 0) {
-            addLocal(funcName);
-        }
-        outerSlot = resolveLocal(funcName);
-        // ★ 加强版初始化：包含变长标志透传与必填项扣除
-        auto fn = std::make_shared<CompiledFunction>();
-        fn->name = funcName;
-        fn->maxArity = static_cast<int>(expr->params.size());
-        fn->hasRestParam = expr->hasRestParam;
-
-        int requiredParams = 0;
-        for (size_t i = 0; i < expr->params.size(); ++i) {
-            if (i >= expr->defaultExprs.size() || !expr->defaultExprs[i]) {
-                if (expr->hasRestParam && i == expr->params.size() - 1) break;
-                requiredParams++;
-            }
-            else break;
-        }
-        fn->arity = requiredParams;
-
-        compiledFunctions.push_back(fn);
-
-        int thisFnIndex = functionIndexOffset +
-            static_cast<int>(compiledFunctions.size()) - 1;
-
-        initCompiler(fn.get());
-        beginScope();
-
-        for (size_t i = 0; i < expr->params.size(); ++i) {
-            addLocal(expr->params[i].lexeme);
-        }
-        fn->paramIsRef = expr->paramIsRef; // ★ 保留：记录引用的参数标记
-
-        emitDefaultPreamble(expr->defaultExprs, fn->maxArity);
-
-        // ★ 幽灵注入：参数类型检查
-        for (size_t i = 0; i < expr->params.size(); ++i) {
-            if (i < expr->paramTypes.size() && !expr->paramTypes[i].empty()) {
-                int slot = resolveLocal(expr->params[i].lexeme);
-                emit(OpCode::OP_GET_LOCAL, lastLine);
-                emit16(static_cast<uint16_t>(slot), lastLine);
-
-                uint16_t typeIdx = identifierConstant(expr->paramTypes[i]);
-                uint16_t nameIdx = identifierConstant(expr->params[i].lexeme);
-                emit(OpCode::OP_ASSERT_PARAM_TYPE, lastLine);
-                emit16(typeIdx, lastLine);
-                emit16(nameIdx, lastLine);
-            }
-        }
-        current().expectedReturnType = expr->returnType; // 记录期盼的类型
-        compileNode(expr->body.get());
-
-        // ★ 幽灵注入：隐式返回值的类型检查
-        if (!expr->returnType.empty()) {
-            uint16_t typeIdx = identifierConstant(expr->returnType);
-            emit(OpCode::OP_ASSERT_RETURN_TYPE, lastLine);
-            emit16(typeIdx, lastLine);
-        }
-
-        emit(OpCode::OP_RETURN, lastLine);
-        fn->localCount = current().maxLocals;
-        endScope();
-        stateStack.pop_back();
-
-        uint16_t fnIdx = makeConstant(Value(static_cast<double>(thisFnIndex)));
-        emit(OpCode::OP_CLOSURE, expr->name.line);
-        emit16(fnIdx, expr->name.line);
-
-        // ★ 使用提前抢占好的 outerSlot 并设定值
-        if (outerSlot != -1) {
-            emit(OpCode::OP_SET_LOCAL, expr->name.line);
-            emit16(static_cast<uint16_t>(outerSlot), expr->name.line);
-
-            uint16_t globalIdx = identifierConstant(funcName);
-            emit(OpCode::OP_SET_GLOBAL, expr->name.line);
-            emit16(globalIdx, expr->name.line);
-        }
-        else {
-            int upvalue = resolveUpvalue(funcName);
-            if (upvalue != -1) {
-                emit(OpCode::OP_SET_UPVALUE, expr->name.line);
-                emit16(static_cast<uint16_t>(upvalue), expr->name.line);
-            }
-            else {
-                uint16_t nameIdx = identifierConstant(funcName);
-                emit(OpCode::OP_SET_GLOBAL, expr->name.line);
-                emit16(nameIdx, expr->name.line);
-            }
-        }
-        return {};
-    }
-
     std::any Compiler::visitLambdaExpr(LambdaExpr* expr) {
         auto fn = std::make_shared<CompiledFunction>();
-        fn->name = "<lambda>";
+        fn->name = expr->name;
         fn->maxArity = static_cast<int>(expr->params.size());
         fn->hasRestParam = expr->hasRestParam;
 
@@ -762,6 +668,7 @@ namespace jc {
         for (size_t i = 0; i < expr->params.size(); ++i) {
             addLocal(expr->params[i].lexeme);
         }
+        fn->paramIsRef = expr->paramIsRef; // ★ Transfer ref info
         emitDefaultPreamble(expr->defaultExprs, fn->maxArity);
 
 
@@ -1454,6 +1361,7 @@ namespace jc {
 
     std::any Compiler::visitConstDecl(ConstDecl* expr) {
         compileNode(expr->value.get());
+        emit(OpCode::OP_DUP, lastLine);
         const std::string& name = expr->name.lexeme;
 
         if (stateStack.size() == 1) knownGlobals.insert(name);
