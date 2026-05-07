@@ -43,15 +43,15 @@ namespace jc {
         bool operator()(const Value& lhs, const Value& rhs) const;
     };
 
-    struct PrintGuard {
+    struct RecursionGuard {
         std::vector<const void*>& vis;
         bool isCycle;
-        PrintGuard(std::vector<const void*>& v, const void* p) : vis(v) {
+        RecursionGuard(std::vector<const void*>& v, const void* p) : vis(v) {
             isCycle = (std::find(vis.begin(), vis.end(), p) != vis.end());
             if (!isCycle) vis.push_back(p);
         }
-        ~PrintGuard() {
-            if (!isCycle) vis.pop_back(); // 打印退出时自动抹除足迹
+        ~RecursionGuard() {
+            if (!isCycle) vis.pop_back(); // 退出时自动抹除足迹
         }
     };
 
@@ -405,6 +405,7 @@ namespace jc {
         // 统一哈希判定 (The One and Only Hashability)
         // ==========================================
         bool isHashable() const {
+            static thread_local std::vector<const void*> visited;
             return std::visit([this](auto&& arg) -> bool {
                 using T = std::decay_t<decltype(arg)>;
                 if constexpr (std::is_same_v<T, std::monostate> ||
@@ -424,6 +425,8 @@ namespace jc {
                 }
                 else if constexpr (std::is_same_v<T, List>) {
                     if (!arg.isFrozen()) return false;
+                    RecursionGuard guard(visited, arg.id());
+                    if (guard.isCycle) return true;
                     for (const auto& e : arg.raw()) {
                         try {
                             if (!e.isHashable()) return false;
@@ -433,6 +436,8 @@ namespace jc {
                 }
                 else if constexpr (std::is_same_v<T, Dict>) {
                     if (!arg.isFrozen()) return false;
+                    RecursionGuard guard(visited, arg.id());
+                    if (guard.isCycle) return true;
                     for (const auto& [k, v] : arg.getEntries()) {
                         try {
                             if (!v.isHashable()) return false;
@@ -442,6 +447,8 @@ namespace jc {
                 }
                 else if constexpr (std::is_same_v<T, Set>) {
                     if (!arg.isFrozen()) return false;
+                    RecursionGuard guard(visited, arg.id());
+                    if (guard.isCycle) return true;
                     for (const auto& v : arg.raw()) {
                         try {
                             if (!v.isHashable()) return false;
@@ -451,6 +458,8 @@ namespace jc {
                 }
                 else if constexpr (std::is_same_v<T, std::shared_ptr<Instance>>) {
                     if (!arg) return false;
+                    RecursionGuard guard(visited, arg.get());
+                    if (guard.isCycle) return true;
                     auto c = arg->classDef;
                     while (c) {
                         if (c->methods.count("__hash__")) return true;
@@ -1250,7 +1259,7 @@ namespace jc {
                 else if constexpr (std::is_same_v<T, BaseNum>) os << arg;
                 else if constexpr (std::is_same_v<T, jc::StringMatrix>) os << arg;
                 else if constexpr (std::is_same_v<T, jc::Dict>) {
-                    PrintGuard guard(visited, arg.id());
+                    RecursionGuard guard(visited, arg.id());
                     if (guard.isCycle) { os << "{...}"; return; }
                     os << "{";
                     const auto& entries = arg.getEntries();
@@ -1267,7 +1276,7 @@ namespace jc {
                     os << "}";
                 }
                 else if constexpr (std::is_same_v<T, jc::List>) {
-                    PrintGuard guard(visited, arg.id());
+                    RecursionGuard guard(visited, arg.id());
                     if (guard.isCycle) { os << "[...]"; return; }
                     os << "[";
                     for (size_t ii = 0; ii < arg.size(); ++ii) {
@@ -1286,7 +1295,7 @@ namespace jc {
                 }
                 else if constexpr (std::is_same_v<T, std::shared_ptr<Instance>>) {
                     if (!arg) { os << "<instance null>"; return; }
-                    PrintGuard guard(visited, arg.get());
+                    RecursionGuard guard(visited, arg.get());
                     std::string cname = arg->classDef ? arg->classDef->name : "unknown";
                     if (guard.isCycle) {
                         os << "<" << cname << " {...}>";
@@ -1319,7 +1328,7 @@ namespace jc {
                     }
                 }
                 else if constexpr (std::is_same_v<T, jc::Set>) {
-                    PrintGuard guard(visited, arg.id());
+                    RecursionGuard guard(visited, arg.id());
                     if (guard.isCycle) { os << "Set{...}"; return; }
                     os << "Set{";
                     const auto& elems = arg.raw();
@@ -1386,6 +1395,7 @@ namespace jc {
         }
 
         std::string toJC2Expression() const {
+            static thread_local std::vector<const void*> visited;
             return std::visit([](auto&& arg) -> std::string {
                 using T = std::decay_t<decltype(arg)>;
 
@@ -1436,6 +1446,8 @@ namespace jc {
                     return res;
                 }
                 else if constexpr (std::is_same_v<T, Dict>) {
+                    RecursionGuard guard(visited, arg.id());
+                    if (guard.isCycle) return "dict()";
                     const auto& entries = arg.getEntries();
                     std::string res = "dict(";
                     for (size_t ii = 0; ii < entries.size(); ++ii) {
@@ -1452,6 +1464,8 @@ namespace jc {
                     return res;
                 }
                 else if constexpr (std::is_same_v<T, List>) {
+                    RecursionGuard guard(visited, arg.id());
+                    if (guard.isCycle) return "list()";
                     std::string res = "list(";
                     for (size_t ii = 0; ii < arg.size(); ++ii) {
                         try {
@@ -1465,6 +1479,8 @@ namespace jc {
                     return res;
                 }
                 else if constexpr (std::is_same_v<T, Set>) {
+                    RecursionGuard guard(visited, arg.id());
+                    if (guard.isCycle) return "Set()";
                     std::string res = "Set(";
                     const auto& elems = arg.raw();
                     for (size_t ii = 0; ii < elems.size(); ++ii) {
@@ -1692,11 +1708,15 @@ inline void Set::clear() {
 }
 
 inline size_t ValueHasher::operator()(const Value& v) const {
+    static thread_local std::vector<const void*> visited;
+
     if (v.isString()) return std::hash<std::string>{}(std::get<std::string>(v.data));
     if (v.isNone()) return 0;
     
     if (std::holds_alternative<std::shared_ptr<Instance>>(v.data)) {
         auto inst = std::get<std::shared_ptr<Instance>>(v.data);
+        RecursionGuard guard(visited, inst.get());
+        if (guard.isCycle) return 0;
         auto [found, res] = invokeDunder(inst, "__hash__");
         if (found) return operator()(res); // 递归哈希其返回值（如数字或字符串）
         return std::hash<const void*>{}(inst.get());
@@ -1709,15 +1729,21 @@ inline size_t ValueHasher::operator()(const Value& v) const {
     }
 
     if (std::holds_alternative<List>(v.data)) {
+        auto& l = std::get<List>(v.data);
+        RecursionGuard guard(visited, l.id());
+        if (guard.isCycle) return 0;
         size_t h = 0;
-        for (const auto& e : std::get<List>(v.data).raw()) {
+        for (const auto& e : l.raw()) {
             h ^= operator()(e) + 0x9e3779b9 + (h << 6) + (h >> 2);
         }
         return h;
     }
     if (std::holds_alternative<Dict>(v.data)) {
+        auto& d = std::get<Dict>(v.data);
+        RecursionGuard guard(visited, d.id());
+        if (guard.isCycle) return 0;
         size_t h = 0;
-        for (const auto& [k, val] : std::get<Dict>(v.data).getEntries()) {
+        for (const auto& [k, val] : d.getEntries()) {
             size_t kv_hash = operator()(k);
             kv_hash ^= operator()(val) + 0x9e3779b9 + (kv_hash << 6) + (kv_hash >> 2);
             // MurmurHash3 风格的雪崩扰乱，打散位分布
@@ -1732,8 +1758,11 @@ inline size_t ValueHasher::operator()(const Value& v) const {
         return h;
     }
     if (std::holds_alternative<Set>(v.data)) {
+        auto& s = std::get<Set>(v.data);
+        RecursionGuard guard(visited, s.id());
+        if (guard.isCycle) return 0;
         size_t h = 0;
-        for (const auto& val : std::get<Set>(v.data).raw()) {
+        for (const auto& val : s.raw()) {
             size_t e_hash = operator()(val);
             // 雪崩扰乱
             e_hash ^= (e_hash >> 16);

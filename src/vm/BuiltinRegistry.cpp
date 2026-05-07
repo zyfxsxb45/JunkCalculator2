@@ -54,7 +54,7 @@ namespace jc {
         }
         else if (std::holds_alternative<List>(v.data)) {
             auto& l = std::get<List>(v.data);
-            PrintGuard guard(visited, l.id());
+            RecursionGuard guard(visited, l.id());
             if (guard.isCycle) { oss << "CYCLE"; return oss.str(); }
             oss << "[";
             for (const auto& e : l.raw()) {
@@ -64,7 +64,7 @@ namespace jc {
         }
         else if (std::holds_alternative<Dict>(v.data)) {
             auto& d = std::get<Dict>(v.data);
-            PrintGuard guard(visited, d.id());
+            RecursionGuard guard(visited, d.id());
             if (guard.isCycle) { oss << "CYCLE"; return oss.str(); }
             std::vector<std::string> pairs;
             for (const auto& [k, val] : d.getEntries()) {
@@ -77,7 +77,7 @@ namespace jc {
         }
         else if (std::holds_alternative<Set>(v.data)) {
             auto& s = std::get<Set>(v.data);
-            PrintGuard guard(visited, s.id());
+            RecursionGuard guard(visited, s.id());
             if (guard.isCycle) { oss << "CYCLE"; return oss.str(); }
             std::vector<std::string> elems;
             for (const auto& val : s.raw()) {
