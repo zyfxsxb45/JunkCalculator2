@@ -193,7 +193,7 @@ namespace jc {
                                 if (isParamRef) throw std::runtime_error("Destructured dict cannot be ref.");
                                 auto dictNode = parseDictLiteral();
 
-                                std::string phName = "__param_dict_" + std::to_string(destructCounter++);
+                                std::string phName = "<param_dict>_" + std::to_string(destructCounter++);
                                 Token phTok(TokenType::IDENTIFIER, phName, funcName.line);
                                 params.push_back(phTok);
                                 paramIsRef.push_back(false);
@@ -429,7 +429,7 @@ namespace jc {
                 
                 // 连续比较，为每个中间节点生成独立的临时变量
                 int chainIdx = 0;
-                std::string tmpName = "__jc2_chain_" + std::to_string(current) + "_" + std::to_string(chainIdx++);
+                std::string tmpName = "<chain>_" + std::to_string(current) + "_" + std::to_string(chainIdx++);
                 Token tmpTok(TokenType::IDENTIFIER, tmpName, op.position, op.line);
                 
                 auto assign = std::make_unique<Assign>(tmpTok, std::move(right));
@@ -449,7 +449,7 @@ namespace jc {
                         check(TokenType::GREATER) || check(TokenType::GREATER_EQUAL) ||
                         check(TokenType::IN)) {
                         
-                        std::string nextTmpName = "__jc2_chain_" + std::to_string(current) + "_" + std::to_string(chainIdx++);
+                        std::string nextTmpName = "<chain>_" + std::to_string(current) + "_" + std::to_string(chainIdx++);
                         Token nextTmpTok(TokenType::IDENTIFIER, nextTmpName, nextOp.position, nextOp.line);
 
                         auto nextAssign = std::make_unique<Assign>(nextTmpTok, std::move(nextRight));
@@ -545,7 +545,7 @@ namespace jc {
                         if (auto* var = dynamic_cast<Variable*>(arg.get())) {
                             if (var->name.lexeme == "_") {
                                 isPartial = true;
-                                Token phTok(TokenType::IDENTIFIER, "__ph_" + std::to_string(phCount++), var->name.line);
+                                Token phTok(TokenType::IDENTIFIER, "<ph>_" + std::to_string(phCount++), var->name.line);
                                 phParams.push_back(phTok);
                                 phDefaults.push_back(nullptr);
                                 arg = std::make_unique<Variable>(phTok);
@@ -593,7 +593,7 @@ namespace jc {
                     if (auto* var = dynamic_cast<Variable*>(arg.get())) {
                         if (var->name.lexeme == "_") {
                             isPartial = true;
-                            Token phTok(TokenType::IDENTIFIER, "__ph_" + std::to_string(phCount++), var->name.line);
+                            Token phTok(TokenType::IDENTIFIER, "<ph>_" + std::to_string(phCount++), var->name.line);
                             phParams.push_back(phTok);
                             phDefaults.push_back(nullptr);
                             arg = std::make_unique<Variable>(phTok);

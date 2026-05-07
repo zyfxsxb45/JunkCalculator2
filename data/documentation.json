@@ -1409,6 +1409,7 @@
       "",
       "    2. State Machine (Private Memory): Use `state` assignment.",
       "       The closure mutates its own captured snapshot. Outer scope is untouched.",
+      "       Initialization (e.g., state n = 0) happens EXACTLY ONCE on the first call.",
       "       base = 100; f = () => { state base += 50; return base }",
       "       f() // 150, f() // 200.  print(base) // Still 100!",
       "",
@@ -5986,9 +5987,11 @@
         "Scope modifier: gives a closure variable PRIVATE PERSISTENT memory.",
         "Each call remembers the previous value of `state` variables,",
         "but the outer scope variable (if any) remains completely untouched.",
+        "The initialization expression (e.g., state x = expr) is guaranteed",
+        "to evaluate and assign EXACTLY ONCE during the first execution.",
         "",
         "Usage forms:",
-        "  state x = expr     Assign to private persistent variable",
+        "  state x = expr     Initialize private persistent variable (once)",
         "  state x += expr    Compound assignment to private variable",
         "  state x            Standalone declaration",
         "",
@@ -5998,7 +6001,7 @@
         "See also: /help scope, /help ref"
       ],
       "examples": [
-        "counter() = { state n = 0; state n += 1; return n }",
+        "counter() = { state n = 0; n += 1; return n }",
         "counter()  // → 1",
         "counter()  // → 2",
         "counter()  // → 3"
