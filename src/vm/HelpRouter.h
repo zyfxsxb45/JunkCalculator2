@@ -70,6 +70,42 @@ namespace jc {
             return prevCol[len2];
         }
 
+        static bool printEntry(const Value& entryVal) {
+            if (!std::holds_alternative<Dict>(entryVal.data)) return false;
+            Dict entry = std::get<Dict>(entryVal.data);
+            std::cout << "\n";
+            if (entry.has(Value("signature"))) {
+                std::cout << col(Ansi::BRIGHT_GREEN) << std::get<std::string>(entry.get(Value("signature"))->data) << col(Ansi::RESET) << "\n";
+            }
+            if (entry.has(Value("desc"))) {
+                Value descVal = *entry.get(Value("desc"));
+                if (std::holds_alternative<std::string>(descVal.data)) {
+                    std::cout << "  " << std::get<std::string>(descVal.data) << "\n";
+                } else if (std::holds_alternative<List>(descVal.data)) {
+                    for (const auto& lineAny : std::get<List>(descVal.data).raw()) {
+                        Value lineVal = extractAny(lineAny);
+                        if (std::holds_alternative<std::string>(lineVal.data)) {
+                            std::cout << "  " << std::get<std::string>(lineVal.data) << "\n";
+                        }
+                    }
+                }
+            }
+            if (entry.has(Value("examples"))) {
+                Value exVal = *entry.get(Value("examples"));
+                if (std::holds_alternative<List>(exVal.data)) {
+                    std::cout << "\n  Examples:\n";
+                    for (const auto& exAny : std::get<List>(exVal.data).raw()) {
+                        Value ex = extractAny(exAny);
+                        if (std::holds_alternative<std::string>(ex.data)) {
+                            std::cout << col(Ansi::BRIGHT_YELLOW) << "    " << std::get<std::string>(ex.data) << col(Ansi::RESET) << "\n";
+                        }
+                    }
+                }
+            }
+            std::cout << std::endl;
+            return true;
+        }
+
     public:
         static void printHelpTopic(const std::string& topic) {
             init();
@@ -125,40 +161,7 @@ namespace jc {
                         }
                     }
 
-                    if (!targetFn.isNone() && std::holds_alternative<Dict>(targetFn.data)) {
-                        Dict fn = std::get<Dict>(targetFn.data);
-                        std::cout << "\n";
-                        if (fn.has(Value("signature"))) {
-                            std::cout << col(Ansi::BRIGHT_GREEN) << std::get<std::string>(fn.get(Value("signature"))->data) << col(Ansi::RESET) << "\n";
-                        }
-                        if (fn.has(Value("desc"))) {
-                            Value descVal = *fn.get(Value("desc"));
-                            if (std::holds_alternative<std::string>(descVal.data)) {
-                                std::cout << "  " << std::get<std::string>(descVal.data) << "\n";
-                            } else if (std::holds_alternative<List>(descVal.data)) {
-                                for (const auto& lineAny : std::get<List>(descVal.data).raw()) {
-                                    Value lineVal = extractAny(lineAny);
-                                    if (std::holds_alternative<std::string>(lineVal.data)) {
-                                        std::cout << "  " << std::get<std::string>(lineVal.data) << "\n";
-                                    }
-                                }
-                            }
-                        }
-                        if (fn.has(Value("examples"))) {
-                            Value exVal = *fn.get(Value("examples"));
-                            if (std::holds_alternative<List>(exVal.data)) {
-                                std::cout << "\n  Examples:\n";
-                                for (const auto& exAny : std::get<List>(exVal.data).raw()) {
-                                    Value ex = extractAny(exAny);
-                                    if (std::holds_alternative<std::string>(ex.data)) {
-                                        std::cout << col(Ansi::BRIGHT_YELLOW) << "    " << std::get<std::string>(ex.data) << col(Ansi::RESET) << "\n";
-                                    }
-                                }
-                            }
-                        }
-                        std::cout << std::endl;
-                        return;
-                    }
+                    if (!targetFn.isNone() && printEntry(targetFn)) return;
                 }
             }
 
@@ -187,6 +190,17 @@ namespace jc {
                             std::cout << std::endl;
                             return;
                         }
+                    }
+                }
+            }
+
+            // 3.5 Search in "keywords" (case-insensitive)
+            if (root.has(Value("keywords"))) {
+                Value kwsVal = *root.get(Value("keywords"));
+                if (std::holds_alternative<Dict>(kwsVal.data)) {
+                    Dict kws = std::get<Dict>(kwsVal.data);
+                    if (kws.has(Value(lowerKey))) {
+                        if (printEntry(*kws.get(Value(lowerKey)))) return;
                     }
                 }
             }
@@ -227,6 +241,42 @@ namespace jc {
                             
                             if (isPrefix || isSubstr || dist <= 2) {
                                 candidates.push_back({funcName, desc});
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (root.has(Value("keywords"))) {
+                Value kwsVal = *root.get(Value("keywords"));
+                if (std::holds_alternative<Dict>(kwsVal.data)) {
+                    Dict kws = std::get<Dict>(kwsVal.data);
+                    for (const auto& [k, v] : kws.getEntries()) {
+                        if (std::holds_alternative<std::string>(k.data) && std::holds_alternative<Dict>(v.data)) {
+                            std::string kwName = std::get<std::string>(k.data);
+                            Dict kwDict = std::get<Dict>(v.data);
+                            std::string desc = "";
+                            if (kwDict.has(Value("desc"))) {
+                                Value descVal = *kwDict.get(Value("desc"));
+                                if (std::holds_alternative<std::string>(descVal.data)) {
+                                    desc = std::get<std::string>(descVal.data);
+                                } else if (std::holds_alternative<List>(descVal.data)) {
+                                    auto raw = std::get<List>(descVal.data).raw();
+                                    if (!raw.empty()) {
+                                        Value firstLine = extractAny(raw[0]);
+                                        if (std::holds_alternative<std::string>(firstLine.data))
+                                            desc = std::get<std::string>(firstLine.data);
+                                    }
+                                }
+                            }
+                            std::string lowerKwName = kwName;
+                            std::transform(lowerKwName.begin(), lowerKwName.end(), lowerKwName.begin(),
+                                [](unsigned char c) -> char { return static_cast<char>(std::tolower(c)); });
+                            bool isPrefix = lowerKwName.find(lowerKey) == 0;
+                            bool isSubstr = lowerKwName.find(lowerKey) != std::string::npos;
+                            int dist = levenshtein(lowerKey, lowerKwName);
+                            if (isPrefix || isSubstr || dist <= 2) {
+                                candidates.push_back({kwName + " (keyword)", desc});
                             }
                         }
                     }

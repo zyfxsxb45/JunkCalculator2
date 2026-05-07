@@ -67,6 +67,12 @@
       "    fileio      File I/O (read, write, CSV, directory)",
       "    import      Code reuse (import libraries and scripts)",
       "",
+      "  Language Keywords (type \"/help <keyword>\")",
+      "  ────────────────────────────────────────────────────────────────────",
+      "    if  else  while  for  in  break  continue  return  switch  case",
+      "    class  extends  super  self  ref  state  const  delete",
+      "    try  catch  throw  import  true  false  none",
+      "",
       "  Native Modules (require `import` before use)",
       "  ────────────────────────────────────────────────────────────────────",
       "    image       BMP image generation (import \"image\")",
@@ -99,7 +105,9 @@
       "    A = matrix(2, 2, 1, 2, 3, 4)   same, via constructor",
       "    A[0, 1] = 99                   in-place modify",
       "    [a, b] = [1, 2]                destructuring assignment",
+      "    [ref a, state b] = [1, 2]      per-variable scope modifiers",
       "    {x, y: yy} = obj               dict/instance destructuring",
+      "    {x: ref a, y: state b} = obj   dict destructuring with modifiers",
       "    [x, y] = [y, x]                swap variables",
       "    v = [1; 2; 3]                  column vector (math)",
       "    arr = [1, 2, 3]                row vector (data/array)",
@@ -202,11 +210,24 @@
       "   Destructuring Assignment (Arrays & Dicts)",
       "  ──────────────────────",
       "    [a, b, c] = [10, 20, 30]          // Array destructuring",
+      "    [ref a, state b] = [1, 2]         // Per-variable scope modifiers",
       "    { name, age: a } = { name: \"Bob\", age: 20 }  // Dict destructuring",
+      "    { x: ref a, y: state b } = obj    // Dict destructuring with modifiers",
       "    Works with any iterable on the right side:",
       "      [a, b] = [1; 2]                    Column vector",
       "      [a, b] = list(\"hello\", 42)          List",
       "      { x, y } = Point(10, 20)           Force-extract from instances!",
+      "    Per-Variable Scope Modifiers (ref / state):",
+      "      Each destructured variable can independently carry a `ref` or `state` modifier.",
+      "      This allows fine-grained control over which variables read/write outer scope,",
+      "      which have private memory, and which are plain auto-locals.",
+      "      [ref a, state b, c] = [x+1, y+1, z+1]",
+      "        • a uses `ref` → reads/writes the outer variable 'a' directly",
+      "        • b uses `state` → has private persistent memory across calls",
+      "        • c has no modifier → auto-local (default behavior)",
+      "      {x: ref px, y: state py} = point",
+      "        • Same rules apply to dict destructuring targets",
+      "",
       "    Variable Swap & Discard:",
       "      [x, y] = [y, x]",
       "      [_, second, _] = [10, 20, 30]      Discard with underscore",
@@ -1405,7 +1426,26 @@
       "  ──────────────────────",
       "    Destructured variables obey auto-local rules:",
       "      f() = { [a, b] = [10, 20]; return a + b }   // a, b are local",
-      "    Use 'ref' to project destructured variables into the outer scope.",
+      "",
+      "    ★ Per-Variable Modifiers in Destructuring:",
+      "    Each target variable can individually carry `ref` or `state`:",
+      "      [ref a, state b, c] = [1, 2, 3]",
+      "        • ref a    → reads/writes the outer variable 'a' directly",
+      "        • state b  → private persistent memory (closure state machine)",
+      "        • c        → plain auto-local (no modifier)",
+      "",
+      "      {x: ref px, y: state py} = obj",
+      "        • Same rules apply to dict destructuring targets",
+      "",
+      "    Example — Mixed modifiers in a closure:",
+      "      score = 0; combo = 0",
+      "      hit() = {",
+      "          [state score, combo] = [score + 10, combo + 1]",
+      "          return f\"score={score}, combo={combo}\"",
+      "      }",
+      "      hit()  // \"score=10, combo=1\"  (state score remembers, combo resets)",
+      "      hit()  // \"score=20, combo=1\"  (score increments, combo always 1)",
+      "      print(score)  // 0  (global untouched)",
       "",
       "  Constants (const)",
       "  ──────────────────────",
@@ -5676,6 +5716,399 @@
       "signature": "__hash__()",
       "desc": "Dunder method: Provides a hash value for Dict keys and Set elements. Must return a hashable type.",
       "examples": ["__hash__() = hash(self.id)"]
+    }
+  },
+  "keywords": {
+    "if": {
+      "signature": "if (condition) { body } [else if (cond) { body }] [else { body }]",
+      "desc": [
+        "Conditional branching statement.",
+        "Executes the body if the condition evaluates to a truthy value.",
+        "Supports chained `else if` and a final `else` fallback branch.",
+        "Braces {} are optional for single-statement bodies.",
+        "Returns the value of the last expression evaluated in the selected branch.",
+        "See also: /help control"
+      ],
+      "examples": [
+        "if (x > 0) print(\"positive\")",
+        "if (x > 0) { \"pos\" } else if (x == 0) { \"zero\" } else { \"neg\" }",
+        "result = if (score >= 60) { \"pass\" } else { \"fail\" }"
+      ]
+    },
+    "else": {
+      "signature": "if (cond) { ... } else { ... }  |  else if (cond) { ... }",
+      "desc": [
+        "Fallback branch of an `if` statement.",
+        "Executes when all preceding `if` and `else if` conditions are falsy.",
+        "Can also be used as `else if (cond)` for chained conditions.",
+        "See also: /help if, /help control"
+      ],
+      "examples": [
+        "if (x > 0) { 1 } else { -1 }",
+        "if (a) { ... } else if (b) { ... } else { ... }"
+      ]
+    },
+    "while": {
+      "signature": "while (condition) { body }",
+      "desc": [
+        "Loop that repeats the body as long as the condition is truthy.",
+        "Braces {} are optional for single-statement bodies.",
+        "Use `break` to exit early, `continue` to skip to next iteration.",
+        "See also: /help control"
+      ],
+      "examples": [
+        "i = 0; while (i < 10) { print(i); i += 1 }",
+        "while (true) { if (done) break }"
+      ]
+    },
+    "for": {
+      "signature": "for (init; cond; update) { body }  |  for (var in iterable) { body }",
+      "desc": [
+        "C-style for loop or for-in iteration loop.",
+        "",
+        "C-style: for (init; condition; update) { body }",
+        "  Executes init once, then repeats body while condition is truthy,",
+        "  running update after each iteration.",
+        "",
+        "For-in: for (var in iterable) { body }",
+        "  Iterates over arrays, vectors, strings, lists, dicts, sets.",
+        "  Supports destructuring: for ([k, v] in dict) { ... }",
+        "",
+        "Braces {} are optional for single-statement bodies.",
+        "See also: /help control"
+      ],
+      "examples": [
+        "for (i = 0; i < 10; i += 1) { print(i) }",
+        "for (x in [1, 2, 3]) print(x)",
+        "for ([k, v] in {a: 1, b: 2}) print(k, v)"
+      ]
+    },
+    "in": {
+      "signature": "for (var in iterable)  |  value in container",
+      "desc": [
+        "Used in two contexts:",
+        "",
+        "1. For-in loops: Iterates var over each element of an iterable.",
+        "   Supported: arrays, vectors, strings, lists, dicts, sets.",
+        "",
+        "2. Membership test (operator): Returns 1 if the value exists",
+        "   in the container, 0 otherwise.",
+        "   Supported: arrays, lists, strings, dicts (checks keys), sets.",
+        "See also: /help for, /help control"
+      ],
+      "examples": [
+        "for (x in range(10)) print(x)",
+        "3 in [1, 2, 3]          // → 1",
+        "\"key\" in {key: 42}      // → 1",
+        "\"h\" in \"hello\"          // → 1"
+      ]
+    },
+    "break": {
+      "signature": "break",
+      "desc": [
+        "Immediately exits the innermost enclosing loop (for or while).",
+        "Cannot be used outside of a loop body.",
+        "See also: /help control"
+      ],
+      "examples": [
+        "for (i = 0; i < 100; i += 1) { if (i == 5) break }",
+        "while (true) { if (done()) break }"
+      ]
+    },
+    "continue": {
+      "signature": "continue",
+      "desc": [
+        "Skips the remainder of the current loop iteration and jumps",
+        "to the next iteration (or the condition check for while loops).",
+        "See also: /help control"
+      ],
+      "examples": [
+        "for (i = 0; i < 10; i += 1) { if (i % 2 == 0) continue; print(i) }"
+      ]
+    },
+    "return": {
+      "signature": "return [expr]",
+      "desc": [
+        "Exits the current function and optionally returns a value.",
+        "If no expression is provided, returns `none`.",
+        "Can be used anywhere inside a function body, including nested blocks.",
+        "See also: /help control, /help scope"
+      ],
+      "examples": [
+        "f(x) = { if (x < 0) return -x; return x }",
+        "g() = { print(\"done\"); return }"
+      ]
+    },
+    "switch": {
+      "signature": "switch (expr) { case val: { body } ... [default: { body }] }",
+      "desc": [
+        "Pattern matching statement. Evaluates expr and compares against",
+        "each case value. Executes the first matching branch.",
+        "Multiple values per case: `case val1, val2: { ... }`",
+        "No fall-through — only the matched branch executes.",
+        "Returns the value of the matched branch expression.",
+        "See also: /help control"
+      ],
+      "examples": [
+        "switch (day) {",
+        "    case \"Mon\", \"Tue\": { \"weekday\" }",
+        "    case \"Sat\", \"Sun\": { \"weekend\" }",
+        "    default: { \"other\" }",
+        "}"
+      ]
+    },
+    "case": {
+      "signature": "case value [, value2, ...]: { body }",
+      "desc": [
+        "A branch inside a `switch` statement.",
+        "Matches when the switch expression equals any of the listed values.",
+        "Multiple values can be comma-separated for a single branch.",
+        "See also: /help switch, /help control"
+      ],
+      "examples": [
+        "case 1: { \"one\" }",
+        "case \"a\", \"b\": { \"letter\" }"
+      ]
+    },
+    "default": {
+      "signature": "default: { body }",
+      "desc": [
+        "The fallback branch inside a `switch` statement.",
+        "Executes when no `case` value matches the switch expression.",
+        "See also: /help switch, /help control"
+      ],
+      "examples": [
+        "default: { \"unknown\" }"
+      ]
+    },
+    "class": {
+      "signature": "class Name [extends Parent] { init(...) = {...}  method(...) = ... }",
+      "desc": [
+        "Defines a new class with methods and an optional constructor.",
+        "• `init(...)` is the constructor, called on instantiation.",
+        "• `self` refers to the current instance inside methods.",
+        "• Supports single inheritance via `extends`.",
+        "• Operator overloading via dunder methods (__add__, __str__, etc.).",
+        "See also: /help class (topic) for full details"
+      ],
+      "examples": [
+        "class Point {",
+        "    init(x, y) = { self.x = x; self.y = y }",
+        "    dist() = sqrt(self.x^2 + self.y^2)",
+        "}",
+        "p = Point(3, 4); p.dist()  // → 5"
+      ]
+    },
+    "extends": {
+      "signature": "class Child extends Parent { ... }",
+      "desc": [
+        "Declares that a class inherits from a parent class.",
+        "The child class inherits all methods from the parent.",
+        "Use `super.method()` to call the parent's implementation.",
+        "See also: /help class (topic)"
+      ],
+      "examples": [
+        "class Animal { speak() = \"...\" }",
+        "class Dog extends Animal { speak() = \"Woof!\" }"
+      ]
+    },
+    "super": {
+      "signature": "super.method(args)  |  super.init(args)",
+      "desc": [
+        "Refers to the parent class's method implementation.",
+        "Typically used in constructors: `super.init(...)` to initialize",
+        "inherited fields, and in overridden methods to extend behavior.",
+        "See also: /help class (topic)"
+      ],
+      "examples": [
+        "class Dog extends Animal {",
+        "    init(name) = { super.init(name); self.type = \"Dog\" }",
+        "}"
+      ]
+    },
+    "self": {
+      "signature": "self.field  |  self.method()",
+      "desc": [
+        "Refers to the current class instance inside a method body.",
+        "Used to read/write instance fields and call other methods.",
+        "Automatically available in all class methods — no declaration needed.",
+        "See also: /help class (topic)"
+      ],
+      "examples": [
+        "init(x) = { self.x = x }",
+        "area() = self.w * self.h"
+      ]
+    },
+    "ref": {
+      "signature": "ref variable = expr  |  ref variable",
+      "desc": [
+        "Scope modifier: binds a variable to an OUTER scope variable.",
+        "Without `ref`, assignments inside functions create new auto-locals.",
+        "With `ref`, the assignment reads/writes the enclosing scope directly.",
+        "",
+        "Usage forms:",
+        "  ref x = expr       Assign to outer variable x",
+        "  ref x += expr      Compound assignment to outer variable",
+        "  ref x              Standalone declaration (marks x for subsequent uses)",
+        "",
+        "Works in destructuring (per-variable):",
+        "  [ref a, b] = [1, 2]         a writes to outer, b is auto-local",
+        "  {x: ref a, y: b} = obj      Same for dict destructuring",
+        "",
+        "Also used for pass-by-reference parameters:",
+        "  addOne(ref x) = { x = x + 1 }   Mutates the caller's variable",
+        "",
+        "See also: /help scope, /help state"
+      ],
+      "examples": [
+        "counter = 0",
+        "bump() = ref counter += 1",
+        "bump(); bump(); print(counter)  // → 2",
+        "[ref a, state b] = [x + 1, y + 1]"
+      ]
+    },
+    "state": {
+      "signature": "state variable = expr  |  state variable",
+      "desc": [
+        "Scope modifier: gives a closure variable PRIVATE PERSISTENT memory.",
+        "Each call remembers the previous value of `state` variables,",
+        "but the outer scope variable (if any) remains completely untouched.",
+        "",
+        "Usage forms:",
+        "  state x = expr     Assign to private persistent variable",
+        "  state x += expr    Compound assignment to private variable",
+        "  state x            Standalone declaration",
+        "",
+        "Works in destructuring (per-variable):",
+        "  [state a, b] = [1, 2]    a has memory across calls, b resets each time",
+        "",
+        "See also: /help scope, /help ref"
+      ],
+      "examples": [
+        "counter() = { state n = 0; state n += 1; return n }",
+        "counter()  // → 1",
+        "counter()  // → 2",
+        "counter()  // → 3"
+      ]
+    },
+    "const": {
+      "signature": "const name = expr",
+      "desc": [
+        "Declares an immutable constant. Any attempt to reassign the variable",
+        "will throw a runtime error. Can still be removed with `delete`.",
+        "See also: /help scope"
+      ],
+      "examples": [
+        "const G = 9.81",
+        "G = 10             // ✗ Error: Cannot modify const",
+        "delete G           // ✓ Permitted"
+      ]
+    },
+    "delete": {
+      "signature": "delete variable",
+      "desc": [
+        "Removes a variable from the global scope entirely.",
+        "Works on any variable, including `const` and system constants.",
+        "For user function overloads, removes only the user-defined overload.",
+        "See also: /help scope"
+      ],
+      "examples": [
+        "x = 42; delete x",
+        "delete PI         // use resetConst() to restore"
+      ]
+    },
+    "try": {
+      "signature": "try { body } catch (var) { handler }",
+      "desc": [
+        "Error handling construct. Executes the body; if any error occurs,",
+        "execution jumps to the catch block with the error message in `var`.",
+        "try/catch is an expression — returns the value of whichever branch runs.",
+        "Control flow signals (break, continue, return) pass through unaffected.",
+        "See also: /help error"
+      ],
+      "examples": [
+        "try { 1 / 0 } catch (e) { print(\"Error:\", e) }",
+        "result = try { riskyOp() } catch (e) { \"fallback\" }"
+      ]
+    },
+    "catch": {
+      "signature": "catch (variable) { handler }",
+      "desc": [
+        "The error handler block of a `try` statement.",
+        "The variable receives the error message as a string.",
+        "You can re-throw the error with `throw e` to propagate it upward.",
+        "See also: /help try, /help error"
+      ],
+      "examples": [
+        "try { error(\"oops\") } catch (e) { print(e) }"
+      ]
+    },
+    "throw": {
+      "signature": "throw expr",
+      "desc": [
+        "Throws a runtime error with the given value (usually a string).",
+        "Unwinds the call stack until a `try/catch` block catches it.",
+        "If uncaught, prints a full stack trace and terminates execution.",
+        "See also: /help error"
+      ],
+      "examples": [
+        "throw \"Invalid input\"",
+        "if (x < 0) throw f\"Expected positive, got {x}\""
+      ]
+    },
+    "import": {
+      "signature": "import \"path_or_module\"",
+      "desc": [
+        "Loads and executes a .jc2 script or native C++ module.",
+        "Native modules (image, prob, json, bytes, socket, window, latex)",
+        "take priority over .jc2 files with the same name.",
+        "Importing the same module/file twice is a safe no-op (deduplicated).",
+        "All definitions become globally available in the caller's scope.",
+        "See also: /help import (topic) for full details"
+      ],
+      "examples": [
+        "import \"json\"",
+        "import \"math_utils\"",
+        "import \"../lib/helpers\""
+      ]
+    },
+    "true": {
+      "signature": "true",
+      "desc": [
+        "Boolean constant, equal to 1.0.",
+        "It is an ordinary global variable — can be overwritten or deleted.",
+        "Use `resetConst()` to restore.",
+        "See also: /help scope, /help control"
+      ],
+      "examples": [
+        "if (true) print(\"always\")"
+      ]
+    },
+    "false": {
+      "signature": "false",
+      "desc": [
+        "Boolean constant, equal to 0.0.",
+        "It is an ordinary global variable — can be overwritten or deleted.",
+        "Use `resetConst()` to restore.",
+        "See also: /help scope, /help control"
+      ],
+      "examples": [
+        "if (!false) print(\"always\")"
+      ]
+    },
+    "none": {
+      "signature": "none",
+      "desc": [
+        "Represents the absence of a value. Evaluates as falsy.",
+        "Functions without an explicit `return` return `none`.",
+        "It is an ordinary global variable — can be overwritten.",
+        "Factory function `none()` always returns a fresh none value.",
+        "See also: /help basic"
+      ],
+      "examples": [
+        "x = none",
+        "if (isnone(x)) print(\"no value\")"
+      ]
     }
   }
 }
