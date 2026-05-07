@@ -71,6 +71,18 @@ function activate(context) {
     const provider = vscode.languages.registerCompletionItemProvider('jc2', {
         provideCompletionItems(document, position) {
             const completionItems = [];
+
+            // 添加关键字补全
+            const keywords = [
+                'if', 'else', 'while', 'for', 'in', 'break', 'continue', 'return',
+                'switch', 'case', 'default', 'throw', 'try', 'catch',
+                'class', 'extends', 'const', 'state', 'delete', 'ref', 'import',
+                'true', 'false', 'none', 'PI', 'E', 'ANS', 'self', 'super'
+            ];
+            for (const kw of keywords) {
+                completionItems.push(new vscode.CompletionItem(kw, vscode.CompletionItemKind.Keyword));
+            }
+
             for (const [funcName, funcData] of Object.entries(functions)) {
                 // 忽略 dunder methods (如 __add__)
                 if (funcName.startsWith('__') && funcName.endsWith('__')) continue;
