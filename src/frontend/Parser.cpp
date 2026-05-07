@@ -300,7 +300,11 @@ namespace jc {
 
             auto value = assignment();
 
-            return std::make_unique<CompoundAssign>(std::move(expr), baseOp, std::move(value), false, false);
+            if (!dynamic_cast<Variable*>(expr.get()) && (isRef || isState)) {
+                throw std::runtime_error("Parser Error: 'ref' or 'state' can only be applied to variables.");
+            }
+
+            return std::make_unique<CompoundAssign>(std::move(expr), baseOp, std::move(value), isRef, isState);
         }
 
         // ── 处理标准赋值 (=) ──
@@ -309,10 +313,12 @@ namespace jc {
             auto value = assignment();  // ★ 直接读取右值即可，把上下两行记录 index 的删掉
 
             if (auto* dotExpr = dynamic_cast<DotAccess*>(expr.get())) {
+                if (isRef || isState) throw std::runtime_error("Parser Error: 'ref' or 'state' cannot be applied to object properties.");
                 return std::make_unique<DotAssign>(std::move(dotExpr->object), std::move(dotExpr->field), std::move(value));
             }
 
             if (auto* indexExpr = dynamic_cast<IndexAccess*>(expr.get())) {
+                if (isRef || isState) throw std::runtime_error("Parser Error: 'ref' or 'state' cannot be applied to array elements.");
                 std::vector<std::vector<std::unique_ptr<Expr>>> chain;
                 IndexAccess* currentIA = indexExpr;
                 chain.push_back(std::move(currentIA->indices));
@@ -331,6 +337,7 @@ namespace jc {
             }
 
             if (auto* matNode = dynamic_cast<MatrixNode*>(expr.get())) {
+                if (isRef || isState) throw std::runtime_error("Parser Error: 'ref' or 'state' cannot be applied to destructuring.");
                 std::vector<Token> names;
                 bool validDestruct = true;
 
@@ -348,6 +355,7 @@ namespace jc {
             }
 
             if (auto* dictNode = dynamic_cast<DictLiteral*>(expr.get())) {
+                if (isRef || isState) throw std::runtime_error("Parser Error: 'ref' or 'state' cannot be applied to destructuring.");
                 std::vector<std::pair<std::string, Token>> targets;
                 bool validDestruct = true;
                 for (auto& entry : dictNode->entries) {
@@ -367,7 +375,7 @@ namespace jc {
             }
 
             if (auto* varExpr = dynamic_cast<Variable*>(expr.get())) {
-                return std::make_unique<Assign>(varExpr->name, std::move(value), false, false);
+                return std::make_unique<Assign>(varExpr->name, std::move(value), isRef, isState);
             }
 
             // ★ （旧的 Call 拦截已经被上面顶端安全取代，这里删去原来的 Call if 分支即可！）
@@ -376,13 +384,7 @@ namespace jc {
         }
 
         if (isRef || isState) {
-            if (auto* assign = dynamic_cast<Assign*>(expr.get())) {
-                assign->isRef = isRef;
-                assign->isState = isState;
-            } else if (auto* compAssign = dynamic_cast<CompoundAssign*>(expr.get())) {
-                compAssign->isRef = isRef;
-                compAssign->isState = isState;
-            } else if (auto* var = dynamic_cast<Variable*>(expr.get())) {
+            if (auto* var = dynamic_cast<Variable*>(expr.get())) {
                 if (isRef) expr = std::make_unique<RefDecl>(var->name);
                 else expr = std::make_unique<StateDecl>(var->name);
             } else {
