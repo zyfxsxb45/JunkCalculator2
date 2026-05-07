@@ -308,17 +308,6 @@ namespace jc {
                 expr = std::make_unique<Variable>(stateDecl->name);
             }
 
-            if (auto* gdecl = dynamic_cast<GlobalDecl*>(expr.get())) {
-                if (gdecl->names.size() != 1) {
-                    throw std::runtime_error("Parser Error: Cannot use compound assignment on multiple global declarations.");
-                }
-                Token varTok = gdecl->names[0];
-                std::vector<std::unique_ptr<Expr>> stmts;
-                stmts.push_back(std::move(expr));
-                stmts.push_back(std::make_unique<CompoundAssign>(
-                    std::make_unique<Variable>(varTok), baseOp, std::move(value), isRef, isState));
-                return std::make_unique<Block>(std::move(stmts));
-            }
             return std::make_unique<CompoundAssign>(std::move(expr), baseOp, std::move(value), isRef, isState);
         }
 
@@ -335,15 +324,6 @@ namespace jc {
             } else if (auto* stateDecl = dynamic_cast<StateDecl*>(expr.get())) {
                 isState = true;
                 expr = std::make_unique<Variable>(stateDecl->name);
-            }
-
-            if (auto* gdecl = dynamic_cast<GlobalDecl*>(expr.get())) {
-                if (gdecl->names.size() != 1) throw std::runtime_error("Parser Error: Cannot assign to multiple global declarations at once.");
-                Token varTok = gdecl->names[0];
-                std::vector<std::unique_ptr<Expr>> stmts;
-                stmts.push_back(std::move(expr));
-                stmts.push_back(std::make_unique<Assign>(varTok, std::move(value), isRef, isState));
-                return std::make_unique<Block>(std::move(stmts));
             }
 
             if (auto* dotExpr = dynamic_cast<DotAccess*>(expr.get())) {
@@ -882,7 +862,7 @@ namespace jc {
                 t == TokenType::BREAK || t == TokenType::CONTINUE ||
                 t == TokenType::RETURN || t == TokenType::LOCAL ||
                 t == TokenType::CONST || t == TokenType::DELETE ||
-                t == TokenType::GLOBAL || t == TokenType::IN ||
+                t == TokenType::IN ||
                 t == TokenType::THROW || t == TokenType::TRY ||  // ★
                 t == TokenType::CATCH || t == TokenType::REF ||   // ★
                 t == TokenType::STATE ||                          // ★
@@ -907,15 +887,6 @@ namespace jc {
         if (match({ TokenType::RSTRING })) return std::make_unique<Literal>(previous().lexeme, true);  // ★
         if (match({ TokenType::STRING }))     return std::make_unique<Literal>(previous().lexeme, true);
         if (match({ TokenType::IDENTIFIER })) return std::make_unique<Variable>(previous());
-        if (match({ TokenType::GLOBAL })) {
-            std::vector<Token> names;
-            names.push_back(consume(TokenType::IDENTIFIER, "Parser Error: Expect variable name after 'global'."));
-            while (match({ TokenType::COMMA })) {
-                names.push_back(consume(TokenType::IDENTIFIER, "Parser Error: Expect variable name after ','."));
-            }
-            return std::make_unique<GlobalDecl>(std::move(names));
-        }
-
         // ★ 控制流关键字
         if (match({ TokenType::SUPER }))    return std::make_unique<SuperExpr>();
         if (match({ TokenType::CLASS }))    return classDefExpr();
@@ -957,7 +928,7 @@ namespace jc {
             throw std::runtime_error(
                 "Syntax Error: 'local' has been removed. "
                 "Variables inside functions are now auto-local. "
-                "Use 'global x' to modify outer variables.");
+                "Use 'ref x' to modify outer variables.");
         }
         if (match({ TokenType::CONST })) {
             Token name = consume(TokenType::IDENTIFIER, "Parser Error: Expect variable name after 'const'.");

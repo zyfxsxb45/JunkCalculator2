@@ -35,7 +35,6 @@ namespace jc {
     struct CompoundAssign;
     struct LambdaExpr;
     struct InvokeExpr;
-    struct GlobalDecl;       // ★ 新增
     struct ForInExpr;
     struct ThrowExpr;        // ★
     struct TryCatchExpr;     // ★
@@ -82,7 +81,6 @@ namespace jc {
         virtual std::any visitCompoundAssign(CompoundAssign* expr) = 0;
         virtual std::any visitLambdaExpr(LambdaExpr* expr) = 0;
         virtual std::any visitInvokeExpr(InvokeExpr* expr) = 0;
-        virtual std::any visitGlobalDecl(GlobalDecl* expr) = 0;   // ★ 新增
         virtual std::any visitForInExpr(ForInExpr* expr) = 0;
         virtual std::any visitThrowExpr(ThrowExpr* expr) = 0;         // ★
         virtual std::any visitTryCatchExpr(TryCatchExpr* expr) = 0;   // ★
@@ -371,12 +369,6 @@ namespace jc {
             : callee(std::move(callee)), arguments(std::move(arguments)) {
         }
         std::any accept(ExprVisitor& visitor) override { return visitor.visitInvokeExpr(this); }
-    };
-
-    struct GlobalDecl : public Expr {
-        std::vector<Token> names;
-        explicit GlobalDecl(std::vector<Token> names) : names(std::move(names)) {}
-        std::any accept(ExprVisitor& visitor) override { return visitor.visitGlobalDecl(this); }
     };
 
     struct ForInExpr : public Expr {

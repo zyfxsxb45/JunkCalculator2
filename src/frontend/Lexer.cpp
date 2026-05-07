@@ -19,7 +19,6 @@ namespace jc {
         {"state",    TokenType::STATE},
         {"const",    TokenType::CONST},
         {"delete",   TokenType::DELETE},
-        {"global",   TokenType::GLOBAL},
         {"in",       TokenType::IN},
         {"throw",    TokenType::THROW},        // ★
         {"try",      TokenType::TRY},          // ★

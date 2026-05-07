@@ -40,7 +40,7 @@ namespace jc {
         IF, ELSE, WHILE, FOR, IN,
         BREAK, CONTINUE,
         RETURN,
-        LOCAL, REF, STATE, GLOBAL,
+        LOCAL, REF, STATE,
         CONST,
         DELETE,
         THROW,               // ★ 新增
@@ -139,7 +139,6 @@ namespace jc {
         case TokenType::CASE:          return "CASE";
         case TokenType::DEFAULT:       return "DEFAULT";
         case TokenType::LOCAL:         return "LOCAL";
-        case TokenType::GLOBAL:        return "GLOBAL";
         case TokenType::IMPORT:        return "IMPORT";
         case TokenType::REF:           return "REF";
         case TokenType::STATE:         return "STATE";

@@ -22,7 +22,6 @@ namespace jc {
             int scopeDepth = 0;
             std::vector<Local> locals;
             int maxLocals = 0;                  // ★ 新增：跟踪该函数所使用的最大局部变量数
-            std::set<std::string> globalNames;
             std::set<std::string> refNames;     // ★ 新增：跟踪当前作用域显式 ref 的外部变量
             std::set<std::string> stateNames;   // ★ 新增：跟踪当前作用域显式 state 的外部变量
             int tryDepth = 0;
@@ -103,7 +102,6 @@ namespace jc {
         std::any visitCompoundAssign(CompoundAssign*) override;
         std::any visitLambdaExpr(LambdaExpr*) override;
         std::any visitInvokeExpr(InvokeExpr*) override;
-        std::any visitGlobalDecl(GlobalDecl*) override;
         std::any visitForInExpr(ForInExpr*) override;
         std::any visitThrowExpr(ThrowExpr*) override;
         std::any visitTryCatchExpr(TryCatchExpr*) override;
