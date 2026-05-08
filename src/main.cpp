@@ -556,9 +556,9 @@ int main(int argc, char* argv[]) {
                     "V jnf tbvat gb gryy n wbxr, ohg gur Tneontr Pbyyrpgbe fjrcg vg njnl.",
                     "Qvivqvat ol mreb vf whfg n zlgu vairagrq ol zngurzngvpvnaf gb fpner pnyphyngbef.",
                     "Frtzragngvba snhyg (pber qhzcrq)... Whfg xvqqvat, P++20 tbg zl onpx.",
-                    "0.1 + 0.2 == 0.3 vf Snyfr. V nz n Whax Pnyphyngbe, abg n yvne.",
+                    "0.1 + 0.2 == 0.3 vf SNYFR. V nz n Whax Pnyphyngbe, abg n yvne.",
                     "Gur Fgnpx IZ vf gnxvat n pbssrr oernx. Cyrnfr glcr tragyl.",
-                    "Gb haqrefgnaq erphefvba, lbh zhfg svefg glcr \x2f\x65\x67\x67.",
+                    "Gb haqrefgnaq erphefvba, lbh zhfg svefg glcr /rtt.",
                     "Reebe 418: V nz n pnyphyngbe, abg n grncbg."
                 };
                 static std::random_device a;
