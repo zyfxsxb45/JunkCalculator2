@@ -111,7 +111,7 @@ This update officially establishes a tri-state closure scope framework consistin
   - Help documentation data has been fully migrated to an independent JSON file for backend driving.
   - Supports querying specific subtopics directly in the system terminal (e.g., `jc --help scope`).
   - The built-in REPL help query now includes fuzzy word matching based on Levenshtein distance.
-- **VS Code Extension Upgrade**: The extension now interfaces with the system's JSON API documentation parsing, providing complete intelligent auto-completion for native functions and keywords.
+- **VS Code Extension Upgrade**: The extension now interfaces with the system's JSON API documentation parsing, providing complete intelligent auto-completion for native functions and keywords. Added **Signature Help (Parameter Hints)** that automatically pops up and highlights the active parameter as you type.
 
 ### Math Engine (CAS) & Documentation
 - **CAS Evaluation Optimization**: Introduced `poly-exp` closed-form calculation shortcut rules in the symbolic computation engine to prevent crashes caused by excessive recursion depth during limit calculations, polynomial differentiation, or integration.

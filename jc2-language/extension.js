@@ -105,10 +105,12 @@ function activate(context) {
                 if (funcName.startsWith('__') && funcName.endsWith('__')) continue;
 
                 const item = new vscode.CompletionItem(funcName, vscode.CompletionItemKind.Function);
-                item.detail = funcData.signature;
-                item.documentation = new vscode.MarkdownString(funcData.desc);
-                if (funcData.examples && funcData.examples.length > 0) {
-                    item.documentation.appendCodeblock(funcData.examples.join('\n'), 'jc2');
+                if (funcData.signature) item.detail = funcData.signature;
+                if (funcData.desc) {
+                    item.documentation = new vscode.MarkdownString(funcData.desc);
+                    if (funcData.examples && funcData.examples.length > 0) {
+                        item.documentation.appendCodeblock(funcData.examples.join('\n'), 'jc2');
+                    }
                 }
                 completionItems.push(item);
 
@@ -116,10 +118,12 @@ function activate(context) {
                 if (funcData.aliases) {
                     for (const alias of funcData.aliases) {
                         const aliasItem = new vscode.CompletionItem(alias, vscode.CompletionItemKind.Function);
-                        aliasItem.detail = funcData.signature + ` (alias for ${funcName})`;
-                        aliasItem.documentation = new vscode.MarkdownString(funcData.desc);
-                        if (funcData.examples && funcData.examples.length > 0) {
-                            aliasItem.documentation.appendCodeblock(funcData.examples.join('\n'), 'jc2');
+                        aliasItem.detail = (funcData.signature || alias) + ` (alias for ${funcName})`;
+                        if (funcData.desc) {
+                            aliasItem.documentation = new vscode.MarkdownString(funcData.desc);
+                            if (funcData.examples && funcData.examples.length > 0) {
+                                aliasItem.documentation.appendCodeblock(funcData.examples.join('\n'), 'jc2');
+                            }
                         }
                         completionItems.push(aliasItem);
                     }
@@ -129,6 +133,66 @@ function activate(context) {
         }
     });
     context.subscriptions.push(provider);
+
+    // ★ 新增：参数悬浮提示 (Signature Help)
+    const signatureProvider = vscode.languages.registerSignatureHelpProvider('jc2', {
+        provideSignatureHelp(document, position, token, context) {
+            const linePrefix = document.lineAt(position).text.substring(0, position.character);
+            
+            // 向前查找未闭合的左括号 '('
+            let openParenIndex = -1;
+            let parenCount = 0;
+            for (let i = position.character - 1; i >= 0; i--) {
+                const char = linePrefix[i];
+                if (char === ')') parenCount++;
+                else if (char === '(') {
+                    if (parenCount === 0) {
+                        openParenIndex = i;
+                        break;
+                    }
+                    parenCount--;
+                }
+            }
+            if (openParenIndex === -1) return null;
+
+            // 提取函数名
+            const beforeParen = linePrefix.substring(0, openParenIndex).trimEnd();
+            const match = beforeParen.match(/([a-zA-Z_][a-zA-Z0-9_]*)$/);
+            if (!match) return null;
+
+            const funcName = match[1];
+            const funcData = functions[funcName];
+            if (!funcData || !funcData.signature) return null;
+
+            const signatureHelp = new vscode.SignatureHelp();
+            const sigInfo = new vscode.SignatureInformation(funcData.signature);
+            
+            // 解析签名中的参数列表以实现高亮
+            const paramMatch = funcData.signature.match(/\((.*)\)/);
+            if (paramMatch && paramMatch[1]) {
+                // 简单按逗号分割签名字符串
+                const params = paramMatch[1].split(',').map(p => p.trim());
+                sigInfo.parameters = params.map(p => new vscode.ParameterInformation(p));
+            }
+
+            // 计算当前处于第几个参数（忽略嵌套括号内的逗号）
+            const argsString = linePrefix.substring(openParenIndex + 1);
+            let activeParam = 0;
+            let nested = 0;
+            for (let i = 0; i < argsString.length; i++) {
+                if (argsString[i] === '(') nested++;
+                else if (argsString[i] === ')') nested--;
+                else if (argsString[i] === ',' && nested === 0) activeParam++;
+            }
+
+            signatureHelp.signatures = [sigInfo];
+            signatureHelp.activeSignature = 0;
+            signatureHelp.activeParameter = activeParam;
+
+            return signatureHelp;
+        }
+    }, '(', ',');
+    context.subscriptions.push(signatureProvider);
 
     context.subscriptions.push(
         vscode.commands.registerCommand('jc2.run', () => {
