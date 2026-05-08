@@ -1,6 +1,6 @@
 ﻿# ==============================================================================
 # Junk Calculator 2 - Ultimate CMake Build Script
-# Version: 2.3.2.1
+# Version: 2.3.3.0
 # ==============================================================================
 cmake_minimum_required(VERSION 3.15)
 
@@ -11,7 +11,7 @@ cmake_policy(SET CMP0091 NEW)
 # This permanently eliminates the "missing VCRUNTIME140.dll" error on target machines!
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
-project(JunkCalculator2 VERSION 2.3.2.1 LANGUAGES CXX)
+project(JunkCalculator2 VERSION 2.3.3.0 LANGUAGES CXX)
 
 # Enforce C++ 20 Standard
 set(CMAKE_CXX_STANDARD 20)
@@ -89,6 +89,10 @@ endif()
 # ==============================================================================
 # Post-Build Resource Injection (Auto-Copying directories)
 # ==============================================================================
+# ★ Create shorthand wrapper scripts to save space (instead of copying the .exe)
+file(GENERATE OUTPUT "$<TARGET_FILE_DIR:JunkCalculator2>/jc.bat" CONTENT "@echo off\n\"%~dp0JunkCalculator2.exe\" %*\n")
+file(GENERATE OUTPUT "$<TARGET_FILE_DIR:JunkCalculator2>/jc" CONTENT "#!/bin/sh\nexec \"$(dirname \"$0\")/JunkCalculator2\" \"$@\"\n")
+
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data")
     add_custom_command(TARGET JunkCalculator2 POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_directory
@@ -121,6 +125,11 @@ endif()
 # CPack Installation & Release Packaging Rules
 # ==============================================================================
 install(TARGETS JunkCalculator2 DESTINATION bin)
+if(WIN32)
+    install(PROGRAMS "$<TARGET_FILE_DIR:JunkCalculator2>/jc.bat" DESTINATION bin)
+else()
+    install(PROGRAMS "$<TARGET_FILE_DIR:JunkCalculator2>/jc" DESTINATION bin)
+endif()
 
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data")
     install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/data" DESTINATION bin)
@@ -142,7 +151,7 @@ endif()
 
 set(CPACK_GENERATOR "ZIP")
 set(CPACK_PACKAGE_NAME "JunkCalculator2")
-set(CPACK_PACKAGE_VERSION "2.3.2.1")
+set(CPACK_PACKAGE_VERSION "2.3.3.0")
 set(CPACK_PACKAGE_VENDOR "Yu Liangyang")
 set(CPACK_PACKAGE_FILE_NAME "${CPACK_PACKAGE_NAME}-${CPACK_PACKAGE_VERSION}-Windows-x64")
 include(CPack)

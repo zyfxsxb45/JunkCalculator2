@@ -38,7 +38,8 @@ void sigintHandler(int signum) {
     std::signal(SIGINT, sigintHandler); // 重新注册，防止某些平台恢复默认处理
 
     if (jc::g_isWaitingForInput.load(std::memory_order_relaxed)) {
-        std::cout << "\nGoodbye!" << std::endl;
+        extern bool g_quiet;
+        if (!g_quiet) std::cout << "\nGoodbye!" << std::endl;
         std::exit(0);
     }
 
@@ -95,6 +96,7 @@ std::vector<std::shared_ptr<jc::CompiledFunction>> allFunctions;
 bool g_showDisasm = false;  // ★ 新增：字节码反汇编开关
 bool g_autoDebug = false;
 bool g_profile = false;
+bool g_quiet = false;
 
 // ★ 执行一段任意多行/单行代码的统一接口
 jc::Value evalCode(const std::string& code, const std::string& sourceFile, bool isFile = false) {
@@ -266,9 +268,21 @@ int main(int argc, char* argv[]) {
 
     // ★ 清洁版命令行参数解析
     std::string scriptPath = "";
+    std::string evalStr = "";
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
-        if (arg == "-d") {
+        if (arg == "-e" || arg == "--eval") {
+            if (i + 1 < argc) {
+                evalStr = argv[++i];
+            } else {
+                std::cerr << "Error: --eval requires an argument.\n";
+                return 1;
+            }
+        }
+        else if (arg == "-q" || arg == "--quiet") {
+            g_quiet = true;
+        }
+        else if (arg == "-d") {
             g_showDisasm = true;
         }
         else if (arg == "--debug") {    // ★ 拦截 --debug 启动项
@@ -278,7 +292,16 @@ int main(int argc, char* argv[]) {
             continue; // 跳过 --run 标记
         }
         else if (arg == "--help" || arg == "-h") {
-            printHelp();
+            if (i + 1 < argc && argv[i + 1][0] != '-') {
+                printHelpTopic(argv[i + 1]);
+                i++; // 消耗掉 topic 参数
+            } else {
+                printHelp();
+            }
+            return 0;
+        }
+        else if (arg == "--version" || arg == "-v") {
+            std::cout << "Junk Calculator 2.3.3.0\n";
             return 0;
         }
         else if (arg == "--profile") {
@@ -296,6 +319,20 @@ int main(int argc, char* argv[]) {
         }
     }
 
+    // 如果有 --eval 参数，则直接执行并退出
+    if (!evalStr.empty()) {
+        try {
+            jc::Value result = evalCode(evalStr, "<command-line>", false);
+            if (!result.isNone()) {
+                std::cout << result << std::endl;
+            }
+        } catch (const std::exception& e) {
+            std::cerr << "Error: " << e.what() << std::endl;
+            return 1;
+        }
+        return 0;
+    }
+
     // 有脚本路径则执行脚本并退出
     if (!scriptPath.empty()) {
         runScript(scriptPath);
@@ -305,20 +342,20 @@ int main(int argc, char* argv[]) {
     auto printBanner = []() {
         std::cout << jc::col(jc::Ansi::BRIGHT_CYAN)
             << "=================================================\n"
-            << "   Junk Calculator 2.3.2.1\n"
+            << "   Junk Calculator 2.3.3.0\n"
             << "   Developed by Yu Liangyang, Tsinghua University\n"
             << "=================================================\n" << jc::col(jc::Ansi::RESET)
             << "Type " << jc::col(jc::Ansi::BRIGHT_YELLOW) << "'/help'" << jc::col(jc::Ansi::RESET) << " for a list of commands." << std::endl;
     };
 
-    printBanner();
+    if (!g_quiet) printBanner();
 
     while (true) {
         jc::g_interruptRequested.store(false, std::memory_order_relaxed);
         g_sigintCount = 0;
 
         std::string input;
-        std::cout << "\n" << jc::col(jc::Ansi::BOLD) << jc::col(jc::Ansi::BRIGHT_CYAN) << "JC2> " << jc::col(jc::Ansi::RESET);
+        if (!g_quiet) std::cout << "\n" << jc::col(jc::Ansi::BOLD) << jc::col(jc::Ansi::BRIGHT_CYAN) << "JC2> " << jc::col(jc::Ansi::RESET);
         
         jc::g_isWaitingForInput.store(true, std::memory_order_relaxed);
         bool getlineResult = (bool)std::getline(std::cin, input);
@@ -334,7 +371,7 @@ int main(int argc, char* argv[]) {
                 continue;
             }
             if (isEof) {
-                std::cout << "\nGoodbye!" << std::endl;
+                if (!g_quiet) std::cout << "\nGoodbye!" << std::endl;
                 std::exit(1);
             }
             
@@ -357,7 +394,7 @@ int main(int argc, char* argv[]) {
         bool isEof = false;
         while (braces > 0 || parens > 0 || brackets > 0 || endsWithContinuation(input)) {
             std::string line;
-            std::cout << jc::col(jc::Ansi::BRIGHT_CYAN) << "...  " << jc::col(jc::Ansi::RESET);
+            if (!g_quiet) std::cout << jc::col(jc::Ansi::BRIGHT_CYAN) << "...  " << jc::col(jc::Ansi::RESET);
             if (!std::getline(std::cin, line)) {
                 bool isInterrupt = jc::g_interruptRequested.load(std::memory_order_relaxed);
                 isEof = std::cin.eof();
@@ -385,7 +422,7 @@ int main(int argc, char* argv[]) {
             }
         }
         if (inputAborted && isEof) {
-            std::cout << "\nGoodbye!" << std::endl;
+            if (!g_quiet) std::cout << "\nGoodbye!" << std::endl;
             std::exit(1);
         }
         if (inputAborted) continue;
@@ -434,6 +471,7 @@ int main(int argc, char* argv[]) {
             }
             if (input == "/exit" || input == "/quit") break;
             if (input == "/help") { printHelp(); continue; }
+            if (input == "/version") { std::cout << "Junk Calculator 2.3.3.0\n"; continue; }
             if (input.substr(0, 6) == "/help ") { printHelpTopic(input.substr(6)); continue; }
             if (input == "/clear") { vm.clearGlobals(); std::cout << "All variables cleared.\n"; continue; }
             if (input == "/cls") {
@@ -447,6 +485,7 @@ int main(int argc, char* argv[]) {
             }
             if (input.substr(0, 6) == "/save ") { saveWorkspace(input.substr(6)); continue; }
             if (input.substr(0, 6) == "/load ") { loadWorkspace(input.substr(6)); continue; }
+            if (input == "/egg") { std::cout << "There is no Easter egg here!\n"; continue; }
             
             std::cerr << jc::col(jc::Ansi::BRIGHT_RED) << "Unknown command: " << input << jc::col(jc::Ansi::RESET) << "\nType '/help' for a list of commands.\n";
             continue;
@@ -507,6 +546,6 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    std::cout << "\nGoodbye!" << std::endl;
+    if (!g_quiet) std::cout << "\nGoodbye!" << std::endl;
     return 0;
 }
