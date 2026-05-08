@@ -36,8 +36,11 @@ namespace jc {
         void addToken(TokenType type);
 
         void stringLiteral(char quoteChar);
+        void multilineStringLiteral(char quoteChar);
         void fstringLiteral(char quoteChar);  // ★
+        void fmultilineStringLiteral(char quoteChar);
         void rstringLiteral(char quoteChar);  // ★
+        void rmultilineStringLiteral(char quoteChar);
 
         void throwError(const std::string& msg);
 

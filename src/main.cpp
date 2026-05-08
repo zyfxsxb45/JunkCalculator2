@@ -384,15 +384,53 @@ int main(int argc, char* argv[]) {
         if (start == std::string::npos) continue;
         input = input.substr(start, end - start + 1);
 
+        auto checkInputState = [](const std::string& s, int& braces, int& parens, int& brackets, bool& inStr, bool& isMulti) {
+            braces = 0; parens = 0; brackets = 0;
+            inStr = false; isMulti = false;
+            char strQuote = '\0';
+            for (size_t i = 0; i < s.length(); ++i) {
+                char c = s[i];
+                if (inStr) {
+                    if (c == '\\' && i + 1 < s.length()) {
+                        i++;
+                    } else if (c == strQuote) {
+                        if (isMulti) {
+                            if (i + 2 < s.length() && s[i+1] == strQuote && s[i+2] == strQuote) {
+                                inStr = false;
+                                isMulti = false;
+                                i += 2;
+                            }
+                        } else {
+                            inStr = false;
+                        }
+                    }
+                } else {
+                    if (c == '"' || c == '\'') {
+                        inStr = true;
+                        strQuote = c;
+                        if (i + 2 < s.length() && s[i+1] == c && s[i+2] == c) {
+                            isMulti = true;
+                            i += 2;
+                        } else {
+                            isMulti = false;
+                        }
+                    } else if (c == '{') braces++;
+                    else if (c == '}') braces--;
+                    else if (c == '(') parens++;
+                    else if (c == ')') parens--;
+                    else if (c == '[') brackets++;
+                    else if (c == ']') brackets--;
+                }
+            }
+        };
+
         int braces = 0, parens = 0, brackets = 0;
-        for (char c : input) {
-            if (c == '{') braces++; else if (c == '}') braces--;
-            else if (c == '(') parens++; else if (c == ')') parens--;
-            else if (c == '[') brackets++; else if (c == ']') brackets--;
-        }
+        bool inStr = false, isMulti = false;
+        checkInputState(input, braces, parens, brackets, inStr, isMulti);
+
         bool inputAborted = false;
         bool isEof = false;
-        while (braces > 0 || parens > 0 || brackets > 0 || endsWithContinuation(input)) {
+        while (braces > 0 || parens > 0 || brackets > 0 || (inStr && isMulti) || (!inStr && endsWithContinuation(input))) {
             std::string line;
             if (!g_quiet) std::cout << jc::col(jc::Ansi::BRIGHT_CYAN) << "...  " << jc::col(jc::Ansi::RESET);
             if (!std::getline(std::cin, line)) {
@@ -415,11 +453,7 @@ int main(int argc, char* argv[]) {
                 break;
             }
             input += "\n" + line;
-            for (char c : line) {
-                if (c == '{') braces++; else if (c == '}') braces--;
-                else if (c == '(') parens++; else if (c == ')') parens--;
-                else if (c == '[') brackets++; else if (c == ']') brackets--;
-            }
+            checkInputState(input, braces, parens, brackets, inStr, isMulti);
         }
         if (inputAborted && isEof) {
             if (!g_quiet) std::cout << "\nGoodbye!" << std::endl;

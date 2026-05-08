@@ -158,8 +158,22 @@ namespace jc {
             addToken(match('=') ? TokenType::CARET_ASSIGN : TokenType::CARET);
             break;
         case '\\': addToken(TokenType::BACKSLASH); break;
-        case '"': stringLiteral('"'); break;     // ★
-        case '\'': stringLiteral('\''); break;   // ★
+        case '"':
+            if (peek() == '"' && peekNext() == '"') {
+                advance(); advance();
+                multilineStringLiteral('"');
+            } else {
+                stringLiteral('"');
+            }
+            break;
+        case '\'':
+            if (peek() == '\'' && peekNext() == '\'') {
+                advance(); advance();
+                multilineStringLiteral('\'');
+            } else {
+                stringLiteral('\'');
+            }
+            break;
         case '=':
             if (match('=')) addToken(TokenType::EQUAL);
             else if (match('>')) addToken(TokenType::ARROW);      // ★
@@ -202,11 +216,21 @@ namespace jc {
             if (std::isdigit(c)) { number(); }
             else if (c == 'f' && (peek() == '"' || peek() == '\'')) { // ★ 支持 f" 和 f'
                 char quote = advance(); // consume opening quote
-                fstringLiteral(quote);
+                if (peek() == quote && peekNext() == quote) {
+                    advance(); advance();
+                    fmultilineStringLiteral(quote);
+                } else {
+                    fstringLiteral(quote);
+                }
             }
             else if (c == 'r' && (peek() == '"' || peek() == '\'')) { // ★ 支持 r" 和 r'
                 char quote = advance(); // consume opening quote
-                rstringLiteral(quote);
+                if (peek() == quote && peekNext() == quote) {
+                    advance(); advance();
+                    rmultilineStringLiteral(quote);
+                } else {
+                    rstringLiteral(quote);
+                }
             }
             else if (std::isalpha(c) || c == '_') { identifier(); }
             else {
@@ -282,6 +306,42 @@ namespace jc {
     bool Lexer::match(char expected) { if (isAtEnd() || source[current] != expected) return false; current++; return true; }
     void Lexer::addToken(TokenType type) { tokens.emplace_back(type, source.substr(start, current - start), start, line); }
 
+    void Lexer::multilineStringLiteral(char quoteChar) {
+        std::string value;
+        while (!isAtEnd()) {
+            if (peek() == quoteChar && peekNext() == quoteChar && peekNextNext() == quoteChar) {
+                break;
+            }
+            if (peek() == '\n') line++;
+            char c = advance();
+            if (c == '\\' && !isAtEnd()) {
+                char esc = advance();
+                switch (esc) {
+                case 'n':  value += '\n'; break;
+                case 't':  value += '\t'; break;
+                case 'r':  value += '\r'; break;
+                case '\\': value += '\\'; break;
+                case '"':  value += '"';  break;
+                case '\'': value += '\''; break;
+                case '0':  value += '\0'; break;
+                case '\n': line++; break; // 忽略反斜杠加换行
+                default:
+                    value += '\\';
+                    value += esc;
+                    break;
+                }
+            }
+            else {
+                value += c;
+            }
+        }
+        if (isAtEnd()) {
+            throwError("Unterminated multiline string.");
+        }
+        advance(); advance(); advance(); // 吃掉对应的三个引号
+        tokens.emplace_back(TokenType::STRING, value, start);
+    }
+
     void Lexer::stringLiteral(char quoteChar) {
         std::string value;
         while (peek() != quoteChar && !isAtEnd()) {
@@ -313,6 +373,71 @@ namespace jc {
         }
         advance(); // 吃掉对应的右引号
         tokens.emplace_back(TokenType::STRING, value, start);
+    }
+
+    void Lexer::fmultilineStringLiteral(char quoteChar) {
+        std::string value;
+        while (!isAtEnd()) {
+            if (peek() == quoteChar && peekNext() == quoteChar && peekNextNext() == quoteChar) {
+                break;
+            }
+            char c = peek();
+            if (c == '{') {
+                value += advance();
+                int depth = 1;
+                char inStrQuote = '\0';
+                while (!isAtEnd() && depth > 0) {
+                    c = peek();
+                    if (inStrQuote != '\0') {
+                        if (c == '\\' && !isAtEnd()) {
+                            value += advance(); value += advance();
+                        }
+                        else if (c == inStrQuote) {
+                            inStrQuote = '\0';
+                            value += advance();
+                        }
+                        else {
+                            value += advance();
+                        }
+                    }
+                    else {
+                        if (c == '"' || c == '\'') {
+                            inStrQuote = c;
+                            value += advance();
+                        }
+                        else if (c == '{') { depth++; value += advance(); }
+                        else if (c == '}') { depth--; value += advance(); }
+                        else { value += advance(); }
+                    }
+                }
+                if (depth != 0)
+                    throwError("Unmatched '{' in f-string.");
+            }
+            else if (c == '\\') {
+                advance();
+                if (isAtEnd()) break;
+                char esc = advance();
+                switch (esc) {
+                case 'n':  value += '\n'; break;
+                case 't':  value += '\t'; break;
+                case 'r':  value += '\r'; break;
+                case '\\': value += '\\'; break;
+                case '"':  value += '"';  break;
+                case '\'': value += '\''; break;
+                case '0':  value += '\0'; break;
+                case '\n': line++; break;
+                default:   value += '\\'; value += esc; break;
+                }
+            }
+            else {
+                if (c == '\n') line++;
+                value += advance();
+            }
+        }
+        if (isAtEnd())
+            throwError("Unterminated multiline f-string.");
+        advance(); advance(); advance(); // consume closing quotes
+        tokens.emplace_back(TokenType::FSTRING, value, start);
     }
 
     void Lexer::fstringLiteral(char quoteChar) {
@@ -378,6 +503,20 @@ namespace jc {
             throwError("Unterminated f-string.");
         advance(); // consume closing quote
         tokens.emplace_back(TokenType::FSTRING, value, start);
+    }
+
+    void Lexer::rmultilineStringLiteral(char quoteChar) {
+        std::string value;
+        while (!isAtEnd()) {
+            if (peek() == quoteChar && peekNext() == quoteChar && peekNextNext() == quoteChar) {
+                break;
+            }
+            if (peek() == '\n') line++;
+            value += advance();
+        }
+        if (isAtEnd()) throwError("Unterminated multiline raw string.");
+        advance(); advance(); advance();
+        tokens.emplace_back(TokenType::RSTRING, value, start);
     }
 
     void Lexer::rstringLiteral(char quoteChar) {
