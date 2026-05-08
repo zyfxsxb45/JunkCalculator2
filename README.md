@@ -67,24 +67,49 @@ JC2 standard libraries loaded via `import`:
 
 ---
 
-## What's New in v2.3.2.1
+## What's New in v2.3.3.0
 
-Version 2.3.2.1 is a critical architecture and performance patch focusing on the Symbolic Integration engine, alongside a major Domain-Driven Design (DDD) codebase refactoring.
+Version 2.3.3.0 focuses on refactoring the compiler's scoping system and memory semantics, introducing new closure state modifiers, and expanding the Command-Line Interface (CLI) and related toolchains to further enhance the security and stability of the language core.
 
-### Computer Algebra System (CAS)
-- **Integration Router:** Replaced the static sequential strategy chaining with an AST-based heuristic router. Integration strategies are now dynamically scored and prioritized, drastically reducing invalid DFS recursion overhead.
-- **Exponential RDE Heuristic:** Implemented a unified $O(1)$ heuristic solver for exponential integrals $\int e^{c(x)}\frac{A(x)}{D(x)}dx$. Utilizing square-free factorization via `polyDiv`, it resolves RDE scenarios instantly without deteriorating into integration-by-parts cycles.
-- **Tightened Integration Limits (Fail Fast):** Adjusted core recursion safety limits (`maxDepth=6`, `maxAstNodes=30k`, `maxExpandTerms=2000`). The engine now safely halts and raises exceptions upon encountering mathematically non-elementary integrals instead of causing infinite loops.
-- **Hyperbolic & Radical Enhancements:** Added formal antiderivatives for `asinh`, `acosh`, `atanh`. Added pre-pass algebraic simplifications (e.g., $\cosh^2(x) - \sinh^2(x) = 1$) and fortified quadratic radical rules via hyperbolic substitutions.
-- **Risch Algorithm Fixes:** Corrected radical traversal, Trager resultant sign evaluation, and Extended GCD (EGCD) fallback mechanics.
+### ⚠️ Breaking Changes & Migration Guide
 
-### Architecture & Core Refactoring
-- **Domain-Driven Layout:** The source code tree has been entirely restructured into a domain-driven architectural layout (`frontend`, `vm`, `memory`, `math`, `cas`, `modules`) with updated include paths.
-- **Commit Convention:** Added `COMMIT_CONVENTION.md` guidelines for project standardization.
-- **Runtime Optimizations & Fixes:** 
-  - Migrated runtime string lookups to native hash lookups for optimal traversal performance.
-  - Fixed GC and equality evaluation issues in function closures.
-  - Fixed an incorrect parameter type check in the `imgPlot` native function.
+This update unifies the underlying variable model processing logic. Older code may require the following migrations:
+
+1. **Deprecation of the `global` keyword**
+   - **Reason**: Introduced a more structured upward addressing mechanism.
+   - **Migration**: Replace all `global` keywords in old code with the newly introduced `ref` modifier. When referencing or modifying external variables inside a function, uniformly use `ref x = ...`.
+2. **Function Declaration Desugaring**
+   - **Impact**: Removed the privileged scope of explicit functions. All `func() = {}` declarations are now strictly equivalent to anonymous closure assignments `func = () => {}` at compile time. Function names are now completely identical to ordinary variables and follow the same auto-local shadowing rules.
+3. **Modifier Binding Scope Reduced to Identifier Level**
+   - **Impact**: In destructuring declarations, if you need to modify an upper-level variable or set a persistent state, you must individually mark the modifier for each specific variable. For example: `[ref a, state b, c] = [1, 2, 3]`.
+
+### Compiler & Core Scope Refactoring
+This update officially establishes a tri-state closure scope framework consisting of ordinary local assignment (Auto-local), persistent state (`state`), and reference modification (`ref`):
+- **New `ref` Modifier (Upper Scope Penetration)**: Breaks the default auto-local shadowing rule. Allows direct addressing and modification of identically named variables in the outer (or global) scope from within a closure. `ref` features strict existence validation, only permitting modifications to existing variables. If an attempt is made to penetrate and modify an undeclared variable, the VM will immediately intercept it and throw a runtime error, completely eliminating accidental global environment pollution caused by typos.
+- **New `state` Modifier (Private Persistent State)**: Grants closure variables local persistent memory capabilities. Variables marked with `state` are strictly initialized only once during the closure's lifecycle. Subsequent calls to the function will retain and allow modification of this state, perfectly implementing state machine mechanics without polluting the external space. If there is no explicit assignment (e.g., `state x`), it safely defaults to `none`.
+- **Refined Destructuring Assignment Semantics**: Optimized LHS (Left-Hand Side) addressing priority, enabling `ref` and `state` to seamlessly integrate into multi-dimensional array and dictionary destructuring syntax.
+- **Fixed Recursive Closures**: After desugaring functions into anonymous closures, the underlying system automatically captures its own name by reference, supporting seamless and safe self-recursive closure calls.
+- **Expression Expansion**: Restored full support for Comma Expressions and adjusted related parsing priorities to be compatible with the new scope modifiers.
+
+### Memory Safety & VM Engine Optimization
+- **Dedicated Global Modifier Instruction**: To support strict `ref` validation, the underlying VM introduces a new `OP_SET_GLOBAL_REF` opcode, completing variable existence checks and read/writes within O(1) single hash addressing complexity, achieving safety while maintaining zero performance overhead.
+- **Cyclic Reference Prevention**: Added object reference path detection for deep copy `clone()` and deep freeze `val()` to prevent stack overflows or memory exhaustion when operating on self-referencing containers (like self-contained dictionaries or lists).
+- **Streamlined Instruction Set**: Removed redundant function call opcodes from the underlying virtual machine, optimizing the instruction execution pipeline.
+
+### Command-Line Interface (CLI) & Toolchain
+- **New `jc` Alias**: When building via CMake, wrapper programs `jc` (Linux/macOS) and `jc.bat` (Windows) are automatically generated as minimalist aliases for the original `JunkCalculator2` command.
+- **Expanded CLI Startup Parameters**:
+  - Added `-e` / `--eval <code>` parameter, supporting direct evaluation of a single line of code passed via the command line, exiting immediately after.
+  - Added `-q` / `--quiet` silent startup mode, hiding the REPL banner and interactive prompt, facilitating seamless integration of JC2 with standard system pipelines for data stream processing.
+- **Refactored Help System**:
+  - Help documentation data has been fully migrated to an independent JSON file for backend driving.
+  - Supports querying specific subtopics directly in the system terminal (e.g., `jc --help scope`).
+  - The built-in REPL help query now includes fuzzy word matching based on Levenshtein distance.
+- **VS Code Extension Upgrade**: The extension now interfaces with the system's JSON API documentation parsing, providing complete intelligent auto-completion for native functions and keywords.
+
+### Math Engine (CAS) & Documentation
+- **CAS Evaluation Optimization**: Introduced `poly-exp` closed-form calculation shortcut rules in the symbolic computation engine to prevent crashes caused by excessive recursion depth during limit calculations, polynomial differentiation, or integration.
+- **Complete Documentation Coverage**: Updated the system's built-in documentation data structure, comprehensively supplementing standard specifications and example code for system constants, control functions, and class magic methods (e.g., `__str__`, `__add__`).
 
 ---
 
