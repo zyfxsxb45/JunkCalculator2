@@ -88,7 +88,11 @@ namespace jc {
                 }
                 else {
                     uint16_t nameIdx = identifierConstant(name);
-                    emit(OpCode::OP_SET_GLOBAL, lastLine);
+                    if (current().refNames.count(name) > 0) {
+                        emit(OpCode::OP_SET_GLOBAL_REF, lastLine);
+                    } else {
+                        emit(OpCode::OP_SET_GLOBAL, lastLine);
+                    }
                     emit16(nameIdx, lastLine);
                 }
             }
@@ -196,7 +200,11 @@ namespace jc {
                 }
                 else {
                     uint16_t idx = identifierConstant(name);
-                    emit(OpCode::OP_SET_GLOBAL, lastLine);
+                    if (current().refNames.count(name) > 0) {
+                        emit(OpCode::OP_SET_GLOBAL_REF, lastLine);
+                    } else {
+                        emit(OpCode::OP_SET_GLOBAL, lastLine);
+                    }
                     emit16(idx, lastLine);
                 }
                 emit(OpCode::OP_POP, lastLine);
@@ -216,7 +224,11 @@ namespace jc {
             }
             else {
                 uint16_t idx = identifierConstant(varName);
-                emit(OpCode::OP_SET_GLOBAL, lastLine);
+                if (current().refNames.count(varName) > 0) {
+                    emit(OpCode::OP_SET_GLOBAL_REF, lastLine);
+                } else {
+                    emit(OpCode::OP_SET_GLOBAL, lastLine);
+                }
                 emit16(idx, lastLine);
             }
             emit(OpCode::OP_POP, lastLine);
@@ -415,7 +427,11 @@ namespace jc {
             }
             else {
                 uint16_t idx = identifierConstant(name);
-                emit(OpCode::OP_SET_GLOBAL, expr->name.line);
+                if (expr->isRef || current().refNames.count(name) > 0) {
+                    emit(OpCode::OP_SET_GLOBAL_REF, expr->name.line);
+                } else {
+                    emit(OpCode::OP_SET_GLOBAL, expr->name.line);
+                }
                 emit16(idx, expr->name.line);
             }
         }
@@ -960,7 +976,15 @@ namespace jc {
                     addLocal(name); slot = resolveLocal(name);
                 }
                 if (slot != -1) { emit(OpCode::OP_SET_LOCAL, lastLine); emit16(static_cast<uint16_t>(slot), lastLine); }
-                else { uint16_t idx = identifierConstant(name); emit(OpCode::OP_SET_GLOBAL, lastLine); emit16(idx, lastLine); }
+                else { 
+                    uint16_t idx = identifierConstant(name); 
+                    if (current().refNames.count(name) > 0) {
+                        emit(OpCode::OP_SET_GLOBAL_REF, lastLine);
+                    } else {
+                        emit(OpCode::OP_SET_GLOBAL, lastLine); 
+                    }
+                    emit16(idx, lastLine); 
+                }
                 emit(OpCode::OP_POP, lastLine);
             }
             emit(OpCode::OP_POP, lastLine);
@@ -975,7 +999,15 @@ namespace jc {
                 addLocal(varName); slot = resolveLocal(varName);
             }
             if (slot != -1) { emit(OpCode::OP_SET_LOCAL, lastLine); emit16(static_cast<uint16_t>(slot), lastLine); }
-            else { uint16_t idx = identifierConstant(varName); emit(OpCode::OP_SET_GLOBAL, lastLine); emit16(idx, lastLine); }
+            else { 
+                uint16_t idx = identifierConstant(varName); 
+                if (current().refNames.count(varName) > 0) {
+                    emit(OpCode::OP_SET_GLOBAL_REF, lastLine);
+                } else {
+                    emit(OpCode::OP_SET_GLOBAL, lastLine); 
+                }
+                emit16(idx, lastLine); 
+            }
             emit(OpCode::OP_POP, lastLine);
         }
 
@@ -1102,7 +1134,15 @@ namespace jc {
                     // ★ 修改：引入 Upvalue 写入
                     int upvalue = resolveUpvalue(expr->name.lexeme);
                     if (upvalue != -1) { emit(OpCode::OP_SET_UPVALUE, lastLine); emit16(static_cast<uint16_t>(upvalue), lastLine); }
-                    else { uint16_t idx = identifierConstant(expr->name.lexeme); emit(OpCode::OP_SET_GLOBAL, lastLine); emit16(idx, lastLine); }
+                    else { 
+                        uint16_t idx = identifierConstant(expr->name.lexeme); 
+                        if (current().refNames.count(expr->name.lexeme) > 0) {
+                            emit(OpCode::OP_SET_GLOBAL_REF, lastLine);
+                        } else {
+                            emit(OpCode::OP_SET_GLOBAL, lastLine); 
+                        }
+                        emit16(idx, lastLine); 
+                    }
                 }
             }
             else { emitStoreTarget(expr->objectExpr.get()); }
@@ -1135,7 +1175,15 @@ namespace jc {
                     // ★ 修改引入写入环境
                     int upvalue = resolveUpvalue(expr->name.lexeme);
                     if (upvalue != -1) { emit(OpCode::OP_SET_UPVALUE, lastLine); emit16(static_cast<uint16_t>(upvalue), lastLine); }
-                    else { uint16_t nameIdx = identifierConstant(expr->name.lexeme); emit(OpCode::OP_SET_GLOBAL, lastLine); emit16(nameIdx, lastLine); }
+                    else { 
+                        uint16_t nameIdx = identifierConstant(expr->name.lexeme); 
+                        if (current().refNames.count(expr->name.lexeme) > 0) {
+                            emit(OpCode::OP_SET_GLOBAL_REF, lastLine);
+                        } else {
+                            emit(OpCode::OP_SET_GLOBAL, lastLine); 
+                        }
+                        emit16(nameIdx, lastLine); 
+                    }
                 }
             }
             else emitStoreTarget(expr->objectExpr.get());
@@ -1299,7 +1347,11 @@ namespace jc {
                     emit16(static_cast<uint16_t>(upvalue), lastLine);
                 } else {
                     uint16_t idx = identifierConstant(name);
-                    emit(OpCode::OP_SET_GLOBAL, lastLine);
+                    if (isRef || current().refNames.count(name) > 0) {
+                        emit(OpCode::OP_SET_GLOBAL_REF, lastLine);
+                    } else {
+                        emit(OpCode::OP_SET_GLOBAL, lastLine);
+                    }
                     emit16(idx, lastLine);
                 }
             }
@@ -1380,7 +1432,11 @@ namespace jc {
         else {
             // ★ 修复：在这里补充未定义的 nameIdx
             uint16_t nameIdx = identifierConstant(expr->catchName.lexeme);
-            emit(OpCode::OP_SET_GLOBAL, lastLine);
+            if (current().refNames.count(expr->catchName.lexeme) > 0) {
+                emit(OpCode::OP_SET_GLOBAL_REF, lastLine);
+            } else {
+                emit(OpCode::OP_SET_GLOBAL, lastLine);
+            }
             emit16(nameIdx, lastLine);
         }
         emit(OpCode::OP_POP, lastLine);
@@ -1514,7 +1570,14 @@ namespace jc {
         else {
             int upvalue = resolveUpvalue(className);
             if (upvalue != -1) { emit(OpCode::OP_SET_UPVALUE, lastLine); emit16(static_cast<uint16_t>(upvalue), lastLine); }
-            else { emit(OpCode::OP_SET_GLOBAL, lastLine); emit16(nameIdx, lastLine); }
+            else { 
+                if (current().refNames.count(className) > 0) {
+                    emit(OpCode::OP_SET_GLOBAL_REF, lastLine);
+                } else {
+                    emit(OpCode::OP_SET_GLOBAL, lastLine); 
+                }
+                emit16(nameIdx, lastLine); 
+            }
         }
 
         // ★ 智能加载宏：无论这个类在何处，精准找到它
@@ -1771,7 +1834,11 @@ namespace jc {
                 }
                 else {
                     uint16_t idx = identifierConstant(varName);
-                    emit(OpCode::OP_SET_GLOBAL, lastLine);
+                    if (isRef || current().refNames.count(varName) > 0) {
+                        emit(OpCode::OP_SET_GLOBAL_REF, lastLine);
+                    } else {
+                        emit(OpCode::OP_SET_GLOBAL, lastLine);
+                    }
                     emit16(idx, lastLine);
                 }
             }

@@ -45,6 +45,7 @@ namespace jc {
         // 全局变量
         OP_GET_GLOBAL,      // [name_idx:16bit]
         OP_SET_GLOBAL,      // [name_idx:16bit]
+        OP_SET_GLOBAL_REF,  // [name_idx:16bit] ★ 新增
         OP_DEFINE_GLOBAL,   // [name_idx:16bit]
 
         // 局部变量
@@ -162,6 +163,7 @@ namespace jc {
         case OpCode::OP_GREATER_EQUAL: return "OP_GREATER_EQUAL";
         case OpCode::OP_GET_GLOBAL: return "OP_GET_GLOBAL";
         case OpCode::OP_SET_GLOBAL: return "OP_SET_GLOBAL";
+        case OpCode::OP_SET_GLOBAL_REF: return "OP_SET_GLOBAL_REF";
         case OpCode::OP_DEFINE_GLOBAL: return "OP_DEFINE_GLOBAL";
         case OpCode::OP_GET_LOCAL: return "OP_GET_LOCAL";
         case OpCode::OP_SET_LOCAL: return "OP_SET_LOCAL";
@@ -364,6 +366,7 @@ namespace jc {
             case OpCode::OP_CONSTANT:
             case OpCode::OP_GET_GLOBAL:
             case OpCode::OP_SET_GLOBAL:
+            case OpCode::OP_SET_GLOBAL_REF:
             case OpCode::OP_DEFINE_GLOBAL:
             case OpCode::OP_CLASS:
             case OpCode::OP_METHOD:

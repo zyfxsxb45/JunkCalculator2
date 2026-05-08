@@ -717,7 +717,8 @@ namespace jc {
                     }
                     break;
                 }
-                case OpCode::OP_SET_GLOBAL: {
+                case OpCode::OP_SET_GLOBAL:
+                case OpCode::OP_SET_GLOBAL_REF: {
                     uint16_t idx = readShort();
                     std::string name = std::get<std::string>(currentChunk().constants[idx].data);
 
@@ -727,6 +728,12 @@ namespace jc {
 
                     if (constGlobals.count(name))
                         throw std::runtime_error("Runtime Error: Cannot modify const variable '" + name + "'.");
+
+                    if (op == OpCode::OP_SET_GLOBAL_REF) {
+                        if (globals.find(name) == globals.end() && nativeBuiltins.find(name) == nativeBuiltins.end()) {
+                            throw std::runtime_error("Runtime Error: Undefined variable '" + name + "'.");
+                        }
+                    }
 
                     // ★ 检查是否与内建函数 arity 冲突
                     Value& val = peek(0);
