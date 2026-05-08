@@ -32,10 +32,10 @@ namespace jc_latex {
         else if (std::holds_alternative<Complex>(val.data)) {
             auto c = std::get<Complex>(val.data);
             std::ostringstream oss; oss << std::defaultfloat << std::setprecision(4);
-            if (Tol::isEq(c.real, 0.0) && Tol::isEq(c.imag, 0.0)) return "0";
-            if (!Tol::isEq(c.real, 0.0)) oss << c.real;
-            if (!Tol::isEq(c.imag, 0.0)) {
-                if (c.imag > 0 && !Tol::isEq(c.real, 0.0)) oss << "+";
+            if (c.real == 0.0 && c.imag == 0.0) return "0";
+            if (c.real != 0.0) oss << c.real;
+            if (c.imag != 0.0) {
+                if (c.imag > 0 && c.real != 0.0) oss << "+";
                 if (Tol::isEq(c.imag, 1.0)) oss << "i";
                 else if (Tol::isEq(c.imag, -1.0)) oss << "-i";
                 else oss << c.imag << "i";
@@ -310,7 +310,7 @@ JC2_MODULE(latex) {
 
         // ★ 核心收尾：C++ 的 complex 落回到 JC2 的类型系统中
         cplx res = ast->eval({});
-        if (Tol::isEq(res.imag(), 0.0)) return Value(res.real()); // 纯虚部为 0 降级为 double
+        if (res.imag() == 0.0) return Value(res.real()); // 纯虚部为 0 降级为 double
         return Value(Complex(res.real(), res.imag()));           // 否则以复数形式返还！
         }));
 
@@ -355,7 +355,7 @@ JC2_MODULE(latex) {
             }
 
             cplx res = ast->eval(env);
-            if (Tol::isEq(res.imag(), 0.0)) return Value(res.real());
+            if (res.imag() == 0.0) return Value(res.real());
             return Value(Complex(res.real(), res.imag()));
             };
         return (*makeNativeFn)("latex_lambda", static_cast<int>(varNames.size()), jc_caller);

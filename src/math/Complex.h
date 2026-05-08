@@ -25,29 +25,29 @@ namespace jc {
         // --- 基础数学与属性 ---
         double getReal() const { return real; }
         double getImage() const { return imag; }
-        bool isNumber() const { return Tol::isEq(Tol::clean(imag, std::abs(real)), 0.0); }
-        bool isInteger() const { return isNumber() && Tol::isEq(real, std::round(real)); }
+        bool isNumber() const { return Tol::clean(imag, std::abs(real)) == 0.0; }
+        bool isInteger() const { return isNumber() && real == std::round(real); }
 
         double modulus() const { return std::sqrt(real * real + imag * imag); }
 
         double argument() const {
-            if (jc::Tol::isEq(modulus(), 0.0)) throw std::runtime_error("Math Error: The argument of 0 is arbitrary.");
+            if (real == 0.0 && imag == 0.0) throw std::runtime_error("Math Error: The argument of 0 is arbitrary.");
             return std::atan2(imag, real);
         }
 
         static void cleanRoots(std::vector<Complex>& roots) {
             for (auto& r : roots) {
                 double mag = r.modulus();
-                if (Tol::isEq(mag, 0.0)) continue;
+                if (mag == 0.0) continue;
                 // 按模长规模清洗实部和虚部
                 r.imag = Tol::clean(r.imag, mag);
                 r.real = Tol::clean(r.real, mag);
                 // 整数吸附 (放宽一点 ULP，比如 1e4，为了更舒服的输出)
-                if (Tol::isEq(r.imag, 0.0)) {
+                if (r.imag == 0.0) {
                     double rounded = std::round(r.real);
                     if (Tol::isEq(r.real, rounded, 1e4)) r.real = rounded;
                 }
-                if (Tol::isEq(r.real, 0.0)) {
+                if (r.real == 0.0) {
                     double rounded = std::round(r.imag);
                     if (Tol::isEq(r.imag, rounded, 1e4)) r.imag = rounded;
                 }
@@ -58,15 +58,15 @@ namespace jc {
             double re = c.real, im = c.imag;
             double mag = std::sqrt(re * re + im * im);
 
-            if (!Tol::isEq(mag, 0.0)) {
+            if (mag != 0.0) {
                 im = Tol::clean(im, mag);
                 re = Tol::clean(re, mag);
             }
-            if (!Tol::isEq(re, 0.0)) {
+            if (re != 0.0) {
                 double rounded = std::round(re);
                 if (Tol::isEq(re, rounded, 1e4)) re = rounded;
             }
-            if (!Tol::isEq(im, 0.0)) {
+            if (im != 0.0) {
                 double rounded = std::round(im);
                 if (Tol::isEq(im, rounded, 1e4)) im = rounded;
             }
@@ -94,25 +94,25 @@ namespace jc {
 
         Complex operator/(const Complex& other) const {
             double den = other.real * other.real + other.imag * other.imag;
-            if (jc::Tol::isEq(den, 0.0)) throw std::runtime_error("Math Error: Division by zero complex number.");
+            if (den == 0.0) throw std::runtime_error("Math Error: Division by zero complex number.");
             return { (real * other.real + imag * other.imag) / den, (imag * other.real - real * other.imag) / den };
         }
         Complex operator/(double other) const {
-            if (jc::Tol::isEq(other, 0.0)) throw std::runtime_error("Math Error: Division by zero.");
+            if (other == 0.0) throw std::runtime_error("Math Error: Division by zero.");
             return { real / other, imag / other };
         }
         friend Complex operator/(double lhs, const Complex& rhs) {
             double den = rhs.real * rhs.real + rhs.imag * rhs.imag;
-            if (jc::Tol::isEq(den, 0.0)) throw std::runtime_error("Math Error: Division by zero complex number.");
+            if (den == 0.0) throw std::runtime_error("Math Error: Division by zero complex number.");
             return { (lhs * rhs.real) / den, (-lhs * rhs.imag) / den };
         }
 
         // --- 逻辑与比较 ---
         bool operator==(const Complex& other) const {
-            return jc::Tol::isEq(real, other.real) && jc::Tol::isEq(imag, other.imag);
+            return real == other.real && imag == other.imag;
         }
         bool operator==(double other) const {
-            return jc::Tol::isEq(real, other) && jc::Tol::isEq(imag, 0.0);
+            return real == other && imag == 0.0;
         }
         bool operator!=(const Complex& other) const { return !(*this == other); }
         bool operator!=(double other) const { return !(*this == other); }
@@ -123,29 +123,29 @@ namespace jc {
         // =================================================================================
 
         friend Complex exp(const Complex& z) {
-            if (jc::Tol::isEq(z.modulus(), 0.0)) return { 1.0, 0.0 };
+            if (z.real == 0.0 && z.imag == 0.0) return { 1.0, 0.0 };
             double r = std::exp(z.real);
             return { r * std::cos(z.imag), r * std::sin(z.imag) };
         }
 
         friend Complex log(const Complex& z) { // 即自带的 ln
-            if (jc::Tol::isEq(z.modulus(), 0.0)) throw std::runtime_error("Math Error: Logarithm of zero.");
+            if (z.real == 0.0 && z.imag == 0.0) throw std::runtime_error("Math Error: Logarithm of zero.");
             return { std::log(z.modulus()), z.argument() };
         }
 
         // 复数乘方 a^b = e^(b*ln(a))
         Complex operator^(const Complex& power) const {
-            if (jc::Tol::isEq(modulus(), 0.0)) {
+            if (real == 0.0 && imag == 0.0) {
                 if (power.real <= 0) throw std::runtime_error("Math Error: Base 0 requires positive real exponent.");
                 return { 0.0, 0.0 };
             }
-            if (jc::Tol::isEq(power.imag, 0.0)) return (*this) ^ power.real; // 降级提速
+            if (power.imag == 0.0) return (*this) ^ power.real; // 降级提速
             return exp(power * log(*this));
         }
 
         Complex operator^(double power) const {
-            if (jc::Tol::isEq(modulus(), 0.0) && power <= 0) throw std::runtime_error("Math Error: Base 0 requires positive exponent.");
-            if (jc::Tol::isEq(modulus(), 0.0)) return { 0.0, 0.0 };
+            if (real == 0.0 && imag == 0.0 && power <= 0) throw std::runtime_error("Math Error: Base 0 requires positive exponent.");
+            if (real == 0.0 && imag == 0.0) return { 0.0, 0.0 };
             double a = power * argument();
             double r = std::pow(modulus(), power);
             return { r * std::cos(a), r * std::sin(a) };
@@ -162,7 +162,7 @@ namespace jc {
         }
         friend Complex tan(const Complex& z) {
             Complex c = cos(z);
-            if (jc::Tol::isEq(c.modulus(), 0.0)) throw std::runtime_error("Math Error: Tangent undefined.");
+            if (c.real == 0.0 && c.imag == 0.0) throw std::runtime_error("Math Error: Tangent undefined.");
             return sin(z) / c;
         }
 
@@ -171,7 +171,7 @@ namespace jc {
         friend Complex cosh(const Complex& z) { return (exp(z) + exp(-z)) / 2.0; }
         friend Complex tanh(const Complex& z) {
             Complex c = cosh(z);
-            if (jc::Tol::isEq(c.modulus(), 0.0)) throw std::runtime_error("Math Error: Tanh undefined.");
+            if (c.real == 0.0 && c.imag == 0.0) throw std::runtime_error("Math Error: Tanh undefined.");
             return sinh(z) / c;
         }
 
@@ -196,7 +196,7 @@ namespace jc {
 
         Complex firstRoot(int n) const {
             if (n <= 0) throw std::runtime_error("Math Error: Root degree must be positive.");
-            if (jc::Tol::isEq(modulus(), 0.0)) return { 0.0, 0.0 };
+            if (real == 0.0 && imag == 0.0) return { 0.0, 0.0 };
             double k = static_cast<double>(n);
             double a = argument() / k;
             double r = std::pow(modulus(), 1.0 / k);
@@ -212,8 +212,8 @@ namespace jc {
             if (!reZero) os << v.real;
             if (!imZero) {
                 if (v.imag > 0 && !reZero) os << "+";
-                if (jc::Tol::isEq(v.imag, 1.0)) os << "i";
-                else if (jc::Tol::isEq(v.imag, -1.0)) os << "-i";
+                if (Tol::isEq(v.imag, 1.0)) os << "i";
+                else if (Tol::isEq(v.imag, -1.0)) os << "-i";
                 else os << v.imag << "i";
             }
             return os;
@@ -225,8 +225,8 @@ namespace jc {
         // 现在的版本不仅求解，所有求出来的根全部打包进 vector，未来可以直接被解析器变成矩阵向外抛！
 
         static std::vector<Complex> solveDegreeOne(const Complex& a, const Complex& b) {
-            if (jc::Tol::isEq(a.modulus(), 0.0)) {
-                if (!jc::Tol::isEq(b.modulus(), 0.0)) throw std::runtime_error("Math Error: Equation has no solution.");
+            if (a.real == 0.0 && a.imag == 0.0) {
+                if (b.real != 0.0 || b.imag != 0.0) throw std::runtime_error("Math Error: Equation has no solution.");
                 throw std::runtime_error("Math Error: Infinitely many solutions.");
             }
             std::vector<Complex> roots = { -b / a };
@@ -235,7 +235,7 @@ namespace jc {
         }
 
         static std::vector<Complex> solveDegreeTwo(const Complex& a, const Complex& b, const Complex& c) {
-            if (jc::Tol::isEq(a.modulus(), 0.0)) return solveDegreeOne(b, c);
+            if (a.real == 0.0 && a.imag == 0.0) return solveDegreeOne(b, c);
             Complex delta = sqrt(b * b - 4.0 * a * c);
             std::vector<Complex> roots = { (-b + delta) / (2.0 * a), (-b - delta) / (2.0 * a) };
             cleanRoots(roots);
@@ -243,7 +243,7 @@ namespace jc {
         }
 
         static std::vector<Complex> solveDegreeThree(const Complex& a, const Complex& b, const Complex& c, const Complex& d) {
-            if (jc::Tol::isEq(a.modulus(), 0.0)) return solveDegreeTwo(b, c, d);
+            if (a.real == 0.0 && a.imag == 0.0) return solveDegreeTwo(b, c, d);
             Complex u = (9.0 * a * b * c - 27.0 * (a ^ 2.0) * d - 2.0 * (b ^ 3.0)) / (54.0 * (a ^ 3.0));
             Complex v = sqrt(3.0 * (4.0 * a * (c ^ 3.0) - (b ^ 2.0) * (c ^ 2.0) - 18.0 * a * b * c * d + 27.0 * (a ^ 2.0) * (d ^ 2.0) + 4.0 * (b ^ 3.0) * d)) / (18.0 * (a ^ 2.0));
             Complex m, n, w(-0.5, std::sqrt(3.0) / 2.0);
@@ -251,7 +251,7 @@ namespace jc {
             if ((u + v).modulus() > (u - v).modulus()) m = (u + v).firstRoot(3);
             else m = (u - v).firstRoot(3);
 
-            if (jc::Tol::isEq(m.modulus(), 0.0)) n = { 0.0, 0.0 };
+            if (m.real == 0.0 && m.imag == 0.0) n = { 0.0, 0.0 };
             else n = ((b ^ 2.0) - 3.0 * a * c) / (9.0 * (a ^ 2.0) * m);
 
             Complex offset = -b / (3.0 * a);
@@ -265,7 +265,7 @@ namespace jc {
         }
 
         static std::vector<Complex> solveDegreeFour(const Complex& a, const Complex& b, const Complex& c, const Complex& d, const Complex& e) {
-            if (jc::Tol::isEq(a.modulus(), 0.0)) return solveDegreeThree(b, c, d, e);
+            if (a.real == 0.0 && a.imag == 0.0) return solveDegreeThree(b, c, d, e);
 
             Complex P = (c * c + 12.0 * a * e - 3.0 * b * d) / 9.0;
             Complex Q = (27.0 * a * d * d + 2.0 * c * c * c + 27.0 * b * b * e - 72.0 * a * c * e - 9.0 * b * c * d) / 54.0;

@@ -478,12 +478,14 @@ namespace jc {
             if (std::holds_alternative<std::monostate>(data)) return false;
             if (std::holds_alternative<double>(data)) {
                 double d = std::get<double>(data);
-                return !Tol::isEq(d, 0.0) && !std::isnan(d);
+                return d != 0.0 && !std::isnan(d);
             }
             if (std::holds_alternative<BigInt>(data))
                 return !std::get<BigInt>(data).isZero();
-            if (std::holds_alternative<Complex>(data))
-                return !Tol::isEq(std::get<Complex>(data).modulus(), 0.0);
+            if (std::holds_alternative<Complex>(data)) {
+                const auto& c = std::get<Complex>(data);
+                return c.real != 0.0 || c.imag != 0.0;
+            }
             if (std::holds_alternative<Fraction>(data))
                 return !std::get<Fraction>(data).getNum().isZero();
             if (std::holds_alternative<BaseNum>(data))
@@ -512,7 +514,7 @@ namespace jc {
             if (lhs.data.index() == rhs.data.index()) {
                 if (std::holds_alternative<std::monostate>(lhs.data)) return true;
                 if (std::holds_alternative<double>(lhs.data))
-                    return Tol::isEq(std::get<double>(lhs.data), std::get<double>(rhs.data));
+                    return std::get<double>(lhs.data) == std::get<double>(rhs.data);
                 if (std::holds_alternative<BigInt>(lhs.data))
                     return std::get<BigInt>(lhs.data) == std::get<BigInt>(rhs.data);
                 if (std::holds_alternative<Complex>(lhs.data))
@@ -532,7 +534,7 @@ namespace jc {
                     if (a.getRows() != b.getRows() || a.getCols() != b.getCols()) return false;
                     for (int i = 0; i < a.getRows(); ++i)
                         for (int j = 0; j < a.getCols(); ++j)
-                            if (!Tol::isEq(a(i, j), b(i, j))) return false;
+                            if (a(i, j) != b(i, j)) return false;
                     return true;
                 }
                 if (std::holds_alternative<ComplexMatrix>(lhs.data)) {
@@ -680,19 +682,19 @@ namespace jc {
 
             if (std::holds_alternative<BigInt>(lhs.data) && numR) {
                 const BigInt& b = std::get<BigInt>(lhs.data);
-                if (!Tol::isEq(numR->imag, 0.0)) return false;
+                if (numR->imag != 0.0) return false;
                 double d = numR->real;
                 if (std::floor(d) != d) return false;
                 if (std::abs(d) < 9e15) return b == BigInt(static_cast<int64_t>(d));
-                try { return Tol::isEq(b.toDouble(), d); } catch (...) { return false; }
+                try { return b.toDouble() == d; } catch (...) { return false; }
             }
             if (std::holds_alternative<BigInt>(rhs.data) && numL) {
                 const BigInt& b = std::get<BigInt>(rhs.data);
-                if (!Tol::isEq(numL->imag, 0.0)) return false;
+                if (numL->imag != 0.0) return false;
                 double d = numL->real;
                 if (std::floor(d) != d) return false;
                 if (std::abs(d) < 9e15) return b == BigInt(static_cast<int64_t>(d));
-                try { return Tol::isEq(b.toDouble(), d); } catch (...) { return false; }
+                try { return b.toDouble() == d; } catch (...) { return false; }
             }
 
             return false;
@@ -1186,7 +1188,7 @@ namespace jc {
                     return result;
                 }
                 else if constexpr (std::is_same_v<T1, RealMatrix> && std::is_same_v<T2, double>) {
-                    if (jc::Tol::isEq(b, 0.0)) throw std::runtime_error("Math Error: Modulo by zero.");
+                    if (b == 0.0) throw std::runtime_error("Math Error: Modulo by zero.");
                     RealMatrix res(a.getRows(), a.getCols());
                     for (int i = 0; i < a.getRows(); ++i) {
                         for (int j = 0; j < a.getCols(); ++j) {
@@ -1196,7 +1198,7 @@ namespace jc {
                     return Value(res);
                 }
                 else if constexpr (std::is_same_v<T1, ComplexMatrix> && std::is_same_v<T2, double>) {
-                    if (jc::Tol::isEq(b, 0.0)) throw std::runtime_error("Math Error: Modulo by zero.");
+                    if (b == 0.0) throw std::runtime_error("Math Error: Modulo by zero.");
                     ComplexMatrix res(a.getRows(), a.getCols());
                     for (int i = 0; i < a.getRows(); ++i) {
                         for (int j = 0; j < a.getCols(); ++j) {
@@ -1240,7 +1242,7 @@ namespace jc {
                 else if constexpr (std::is_same_v<T, double>) {
                     double v = arg;
                     double rounded = std::round(v);
-                    if (!Tol::isEq(rounded, 0.0) && !Tol::isEq(v, 0.0) && Tol::isEq(v, rounded, 1e5) && std::abs(rounded) < 1e15) {
+                    if (rounded != 0.0 && v != 0.0 && Tol::isEq(v, rounded, 1e5) && std::abs(rounded) < 1e15) {
                         if (rounded == std::trunc(rounded)) { os << static_cast<int64_t>(rounded); }
                         else { os << rounded; }
                     }
@@ -1803,9 +1805,9 @@ inline size_t ValueHasher::operator()(const Value& v) const {
     try {
         Complex c = v.asComplex();
         double r = (c.real == 0.0) ? 0.0 : c.real; // 抹平 -0.0
-        if (Tol::isEq(r, std::round(r))) r = std::round(r); // 抹平 1.0 与 1 的差异
+        if (r == std::round(r)) r = std::round(r); // 抹平 1.0 与 1 的差异
         double i = (c.imag == 0.0) ? 0.0 : c.imag;
-        if (Tol::isEq(i, std::round(i))) i = std::round(i);
+        if (i == std::round(i)) i = std::round(i);
         size_t h1 = std::hash<double>{}(r);
         size_t h2 = std::hash<double>{}(i);
         return h1 ^ (h2 << 1);

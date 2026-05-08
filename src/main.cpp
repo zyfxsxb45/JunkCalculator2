@@ -1,3 +1,4 @@
+#define WIN32_LEAN_AND_MEAN
 #include "modules/socket_module.h"
 #include <iostream>
 #include <string>
@@ -24,13 +25,16 @@
 #include "modules/latex_module.h"
 #include <csignal>
 #include <atomic>
+#include <random>
+#include <array>
+#include <string_view>
 
 namespace jc {
-    std::atomic<bool> g_isWaitingForInput{false};
+    std::atomic<bool> g_isWaitingForInput{ false };
 }
 
 // 信号处理
-static std::atomic<int> g_sigintCount{0};
+static std::atomic<int> g_sigintCount{ 0 };
 static auto g_lastSigintTime = std::chrono::steady_clock::now();
 
 void sigintHandler(int signum) {
@@ -46,7 +50,8 @@ void sigintHandler(int signum) {
     auto now = std::chrono::steady_clock::now();
     if (std::chrono::duration_cast<std::chrono::milliseconds>(now - g_lastSigintTime).count() < 1000) {
         g_sigintCount++;
-    } else {
+    }
+    else {
         g_sigintCount = 1;
     }
     g_lastSigintTime = now;
@@ -63,7 +68,7 @@ void sigintHandler(int signum) {
 static bool endsWithContinuation(const std::string& line) {
     size_t e = line.find_last_not_of(" \t\r\n");
     if (e == std::string::npos) return false;
-    
+
     char c = line[e];
     if (c == '+' || c == '-' || c == '*' || c == '/' || c == '\\' ||
         c == '%' || c == '^' || c == ',' || c == '=' || c == '.' ||
@@ -78,7 +83,7 @@ static bool endsWithContinuation(const std::string& line) {
         if (line.substr(start, word.length()) != word) return false;
         if (start > 0 && (std::isalnum(line[start - 1]) || line[start - 1] == '_')) return false;
         return true;
-    };
+        };
 
     if (endsWithWord("in")) {
         return true;
@@ -265,7 +270,7 @@ int main(int argc, char* argv[]) {
     // 绑定虚拟机外包服务给系统级运行时回调！
     jc::helpers::setGlobalCallback = [](const std::string& name, const jc::Value& val) { vm.setGlobal(name, val); };
     jc::helpers::evalCallback = [](const std::string& code) -> jc::Value { return evalCode(code, "<eval>", false); };
-    jc::helpers::runFileCallback = [](const std::string& path) { runScript(path, true);}; 
+    jc::helpers::runFileCallback = [](const std::string& path) { runScript(path, true); };
     jc::helpers::callFunctionCallback = nullptr;
     jc::helpers::resolvePathCallback = [exeDir](const std::string& path) -> std::string {
         namespace fs = std::filesystem;
@@ -290,7 +295,8 @@ int main(int argc, char* argv[]) {
         if (arg == "-e" || arg == "--eval") {
             if (i + 1 < argc) {
                 evalStr = argv[++i];
-            } else {
+            }
+            else {
                 std::cerr << "Error: --eval requires an argument.\n";
                 return 1;
             }
@@ -311,7 +317,8 @@ int main(int argc, char* argv[]) {
             if (i + 1 < argc && argv[i + 1][0] != '-') {
                 printHelpTopic(argv[i + 1]);
                 i++; // 消耗掉 topic 参数
-            } else {
+            }
+            else {
                 printHelp();
             }
             return 0;
@@ -342,7 +349,8 @@ int main(int argc, char* argv[]) {
             if (!result.isNone()) {
                 std::cout << result << std::endl;
             }
-        } catch (const std::exception& e) {
+        }
+        catch (const std::exception& e) {
             std::cerr << "Error: " << e.what() << std::endl;
             return 1;
         }
@@ -362,7 +370,7 @@ int main(int argc, char* argv[]) {
             << "   Developed by Yu Liangyang, Tsinghua University\n"
             << "=================================================\n" << jc::col(jc::Ansi::RESET)
             << "Type " << jc::col(jc::Ansi::BRIGHT_YELLOW) << "'/help'" << jc::col(jc::Ansi::RESET) << " for a list of commands." << std::endl;
-    };
+        };
 
     if (!g_quiet) printBanner();
 
@@ -372,7 +380,7 @@ int main(int argc, char* argv[]) {
 
         std::string input;
         if (!g_quiet) std::cout << "\n" << jc::col(jc::Ansi::BOLD) << jc::col(jc::Ansi::BRIGHT_CYAN) << "JC2> " << jc::col(jc::Ansi::RESET);
-        
+
         jc::g_isWaitingForInput.store(true, std::memory_order_relaxed);
         bool getlineResult = (bool)std::getline(std::cin, input);
         jc::g_isWaitingForInput.store(false, std::memory_order_relaxed);
@@ -390,7 +398,7 @@ int main(int argc, char* argv[]) {
                 if (!g_quiet) std::cout << "\nGoodbye!" << std::endl;
                 std::exit(1);
             }
-            
+
             std::cout << "\n";
             continue;
         }
@@ -409,28 +417,33 @@ int main(int argc, char* argv[]) {
                 if (inStr) {
                     if (c == '\\' && i + 1 < s.length()) {
                         i++;
-                    } else if (c == strQuote) {
+                    }
+                    else if (c == strQuote) {
                         if (isMulti) {
-                            if (i + 2 < s.length() && s[i+1] == strQuote && s[i+2] == strQuote) {
+                            if (i + 2 < s.length() && s[i + 1] == strQuote && s[i + 2] == strQuote) {
                                 inStr = false;
                                 isMulti = false;
                                 i += 2;
                             }
-                        } else {
+                        }
+                        else {
                             inStr = false;
                         }
                     }
-                } else {
+                }
+                else {
                     if (c == '"' || c == '\'') {
                         inStr = true;
                         strQuote = c;
-                        if (i + 2 < s.length() && s[i+1] == c && s[i+2] == c) {
+                        if (i + 2 < s.length() && s[i + 1] == c && s[i + 2] == c) {
                             isMulti = true;
                             i += 2;
-                        } else {
+                        }
+                        else {
                             isMulti = false;
                         }
-                    } else if (c == '{') braces++;
+                    }
+                    else if (c == '{') braces++;
                     else if (c == '}') braces--;
                     else if (c == '(') parens++;
                     else if (c == ')') parens--;
@@ -438,7 +451,7 @@ int main(int argc, char* argv[]) {
                     else if (c == ']') brackets--;
                 }
             }
-        };
+            };
 
         int braces = 0, parens = 0, brackets = 0;
         bool inStr = false, isMulti = false;
@@ -535,8 +548,34 @@ int main(int argc, char* argv[]) {
             }
             if (input.substr(0, 6) == "/save ") { saveWorkspace(input.substr(6)); continue; }
             if (input.substr(0, 6) == "/load ") { loadWorkspace(input.substr(6)); continue; }
-            if (input == "/egg") { std::cout << "There is no Easter egg here!\n"; continue; }
-            
+            if (input == "\x2f\x65\x67\x67") {
+                static constexpr std::array<std::string_view, 10> e = {
+                    "V nz n Whax Pnyphyngbe. Jung qvq lbh rkcrpg, negvsvpvny vagryyvtrapr?",
+                    "Gurer vf ab Rnfgre rtt urer! Tb qb fbzr zngu.",
+                    "Bar zna'f whax vf nabgure zna'f Ghevat-pbzcyrgr ynathntr.",
+                    "V jnf tbvat gb gryy n wbxr, ohg gur Tneontr Pbyyrpgbe fjrcg vg njnl.",
+                    "Qvivqvat ol mreb vf whfg n zlgu vairagrq ol zngurzngvpvnaf gb fpner pnyphyngbef.",
+                    "Frtzragngvba snhyg (pber qhzcrq)... Whfg xvqqvat, P++20 tbg zl onpx.",
+                    "0.1 + 0.2 == 0.3 vf Snyfr. V nz n Whax Pnyphyngbe, abg n yvne.",
+                    "Gur Fgnpx IZ vf gnxvat n pbssrr oernx. Cyrnfr glcr tragyl.",
+                    "Gb haqrefgnaq erphefvba, lbh zhfg svefg glcr \x2f\x65\x67\x67.",
+                    "Reebe 418: V nz n pnyphyngbe, abg n grncbg."
+                };
+                static std::random_device a;
+                static std::mt19937 b(a());
+                static std::uniform_int_distribution<std::size_t> d(0, e.size() - 1);
+                std::string_view t = e[d(b)];
+                std::string o;
+                o.reserve(t.size());
+                for (char c : t) {
+                    if (c >= 'a' && c <= 'z') o += (c - 'a' + 13) % 26 + 'a';
+                    else if (c >= 'A' && c <= 'Z') o += (c - 'A' + 13) % 26 + 'A';
+                    else o += c;
+                }
+                std::cout << o << '\n';
+                continue;
+            }
+
             std::cerr << jc::col(jc::Ansi::BRIGHT_RED) << "Unknown command: " << input << jc::col(jc::Ansi::RESET) << "\nType '/help' for a list of commands.\n";
             continue;
         }

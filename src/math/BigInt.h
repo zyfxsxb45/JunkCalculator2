@@ -557,8 +557,8 @@ namespace jc {
         // 混合计算自动降阶 / 升维隐式友元接口 (为了迎合 Value.h)
         // =================================================================================
         bool operator==(double d) const {
-            if (isZero()) return jc::Tol::isEq(0.0, d);
-            try { return jc::Tol::isEq(toDouble(), d); }
+            if (isZero()) return d == 0.0;
+            try { return toDouble() == d; }
             catch (...) { return false; }
         }
         friend bool operator==(double d, const BigInt& b) { return b == d; }
@@ -571,7 +571,7 @@ namespace jc {
         friend double operator*(const BigInt& a, double b) { return a.toDouble() * b; }
         friend double operator*(double a, const BigInt& b) { return a * b.toDouble(); }
         friend double operator/(const BigInt& a, double b) {
-            if (jc::Tol::isEq(b, 0.0)) throw std::runtime_error("Math Error: Division by zero.");
+            if (b == 0.0) throw std::runtime_error("Math Error: Division by zero.");
             return a.toDouble() / b;
         }
         friend double operator/(double a, const BigInt& b) {
@@ -579,7 +579,7 @@ namespace jc {
             return a / b.toDouble();
         }
         friend double operator%(const BigInt& a, double b) {
-            if (jc::Tol::isEq(b, 0.0)) throw std::runtime_error("Math Error: Modulo by zero.");
+            if (b == 0.0) throw std::runtime_error("Math Error: Modulo by zero.");
             return std::fmod(a.toDouble(), b);
         }
         friend double operator%(double a, const BigInt& b) {

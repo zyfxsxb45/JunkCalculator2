@@ -4,6 +4,7 @@
 #include "BuiltinRegistry.h"
 #include "../frontend/Highlight.h"
 #include "../memory/GcHeap.h"
+#include "EngineInterrupt.h"
 #include <iostream>
 #include <cmath>
 #include <stdexcept>
@@ -437,9 +438,10 @@ namespace jc {
 
         while (true) {
             
-            // ═══ GC 自动触发探针 ═══
+            // ═══ GC 自动触发探针与中断探针 ═══
             if (++gcInstructionCounter_ >= 2048) {
                 gcInstructionCounter_ = 0;
+                jc::checkInterrupt();
                 if (GcHeap::get().shouldCollect()) {
                     collectGarbage();
                 }
@@ -597,9 +599,8 @@ namespace jc {
                     else if (std::holds_alternative<std::string>(a.data) && std::holds_alternative<std::string>(b.data))
                         push(Value(std::get<std::string>(a.data) < std::get<std::string>(b.data) ? 1.0 : 0.0));
                     else {
-                        // ★ 同步 Evaluator 的智能容差系统
                         double da = a.asDouble(), db = b.asDouble();
-                        push(Value((da < db && !Tol::isEq(da, db)) ? 1.0 : 0.0));
+                        push(Value((da < db) ? 1.0 : 0.0));
                     }
                     break;
                 }
@@ -614,9 +615,8 @@ namespace jc {
                     else if (std::holds_alternative<std::string>(a.data) && std::holds_alternative<std::string>(b.data))
                         push(Value(std::get<std::string>(a.data) <= std::get<std::string>(b.data) ? 1.0 : 0.0));
                     else {
-                        // ★ 同步 Evaluator 的智能容差系统
                         double da = a.asDouble(), db = b.asDouble();
-                        push(Value((da < db || Tol::isEq(da, db)) ? 1.0 : 0.0));
+                        push(Value((da <= db) ? 1.0 : 0.0));
                     }
                     break;
                 }
@@ -631,9 +631,8 @@ namespace jc {
                     else if (std::holds_alternative<std::string>(a.data) && std::holds_alternative<std::string>(b.data))
                         push(Value(std::get<std::string>(a.data) > std::get<std::string>(b.data) ? 1.0 : 0.0));
                     else {
-                        // ★ 同步 Evaluator 的智能容差系统
                         double da = a.asDouble(), db = b.asDouble();
-                        push(Value((da > db && !Tol::isEq(da, db)) ? 1.0 : 0.0));
+                        push(Value((da > db) ? 1.0 : 0.0));
                     }
                     break;
                 }
@@ -648,9 +647,8 @@ namespace jc {
                     else if (std::holds_alternative<std::string>(a.data) && std::holds_alternative<std::string>(b.data))
                         push(Value(std::get<std::string>(a.data) >= std::get<std::string>(b.data) ? 1.0 : 0.0));
                     else {
-                        // ★ 同步 Evaluator 的智能容差系统
                         double da = a.asDouble(), db = b.asDouble();
-                        push(Value((da > db || Tol::isEq(da, db)) ? 1.0 : 0.0));
+                        push(Value((da >= db) ? 1.0 : 0.0));
                     }
                     break;
                 }
@@ -1690,6 +1688,9 @@ namespace jc {
             // =======================================================
             // ★ 异常捕获与 Traceback 调用栈回溯 (Stack Tracing)
             // =======================================================
+            catch (const EngineInterruptError&) {
+                throw; // 强行中断，无视 try-catch 拦截，不生成 Traceback
+            }
             catch (const StackTracedException& ex) {
                 std::string msg = ex.rawMessage;
                 if (handleExceptionUnwind(msg)) continue;
@@ -3513,7 +3514,7 @@ namespace jc {
             try { target = needle.asDouble(); }
             catch (...) { push(Value(0.0)); return; }
             for (const auto& v : m.rawData()) {
-                if (Tol::isEq(v, target, 1e4)) { push(Value(1.0)); return; }
+                if (v == target) { push(Value(1.0)); return; }
             }
             push(Value(0.0));
             return;

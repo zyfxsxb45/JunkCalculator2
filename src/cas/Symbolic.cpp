@@ -116,7 +116,7 @@ namespace jc {
     static std::pair<bool, int> casToInt(const CASVal& v) {
         try {
             double d = casValToValue(v).asDouble();
-            if (Tol::isEq(d, std::round(d)) && std::abs(d) <= 1000)
+            if (d == std::round(d) && std::abs(d) <= 1000)
                 return { true, static_cast<int>(std::round(d)) };
         }
         catch (...) {}
@@ -347,7 +347,7 @@ namespace jc {
                 }
             }
             else if constexpr (std::is_same_v<T, double>) {
-                if (std::isfinite(arg) && Tol::isEq(arg, std::round(arg))) {
+                if (std::isfinite(arg) && arg == std::round(arg)) {
                     // C++ 浮点转整防御，最多精准到 53 位 (±9e15)
                     if (std::abs(arg) < 9e15) {
                         return { true, static_cast<int64_t>(std::round(arg)) };
@@ -442,15 +442,15 @@ namespace jc {
         // 终极防御：高斯整数吸附 (Gaussian Integer Snapping)
         // 防止任何带有微小浮点误差的复数 (如 1.0 + 6.32e-16i) 污染纯符号 AST
         auto makeExactIfPossible = [](double d) -> SymExpr {
-            if (Tol::isEq(d, std::round(d))) {
+            if (d == std::round(d)) {
                 return SymExpr(BigInt(static_cast<int64_t>(std::round(d))));
             }
             return SymExpr(d);
         };
 
-        if (Tol::isEq(v.imag, 0.0)) {
+        if (v.imag == 0.0) {
             ptr = makeExactIfPossible(v.real).ptr;
-        } else if (Tol::isEq(v.real, 0.0)) {
+        } else if (v.real == 0.0) {
             SymExpr imagPart = makeExactIfPossible(v.imag);
             SymExpr iVar = SymExpr::makeVar("i");
             ptr = intern((imagPart * iVar).ptr);
@@ -795,7 +795,7 @@ namespace jc {
                         } else if (result.isComplex()) {
                             Complex c = result.asComplex();
                             // 仅当复数是精确的高斯整数时才折叠，过滤掉浮点噪音
-                            if (Tol::isEq(c.real, std::round(c.real)) && Tol::isEq(c.imag, std::round(c.imag))) {
+                            if (c.real == std::round(c.real) && c.imag == std::round(c.imag)) {
                                 SymExpr res(BigInt(static_cast<int64_t>(std::round(c.real))));
                                 if (std::round(c.imag) != 0.0) {
                                     res = res + SymExpr(BigInt(static_cast<int64_t>(std::round(c.imag)))) * SymExpr::makeVar("i");
@@ -928,7 +928,7 @@ namespace jc {
                             std::complex<double> bc(baseVal.asDouble(), 0.0);
                             std::complex<double> ec(expVal.asDouble(), 0.0);
                             std::complex<double> cres = std::pow(bc, ec);
-                            if (Tol::isEq(cres.imag(), 0.0)) return SymExpr(cres.real());
+                            if (cres.imag() == 0.0) return SymExpr(cres.real());
                             return SymExpr(Complex(cres.real(), cres.imag()));
                         }
                         
@@ -947,7 +947,7 @@ namespace jc {
                         std::complex<double> bc(baseVal.asDouble(), 0.0);
                         std::complex<double> ec(expVal.asDouble(), 0.0);
                         std::complex<double> cres = std::pow(bc, ec);
-                        if (Tol::isEq(cres.imag(), 0.0)) return SymExpr(cres.real());
+                        if (cres.imag() == 0.0) return SymExpr(cres.real());
                         return SymExpr(Complex(cres.real(), cres.imag()));
                     }
                         
@@ -1841,7 +1841,7 @@ namespace jc {
                             std::complex<double> bc(br, bi);
                             std::complex<double> ec(er, ei);
                             std::complex<double> cres = std::pow(bc, ec);
-                            if (Tol::isEq(cres.imag(), 0.0)) res = Value(cres.real());
+                            if (cres.imag() == 0.0) res = Value(cres.real());
                             else res = Value(Complex(cres.real(), cres.imag()));
                         }
                     }
@@ -2032,7 +2032,7 @@ namespace jc {
             try {
                 if (val.isComplex()) {
                     Complex c = val.asComplex();
-                    if (Tol::isEq(c.imag, 0.0)) return SymExpr(c.real);
+                    if (c.imag == 0.0) return SymExpr(c.real);
                     return SymExpr(c);
                 } else {
                     return SymExpr(val.asDouble());
@@ -5227,7 +5227,7 @@ namespace jc {
             if ((f->name == "RootOf" || f->name == "RootSum") && f->args.size() == 3) {
                 Value v = evaluateRootNode(f, [&](const SymExpr& e) {
                     std::complex<double> c = fastEvalComplex(e.ptr, env, resolver);
-                    if (Tol::isEq(c.imag(), 0.0)) return Value(c.real());
+                    if (c.imag() == 0.0) return Value(c.real());
                     return Value(Complex(c.real(), c.imag()));
                 });
                 if (v.isComplex()) return std::complex<double>(v.asComplex().real, v.asComplex().imag);
@@ -5265,7 +5265,7 @@ namespace jc {
             callArgs.reserve(f->args.size());
             for (auto& arg : f->args) {
                 std::complex<double> c = fastEvalComplex(arg, env, resolver);
-                if (Tol::isEq(c.imag(), 0.0)) callArgs.push_back(Value(c.real()));
+                if (c.imag() == 0.0) callArgs.push_back(Value(c.real()));
                 else callArgs.push_back(Value(Complex(c.real(), c.imag())));
             }
             Value res = resolver(f->name, callArgs);
@@ -5331,7 +5331,7 @@ namespace jc {
                     std::complex<double> bc(br, bi);
                     std::complex<double> ec(er, ei);
                     std::complex<double> cres = std::pow(bc, ec);
-                    if (Tol::isEq(cres.imag(), 0.0)) return Value(cres.real());
+                    if (cres.imag() == 0.0) return Value(cres.real());
                     return Value(Complex(cres.real(), cres.imag()));
                 }
             }
@@ -5375,7 +5375,7 @@ namespace jc {
                     else handled = false;
                     
                     if (handled) {
-                        if (Tol::isEq(res.imag(), 0.0)) return Value(res.real());
+                        if (res.imag() == 0.0) return Value(res.real());
                         return Value(Complex(res.real(), res.imag()));
                     }
                 }
@@ -5386,7 +5386,7 @@ namespace jc {
                     std::complex<double> cb(base.isComplex() ? base.asComplex().real : base.asDouble(), base.isComplex() ? base.asComplex().imag : 0.0);
                     std::complex<double> cn(n.isComplex() ? n.asComplex().real : n.asDouble(), n.isComplex() ? n.asComplex().imag : 0.0);
                     std::complex<double> res = std::pow(cb, 1.0 / cn);
-                    if (Tol::isEq(res.imag(), 0.0)) return Value(res.real());
+                    if (res.imag() == 0.0) return Value(res.real());
                     return Value(Complex(res.real(), res.imag()));
                 }
             }

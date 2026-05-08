@@ -162,13 +162,13 @@ namespace jc {
                         // ★ 把本行的规模传给清洗引擎
                         val = Tol::clean(val, rowScale[i]);
 
-                        if (Tol::isEq(val, 0.0)) {
+                        if (val == 0.0) {
                             oss << 0;
                         }
                         else {
                             // 整数吸附
                             double rounded = std::round(val);
-                            if (!Tol::isEq(rounded, 0.0)
+                            if (rounded != 0.0
                                 && Tol::isEq(val, rounded, 1e5)
                                 && std::abs(rounded) < 1e15
                                 && rounded == std::trunc(rounded)) {
@@ -185,7 +185,7 @@ namespace jc {
                         cv.real = Tol::clean(cv.real, rowScale[i]);
                         cv.imag = Tol::clean(cv.imag, rowScale[i]);
 
-                        if (Tol::isEq(cv.modulus(), 0.0)) {
+                        if (cv.real == 0.0 && cv.imag == 0.0) {
                             oss << 0;
                         }
                         else {
@@ -257,10 +257,10 @@ namespace jc {
             }
         }
 
-        // [4] 判断元素是否“极其趋近于零” (专门用来处理恶心的浮点数误差和复数)
+        // [4] 判断元素是否为零
         static bool isEssentiallyZero(const T& val) {
-            if constexpr (std::is_same_v<T, double>) return Tol::isEq(val, 0.0);
-            else if constexpr (std::is_same_v<T, Complex>) return Tol::isEq(val.modulus(), 0.0);
+            if constexpr (std::is_same_v<T, double>) return val == 0.0;
+            else if constexpr (std::is_same_v<T, Complex>) return val.real == 0.0 && val.imag == 0.0;
             else return val == T(0);
         }
 
@@ -727,7 +727,7 @@ namespace jc {
             double normA = norm();
 
             // 零矩阵直接返回单位阵
-            if (jc::Tol::isEq(normA, 0.0)) return identity(n);
+            if (normA == 0.0) return identity(n);
             int s = 0;
             double scaledNorm = normA;
             while (scaledNorm > 0.5) {
@@ -1132,9 +1132,9 @@ namespace jc {
                 xnorm += mag * mag;
             }
             xnorm = std::sqrt(xnorm);
-            if (jc::Tol::isEq(xnorm, 0.0)) continue;
+            if (xnorm == 0.0) continue;
             Complex alpha = H(k + 1, k);
-            Complex signAlpha = (jc::Tol::isEq(alpha.modulus(), 0.0))
+            Complex signAlpha = (alpha.real == 0.0 && alpha.imag == 0.0)
                 ? Complex(1.0)
                 : alpha / Complex(alpha.modulus());
 
@@ -1146,7 +1146,7 @@ namespace jc {
             for (int i = 0; i < m; ++i)
                 vnorm += v[i].modulus() * v[i].modulus();
             vnorm = std::sqrt(vnorm);
-            if (jc::Tol::isEq(vnorm, 0.0)) continue;
+            if (vnorm == 0.0) continue;
             for (int i = 0; i < m; ++i)
                 v[i] = v[i] / Complex(vnorm);
             for (int j = k; j < n; ++j) {
@@ -1242,7 +1242,7 @@ namespace jc {
                     Complex a = A(i, i), b = A(i + 1, i);
                     double r = std::sqrt(a.modulus() * a.modulus() + b.modulus() * b.modulus());
 
-                    if (jc::Tol::isEq(r, 0.0)) {
+                    if (r == 0.0) {
                         cs[i] = Complex(1);
                         ss[i] = Complex(0);
                         continue;
@@ -1413,7 +1413,7 @@ namespace jc {
             ComplexMatrix logD(n, n);
             for (int i = 0; i < n; ++i) {
                 Complex eigenval = D(i, i);
-                if (jc::Tol::isEq(eigenval.modulus(), 0.0))
+                if (eigenval.real == 0.0 && eigenval.imag == 0.0)
                     throw std::runtime_error("Math Error: Matrix logarithm undefined (zero eigenvalue).");
                 logD(i, i) = log(eigenval);
             }

@@ -194,6 +194,8 @@ namespace jc {
                             throw std::runtime_error("Function not found");
                         };
                         vals.push_back(evalUniversal(collapsed.ptr, emptyEnv, resolver));
+                    } catch (const jc::EngineInterruptError&) {
+                        throw;
                     } catch (...) {
                         allNumeric = false;
                     }
@@ -704,7 +706,7 @@ void BuiltinRegistry::registerMath() {
             if (std::holds_alternative<Complex>(args[0].data)) {
                 const Complex& c = std::get<Complex>(args[0].data);
                 Complex result(fn(c.real), fn(c.imag));
-                if (jc::Tol::isEq(result.imag, 0.0)) {
+                if (result.imag == 0.0) {
                     if (!hasN || n <= 0) return Value(BigInt(static_cast<int64_t>(result.real)));
                     return Value(result.real);
                 }
@@ -808,9 +810,9 @@ void BuiltinRegistry::registerMatrixOps() {
     reg("addS", { 2 }, [](const std::vector<Value>& args) -> Value { if (std::holds_alternative<RealMatrix>(args[0].data)) { RealMatrix m = std::get<RealMatrix>(args[0].data); double c = args[1].asDouble(); std::vector<double> flat = m.rawData(); for (auto& v : flat) v += c; return Value(RealMatrix(m.getRows(), m.getCols(), flat)); } if (std::holds_alternative<ComplexMatrix>(args[0].data)) { ComplexMatrix m = std::get<ComplexMatrix>(args[0].data); Complex c = args[1].asComplex(); std::vector<Complex> flat = m.rawData(); for (auto& v : flat) v = v + c; return Value(ComplexMatrix(m.getRows(), m.getCols(), flat)); } throw std::runtime_error("Type Error: addS() requires a matrix."); });
     reg("subS", { 2 }, [](const std::vector<Value>& args) -> Value { if (std::holds_alternative<RealMatrix>(args[0].data)) { RealMatrix m = std::get<RealMatrix>(args[0].data); double c = args[1].asDouble(); std::vector<double> flat = m.rawData(); for (auto& v : flat) v -= c; return Value(RealMatrix(m.getRows(), m.getCols(), flat)); } if (std::holds_alternative<ComplexMatrix>(args[0].data)) { ComplexMatrix m = std::get<ComplexMatrix>(args[0].data); Complex c = args[1].asComplex(); std::vector<Complex> flat = m.rawData(); for (auto& v : flat) v = v - c; return Value(ComplexMatrix(m.getRows(), m.getCols(), flat)); } throw std::runtime_error("Type Error: subS() requires a matrix."); });
     reg("mulS", { 2 }, [](const std::vector<Value>& args) -> Value { if (std::holds_alternative<RealMatrix>(args[0].data)) { RealMatrix m = std::get<RealMatrix>(args[0].data); double c = args[1].asDouble(); std::vector<double> flat = m.rawData(); for (auto& v : flat) v *= c; return Value(RealMatrix(m.getRows(), m.getCols(), flat)); } if (std::holds_alternative<ComplexMatrix>(args[0].data)) { ComplexMatrix m = std::get<ComplexMatrix>(args[0].data); Complex c = args[1].asComplex(); std::vector<Complex> flat = m.rawData(); for (auto& v : flat) v = v * c; return Value(ComplexMatrix(m.getRows(), m.getCols(), flat)); } throw std::runtime_error("Type Error: mulS() requires a matrix."); });
-    reg("divS", { 2 }, [](const std::vector<Value>& args) -> Value { if (std::holds_alternative<RealMatrix>(args[0].data)) { RealMatrix m = std::get<RealMatrix>(args[0].data); double c = args[1].asDouble(); if (jc::Tol::isEq(c, 0.0)) throw std::runtime_error("Math Error: Division by zero."); std::vector<double> flat = m.rawData(); for (auto& v : flat) v /= c; return Value(RealMatrix(m.getRows(), m.getCols(), flat)); } if (std::holds_alternative<ComplexMatrix>(args[0].data)) { ComplexMatrix m = std::get<ComplexMatrix>(args[0].data); Complex c = args[1].asComplex(); if (jc::Tol::isEq(c.modulus(), 0.0)) throw std::runtime_error("Math Error: Division by zero."); std::vector<Complex> flat = m.rawData(); for (auto& v : flat) v = v / c; return Value(ComplexMatrix(m.getRows(), m.getCols(), flat)); } throw std::runtime_error("Type Error: divS() requires a matrix."); });
+    reg("divS", { 2 }, [](const std::vector<Value>& args) -> Value { if (std::holds_alternative<RealMatrix>(args[0].data)) { RealMatrix m = std::get<RealMatrix>(args[0].data); double c = args[1].asDouble(); if (c == 0.0) throw std::runtime_error("Math Error: Division by zero."); std::vector<double> flat = m.rawData(); for (auto& v : flat) v /= c; return Value(RealMatrix(m.getRows(), m.getCols(), flat)); } if (std::holds_alternative<ComplexMatrix>(args[0].data)) { ComplexMatrix m = std::get<ComplexMatrix>(args[0].data); Complex c = args[1].asComplex(); if (c.real == 0.0 && c.imag == 0.0) throw std::runtime_error("Math Error: Division by zero."); std::vector<Complex> flat = m.rawData(); for (auto& v : flat) v = v / c; return Value(ComplexMatrix(m.getRows(), m.getCols(), flat)); } throw std::runtime_error("Type Error: divS() requires a matrix."); });
     reg("powS", { 2 }, [](const std::vector<Value>& args) -> Value { if (std::holds_alternative<RealMatrix>(args[0].data)) { RealMatrix m = std::get<RealMatrix>(args[0].data); double c = args[1].asDouble(); std::vector<double> flat = m.rawData(); for (auto& v : flat) v = std::pow(v, c); return Value(RealMatrix(m.getRows(), m.getCols(), flat)); } if (std::holds_alternative<ComplexMatrix>(args[0].data)) { ComplexMatrix m = std::get<ComplexMatrix>(args[0].data); Complex c = args[1].asComplex(); std::vector<Complex> flat = m.rawData(); for (auto& v : flat) v = v ^ c; return Value(ComplexMatrix(m.getRows(), m.getCols(), flat)); } throw std::runtime_error("Type Error: powS() requires a matrix."); });
-    reg("modS", { 2 }, [](const std::vector<Value>& args) -> Value { if (std::holds_alternative<RealMatrix>(args[0].data)) { RealMatrix m = std::get<RealMatrix>(args[0].data); double c = args[1].asDouble(); if (jc::Tol::isEq(c, 0.0)) throw std::runtime_error("Math Error: Modulo by zero."); std::vector<double> flat = m.rawData(); for (auto& v : flat) { v = std::fmod(v, c); if (v < 0) v += std::abs(c); } return Value(RealMatrix(m.getRows(), m.getCols(), flat)); } if (std::holds_alternative<ComplexMatrix>(args[0].data)) { ComplexMatrix m = std::get<ComplexMatrix>(args[0].data); double c = args[1].asDouble(); if (jc::Tol::isEq(c, 0.0)) throw std::runtime_error("Math Error: Modulo by zero."); std::vector<Complex> flat = m.rawData(); for (auto& v : flat) { double re = std::fmod(v.real, c); double im = std::fmod(v.imag, c); if (re < 0) re += std::abs(c); if (im < 0) im += std::abs(c); v = Complex(re, im); } return Value(ComplexMatrix(m.getRows(), m.getCols(), flat)); } throw std::runtime_error("Type Error: modS() requires a matrix."); });
+    reg("modS", { 2 }, [](const std::vector<Value>& args) -> Value { if (std::holds_alternative<RealMatrix>(args[0].data)) { RealMatrix m = std::get<RealMatrix>(args[0].data); double c = args[1].asDouble(); if (c == 0.0) throw std::runtime_error("Math Error: Modulo by zero."); std::vector<double> flat = m.rawData(); for (auto& v : flat) { v = std::fmod(v, c); if (v < 0) v += std::abs(c); } return Value(RealMatrix(m.getRows(), m.getCols(), flat)); } if (std::holds_alternative<ComplexMatrix>(args[0].data)) { ComplexMatrix m = std::get<ComplexMatrix>(args[0].data); double c = args[1].asDouble(); if (c == 0.0) throw std::runtime_error("Math Error: Modulo by zero."); std::vector<Complex> flat = m.rawData(); for (auto& v : flat) { double re = std::fmod(v.real, c); double im = std::fmod(v.imag, c); if (re < 0) re += std::abs(c); if (im < 0) im += std::abs(c); v = Complex(re, im); } return Value(ComplexMatrix(m.getRows(), m.getCols(), flat)); } throw std::runtime_error("Type Error: modS() requires a matrix."); });
 
     // --- 性质 ---
     reg("det", { 1 }, [](const std::vector<Value>& args) -> Value { if (std::holds_alternative<RealMatrix>(args[0].data)) return Value(std::get<RealMatrix>(args[0].data).determinant()); if (std::holds_alternative<ComplexMatrix>(args[0].data)) return Value(std::get<ComplexMatrix>(args[0].data).determinant()); throw std::runtime_error("Type Error: det() requires a matrix."); });
@@ -974,11 +976,11 @@ void BuiltinRegistry::registerVectors() {
         });    
     reg("dot", { 2 }, [assertVec](const std::vector<Value>& args) -> Value { assertVec(args[0], "dot"); assertVec(args[1], "dot"); ComplexMatrix a = args[0].asComplexMatrix(), b = args[1].asComplexMatrix(); if (a.getRows() != b.getRows()) throw std::runtime_error("Math Error: Dimension mismatch."); return Value((a.conjugateTranspose() * b)(0, 0)); });
     reg("vnorm", { 1 }, [assertVec](const std::vector<Value>& args) -> Value { assertVec(args[0], "vnorm"); ComplexMatrix v = args[0].asComplexMatrix(); return Value(std::sqrt((v.conjugateTranspose() * v)(0, 0).real)); });
-    reg("normalize", { 1 }, [assertVec](const std::vector<Value>& args) -> Value { assertVec(args[0], "normalize"); ComplexMatrix v = args[0].asComplexMatrix(); double len = std::sqrt((v.conjugateTranspose() * v)(0, 0).real); if (jc::Tol::isEq(len, 0.0)) throw std::runtime_error("Math Error: Cannot normalize a zero vector."); return Value(v / Complex(len)); });
+    reg("normalize", { 1 }, [assertVec](const std::vector<Value>& args) -> Value { assertVec(args[0], "normalize"); ComplexMatrix v = args[0].asComplexMatrix(); double len = std::sqrt((v.conjugateTranspose() * v)(0, 0).real); if (len == 0.0) throw std::runtime_error("Math Error: Cannot normalize a zero vector."); return Value(v / Complex(len)); });
     reg("cross", { 2 }, [assertVec](const std::vector<Value>& args) -> Value { assertVec(args[0], "cross"); assertVec(args[1], "cross"); ComplexMatrix a = args[0].asComplexMatrix(), b = args[1].asComplexMatrix(); if (a.getRows() != 3 || b.getRows() != 3) throw std::runtime_error("Math Error: Cross product is 3D only."); std::vector<Complex> r = { a(1,0)*b(2,0)-a(2,0)*b(1,0), a(2,0)*b(0,0)-a(0,0)*b(2,0), a(0,0)*b(1,0)-a(1,0)*b(0,0) }; return Value(ComplexMatrix(3, 1, r)); });
-    reg("angle", { 2 }, [assertVec](const std::vector<Value>& args) -> Value { assertVec(args[0], "angle"); assertVec(args[1], "angle"); ComplexMatrix a = args[0].asComplexMatrix(), b = args[1].asComplexMatrix(); double nA = std::sqrt((a.conjugateTranspose()*a)(0,0).real), nB = std::sqrt((b.conjugateTranspose()*b)(0,0).real); if (jc::Tol::isEq(nA, 0.0) || jc::Tol::isEq(nB, 0.0)) throw std::runtime_error("Math Error: Zero vector."); double ct = (a.conjugateTranspose()*b)(0,0).real/(nA*nB); ct = std::max(-1.0, std::min(1.0, ct)); return Value(std::acos(ct)); });
-    reg("sproj", { 2 }, [assertVec](const std::vector<Value>& args) -> Value { assertVec(args[0], "sproj"); assertVec(args[1], "sproj"); ComplexMatrix a = args[0].asComplexMatrix(), b = args[1].asComplexMatrix(); double nB = std::sqrt((b.conjugateTranspose()*b)(0,0).real); if (jc::Tol::isEq(nB, 0.0)) throw std::runtime_error("Math Error: Zero vector."); return Value((a.conjugateTranspose()*b)(0,0).real/nB); });
-    reg("vproj", { 2 }, [assertVec](const std::vector<Value>& args) -> Value { assertVec(args[0], "vproj"); assertVec(args[1], "vproj"); ComplexMatrix a = args[0].asComplexMatrix(), b = args[1].asComplexMatrix(); Complex dBB = (b.conjugateTranspose()*b)(0,0); if (jc::Tol::isEq(dBB.modulus(), 0.0)) throw std::runtime_error("Math Error: Zero vector."); return Value(b * ((a.conjugateTranspose()*b)(0,0)/dBB)); });
+    reg("angle", { 2 }, [assertVec](const std::vector<Value>& args) -> Value { assertVec(args[0], "angle"); assertVec(args[1], "angle"); ComplexMatrix a = args[0].asComplexMatrix(), b = args[1].asComplexMatrix(); double nA = std::sqrt((a.conjugateTranspose()*a)(0,0).real), nB = std::sqrt((b.conjugateTranspose()*b)(0,0).real); if (nA == 0.0 || nB == 0.0) throw std::runtime_error("Math Error: Zero vector."); double ct = (a.conjugateTranspose()*b)(0,0).real/(nA*nB); ct = std::max(-1.0, std::min(1.0, ct)); return Value(std::acos(ct)); });
+    reg("sproj", { 2 }, [assertVec](const std::vector<Value>& args) -> Value { assertVec(args[0], "sproj"); assertVec(args[1], "sproj"); ComplexMatrix a = args[0].asComplexMatrix(), b = args[1].asComplexMatrix(); double nB = std::sqrt((b.conjugateTranspose()*b)(0,0).real); if (nB == 0.0) throw std::runtime_error("Math Error: Zero vector."); return Value((a.conjugateTranspose()*b)(0,0).real/nB); });
+    reg("vproj", { 2 }, [assertVec](const std::vector<Value>& args) -> Value { assertVec(args[0], "vproj"); assertVec(args[1], "vproj"); ComplexMatrix a = args[0].asComplexMatrix(), b = args[1].asComplexMatrix(); Complex dBB = (b.conjugateTranspose()*b)(0,0); if (dBB.real == 0.0 && dBB.imag == 0.0) throw std::runtime_error("Math Error: Zero vector."); return Value(b * ((a.conjugateTranspose()*b)(0,0)/dBB)); });
     reg("triple", { 3 }, [assertVec](const std::vector<Value>& args) -> Value { assertVec(args[0], "triple"); assertVec(args[1], "triple"); assertVec(args[2], "triple"); ComplexMatrix a = args[0].asComplexMatrix(), b = args[1].asComplexMatrix(), c = args[2].asComplexMatrix(); if (a.getRows()!=3||b.getRows()!=3||c.getRows()!=3) throw std::runtime_error("Math Error: 3D only."); std::vector<Complex> bc = { b(1,0)*c(2,0)-b(2,0)*c(1,0), b(2,0)*c(0,0)-b(0,0)*c(2,0), b(0,0)*c(1,0)-b(1,0)*c(0,0) }; return Value(a(0,0)*bc[0]+a(1,0)*bc[1]+a(2,0)*bc[2]); });
     reg("isperp", { 2 }, [assertVec](const std::vector<Value>& args) -> Value { assertVec(args[0], "isperp"); assertVec(args[1], "isperp"); ComplexMatrix a = args[0].asComplexMatrix(), b = args[1].asComplexMatrix(); double innerScale = a.norm()*b.norm(); return Value(Tol::clean((a.conjugateTranspose()*b)(0,0).modulus(), innerScale)==0.0?1.0:0.0); });
     reg("isparallel", { 2 }, [assertVec](const std::vector<Value>& args) -> Value { assertVec(args[0], "isparallel"); assertVec(args[1], "isparallel"); ComplexMatrix a = args[0].asComplexMatrix(), b = args[1].asComplexMatrix(); return Value(a.integR(b).rank()<=1?1.0:0.0); });
@@ -1012,7 +1014,7 @@ void BuiltinRegistry::registerNumberTheory() {
         if (args[0].isBigInt() && args[1].isBigInt()) return Value(BigInt::mathMod(std::get<BigInt>(args[0].data), std::get<BigInt>(args[1].data)));
         if (std::holds_alternative<Fraction>(args[0].data)) { const auto& f = std::get<Fraction>(args[0].data); if (f.getDen() == BigInt(1)) return Value(BigInt::mathMod(f.getNum(), toBigInt(args[1]))); }
         double a = args[0].asDouble(), b = args[1].asDouble();
-        if (jc::Tol::isEq(b, 0.0)) throw std::runtime_error("Math Error: Modulo by zero.");
+        if (b == 0.0) throw std::runtime_error("Math Error: Modulo by zero.");
         double r = std::fmod(a, b); if (r < 0) r += std::abs(b); return Value(r);
     });
     reg("modpow", { 3 }, [toBigInt](const std::vector<Value>& args) -> Value { return Value(BigInt::modPow(toBigInt(args[0]), toBigInt(args[1]), toBigInt(args[2]))); });
@@ -1124,7 +1126,7 @@ void BuiltinRegistry::registerStatistics() {
         if (d.empty()) throw std::runtime_error("Math Error: Cannot compute mode of empty dataset.");
         struct Bucket { double representative; int count; };
         std::vector<Bucket> buckets;
-        for (double v : d) { bool found = false; for (auto& bkt : buckets) { if (jc::Tol::isEq(v, bkt.representative, 1e4)) { bkt.count++; found = true; break; } } if (!found) buckets.push_back({ v, 1 }); }
+        for (double v : d) { bool found = false; for (auto& bkt : buckets) { if (v == bkt.representative) { bkt.count++; found = true; break; } } if (!found) buckets.push_back({ v, 1 }); }
         int mx = 0; for (const auto& bkt : buckets) if (bkt.count > mx) mx = bkt.count;
         std::vector<double> modes; for (const auto& bkt : buckets) if (bkt.count == mx) modes.push_back(bkt.representative);
         std::sort(modes.begin(), modes.end());
@@ -1139,7 +1141,7 @@ void BuiltinRegistry::registerStatistics() {
         auto X = extractDS(args[0], "regress"), Y = extractDS(args[1], "regress");
         if (X.size()!=Y.size()) throw std::runtime_error("Math Error: Size mismatch.");
         double vX = computeVar(X);
-        if (jc::Tol::isEq(vX, 0.0)) throw std::runtime_error("Math Error: Zero variance in X.");
+        if (vX == 0.0) throw std::runtime_error("Math Error: Zero variance in X.");
         double c = computeCov(X, Y);
         double b = c / vX, a = computeMean(Y) - b * computeMean(X);
         std::cout << "Linear Model: Y = " << a << " + " << b << " * X" << std::endl;
@@ -1446,7 +1448,7 @@ void BuiltinRegistry::registerControlFlow() {
         double start, step, end;
         if (args.size()==2) { start=args[0].asDouble(); end=args[1].asDouble(); step=(start<=end)?1.0:-1.0; }
         else { start=args[0].asDouble(); step=args[1].asDouble(); end=args[2].asDouble(); }
-        if (Tol::isEq(step, 0.0)) throw std::runtime_error("Math Error: Step cannot be zero.");
+        if (step == 0.0) throw std::runtime_error("Math Error: Step cannot be zero.");
         std::vector<double> vals;
         if (step>0) { for (double v=start; v<=end+Tol::EPS*100; v+=step) { jc::checkInterrupt(); vals.push_back(v); } }
         else { for (double v=start; v>=end-Tol::EPS*100; v+=step) { jc::checkInterrupt(); vals.push_back(v); } }
@@ -1890,8 +1892,7 @@ void BuiltinRegistry::registerArrayFunctions() {
                 for (const auto& x : v) {
                     bool found = false;
                     for (const auto& y : result) {
-                        if constexpr (std::is_same_v<Elem, double>) { if (Tol::isEq(x, y, 1e4)) { found = true; break; } }
-                        else { if (x == y) { found = true; break; } }
+                        if (x == y) { found = true; break; }
                     }
                     if (!found) result.push_back(x);
                 }
@@ -1926,8 +1927,7 @@ void BuiltinRegistry::registerArrayFunctions() {
                 catch (...) { return Value(-1.0); }
 
                 for (size_t i = 0; i < v.size(); ++i) {
-                    if constexpr (std::is_same_v<Elem, double>) { if (Tol::isEq(v[i], target, 1e4)) return Value(static_cast<double>(i)); }
-                    else { if (v[i] == target) return Value(static_cast<double>(i)); }
+                    if (v[i] == target) return Value(static_cast<double>(i));
                 }
                 return Value(-1.0);
             }
@@ -1954,8 +1954,7 @@ void BuiltinRegistry::registerArrayFunctions() {
                 }
                 catch (...) { return Value(0.0); }
                 for (const auto& x : v) {
-                    if constexpr (std::is_same_v<Elem, double>) { if (Tol::isEq(x, target, 1e4)) c++; }
-                    else { if (x == target) c++; }
+                    if (x == target) c++;
                 }
                 return Value(static_cast<double>(c));
             }
@@ -2044,7 +2043,7 @@ void BuiltinRegistry::registerArrayFunctions() {
     reg("range", { 1, 2, 3 }, [](const std::vector<Value>& args) -> Value {
         if (args.size() == 1) { int end = static_cast<int>(std::round(args[0].asDouble())); if (end <= 0) return Value(RealMatrix(1, 0)); std::vector<double> v(end); for (int i = 0; i < end; ++i) v[i] = static_cast<double>(i); return Value(RealMatrix(1, end, v)); }
         if (args.size() == 2) { int start = static_cast<int>(std::round(args[0].asDouble())); int end = static_cast<int>(std::round(args[1].asDouble())); if (start >= end) return Value(RealMatrix(1, 0)); int n = end - start; std::vector<double> v(n); for (int i = 0; i < n; ++i) v[i] = static_cast<double>(start + i); return Value(RealMatrix(1, n, v)); }
-        double start = args[0].asDouble(), end = args[1].asDouble(), step = args[2].asDouble(); if (Tol::isEq(step, 0.0)) throw std::runtime_error("Math Error: step cannot be zero."); std::vector<double> v; if (step > 0) { for (double x = start; x < end - Tol::EPS * 100; x += step) v.push_back(x); }
+        double start = args[0].asDouble(), end = args[1].asDouble(), step = args[2].asDouble(); if (step == 0.0) throw std::runtime_error("Math Error: step cannot be zero."); std::vector<double> v; if (step > 0) { for (double x = start; x < end - Tol::EPS * 100; x += step) v.push_back(x); }
         else { for (double x = start; x > end + Tol::EPS * 100; x += step) v.push_back(x); } int n = static_cast<int>(v.size()); if (n == 0) return Value(RealMatrix(1, 0)); return Value(RealMatrix(1, n, v));
         });
     reg("fill", { 2 }, [](const std::vector<Value>& args) -> Value { int n = static_cast<int>(std::round(args[1].asDouble())); if (n < 0) throw std::runtime_error("Runtime Error: count must be non-negative."); return Value(RealMatrix(1, n, std::vector<double>(n, args[0].asDouble()))); });
@@ -2623,7 +2622,7 @@ void BuiltinRegistry::registerCalculus() {
             double y = evalFunc(cl, x);
             if (Tol::clean(y, std::max(1.0, std::abs(x)), 1e7) == 0.0) return Value(x);
             double df = (evalFunc(cl, x + h) - evalFunc(cl, x - h)) / (2 * h);
-            if (Tol::isEq(df, 0.0)) x += 1e-4; else x -= y / df;
+            if (df == 0.0) x += 1e-4; else x -= y / df;
         }
         throw std::runtime_error("Math Error: Equation solver did not converge.");
         });
@@ -2889,6 +2888,9 @@ void BuiltinRegistry::registerErrorHandling() {
             List L; L.push_back(valToAny(Value(0.0))); L.push_back(valToAny(Value(sig.message)));
             L.freeze(); return Value(L);
         }
+        catch (const jc::EngineInterruptError&) {
+            throw; // 强行中断，无视 pcall 拦截
+        }
         catch (const std::exception& ex) {
             List L; L.push_back(valToAny(Value(0.0))); L.push_back(valToAny(Value(std::string(ex.what()))));
             L.freeze(); return Value(L);
@@ -2901,7 +2903,7 @@ void BuiltinRegistry::registerErrorHandling() {
         if (L.size() != 2) return Value(0.0);
         Value first = anyToVal(L.raw()[0]);
         if (std::holds_alternative<double>(first.data))
-            return Value(Tol::isEq(std::get<double>(first.data), 0.0) ? 1.0 : 0.0);
+            return Value(std::get<double>(first.data) == 0.0 ? 1.0 : 0.0);
         return Value(0.0);
         });
 
@@ -3038,6 +3040,7 @@ void BuiltinRegistry::registerSystemShell() {
             double x = xMin + (static_cast<double>(px) / plotW) * (xMax - xMin);
             double y = 0;
             try { y = helpers::safeCallFunction(fn_actual, { Value(x) }).asDouble(); }
+            catch (const jc::EngineInterruptError&) { throw; }
             catch (...) { prevPx = -1; prevPy = -1; continue; }
             int screenX = im->mapPlotX(x, xMin, xMax);
             int screenY = im->mapPlotY(y, yMin, yMax);
@@ -3102,7 +3105,7 @@ void BuiltinRegistry::registerTypeChecks() {
             std::holds_alternative<BaseNum>(args[0].data))
             return Value(1.0);
         if (std::holds_alternative<Complex>(args[0].data))
-            return Value(Tol::isEq(std::get<Complex>(args[0].data).imag, 0.0) ? 1.0 : 0.0);
+            return Value(std::get<Complex>(args[0].data).imag == 0.0 ? 1.0 : 0.0);
         return Value(0.0);
         });
 
@@ -3325,14 +3328,44 @@ void BuiltinRegistry::registerTypeChecks() {
 
     reg("iszero", { 1 }, [](const std::vector<Value>& args) -> Value {
         if (std::holds_alternative<double>(args[0].data))
-            return Value(Tol::isEq(std::get<double>(args[0].data), 0.0) ? 1.0 : 0.0);
+            return Value(std::get<double>(args[0].data) == 0.0 ? 1.0 : 0.0);
         if (std::holds_alternative<BigInt>(args[0].data))
             return Value(std::get<BigInt>(args[0].data).isZero() ? 1.0 : 0.0);
-        if (std::holds_alternative<Complex>(args[0].data))
-            return Value(Tol::isEq(std::get<Complex>(args[0].data).modulus(), 0.0) ? 1.0 : 0.0);
+        if (std::holds_alternative<Complex>(args[0].data)) {
+            const auto& c = std::get<Complex>(args[0].data);
+            return Value((c.real == 0.0 && c.imag == 0.0) ? 1.0 : 0.0);
+        }
         if (std::holds_alternative<Fraction>(args[0].data))
             return Value(std::get<Fraction>(args[0].data).getNum().isZero() ? 1.0 : 0.0);
         return Value(0.0);
+        });
+
+    reg("isapprox", { 2, 3, 4 }, [](const std::vector<Value>& args) -> Value {
+        double rtol = args.size() >= 3 ? args[2].asDouble() : 1e-9;
+        double atol = args.size() == 4 ? args[3].asDouble() : 0.0;
+
+        bool isComp = false;
+        if (std::holds_alternative<Complex>(args[0].data) || std::holds_alternative<Complex>(args[1].data)) isComp = true;
+
+        if (isComp) {
+            Complex a = args[0].asComplex();
+            Complex b = args[1].asComplex();
+            if (std::isnan(a.real) || std::isnan(a.imag) || std::isnan(b.real) || std::isnan(b.imag)) return Value(0.0);
+            if (a.real == b.real && a.imag == b.imag) return Value(1.0);
+            if (std::isinf(a.real) || std::isinf(a.imag) || std::isinf(b.real) || std::isinf(b.imag)) return Value(0.0);
+            double diff = (a - b).modulus();
+            double tol = std::max(atol, rtol * std::max(a.modulus(), b.modulus()));
+            return Value(diff <= tol ? 1.0 : 0.0);
+        } else {
+            double a = args[0].asDouble();
+            double b = args[1].asDouble();
+            if (std::isnan(a) || std::isnan(b)) return Value(0.0);
+            if (a == b) return Value(1.0);
+            if (std::isinf(a) || std::isinf(b)) return Value(0.0);
+            double diff = std::abs(a - b);
+            double tol = std::max(atol, rtol * std::max(std::abs(a), std::abs(b)));
+            return Value(diff <= tol ? 1.0 : 0.0);
+        }
         });
 
     reg("isset", { 1 }, [](const std::vector<Value>& args) -> Value {
@@ -3778,6 +3811,8 @@ void BuiltinRegistry::registerCAS() {
                     throw std::runtime_error("Function not found");
                 };
                 return evalUniversal(expr.ptr, emptyEnv, resolver);
+            } catch (const jc::EngineInterruptError&) {
+                throw;
             } catch (...) {}
         }
         return Value(expr);
@@ -3797,6 +3832,8 @@ void BuiltinRegistry::registerCAS() {
                     throw std::runtime_error("Function not found");
                 };
                 return evalUniversal(expr.ptr, emptyEnv, resolver);
+            } catch (const jc::EngineInterruptError&) {
+                throw;
             } catch (...) {}
         }
         return Value(expr);
@@ -3899,6 +3936,7 @@ void BuiltinRegistry::registerCAS() {
         
         auto safeEval = [&](double x) -> double {
             try { return evalFunc(cl, x); }
+            catch (const jc::EngineInterruptError&) { throw; }
             catch (...) { return std::numeric_limits<double>::quiet_NaN(); }
         };
 
@@ -3971,6 +4009,8 @@ void BuiltinRegistry::registerCAS() {
                 valid_tests++;
                 double err = res.isComplex() ? res.asComplex().modulus() : std::abs(res.asDouble());
                 if (err < 1e-4) pass_count++;
+            } catch (const jc::EngineInterruptError&) {
+                throw;
             } catch (...) {}
         }
         
