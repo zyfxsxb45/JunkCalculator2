@@ -7,9 +7,8 @@
 #include <cctype>
 #include <map>
 #include <any>
+#include <vector>
 #include "GeneratedHelpText.h"
-#include "../modules/json_module.h"
-#include "../memory/Value.h"
 #include "../frontend/Highlight.h"
 
 namespace jc {
@@ -17,7 +16,128 @@ namespace jc {
 
     class HelpRouter {
     private:
-        static inline Value helpAst = Value::none();
+        struct NativeJson {
+            enum Type { N_NULL, N_STRING, N_ARRAY, N_OBJECT };
+            Type type = N_NULL;
+            std::string str;
+            std::vector<NativeJson> arr;
+            std::map<std::string, NativeJson> obj;
+
+            bool isNull() const { return type == N_NULL; }
+            bool isString() const { return type == N_STRING; }
+            bool isArray() const { return type == N_ARRAY; }
+            bool isObject() const { return type == N_OBJECT; }
+        };
+
+        class NativeJsonParser {
+            std::string s;
+            size_t pos = 0;
+
+            void skipWS() {
+                while (pos < s.size() && std::isspace(static_cast<unsigned char>(s[pos]))) pos++;
+            }
+
+            std::string parseString() {
+                std::string res;
+                pos++; // skip "
+                while (pos < s.size() && s[pos] != '"') {
+                    if (s[pos] == '\\' && pos + 1 < s.size()) {
+                        pos++;
+                        if (s[pos] == 'n') res += '\n';
+                        else if (s[pos] == 't') res += '\t';
+                        else if (s[pos] == 'r') res += '\r';
+                        else if (s[pos] == '"') res += '"';
+                        else if (s[pos] == '\\') res += '\\';
+                        else res += s[pos];
+                    } else {
+                        res += s[pos];
+                    }
+                    pos++;
+                }
+                if (pos < s.size()) pos++; // skip "
+                return res;
+            }
+
+            NativeJson parseArray() {
+                NativeJson node;
+                node.type = NativeJson::N_ARRAY;
+                pos++; // skip [
+                skipWS();
+                if (pos < s.size() && s[pos] == ']') {
+                    pos++;
+                    return node;
+                }
+                while (pos < s.size()) {
+                    node.arr.push_back(parseValue());
+                    skipWS();
+                    if (pos < s.size() && s[pos] == ',') {
+                        pos++;
+                        skipWS();
+                    } else if (pos < s.size() && s[pos] == ']') {
+                        pos++;
+                        break;
+                    } else {
+                        break; // error
+                    }
+                }
+                return node;
+            }
+
+            NativeJson parseObject() {
+                NativeJson node;
+                node.type = NativeJson::N_OBJECT;
+                pos++; // skip {
+                skipWS();
+                if (pos < s.size() && s[pos] == '}') {
+                    pos++;
+                    return node;
+                }
+                while (pos < s.size()) {
+                    skipWS();
+                    if (pos >= s.size() || s[pos] != '"') break;
+                    std::string key = parseString();
+                    skipWS();
+                    if (pos < s.size() && s[pos] == ':') pos++;
+                    skipWS();
+                    node.obj[key] = parseValue();
+                    skipWS();
+                    if (pos < s.size() && s[pos] == ',') {
+                        pos++;
+                        skipWS();
+                    } else if (pos < s.size() && s[pos] == '}') {
+                        pos++;
+                        break;
+                    } else {
+                        break; // error
+                    }
+                }
+                return node;
+            }
+
+        public:
+            NativeJsonParser(const std::string& str) : s(str), pos(0) {}
+
+            NativeJson parseValue() {
+                skipWS();
+                if (pos >= s.size()) return NativeJson();
+                if (s[pos] == '"') {
+                    NativeJson node;
+                    node.type = NativeJson::N_STRING;
+                    node.str = parseString();
+                    return node;
+                }
+                if (s[pos] == '[') return parseArray();
+                if (s[pos] == '{') return parseObject();
+                
+                // skip other values like true, false, numbers, null
+                while (pos < s.size() && !std::isspace(static_cast<unsigned char>(s[pos])) && s[pos] != ',' && s[pos] != ']' && s[pos] != '}') {
+                    pos++;
+                }
+                return NativeJson();
+            }
+        };
+
+        static inline NativeJson helpAst;
         static inline bool initialized = false;
 
         static void init() {
@@ -42,18 +162,13 @@ namespace jc {
             }
             try {
                 // 将极其干净的字符串喂给你的 Parser
-                JsonParser parser(jsonStr);
+                NativeJsonParser parser(jsonStr);
                 helpAst = parser.parseValue();
             }
             catch (const std::exception& e) {
                 std::cerr << "\n[HelpRouter] Failed to parse documentation.json: " << e.what() << "\n";
             }
             initialized = true;
-        }
-
-        static Value extractAny(const std::any& a) {
-            try { return std::any_cast<Value>(a); }
-            catch (...) { return Value::none(); }
         }
 
         static int levenshtein(const std::string& s1, const std::string& s2) {
@@ -70,35 +185,31 @@ namespace jc {
             return prevCol[len2];
         }
 
-        static bool printEntry(const Value& entryVal) {
-            if (!std::holds_alternative<Dict>(entryVal.data)) return false;
-            Dict entry = std::get<Dict>(entryVal.data);
+        static bool printEntry(const NativeJson& entry) {
+            if (!entry.isObject()) return false;
             std::cout << "\n";
-            if (entry.has(Value("signature"))) {
-                std::cout << col(Ansi::BRIGHT_GREEN) << std::get<std::string>(entry.get(Value("signature"))->data) << col(Ansi::RESET) << "\n";
+            auto sigIt = entry.obj.find("signature");
+            if (sigIt != entry.obj.end() && sigIt->second.isString()) {
+                std::cout << col(Ansi::BRIGHT_GREEN) << sigIt->second.str << col(Ansi::RESET) << "\n";
             }
-            if (entry.has(Value("desc"))) {
-                Value descVal = *entry.get(Value("desc"));
-                if (std::holds_alternative<std::string>(descVal.data)) {
-                    std::cout << "  " << std::get<std::string>(descVal.data) << "\n";
-                } else if (std::holds_alternative<List>(descVal.data)) {
-                    for (const auto& lineAny : std::get<List>(descVal.data).raw()) {
-                        Value lineVal = extractAny(lineAny);
-                        if (std::holds_alternative<std::string>(lineVal.data)) {
-                            std::cout << "  " << std::get<std::string>(lineVal.data) << "\n";
+            auto descIt = entry.obj.find("desc");
+            if (descIt != entry.obj.end()) {
+                if (descIt->second.isString()) {
+                    std::cout << "  " << descIt->second.str << "\n";
+                } else if (descIt->second.isArray()) {
+                    for (const auto& line : descIt->second.arr) {
+                        if (line.isString()) {
+                            std::cout << "  " << line.str << "\n";
                         }
                     }
                 }
             }
-            if (entry.has(Value("examples"))) {
-                Value exVal = *entry.get(Value("examples"));
-                if (std::holds_alternative<List>(exVal.data)) {
-                    std::cout << "\n  Examples:\n";
-                    for (const auto& exAny : std::get<List>(exVal.data).raw()) {
-                        Value ex = extractAny(exAny);
-                        if (std::holds_alternative<std::string>(ex.data)) {
-                            std::cout << col(Ansi::BRIGHT_YELLOW) << "    " << std::get<std::string>(ex.data) << col(Ansi::RESET) << "\n";
-                        }
+            auto exIt = entry.obj.find("examples");
+            if (exIt != entry.obj.end() && exIt->second.isArray()) {
+                std::cout << "\n  Examples:\n";
+                for (const auto& ex : exIt->second.arr) {
+                    if (ex.isString()) {
+                        std::cout << col(Ansi::BRIGHT_YELLOW) << "    " << ex.str << col(Ansi::RESET) << "\n";
                     }
                 }
             }
@@ -129,45 +240,42 @@ namespace jc {
                 return;
             }
 
-            if (helpAst.isNone() || !std::holds_alternative<Dict>(helpAst.data)) {
+            if (helpAst.isNull() || !helpAst.isObject()) {
                 std::cout << "\n  [System] Documentation data is unavailable.\n";
                 return;
             }
 
-            Dict root = std::get<Dict>(helpAst.data);
+            const auto& root = helpAst.obj;
 
             std::string lowerKey = key;
             std::transform(lowerKey.begin(), lowerKey.end(), lowerKey.begin(),
                 [](unsigned char c) -> char { return static_cast<char>(std::tolower(c)); });
 
             // 2. Search in "topics" (Case-insensitive)
-            if (!forceFunction && root.has(Value("topics"))) {
-                Value topicsVal = *root.get(Value("topics"));
-                if (std::holds_alternative<Dict>(topicsVal.data)) {
-                    Dict topics = std::get<Dict>(topicsVal.data);
-                    if (topics.has(Value(lowerKey))) {
-                        Value topicVal = *topics.get(Value(lowerKey));
-                        if (std::holds_alternative<std::string>(topicVal.data)) {
-                            std::cout << "\n" << std::get<std::string>(topicVal.data) << std::endl;
-                        } else if (std::holds_alternative<List>(topicVal.data)) {
+            if (!forceFunction) {
+                auto topicsIt = root.find("topics");
+                if (topicsIt != root.end() && topicsIt->second.isObject()) {
+                    const auto& topics = topicsIt->second.obj;
+                    auto topicIt = topics.find(lowerKey);
+                    if (topicIt != topics.end()) {
+                        const auto& topicVal = topicIt->second;
+                        if (topicVal.isString()) {
+                            std::cout << "\n" << topicVal.str << std::endl;
+                        } else if (topicVal.isArray()) {
                             std::cout << "\n";
-                            for (const auto& lineAny : std::get<List>(topicVal.data).raw()) {
-                                Value lineVal = extractAny(lineAny);
-                                if (std::holds_alternative<std::string>(lineVal.data)) {
-                                    std::cout << std::get<std::string>(lineVal.data) << "\n";
+                            for (const auto& line : topicVal.arr) {
+                                if (line.isString()) {
+                                    std::cout << line.str << "\n";
                                 }
                             }
                             std::cout << std::endl;
                         }
                         
                         // Check if a function with the same name exists to provide a hint
-                        if (root.has(Value("functions"))) {
-                            Value funcsVal = *root.get(Value("functions"));
-                            if (std::holds_alternative<Dict>(funcsVal.data)) {
-                                Dict funcs = std::get<Dict>(funcsVal.data);
-                                if (funcs.has(Value(key))) {
-                                    std::cout << col(Ansi::BRIGHT_YELLOW) << "  Tip: '" << key << "' is also a built-in function. Type '/help " << key << "()' to see its documentation.\n" << col(Ansi::RESET) << std::endl;
-                                }
+                        auto funcsIt = root.find("functions");
+                        if (funcsIt != root.end() && funcsIt->second.isObject()) {
+                            if (funcsIt->second.obj.count(key)) {
+                                std::cout << col(Ansi::BRIGHT_YELLOW) << "  Tip: '" << key << "' is also a built-in function. Type '/help " << key << "()' to see its documentation.\n" << col(Ansi::RESET) << std::endl;
                             }
                         }
                         return;
@@ -176,124 +284,98 @@ namespace jc {
             }
 
             // 3. Search in "functions" (Exact match or alias)
-            if (root.has(Value("functions"))) {
-                Value funcsVal = *root.get(Value("functions"));
-                if (std::holds_alternative<Dict>(funcsVal.data)) {
-                    Dict funcs = std::get<Dict>(funcsVal.data);
-                    
-                    Value targetFn = Value::none();
-                    if (funcs.has(Value(key))) {
-                        targetFn = *funcs.get(Value(key));
-                    } else {
-                        for (const auto& [k, v] : funcs.getEntries()) {
-                            if (std::holds_alternative<Dict>(v.data)) {
-                                Dict fnDict = std::get<Dict>(v.data);
-                                if (fnDict.has(Value("aliases"))) {
-                                    Value aliasesVal = *fnDict.get(Value("aliases"));
-                                    if (std::holds_alternative<List>(aliasesVal.data)) {
-                                        for (const auto& aliasAny : std::get<List>(aliasesVal.data).raw()) {
-                                            Value aliasVal = extractAny(aliasAny);
-                                            if (std::holds_alternative<std::string>(aliasVal.data) && 
-                                                std::get<std::string>(aliasVal.data) == key) {
-                                                targetFn = v;
-                                                break;
-                                            }
-                                        }
+            auto funcsIt = root.find("functions");
+            if (funcsIt != root.end() && funcsIt->second.isObject()) {
+                const auto& funcs = funcsIt->second.obj;
+                
+                const NativeJson* targetFn = nullptr;
+                auto fnIt = funcs.find(key);
+                if (fnIt != funcs.end()) {
+                    targetFn = &fnIt->second;
+                } else {
+                    for (const auto& [k, v] : funcs) {
+                        if (v.isObject()) {
+                            auto aliasesIt = v.obj.find("aliases");
+                            if (aliasesIt != v.obj.end() && aliasesIt->second.isArray()) {
+                                for (const auto& alias : aliasesIt->second.arr) {
+                                    if (alias.isString() && alias.str == key) {
+                                        targetFn = &v;
+                                        break;
                                     }
                                 }
                             }
-                            if (!targetFn.isNone()) break;
                         }
+                        if (targetFn) break;
                     }
-
-                    if (!targetFn.isNone() && printEntry(targetFn)) return;
                 }
+
+                if (targetFn && printEntry(*targetFn)) return;
             }
 
             // 3.5 Search in "keywords" (case-insensitive)
-            if (root.has(Value("keywords"))) {
-                Value kwsVal = *root.get(Value("keywords"));
-                if (std::holds_alternative<Dict>(kwsVal.data)) {
-                    Dict kws = std::get<Dict>(kwsVal.data);
-                    if (kws.has(Value(lowerKey))) {
-                        if (printEntry(*kws.get(Value(lowerKey)))) return;
-                    }
+            auto kwsIt = root.find("keywords");
+            if (kwsIt != root.end() && kwsIt->second.isObject()) {
+                const auto& kws = kwsIt->second.obj;
+                auto kwIt = kws.find(lowerKey);
+                if (kwIt != kws.end()) {
+                    if (printEntry(kwIt->second)) return;
                 }
             }
 
             // 4. Did you mean? (Fuzzy matching)
             std::vector<std::pair<std::string, std::string>> candidates;
-            if (root.has(Value("functions"))) {
-                Value funcsVal = *root.get(Value("functions"));
-                if (std::holds_alternative<Dict>(funcsVal.data)) {
-                    Dict funcs = std::get<Dict>(funcsVal.data);
-                    for (const auto& [k, v] : funcs.getEntries()) {
-                        if (std::holds_alternative<std::string>(k.data) && std::holds_alternative<Dict>(v.data)) {
-                            std::string funcName = std::get<std::string>(k.data);
-                            Dict fnDict = std::get<Dict>(v.data);
-                            std::string desc = "";
-                            if (fnDict.has(Value("desc"))) {
-                                Value descVal = *fnDict.get(Value("desc"));
-                                if (std::holds_alternative<std::string>(descVal.data)) {
-                                    desc = std::get<std::string>(descVal.data);
-                                } else if (std::holds_alternative<List>(descVal.data)) {
-                                    auto raw = std::get<List>(descVal.data).raw();
-                                    if (!raw.empty()) {
-                                        Value firstLine = extractAny(raw[0]);
-                                        if (std::holds_alternative<std::string>(firstLine.data)) {
-                                            desc = std::get<std::string>(firstLine.data);
-                                        }
-                                    }
+            if (funcsIt != root.end() && funcsIt->second.isObject()) {
+                for (const auto& [funcName, v] : funcsIt->second.obj) {
+                    if (v.isObject()) {
+                        std::string desc = "";
+                        auto descIt = v.obj.find("desc");
+                        if (descIt != v.obj.end()) {
+                            if (descIt->second.isString()) {
+                                desc = descIt->second.str;
+                            } else if (descIt->second.isArray() && !descIt->second.arr.empty()) {
+                                if (descIt->second.arr[0].isString()) {
+                                    desc = descIt->second.arr[0].str;
                                 }
                             }
-                            
-                            std::string lowerFuncName = funcName;
-                            std::transform(lowerFuncName.begin(), lowerFuncName.end(), lowerFuncName.begin(),
-                                [](unsigned char c) -> char { return static_cast<char>(std::tolower(c)); });
-                            
-                            bool isPrefix = lowerFuncName.find(lowerKey) == 0;
-                            bool isSubstr = lowerFuncName.find(lowerKey) != std::string::npos;
-                            int dist = levenshtein(lowerKey, lowerFuncName);
-                            
-                            if (isPrefix || isSubstr || dist <= 2) {
-                                candidates.push_back({funcName, desc});
-                            }
+                        }
+                        
+                        std::string lowerFuncName = funcName;
+                        std::transform(lowerFuncName.begin(), lowerFuncName.end(), lowerFuncName.begin(),
+                            [](unsigned char c) -> char { return static_cast<char>(std::tolower(c)); });
+                        
+                        bool isPrefix = lowerFuncName.find(lowerKey) == 0;
+                        bool isSubstr = lowerFuncName.find(lowerKey) != std::string::npos;
+                        int dist = levenshtein(lowerKey, lowerFuncName);
+                        
+                        if (isPrefix || isSubstr || dist <= 2) {
+                            candidates.push_back({funcName, desc});
                         }
                     }
                 }
             }
 
-            if (root.has(Value("keywords"))) {
-                Value kwsVal = *root.get(Value("keywords"));
-                if (std::holds_alternative<Dict>(kwsVal.data)) {
-                    Dict kws = std::get<Dict>(kwsVal.data);
-                    for (const auto& [k, v] : kws.getEntries()) {
-                        if (std::holds_alternative<std::string>(k.data) && std::holds_alternative<Dict>(v.data)) {
-                            std::string kwName = std::get<std::string>(k.data);
-                            Dict kwDict = std::get<Dict>(v.data);
-                            std::string desc = "";
-                            if (kwDict.has(Value("desc"))) {
-                                Value descVal = *kwDict.get(Value("desc"));
-                                if (std::holds_alternative<std::string>(descVal.data)) {
-                                    desc = std::get<std::string>(descVal.data);
-                                } else if (std::holds_alternative<List>(descVal.data)) {
-                                    auto raw = std::get<List>(descVal.data).raw();
-                                    if (!raw.empty()) {
-                                        Value firstLine = extractAny(raw[0]);
-                                        if (std::holds_alternative<std::string>(firstLine.data))
-                                            desc = std::get<std::string>(firstLine.data);
-                                    }
+            if (kwsIt != root.end() && kwsIt->second.isObject()) {
+                for (const auto& [kwName, v] : kwsIt->second.obj) {
+                    if (v.isObject()) {
+                        std::string desc = "";
+                        auto descIt = v.obj.find("desc");
+                        if (descIt != v.obj.end()) {
+                            if (descIt->second.isString()) {
+                                desc = descIt->second.str;
+                            } else if (descIt->second.isArray() && !descIt->second.arr.empty()) {
+                                if (descIt->second.arr[0].isString()) {
+                                    desc = descIt->second.arr[0].str;
                                 }
                             }
-                            std::string lowerKwName = kwName;
-                            std::transform(lowerKwName.begin(), lowerKwName.end(), lowerKwName.begin(),
-                                [](unsigned char c) -> char { return static_cast<char>(std::tolower(c)); });
-                            bool isPrefix = lowerKwName.find(lowerKey) == 0;
-                            bool isSubstr = lowerKwName.find(lowerKey) != std::string::npos;
-                            int dist = levenshtein(lowerKey, lowerKwName);
-                            if (isPrefix || isSubstr || dist <= 2) {
-                                candidates.push_back({kwName + " (keyword)", desc});
-                            }
+                        }
+                        std::string lowerKwName = kwName;
+                        std::transform(lowerKwName.begin(), lowerKwName.end(), lowerKwName.begin(),
+                            [](unsigned char c) -> char { return static_cast<char>(std::tolower(c)); });
+                        bool isPrefix = lowerKwName.find(lowerKey) == 0;
+                        bool isSubstr = lowerKwName.find(lowerKey) != std::string::npos;
+                        int dist = levenshtein(lowerKey, lowerKwName);
+                        if (isPrefix || isSubstr || dist <= 2) {
+                            candidates.push_back({kwName + " (keyword)", desc});
                         }
                     }
                 }
