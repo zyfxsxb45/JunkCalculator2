@@ -767,7 +767,6 @@ namespace jc {
     }
 
     std::unique_ptr<Expr> Parser::ifExpr() {
-        while (match({ TokenType::NEWLINE })) {}
         consume(TokenType::LPAREN, "Parser Error: Expect '(' after 'if'.");
         auto condition = expression();
         consume(TokenType::RPAREN, "Parser Error: Expect ')' after if condition.");
@@ -790,7 +789,6 @@ namespace jc {
     }
 
     std::unique_ptr<Expr> Parser::whileExpr() {
-        while (match({ TokenType::NEWLINE })) {}
         consume(TokenType::LPAREN, "Parser Error: Expect '(' after 'while'.");
         auto condition = expression();
         consume(TokenType::RPAREN, "Parser Error: Expect ')' after while condition.");
@@ -804,7 +802,6 @@ namespace jc {
     // ★ 新增：for (init; cond; update) { ... }
     // =================================================================
     std::unique_ptr<Expr> Parser::forExpr() {
-        while (match({ TokenType::NEWLINE })) {}
         consume(TokenType::LPAREN, "Parser Error: Expect '(' after 'for'.");
 
         // ★ 解构 for-in: for ([a, b, ...] in iterable)
@@ -1224,15 +1221,17 @@ namespace jc {
         consume(TokenType::LPAREN, "Parser Error: Expect '(' after 'switch'.");
         auto subject = expression();
         consume(TokenType::RPAREN, "Parser Error: Expect ')' after switch expression.");
-        while (match({ TokenType::NEWLINE })) {}  // ★
+        while (match({ TokenType::NEWLINE })) {}
+        
         consume(TokenType::LBRACE, "Parser Error: Expect '{' to open switch body.");
 
         std::vector<std::pair<std::vector<std::unique_ptr<Expr>>, std::unique_ptr<Expr>>> cases;
         std::unique_ptr<Expr> defaultBody = nullptr;
 
         while (!check(TokenType::RBRACE) && !isAtEnd()) {
-            while (match({ TokenType::SEMICOLON, TokenType::NEWLINE })) {}  // ★
+            while (match({ TokenType::SEMICOLON, TokenType::NEWLINE })) {}
             if (check(TokenType::RBRACE)) break;
+            
             if (match({ TokenType::CASE })) {
                 std::vector<std::unique_ptr<Expr>> values;
                 values.push_back(assignment()); 
@@ -1240,21 +1239,34 @@ namespace jc {
                     values.push_back(assignment()); 
                 }
                 consume(TokenType::COLON, "Parser Error: Expect ':' after case value(s).");
-                auto body = parseBlock();
-                cases.push_back({ std::move(values), std::move(body) });
-                while (match({ TokenType::SEMICOLON, TokenType::NEWLINE })) {}  // ★
+                
+                // 持续吸收语句，直到遇到下一个 case, default 或 }
+                std::vector<std::unique_ptr<Expr>> stmts;
+                while (!check(TokenType::CASE) && !check(TokenType::DEFAULT) && !check(TokenType::RBRACE) && !isAtEnd()) {
+                    while (match({ TokenType::SEMICOLON, TokenType::NEWLINE })) {}
+                    if (check(TokenType::CASE) || check(TokenType::DEFAULT) || check(TokenType::RBRACE)) break;
+                    stmts.push_back(expression());
+                    while (match({ TokenType::SEMICOLON, TokenType::NEWLINE })) {}
+                }
+                cases.push_back({ std::move(values), std::make_unique<Block>(std::move(stmts)) });
             }
             else if (match({ TokenType::DEFAULT })) {
                 consume(TokenType::COLON, "Parser Error: Expect ':' after 'default'.");
-                defaultBody = parseBlock();
-                while (match({ TokenType::SEMICOLON, TokenType::NEWLINE })) {}  // ★
+                std::vector<std::unique_ptr<Expr>> stmts;
+                while (!check(TokenType::CASE) && !check(TokenType::DEFAULT) && !check(TokenType::RBRACE) && !isAtEnd()) {
+                    while (match({ TokenType::SEMICOLON, TokenType::NEWLINE })) {}
+                    if (check(TokenType::CASE) || check(TokenType::DEFAULT) || check(TokenType::RBRACE)) break;
+                    stmts.push_back(expression());
+                    while (match({ TokenType::SEMICOLON, TokenType::NEWLINE })) {}
+                }
+                defaultBody = std::make_unique<Block>(std::move(stmts));
             }
             else {
                 throw std::runtime_error("Parser Error: Expect 'case' or 'default' inside switch.");
             }
         }
-
         consume(TokenType::RBRACE, "Parser Error: Expect '}' to close switch body.");
+
         return std::make_unique<SwitchExpr>(std::move(subject), std::move(cases), std::move(defaultBody));
     }
 

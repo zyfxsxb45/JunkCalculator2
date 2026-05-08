@@ -51,15 +51,19 @@ namespace jc {
             // 逻辑
         case TokenType::AND_AND: case TokenType::OR_OR:
         case TokenType::BIT_AND: case TokenType::BIT_OR:
+        case TokenType::BANG: // ★
             // 管道与箭头
         case TokenType::PIPE: case TokenType::ARROW: case TokenType::RIGHT_ARROW:
             // 标点
         case TokenType::COMMA: case TokenType::DOT:
         case TokenType::COLON: case TokenType::QUESTION:
-        case TokenType::SEMICOLON:
+        case TokenType::SEMICOLON: case TokenType::ELLIPSIS: // ★
             // 开括号
         case TokenType::LPAREN: case TokenType::LBRACKET:
         case TokenType::LBRACE:
+            // 关键字 (期待后续表达式或块)
+        case TokenType::IN: case TokenType::ELSE:
+        case TokenType::TRY:
             // 已有 NEWLINE 不重复发射
         case TokenType::NEWLINE:
             return true;

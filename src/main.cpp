@@ -63,12 +63,28 @@ void sigintHandler(int signum) {
 static bool endsWithContinuation(const std::string& line) {
     size_t e = line.find_last_not_of(" \t\r\n");
     if (e == std::string::npos) return false;
-    if (e >= 1 && line[e - 1] == '|' && line[e] == '>') return true;
-    if (e >= 1 && line[e - 1] == '&' && line[e] == '&') return true;
-    if (e >= 1 && line[e - 1] == '|' && line[e] == '|') return true;
+    
     char c = line[e];
-    return (c == '+' || c == '-' || c == '*' || c == '/' || c == '\\' ||
-        c == '%' || c == '^' || c == ',' || c == '=');
+    if (c == '+' || c == '-' || c == '*' || c == '/' || c == '\\' ||
+        c == '%' || c == '^' || c == ',' || c == '=' || c == '.' ||
+        c == ':' || c == '?' || c == '|' || c == '&' || c == '<' ||
+        c == '>' || c == '!') {
+        return true;
+    }
+
+    auto endsWithWord = [&](const std::string& word) {
+        if (e + 1 < word.length()) return false;
+        size_t start = e + 1 - word.length();
+        if (line.substr(start, word.length()) != word) return false;
+        if (start > 0 && (std::isalnum(line[start - 1]) || line[start - 1] == '_')) return false;
+        return true;
+    };
+
+    if (endsWithWord("else") || endsWithWord("in") || endsWithWord("try")) {
+        return true;
+    }
+
+    return false;
 }
 
 std::string getExecutableDir() {
