@@ -80,7 +80,7 @@ static bool endsWithContinuation(const std::string& line) {
         return true;
     };
 
-    if (endsWithWord("else") || endsWithWord("in") || endsWithWord("try")) {
+    if (endsWithWord("in")) {
         return true;
     }
 

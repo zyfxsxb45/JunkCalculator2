@@ -62,8 +62,7 @@ namespace jc {
         case TokenType::LPAREN: case TokenType::LBRACKET:
         case TokenType::LBRACE:
             // 关键字 (期待后续表达式或块)
-        case TokenType::IN: case TokenType::ELSE:
-        case TokenType::TRY:
+        case TokenType::IN:
             // 已有 NEWLINE 不重复发射
         case TokenType::NEWLINE:
             return true;
