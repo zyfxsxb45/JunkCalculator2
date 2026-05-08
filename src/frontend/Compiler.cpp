@@ -31,9 +31,23 @@ namespace jc {
 
     void Compiler::endScope() {
         current().scopeDepth--;
-        while (!current().locals.empty() && current().locals.back().depth > current().scopeDepth) {
-            // ★ 删除 emit(OpCode::OP_POP, lastLine); 我们实施了分离式局部变量锚定，变量生生不息地待在栈底
-            current().locals.pop_back();
+        
+        // 1. 遍历所有变量，将超出作用域的变量匿名化
+        for (auto& local : current().locals) {
+            if (local.depth > current().scopeDepth) {
+                local.name = ""; 
+            }
+        }
+        
+        // 2. 从后往前清理可以安全回收的 slot
+        while (!current().locals.empty()) {
+            auto& back = current().locals.back();
+            // 如果末尾的变量是匿名的（说明它超出了作用域），且没有被捕获，就可以安全弹出
+            if (back.name == "" && !back.isCaptured) {
+                current().locals.pop_back();
+            } else {
+                break;
+            }
         }
     }
 
@@ -190,23 +204,13 @@ namespace jc {
                 if (name == "_") { emit(OpCode::OP_POP, lastLine); continue; }
 
                 int slot = resolveLocal(name);
-                if (stateStack.size() > 1 && slot == -1 && current().refNames.count(name) == 0 && current().stateNames.count(name) == 0) {
-                    addLocal(name, current().scopeDepth); // 推导式变量严格块级
+                // ★ 强制推导式变量为严格块级局部变量，防止污染外部作用域
+                if (slot == -1 || current().locals[slot].depth < current().scopeDepth) {
+                    addLocal(name, current().scopeDepth);
                     slot = resolveLocal(name);
                 }
-                if (slot != -1) {
-                    emit(OpCode::OP_SET_LOCAL, lastLine);
-                    emit16(static_cast<uint16_t>(slot), lastLine);
-                }
-                else {
-                    uint16_t idx = identifierConstant(name);
-                    if (current().refNames.count(name) > 0) {
-                        emit(OpCode::OP_SET_GLOBAL_REF, lastLine);
-                    } else {
-                        emit(OpCode::OP_SET_GLOBAL, lastLine);
-                    }
-                    emit16(idx, lastLine);
-                }
+                emit(OpCode::OP_SET_LOCAL, lastLine);
+                emit16(static_cast<uint16_t>(slot), lastLine);
                 emit(OpCode::OP_POP, lastLine);
             }
             emit(OpCode::OP_POP, lastLine);
@@ -214,23 +218,13 @@ namespace jc {
         else {
             const std::string& varName = clause.varName.lexeme;
             int slot = resolveLocal(varName);
-            if (stateStack.size() > 1 && slot == -1 && current().refNames.count(varName) == 0 && current().stateNames.count(varName) == 0) {
-                addLocal(varName, current().scopeDepth); // 推导式变量严格块级
+            // ★ 强制推导式变量为严格块级局部变量，防止污染外部作用域
+            if (slot == -1 || current().locals[slot].depth < current().scopeDepth) {
+                addLocal(varName, current().scopeDepth);
                 slot = resolveLocal(varName);
             }
-            if (slot != -1) {
-                emit(OpCode::OP_SET_LOCAL, lastLine);
-                emit16(static_cast<uint16_t>(slot), lastLine);
-            }
-            else {
-                uint16_t idx = identifierConstant(varName);
-                if (current().refNames.count(varName) > 0) {
-                    emit(OpCode::OP_SET_GLOBAL_REF, lastLine);
-                } else {
-                    emit(OpCode::OP_SET_GLOBAL, lastLine);
-                }
-                emit16(idx, lastLine);
-            }
+            emit(OpCode::OP_SET_LOCAL, lastLine);
+            emit16(static_cast<uint16_t>(slot), lastLine);
             emit(OpCode::OP_POP, lastLine);
         }
 
@@ -244,7 +238,7 @@ namespace jc {
     }
 
     void Compiler::addLocal(const std::string& name, int depth) {
-        current().locals.push_back({ name, depth });
+        current().locals.push_back({ name, depth, false });
         // ★ 跟踪峰值容量
         if (static_cast<int>(current().locals.size()) > current().maxLocals) {
             current().maxLocals = static_cast<int>(current().locals.size());
@@ -615,11 +609,7 @@ namespace jc {
             }
         }
 
-        current().scopeDepth--;
-        while (!current().locals.empty() &&
-            current().locals.back().depth > current().scopeDepth) {
-            current().locals.pop_back();
-        }
+        endScope();
         return {};
     }
 
@@ -793,7 +783,10 @@ namespace jc {
         auto& enclosing = stateStack[enclosingLevel];
 
         for (int i = static_cast<int>(enclosing.locals.size()) - 1; i >= 0; --i) {
-            if (enclosing.locals[i].name == name) return addUpvalue(level, name, true, i, isRef, false);
+            if (enclosing.locals[i].name == name) {
+                enclosing.locals[i].isCaptured = true; // ★ 标记为被捕获，防止其物理 slot 被复用
+                return addUpvalue(level, name, true, i, isRef, false);
+            }
         }
 
         int upvalueInEnclosing = resolveUpvalueAt(enclosingLevel, name, isRef, isState);
@@ -1503,9 +1496,17 @@ namespace jc {
         if (current().stateNames.count(name) > 0) {
             throw std::runtime_error("Compiler Error: Cannot declare variable as both 'ref' and 'state'.");
         }
-        resolveUpvalue(name);
+        int upvalue = resolveUpvalue(name);
         current().refNames.insert(name);
-        emit(OpCode::OP_NONE, lastLine);
+        
+        if (upvalue != -1) {
+            emit(OpCode::OP_GET_UPVALUE, lastLine);
+            emit16(static_cast<uint16_t>(upvalue), lastLine);
+        } else {
+            uint16_t idx = identifierConstant(name);
+            emit(OpCode::OP_GET_GLOBAL, lastLine);
+            emit16(idx, lastLine);
+        }
         return {};
     }
 
@@ -1515,10 +1516,18 @@ namespace jc {
         if (current().refNames.count(name) > 0) {
             throw std::runtime_error("Compiler Error: Cannot declare variable as both 'ref' and 'state'.");
         }
-        resolveUpvalue(name);
+        int upvalue = resolveUpvalue(name);
         current().stateNames.insert(name);
         current().stateNames.insert("<init>_" + name); // ★ 注册隐藏的初始化标志
-        emit(OpCode::OP_NONE, lastLine);
+        
+        if (upvalue != -1) {
+            emit(OpCode::OP_GET_UPVALUE, lastLine);
+            emit16(static_cast<uint16_t>(upvalue), lastLine);
+        } else {
+            uint16_t idx = identifierConstant(name);
+            emit(OpCode::OP_GET_GLOBAL, lastLine);
+            emit16(idx, lastLine);
+        }
         return {};
     }
 

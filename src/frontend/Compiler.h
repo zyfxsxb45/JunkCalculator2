@@ -13,6 +13,7 @@ namespace jc {
     struct Local {
         std::string name;
         int depth;
+        bool isCaptured;
     };
 
     class Compiler : public ExprVisitor {

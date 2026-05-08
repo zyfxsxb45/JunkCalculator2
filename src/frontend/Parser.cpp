@@ -1478,6 +1478,8 @@ namespace jc {
         std::unique_ptr<Expr> condition;
 
         while (match({ TokenType::FOR })) {
+            match({ TokenType::LOCAL }); // ★ 允许并忽略可选的 local 关键字（推导式变量默认就是 local 的）
+
             // ★ 解构模式：for [a, b] in ...
             if (check(TokenType::LBRACKET)) {
                 advance(); // consume [
