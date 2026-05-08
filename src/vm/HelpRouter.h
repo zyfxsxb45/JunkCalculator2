@@ -116,6 +116,12 @@ namespace jc {
             if (s != std::string::npos) key = key.substr(s, e - s + 1);
             else key.clear();
 
+            bool forceFunction = false;
+            if (key.length() > 2 && key.substr(key.length() - 2) == "()") {
+                forceFunction = true;
+                key = key.substr(0, key.length() - 2);
+            }
+
             // 1. Dynamic Help (Scripts)
             auto itDyn = DynamicHelp.find(key);
             if (itDyn != DynamicHelp.end()) {
@@ -130,7 +136,46 @@ namespace jc {
 
             Dict root = std::get<Dict>(helpAst.data);
 
-            // 2. Search in "functions" (Exact match or alias)
+            std::string lowerKey = key;
+            std::transform(lowerKey.begin(), lowerKey.end(), lowerKey.begin(),
+                [](unsigned char c) -> char { return static_cast<char>(std::tolower(c)); });
+
+            // 2. Search in "topics" (Case-insensitive)
+            if (!forceFunction && root.has(Value("topics"))) {
+                Value topicsVal = *root.get(Value("topics"));
+                if (std::holds_alternative<Dict>(topicsVal.data)) {
+                    Dict topics = std::get<Dict>(topicsVal.data);
+                    if (topics.has(Value(lowerKey))) {
+                        Value topicVal = *topics.get(Value(lowerKey));
+                        if (std::holds_alternative<std::string>(topicVal.data)) {
+                            std::cout << "\n" << std::get<std::string>(topicVal.data) << std::endl;
+                        } else if (std::holds_alternative<List>(topicVal.data)) {
+                            std::cout << "\n";
+                            for (const auto& lineAny : std::get<List>(topicVal.data).raw()) {
+                                Value lineVal = extractAny(lineAny);
+                                if (std::holds_alternative<std::string>(lineVal.data)) {
+                                    std::cout << std::get<std::string>(lineVal.data) << "\n";
+                                }
+                            }
+                            std::cout << std::endl;
+                        }
+                        
+                        // Check if a function with the same name exists to provide a hint
+                        if (root.has(Value("functions"))) {
+                            Value funcsVal = *root.get(Value("functions"));
+                            if (std::holds_alternative<Dict>(funcsVal.data)) {
+                                Dict funcs = std::get<Dict>(funcsVal.data);
+                                if (funcs.has(Value(key))) {
+                                    std::cout << col(Ansi::BRIGHT_YELLOW) << "  Tip: '" << key << "' is also a built-in function. Type '/help " << key << "()' to see its documentation.\n" << col(Ansi::RESET) << std::endl;
+                                }
+                            }
+                        }
+                        return;
+                    }
+                }
+            }
+
+            // 3. Search in "functions" (Exact match or alias)
             if (root.has(Value("functions"))) {
                 Value funcsVal = *root.get(Value("functions"));
                 if (std::holds_alternative<Dict>(funcsVal.data)) {
@@ -162,35 +207,6 @@ namespace jc {
                     }
 
                     if (!targetFn.isNone() && printEntry(targetFn)) return;
-                }
-            }
-
-            // 3. Search in "topics" (Case-insensitive fallback)
-            std::string lowerKey = key;
-            std::transform(lowerKey.begin(), lowerKey.end(), lowerKey.begin(),
-                [](unsigned char c) -> char { return static_cast<char>(std::tolower(c)); });
-
-            if (root.has(Value("topics"))) {
-                Value topicsVal = *root.get(Value("topics"));
-                if (std::holds_alternative<Dict>(topicsVal.data)) {
-                    Dict topics = std::get<Dict>(topicsVal.data);
-                    if (topics.has(Value(lowerKey))) {
-                        Value topicVal = *topics.get(Value(lowerKey));
-                        if (std::holds_alternative<std::string>(topicVal.data)) {
-                            std::cout << "\n" << std::get<std::string>(topicVal.data) << std::endl;
-                            return;
-                        } else if (std::holds_alternative<List>(topicVal.data)) {
-                            std::cout << "\n";
-                            for (const auto& lineAny : std::get<List>(topicVal.data).raw()) {
-                                Value lineVal = extractAny(lineAny);
-                                if (std::holds_alternative<std::string>(lineVal.data)) {
-                                    std::cout << std::get<std::string>(lineVal.data) << "\n";
-                                }
-                            }
-                            std::cout << std::endl;
-                            return;
-                        }
-                    }
                 }
             }
 

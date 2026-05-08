@@ -30,7 +30,7 @@ class VisualSorter {
         self.win = none()
         self.stream_sock = none()
         self.frame_count = 0
-        self.active_indices = Set() 
+        self.active_indices = set() 
     }
 
     shuffle() = {
@@ -97,7 +97,7 @@ class VisualSorter {
         // Final sweep animation (skip if user forcibly closed the window)
         if (self.win.isOpen()) {
             for (i = 0; i < self.N; i += 1) {
-                self.active_indices = Set(double(i))
+                self.active_indices = set(double(i))
                 if (self.N <= 100 || i % 2 == 0) { self.render_frame() }
             }
         }
@@ -124,7 +124,7 @@ insertion_sort(vis) = {
         }
         vis.data[j + 1] = key
         
-        vis.active_indices = Set(double(j + 1), double(i))
+        vis.active_indices = set(double(j + 1), double(i))
         if(i % 2 == 0) {vis.render_frame()}  // Insertion sort is slow; render every 2 operations
     }
 }
@@ -146,7 +146,7 @@ quick_sort(vis) = {
             pi = i + 1
             
             // ★ Sync active indices as doubles for the Set container
-            vis.active_indices = Set(double(pi))
+            vis.active_indices = set(double(pi))
             vis.render_frame()
             
             qs(low, pi - 1)
@@ -182,7 +182,7 @@ merge_sort(vis) = {
         while (i < n1) { vis.data[k] = L[i]; i += 1; k += 1 }
         while (j < n2) { vis.data[k] = R[j]; j += 1; k += 1 }
         
-        vis.active_indices = Set(double(l), double(r))
+        vis.active_indices = set(double(l), double(r))
         vis.render_frame()
     }
     

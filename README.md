@@ -82,6 +82,12 @@ This update unifies the underlying variable model processing logic. Older code m
    - **Impact**: Removed the privileged scope of explicit functions. All `func() = {}` declarations are now strictly equivalent to anonymous closure assignments `func = () => {}` at compile time. Function names are now completely identical to ordinary variables and follow the same auto-local shadowing rules.
 3. **Modifier Binding Scope Reduced to Identifier Level**
    - **Impact**: In destructuring declarations, if you need to modify an upper-level variable or set a persistent state, you must individually mark the modifier for each specific variable. For example: `[ref a, state b, c] = [1, 2, 3]`.
+4. **Standardization of Built-in Function Names**
+   - **Impact**: The Set constructor and matrix element access functions have been renamed to align with standard naming conventions and prevent conflicts.
+   - **Migration**:
+     - Replace `Set(...)` with `set(...)`.
+     - Replace `get(A, r, c)` with `getElement(A, r, c)`.
+     - Replace `set(A, r, c, val)` with `setElement(A, r, c, val)`.
 
 ### Compiler & Core Scope Refactoring
 This update officially establishes a tri-state closure scope framework consisting of ordinary local assignment (Auto-local), persistent state (`state`), and reference modification (`ref`):

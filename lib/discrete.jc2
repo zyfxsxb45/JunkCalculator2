@@ -76,7 +76,7 @@ class Prop {
 
     vars() -> set = {
         tp = self.tp
-        if (tp == "var") return Set(str(self.a))
+        if (tp == "var") return set(str(self.a))
         if (tp == "not") return self.a.vars()
         return self.a.vars() | self.b.vars()
     }
@@ -169,7 +169,7 @@ Var(name: string) -> Prop = return Prop("var", name, "null")
 class Relation {
     init(S: set, pairs: any = none) = {
         self.S = S
-        self.R = Set()
+        self.R = set()
         self._pt = "List"
 
         if (pairs != none) {
@@ -277,13 +277,13 @@ class Relation {
     }
 
     transitiveClosure() -> Relation = {
-        current = Set()
+        current = set()
         for (p in self.R) add(current, p)
         
         changed = true
         while (changed) {
             changed = false
-            toAdd = Set()
+            toAdd = set()
             for (p1 in current) {
                 for (p2 in current) {
                     [a, b] = p1; [c, d] = p2
@@ -305,11 +305,11 @@ class Relation {
     // ── Equivalence Classes ──
     equivalenceClasses() -> list = {
         if (!self.isEquivalence()) throw "Relation Error: equivalenceClasses subject must be an equivalence relation."
-        assigned = Set()
+        assigned = set()
         classes = list()
         for (x in self.S) {
             if (x in assigned) continue
-            cls = Set()
+            cls = set()
             for (y in self.S) {
                 if (self.hasPair(x, y)) { add(cls, y); add(assigned, y) }
             }
@@ -451,7 +451,7 @@ class Graph {
     // ── Traversals ──
     bfs(start: any) -> list = {
         ks = str(start)
-        visited = Set(ks); q = list(ks); res = list()
+        visited = set(ks); q = list(ks); res = list()
         while (len(q) > 0) {
             curr = shift(q); push(res, curr)
             if (hasKey(self.adj, curr)) {
@@ -464,7 +464,7 @@ class Graph {
     }
 
     dfs(start: any) -> list = {
-        visited = Set(); res = list()
+        visited = set(); res = list()
         _go(v: string) = {
             if (v in visited) return none
             add(visited, v); push(res, v)
@@ -481,7 +481,7 @@ class Graph {
         ks = str(start); ke = str(end)
         if (ks == ke) return list(ks)
         
-        visited = Set(ks); q = list(list(ks))
+        visited = set(ks); q = list(list(ks))
         while (len(q) > 0) {
             path = shift(q); curr = last(path)
             if (hasKey(self.adj, curr)) {
@@ -500,7 +500,7 @@ class Graph {
         ks = str(start); vs = toList(keys(self.adj))
         dist = dict(); prev = dict()
         for (v in vs) dist[v] = none
-        dist[ks] = 0; visited = Set()
+        dist[ks] = 0; visited = set()
         
         while (len(visited) < len(vs)) {
             minV = none; minD = none
@@ -557,7 +557,7 @@ class Graph {
             }
             for (v in vs) { if (color[v] == 0) _visit(v) }
         } else {
-            visited = Set()
+            visited = set()
             _visit(v: string, parent: any) = {
                 if (found[0]) return none
                 add(visited, v)
@@ -605,7 +605,7 @@ class Graph {
     components() -> list = {
         if (self.directed) throw "Graph Error: components() requires an undirected graph."
         
-        visited = Set(); comps = list()
+        visited = set(); comps = list()
         for (v in toList(keys(self.adj))) {
             if (v in visited) continue
             comp = list(); q = list(v); add(visited, v)
@@ -695,7 +695,7 @@ if (isfunction(__register_help)) {
 
   Binary Relations (class Relation)
   ──────────────────────
-    r = Relation(Set(1,2))     Create relation over base Set S
+    r = Relation(set(1,2))     Create relation over base Set S
     r.addPair(a, b)            Add relation (checks bounds in S)
     r.removePair(a, b)         Remove relation securely
     r.hasPair(a, b)            Presence query

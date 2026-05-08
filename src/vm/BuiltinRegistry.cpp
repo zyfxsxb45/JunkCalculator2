@@ -871,8 +871,8 @@ void BuiltinRegistry::registerMatrixOps() {
     builtins["cols"] = builtins["col"]; builtinArity["cols"] = builtinArity["col"];
 
     // --- 元素/行列访问 ---
-    reg("get", { 3 }, [](const std::vector<Value>& args) -> Value { int r = static_cast<int>(std::round(args[1].asDouble())), c = static_cast<int>(std::round(args[2].asDouble())); if (std::holds_alternative<RealMatrix>(args[0].data)) return Value(std::get<RealMatrix>(args[0].data)(r, c)); if (std::holds_alternative<ComplexMatrix>(args[0].data)) return Value(std::get<ComplexMatrix>(args[0].data)(r, c)); if (std::holds_alternative<StringMatrix>(args[0].data)) return Value(std::get<StringMatrix>(args[0].data)(r, c)); throw std::runtime_error("Type Error: get() requires a matrix."); });
-    reg("set", { 4 }, [](const std::vector<Value>& args) -> Value { int r = static_cast<int>(std::round(args[1].asDouble())), c = static_cast<int>(std::round(args[2].asDouble())); if (std::holds_alternative<RealMatrix>(args[0].data)) { RealMatrix res = std::get<RealMatrix>(args[0].data); res(r, c) = args[3].asDouble(); return Value(res); } if (std::holds_alternative<ComplexMatrix>(args[0].data)) { ComplexMatrix res = std::get<ComplexMatrix>(args[0].data); res(r, c) = args[3].asComplex(); return Value(res); } if (std::holds_alternative<StringMatrix>(args[0].data)) { StringMatrix res = std::get<StringMatrix>(args[0].data); if (std::holds_alternative<std::string>(args[3].data)) res(r, c) = std::get<std::string>(args[3].data); else { std::ostringstream oss; oss << args[3]; res(r, c) = oss.str(); } return Value(res); } throw std::runtime_error("Type Error: set() requires a matrix."); });
+    reg("getElement", { 3 }, [](const std::vector<Value>& args) -> Value { int r = static_cast<int>(std::round(args[1].asDouble())), c = static_cast<int>(std::round(args[2].asDouble())); if (std::holds_alternative<RealMatrix>(args[0].data)) return Value(std::get<RealMatrix>(args[0].data)(r, c)); if (std::holds_alternative<ComplexMatrix>(args[0].data)) return Value(std::get<ComplexMatrix>(args[0].data)(r, c)); if (std::holds_alternative<StringMatrix>(args[0].data)) return Value(std::get<StringMatrix>(args[0].data)(r, c)); throw std::runtime_error("Type Error: getElement() requires a matrix."); });
+    reg("setElement", { 4 }, [](const std::vector<Value>& args) -> Value { int r = static_cast<int>(std::round(args[1].asDouble())), c = static_cast<int>(std::round(args[2].asDouble())); if (std::holds_alternative<RealMatrix>(args[0].data)) { RealMatrix res = std::get<RealMatrix>(args[0].data); res(r, c) = args[3].asDouble(); return Value(res); } if (std::holds_alternative<ComplexMatrix>(args[0].data)) { ComplexMatrix res = std::get<ComplexMatrix>(args[0].data); res(r, c) = args[3].asComplex(); return Value(res); } if (std::holds_alternative<StringMatrix>(args[0].data)) { StringMatrix res = std::get<StringMatrix>(args[0].data); if (std::holds_alternative<std::string>(args[3].data)) res(r, c) = std::get<std::string>(args[3].data); else { std::ostringstream oss; oss << args[3]; res(r, c) = oss.str(); } return Value(res); } throw std::runtime_error("Type Error: setElement() requires a matrix."); });
 
     // 行列操作（简写宏化）
     #define ROW_COL_OP(NAME, BODY) reg(NAME, { 2 }, [](const std::vector<Value>& args) -> Value { \
@@ -3346,7 +3346,7 @@ void BuiltinRegistry::registerTypeChecks() {
 void BuiltinRegistry::registerSetFunctions() {
 
     // ═══ 构造 ═══
-    reg("Set", {}, [](const std::vector<Value>& args) -> Value {
+    reg("set", {}, [](const std::vector<Value>& args) -> Value {
         Set s;
         for (const auto& a : args) {
             s.insert(a);

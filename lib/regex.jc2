@@ -3,7 +3,7 @@
 // Pure JC2 2.2.2 Implementation (Backtracking NFA)
 // ═══════════════════════════════════════════════════════════════
 
-const _RE_SHORTHANDS = Set("d", "D", "w", "W", "s", "S")
+const _RE_SHORTHANDS = set("d", "D", "w", "W", "s", "S")
 
 _re_shorthand(kind: string, c: string) -> bool = {
     if (kind == "d") return isdigit(c)
