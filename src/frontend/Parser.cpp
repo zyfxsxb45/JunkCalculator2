@@ -772,8 +772,11 @@ namespace jc {
         consume(TokenType::RPAREN, "Parser Error: Expect ')' after if condition.");
 
         auto thenBranch = parseStatementOrBlock();
-        // ★ 核心修复：允许单行语句后面跟着的分号或换行符被安全吃掉，为潜在的 else 扫清障碍
+        
+        // ★ 核心修复：安全地向前探测 else，如果不是 else 则回退，避免误吞换行符导致表达式被意外拼接
+        int savedPos = current;
         while (match({ TokenType::SEMICOLON, TokenType::NEWLINE })) {}
+        
         std::unique_ptr<Expr> elseBranch = nullptr;
         if (match({ TokenType::ELSE })) {
             while (match({ TokenType::NEWLINE })) {}
@@ -784,7 +787,10 @@ namespace jc {
             else {
                 elseBranch = parseStatementOrBlock();
             }
+        } else {
+            current = savedPos; // 回退，把换行符还给外部上下文
         }
+        
         return std::make_unique<IfExpr>(std::move(condition), std::move(thenBranch), std::move(elseBranch));
     }
 
