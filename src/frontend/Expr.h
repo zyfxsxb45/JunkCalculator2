@@ -26,6 +26,7 @@ namespace jc {
     struct BreakExpr;      // ★ 新增
     struct ContinueExpr;   // ★ 新增
     struct ReturnExpr;
+    struct LocalDecl;        // ★ 新增
     struct RefDecl;
     struct StateDecl;        // ★ 新增
     struct IndexAccess;      // ★ 新增
@@ -74,6 +75,7 @@ namespace jc {
         virtual std::any visitIndexAccess(IndexAccess* expr) = 0;    // ★ 新增
         virtual std::any visitIndexAssign(IndexAssign* expr) = 0;    // ★ 新增
         virtual std::any visitConstDecl(ConstDecl* expr) = 0;   // ★ 新增
+        virtual std::any visitLocalDecl(LocalDecl* expr) = 0;   // ★ 新增
         virtual std::any visitRefDecl(RefDecl* expr) = 0;       // ★ 新增
         virtual std::any visitStateDecl(StateDecl* expr) = 0;   // ★ 新增
         virtual std::any visitDeleteExpr(DeleteExpr* expr) = 0;   // ★ 新增
@@ -144,12 +146,19 @@ namespace jc {
     struct Assign : public Expr {
         Token name;
         std::unique_ptr<Expr> value;
-        bool isRef; // ★ 新增
-        bool isState; // ★ 新增
-        Assign(Token name, std::unique_ptr<Expr> value, bool isRef = false, bool isState = false)
-            : name(std::move(name)), value(std::move(value)), isRef(isRef), isState(isState) {
+        bool isRef;
+        bool isState;
+        bool isLocal; // ★ 新增
+        Assign(Token name, std::unique_ptr<Expr> value, bool isRef = false, bool isState = false, bool isLocal = false)
+            : name(std::move(name)), value(std::move(value)), isRef(isRef), isState(isState), isLocal(isLocal) {
         }
         std::any accept(ExprVisitor& visitor) override { return visitor.visitAssign(this); }
+    };
+
+    struct LocalDecl : public Expr {
+        Token name;
+        explicit LocalDecl(Token name) : name(std::move(name)) {}
+        std::any accept(ExprVisitor& visitor) override { return visitor.visitLocalDecl(this); }
     };
 
     struct Call : public Expr {
@@ -303,10 +312,11 @@ namespace jc {
         std::unique_ptr<Expr> target;   // Variable 或 IndexAccess
         TokenType op;                    // PLUS, MINUS, STAR, SLASH, PERCENT, CARET
         std::unique_ptr<Expr> value;
-        bool isRef; // ★ 新增
-        bool isState; // ★ 新增
-        CompoundAssign(std::unique_ptr<Expr> target, TokenType op, std::unique_ptr<Expr> value, bool isRef = false, bool isState = false)
-            : target(std::move(target)), op(op), value(std::move(value)), isRef(isRef), isState(isState) {
+        bool isRef;
+        bool isState;
+        bool isLocal; // ★ 新增
+        CompoundAssign(std::unique_ptr<Expr> target, TokenType op, std::unique_ptr<Expr> value, bool isRef = false, bool isState = false, bool isLocal = false)
+            : target(std::move(target)), op(op), value(std::move(value)), isRef(isRef), isState(isState), isLocal(isLocal) {
         }
         std::any accept(ExprVisitor& visitor) override { return visitor.visitCompoundAssign(this); }
     };
@@ -351,20 +361,21 @@ namespace jc {
         std::vector<Token> destructNames;  // ★ non-empty = destructured [a, b, ...]
         std::unique_ptr<Expr> iterable;
         std::unique_ptr<Expr> body;
+        bool isLocal; // ★ 新增
 
         bool isDestruct() const { return !destructNames.empty(); }
 
         // Single variable: for (x in ...)
-        ForInExpr(Token varName, std::unique_ptr<Expr> iterable, std::unique_ptr<Expr> body)
-            : varName(std::move(varName)), iterable(std::move(iterable)), body(std::move(body)) {
+        ForInExpr(Token varName, std::unique_ptr<Expr> iterable, std::unique_ptr<Expr> body, bool isLocal = false)
+            : varName(std::move(varName)), iterable(std::move(iterable)), body(std::move(body)), isLocal(isLocal) {
         }
 
         // ★ Destructured: for ([a, b] in ...)
         ForInExpr(std::vector<Token> destructNames, std::unique_ptr<Expr> iterable,
-            std::unique_ptr<Expr> body)
+            std::unique_ptr<Expr> body, bool isLocal = false)
             : varName(Token(TokenType::IDENTIFIER, "", 0)),
             destructNames(std::move(destructNames)),
-            iterable(std::move(iterable)), body(std::move(body)) {
+            iterable(std::move(iterable)), body(std::move(body)), isLocal(isLocal) {
         }
 
         std::any accept(ExprVisitor& visitor) override { return visitor.visitForInExpr(this); }
@@ -481,6 +492,7 @@ namespace jc {
             Token name;
             bool isRef;
             bool isState;
+            bool isLocal; // ★ 新增
         };
         std::vector<Target> targets;
         std::unique_ptr<Expr> value;
@@ -561,6 +573,7 @@ namespace jc {
             Token name;
             bool isRef;
             bool isState;
+            bool isLocal; // ★ 新增
         };
         std::vector<Target> targets;
         std::unique_ptr<Expr> value;

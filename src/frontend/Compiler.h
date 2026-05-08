@@ -59,7 +59,7 @@ namespace jc {
         void beginScope();
         void endScope();
         int resolveLocal(const std::string& name);
-        void addLocal(const std::string& name);
+        void addLocal(const std::string& name, int depth);
         void declareVariable(const std::string& name);
 
         void compileNode(Expr* expr);
@@ -95,6 +95,7 @@ namespace jc {
         std::any visitIndexAccess(IndexAccess*) override;
         std::any visitIndexAssign(IndexAssign*) override;
         std::any visitConstDecl(ConstDecl*) override;
+        std::any visitLocalDecl(LocalDecl*) override; // ★ 新增
         std::any visitRefDecl(RefDecl*) override;
         std::any visitStateDecl(StateDecl*) override; // ★ 新增
         std::any visitDeleteExpr(DeleteExpr*) override;

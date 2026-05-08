@@ -125,9 +125,10 @@ namespace jc {
     }
 
     std::unique_ptr<Expr> Parser::assignment() {
-        bool isRef = match({ TokenType::REF });
-        bool isState = !isRef && match({ TokenType::STATE });
-        bool isConst = !isRef && !isState && match({ TokenType::CONST });
+        bool isLocal = match({ TokenType::LOCAL });
+        bool isRef = !isLocal && match({ TokenType::REF });
+        bool isState = !isLocal && !isRef && match({ TokenType::STATE });
+        bool isConst = !isLocal && !isRef && !isState && match({ TokenType::CONST });
 
         // ★ 特权推测解析：精准捕获带类型注解的函数定义 f(x: int) -> int = ...
         if (check(TokenType::IDENTIFIER) &&
@@ -271,7 +272,7 @@ namespace jc {
                     );
 
                     if (isConst) return std::make_unique<ConstDecl>(funcName, std::move(lambda));
-                    return std::make_unique<Assign>(funcName, std::move(lambda), isRef, isState);
+                    return std::make_unique<Assign>(funcName, std::move(lambda), isRef, isState, isLocal);
                 }
             }
         }
@@ -301,11 +302,11 @@ namespace jc {
 
             auto value = assignment();
 
-            if (!dynamic_cast<Variable*>(expr.get()) && (isRef || isState)) {
-                throw std::runtime_error("Parser Error: 'ref' or 'state' can only be applied to variables.");
+            if (!dynamic_cast<Variable*>(expr.get()) && (isLocal || isRef || isState)) {
+                throw std::runtime_error("Parser Error: 'local', 'ref' or 'state' can only be applied to variables.");
             }
 
-            return std::make_unique<CompoundAssign>(std::move(expr), baseOp, std::move(value), isRef, isState);
+            return std::make_unique<CompoundAssign>(std::move(expr), baseOp, std::move(value), isRef, isState, isLocal);
         }
 
         // ── 处理标准赋值 (=) ──
@@ -314,12 +315,12 @@ namespace jc {
             auto value = assignment();  // ★ 直接读取右值即可，把上下两行记录 index 的删掉
 
             if (auto* dotExpr = dynamic_cast<DotAccess*>(expr.get())) {
-                if (isRef || isState || isConst) throw std::runtime_error("Parser Error: 'ref', 'state', or 'const' cannot be applied to object properties.");
+                if (isLocal || isRef || isState || isConst) throw std::runtime_error("Parser Error: 'local', 'ref', 'state', or 'const' cannot be applied to object properties.");
                 return std::make_unique<DotAssign>(std::move(dotExpr->object), std::move(dotExpr->field), std::move(value));
             }
 
             if (auto* indexExpr = dynamic_cast<IndexAccess*>(expr.get())) {
-                if (isRef || isState || isConst) throw std::runtime_error("Parser Error: 'ref', 'state', or 'const' cannot be applied to array elements.");
+                if (isLocal || isRef || isState || isConst) throw std::runtime_error("Parser Error: 'local', 'ref', 'state', or 'const' cannot be applied to array elements.");
                 std::vector<std::vector<std::unique_ptr<Expr>>> chain;
                 IndexAccess* currentIA = indexExpr;
                 chain.push_back(std::move(currentIA->indices));
@@ -345,11 +346,13 @@ namespace jc {
                 for (auto& row : matNode->elements) {
                     for (auto& elem : row) {
                         if (auto* v = dynamic_cast<Variable*>(elem.get())) {
-                            targets.push_back({v->name, false, false});
+                            targets.push_back({v->name, false, false, false});
                         } else if (auto* r = dynamic_cast<RefDecl*>(elem.get())) {
-                            targets.push_back({r->name, true, false});
+                            targets.push_back({r->name, true, false, false});
                         } else if (auto* s = dynamic_cast<StateDecl*>(elem.get())) {
-                            targets.push_back({s->name, false, true});
+                            targets.push_back({s->name, false, true, false});
+                        } else if (auto* l = dynamic_cast<LocalDecl*>(elem.get())) {
+                            targets.push_back({l->name, false, false, true});
                         } else {
                             validDestruct = false; break;
                         }
@@ -370,11 +373,13 @@ namespace jc {
                     auto* litKey = dynamic_cast<Literal*>(entry.first.get());
                     if (litKey && litKey->isString) {
                         if (auto* varVal = dynamic_cast<Variable*>(entry.second.get())) {
-                            targets.push_back({ litKey->value, varVal->name, false, false });
+                            targets.push_back({ litKey->value, varVal->name, false, false, false });
                         } else if (auto* refVal = dynamic_cast<RefDecl*>(entry.second.get())) {
-                            targets.push_back({ litKey->value, refVal->name, true, false });
+                            targets.push_back({ litKey->value, refVal->name, true, false, false });
                         } else if (auto* stateVal = dynamic_cast<StateDecl*>(entry.second.get())) {
-                            targets.push_back({ litKey->value, stateVal->name, false, true });
+                            targets.push_back({ litKey->value, stateVal->name, false, true, false });
+                        } else if (auto* localVal = dynamic_cast<LocalDecl*>(entry.second.get())) {
+                            targets.push_back({ litKey->value, localVal->name, false, false, true });
                         } else {
                             validDestruct = false; break;
                         }
@@ -392,7 +397,7 @@ namespace jc {
 
             if (auto* varExpr = dynamic_cast<Variable*>(expr.get())) {
                 if (isConst) return std::make_unique<ConstDecl>(varExpr->name, std::move(value));
-                return std::make_unique<Assign>(varExpr->name, std::move(value), isRef, isState);
+                return std::make_unique<Assign>(varExpr->name, std::move(value), isRef, isState, isLocal);
             }
 
             // ★ （旧的 Call 拦截已经被上面顶端安全取代，这里删去原来的 Call if 分支即可！）
@@ -400,13 +405,14 @@ namespace jc {
             throw std::runtime_error("Parser Error: Invalid assignment target at '" + equals.lexeme + "'.");
         }
 
-        if (isRef || isState || isConst) {
+        if (isLocal || isRef || isState || isConst) {
             if (auto* var = dynamic_cast<Variable*>(expr.get())) {
                 if (isConst) throw std::runtime_error("Parser Error: 'const' declaration requires '= value'.");
-                if (isRef) expr = std::make_unique<RefDecl>(var->name);
+                if (isLocal) expr = std::make_unique<LocalDecl>(var->name);
+                else if (isRef) expr = std::make_unique<RefDecl>(var->name);
                 else expr = std::make_unique<StateDecl>(var->name);
             } else {
-                throw std::runtime_error("Parser Error: 'ref', 'state', or 'const' must be followed by a variable or assignment.");
+                throw std::runtime_error("Parser Error: 'local', 'ref', 'state', or 'const' must be followed by a variable or assignment.");
             }
         }
 
@@ -810,9 +816,11 @@ namespace jc {
     std::unique_ptr<Expr> Parser::forExpr() {
         consume(TokenType::LPAREN, "Parser Error: Expect '(' after 'for'.");
 
+        int savedPos = current;
+        bool isLocal = match({ TokenType::LOCAL });
+
         // ★ 解构 for-in: for ([a, b, ...] in iterable)
         if (check(TokenType::LBRACKET)) {
-            int savedPos = current;
             advance(); // consume [
             std::vector<Token> names;
             bool valid = true;
@@ -836,11 +844,9 @@ namespace jc {
                         "Parser Error: Expect ')' after for-in iterable.");
                     auto body = parseStatementOrBlock();
                     return std::make_unique<ForInExpr>(
-                        std::move(names), std::move(iterable), std::move(body));
+                        std::move(names), std::move(iterable), std::move(body), isLocal);
                 }
             }
-            // 不是解构 for-in，回退
-            current = savedPos;
         }
 
         // ★ 推测性检查：for (IDENTIFIER in ...) 还是 for (init; cond; update)
@@ -849,8 +855,14 @@ namespace jc {
             tokens[current + 1].type == TokenType::IN) {
             Token varName = advance(); // 消费标识符
             advance();                  // 消费 'in'
-            return forInExpr(varName);
+            auto iterable = expression();
+            consume(TokenType::RPAREN, "Parser Error: Expect ')' after for-in iterable.");
+            auto body = parseStatementOrBlock();
+            return std::make_unique<ForInExpr>(std::move(varName), std::move(iterable), std::move(body), isLocal);
         }
+
+        // 不是 for-in，回退到 '(' 之后，让 expression() 正常解析 init
+        current = savedPos;
 
         // 传统三段式 for
         auto init = expression();
@@ -943,12 +955,6 @@ namespace jc {
             return std::make_unique<ImportExpr>(std::move(path));
         }
         if (match({ TokenType::SWITCH })) return switchExpr();
-        if (match({ TokenType::LOCAL })) {
-            throw std::runtime_error(
-                "Syntax Error: 'local' has been removed. "
-                "Variables inside functions are now auto-local. "
-                "Use 'ref x' to modify outer variables.");
-        }
         if (match({ TokenType::DELETE })) {
             std::vector<Token> names;
             names.push_back(consume(TokenType::IDENTIFIER, "Parser Error: Expect variable name after 'delete'."));
