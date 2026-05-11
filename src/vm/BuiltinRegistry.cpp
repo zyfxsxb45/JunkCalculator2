@@ -290,11 +290,20 @@ void BuiltinRegistry::registerMath() {
                 if (name == "sqrt" && symArgs.size() == 1) {
                     return Value(SymExpr(symArgs[0]) ^ SymExpr(Fraction(1, 2)));
                 }
+                if (name == "sqrtD" && symArgs.size() == 1) {
+                    return Value(SymExpr(symArgs[0]) ^ SymExpr(0.5));
+                }
                 if (name == "cbrt" && symArgs.size() == 1) {
                     return Value(SymExpr(symArgs[0]) ^ SymExpr(Fraction(1, 3)));
                 }
+                if (name == "cbrtD" && symArgs.size() == 1) {
+                    return Value(SymExpr(symArgs[0]) ^ SymExpr(1.0 / 3.0));
+                }
                 if (name == "root" && symArgs.size() == 2) {
                     return Value(SymExpr(symArgs[0]) ^ (SymExpr(BigInt(1)) / SymExpr(symArgs[1])));
+                }
+                if (name == "rootD" && symArgs.size() == 2) {
+                    return Value(SymExpr(symArgs[0]) ^ (SymExpr(1.0) / SymExpr(symArgs[1])));
                 }
                 return Value(SymExpr(std::make_shared<SymFunc>(name, std::move(symArgs))));
             }
@@ -558,8 +567,16 @@ void BuiltinRegistry::registerMath() {
         return args[0] ^ Value(Fraction(1, 2));
     });
 
+    regMath("sqrtD", { 1 }, [](const std::vector<Value>& args) -> Value {
+        return args[0] ^ Value(0.5);
+    });
+
     regMath("cbrt", { 1 }, [](const std::vector<Value>& args) -> Value {
         return args[0] ^ Value(Fraction(1, 3));
+    });
+
+    regMath("cbrtD", { 1 }, [](const std::vector<Value>& args) -> Value {
+        return args[0] ^ Value(1.0 / 3.0);
     });
 
     reg("matpow", { 2 }, [](const std::vector<Value>& args) -> Value {
@@ -691,6 +708,12 @@ void BuiltinRegistry::registerMath() {
 
     regMath("root", { 2 }, [](const std::vector<Value>& args) -> Value {
         return args[0] ^ (Value(BigInt(1)) / args[1]);
+    });
+
+    regMath("rootD", { 2 }, [](const std::vector<Value>& args) -> Value {
+        Value y = args[1];
+        Value numY = y.isComplex() ? Value(y.asComplex()) : Value(y.asDouble());
+        return args[0] ^ (Value(1.0) / numY);
     });
 
     // 通用取整分发器
