@@ -283,7 +283,12 @@ namespace jc {
 
 
     std::any Compiler::visitLiteral(Literal* expr) {
-        if (expr->isString) {
+        if (expr->isKeyword) {
+            if (expr->value == "true") emit(OpCode::OP_TRUE, lastLine);
+            else if (expr->value == "false") emit(OpCode::OP_FALSE, lastLine);
+            else if (expr->value == "none") emit(OpCode::OP_NONE, lastLine);
+        }
+        else if (expr->isString) {
             chunk()->emitConstant(Value(expr->value), lastLine);
         }
         else if (expr->isImaginary) {
@@ -1745,9 +1750,7 @@ namespace jc {
     std::any Compiler::visitDotAccess(DotAccess* expr) {
         lastLine = expr->field.line;
         if (dynamic_cast<SuperExpr*>(expr->object.get())) {
-            uint16_t selfIdx = identifierConstant("self");
-            emit(OpCode::OP_GET_GLOBAL, lastLine);
-            emit16(selfIdx, lastLine);
+            emit(OpCode::OP_GET_SELF, lastLine);
             uint16_t nameIdx = identifierConstant(expr->field.lexeme);
             emit(OpCode::OP_GET_SUPER, lastLine); emit16(nameIdx, lastLine);
             return {};
@@ -1777,9 +1780,7 @@ namespace jc {
     std::any Compiler::visitMethodCallExpr(MethodCallExpr* expr) {
         lastLine = expr->method.line;
         if (dynamic_cast<SuperExpr*>(expr->object.get())) {
-            uint16_t selfIdx = identifierConstant("self");
-            emit(OpCode::OP_GET_GLOBAL, lastLine);
-            emit16(selfIdx, lastLine);
+            emit(OpCode::OP_GET_SELF, lastLine);
             for (auto& arg : expr->arguments) compileNode(arg.get());
             uint16_t nameIdx = identifierConstant(expr->method.lexeme);
             emit(OpCode::OP_SUPER_INVOKE, lastLine);
@@ -1799,6 +1800,11 @@ namespace jc {
 
     std::any Compiler::visitSuperExpr(SuperExpr*) {
         throw std::runtime_error("Compiler Error: 'super' must be followed by '.method()'.");
+    }
+
+    std::any Compiler::visitSelfExpr(SelfExpr*) {
+        emit(OpCode::OP_GET_SELF, lastLine);
+        return {};
     }
 
     std::any Compiler::visitSliceExpr(SliceExpr*) {

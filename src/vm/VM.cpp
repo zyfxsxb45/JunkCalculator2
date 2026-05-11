@@ -235,9 +235,6 @@ namespace jc {
         globals["E"] = Value(2.71828182845904523536);
         globals["i"] = Value(Complex(0.0, 1.0));
         globals["I"] = Value(Complex(0.0, 1.0));
-        globals["true"] = Value(1.0);
-        globals["false"] = Value(0.0);
-        globals["none"] = Value::none();
 
         registerBuiltin("__vm_delete__", [this](const std::vector<Value>& args) -> Value {
             if (args.size() != 1 || !std::holds_alternative<std::string>(args[0].data))
@@ -262,39 +259,6 @@ namespace jc {
 
     void VM::setGlobal(const std::string& name, const Value& val) {
         globals[name] = val;
-    }
-
-    void VM::push(const Value& val) {
-        if (static_cast<int>(stack.size()) >= MAX_STACK)
-            throw std::runtime_error("VM Error: Stack overflow.");
-        stack.push_back(val);
-    }
-
-    Value VM::pop() {
-        if (stack.empty()) throw std::runtime_error("VM Error: Stack underflow.");
-        Value val = std::move(stack.back());
-        stack.pop_back();
-        return val;
-    }
-
-    Value& VM::peek(int distance) {
-        return stack[stack.size() - 1 - distance];
-    }
-
-    uint8_t VM::readByte() {
-        return currentChunk().code[frame().ip++];
-    }
-
-    uint16_t VM::readShort() {
-        uint8_t hi = readByte();
-        uint8_t lo = readByte();
-        return static_cast<uint16_t>((hi << 8) | lo);
-    }
-
-    OpCode VM::readOp() { return static_cast<OpCode>(readByte()); }
-
-    bool VM::isTruthy(const Value& val) {
-        return val.truthy();
     }
 
     Value VM::execute(const Chunk& c) {
@@ -494,6 +458,12 @@ namespace jc {
                 case OpCode::OP_FALSE: push(Value(0.0)); break;
                 case OpCode::OP_POP:   pop(); break;
 
+                case OpCode::OP_GET_SELF: {
+                    if (frame().selfContext.isNone()) throw std::runtime_error("VM Error: 'self' accessed outside of context.");
+                    push(frame().selfContext);
+                    break;
+                }
+
                 case OpCode::OP_ADD: {
                     Value b = pop(), a = pop();
                     auto d = findDunder(a, "__add__");
@@ -671,15 +641,13 @@ namespace jc {
                     uint16_t idx = readShort();
                     std::string name = std::get<std::string>(currentChunk().constants[idx].data);
 
-                    // ★ 虚拟机级别拦截：遇到 'self'，直接去它该在的物理寄存器里拿！
-                    if (name == "self") {
-                        if (frame().selfContext.isNone()) throw std::runtime_error("VM Error: 'self' accessed outside of context.");
-                        push(frame().selfContext); break;
-                    }
+                    // ★ 虚拟机级别拦截：遇到 '__class__'，直接去它该在的物理寄存器里拿！
                     if (name == "__class__") {
                         if (frame().classContext.isNone()) throw std::runtime_error("VM Error: '__class__' accessed outside of context.");
-                        push(frame().classContext); break;
+                        push(frame().classContext);
+                        break;
                     }
+
                     auto it = globals.find(name);
                     if (it != globals.end()) {
                         push(it->second);
@@ -720,8 +688,8 @@ namespace jc {
                     uint16_t idx = readShort();
                     std::string name = std::get<std::string>(currentChunk().constants[idx].data);
 
-                    // ★ 关键字保护：绝不许改写 self !
-                    if (name == "self" || name == "__class__")
+                    // ★ 关键字保护：绝不许改写上下文关键字 !
+                    if (name == "__class__")
                         throw std::runtime_error("Syntax Error: cannot override context keyword '" + name + "'.");
 
                     if (constGlobals.count(name))

@@ -316,7 +316,6 @@ void BuiltinRegistry::registerMath() {
     reg("pi", { 0 }, [](const std::vector<Value>&) -> Value { return Value(3.14159265358979323846); });
     reg("e", { 0 }, [](const std::vector<Value>&) -> Value { return Value(2.71828182845904523536); });
     reg("i", { 0 }, [](const std::vector<Value>&) -> Value { return Value(Complex(0.0, 1.0)); });
-    reg("none", { 0 }, [](const std::vector<Value>&) -> Value { return Value::none(); });
     reg("complex", { 1, 2 }, [this](const std::vector<Value>& args) -> Value {
         auto evalIfSym = [this](Value v) {
             if (v.isSymbolic()) {
@@ -3133,11 +3132,8 @@ void BuiltinRegistry::registerSystemShell() {
             helpers::setGlobalCallback("E", Value(2.71828182845904523536));
             helpers::setGlobalCallback("i", Value(Complex(0.0, 1.0)));
             helpers::setGlobalCallback("I", Value(Complex(0.0, 1.0)));
-            helpers::setGlobalCallback("true", Value(1.0));
-            helpers::setGlobalCallback("false", Value(0.0));
-            helpers::setGlobalCallback("none", Value::none());
         }
-        std::cout << "System constants restored: PI, E, i, I, true, false" << std::endl;
+        std::cout << "System constants restored: PI, E, i, I" << std::endl;
         return Value::none();
         });
 

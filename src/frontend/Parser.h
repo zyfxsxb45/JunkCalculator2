@@ -46,12 +46,12 @@ namespace jc {
         std::unique_ptr<Expr> parseDictLiteral();  // ★
 
         // --- 游标工具 ---
-        bool match(std::initializer_list<TokenType> types);
-        bool check(TokenType type) const;
-        bool isAtEnd() const;
-        Token advance();
-        Token peek() const;
-        Token previous() const;
+        inline bool match(std::initializer_list<TokenType> types) { for (auto t : types) if (check(t)) { advance(); return true; } return false; }
+        inline bool check(TokenType type) const { if (isAtEnd()) return false; return peek().type == type; }
+        inline bool isAtEnd() const { return peek().type == TokenType::END_OF_FILE; }
+        inline Token advance() { if (!isAtEnd()) current++; return previous(); }
+        inline Token peek() const { return tokens[current]; }
+        inline Token previous() const { return tokens[current - 1]; }
         Token consume(TokenType type, const std::string& message);
 
     public:

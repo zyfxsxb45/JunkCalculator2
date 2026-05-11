@@ -123,6 +123,7 @@ namespace jc {
         OP_INVOKE,          // [name_idx:16bit, argc:8bit]
         OP_GET_SUPER,       // [name_idx:16bit]
         OP_SUPER_INVOKE,    // [name_idx:16bit, argc:8bit]
+        OP_GET_SELF,        // ★ 新增
 
         // 导入
         OP_IMPORT,          // [path_idx:16bit]
@@ -205,6 +206,7 @@ namespace jc {
         case OpCode::OP_INVOKE: return "OP_INVOKE";
         case OpCode::OP_GET_SUPER: return "OP_GET_SUPER";
         case OpCode::OP_SUPER_INVOKE: return "OP_SUPER_INVOKE";
+        case OpCode::OP_GET_SELF: return "OP_GET_SELF";
         case OpCode::OP_IMPORT: return "OP_IMPORT";
         case OpCode::OP_SLICE_GET: return "OP_SLICE_GET";
         case OpCode::OP_SLICE_SET: return "OP_SLICE_SET";
@@ -330,6 +332,7 @@ namespace jc {
             case OpCode::OP_IN: case OpCode::OP_STRINGIFY: case OpCode::OP_TRY_END:
             case OpCode::OP_THROW: case OpCode::OP_LIST_INIT: case OpCode::OP_INHERIT:
             case OpCode::OP_IMPORT: case OpCode::OP_BIT_AND: case OpCode::OP_BIT_OR:
+            case OpCode::OP_GET_SELF:
                 std::cout << std::endl;
                 return offset + 1;
 

@@ -4,6 +4,7 @@
 #include "../memory/Value.h"
 #include <functional>
 #include <map>
+#include <unordered_map>
 #include <set>
 #include <string>
 #include <vector>
@@ -19,27 +20,27 @@ namespace jc {
         std::string name;
         std::string description;
         std::function<void(
-            std::map<std::string, Value>&,              // environment
-            std::map<std::string, NativeCallable>&,     // builtins
-            std::map<std::string, std::set<int>>&       // builtinArity
+            std::unordered_map<std::string, Value>&,              // environment
+            std::unordered_map<std::string, NativeCallable>&,     // builtins
+            std::unordered_map<std::string, std::set<int>>&       // builtinArity
             )> loader;
     };
 
     // ═══ 全局模块注册表 ═══
-    inline std::map<std::string, NativeModule>& getNativeModules() {
-        static std::map<std::string, NativeModule> modules;
+    inline std::unordered_map<std::string, NativeModule>& getNativeModules() {
+        static std::unordered_map<std::string, NativeModule> modules;
         return modules;
     }
 
     // ═══ 模块注册辅助类 ═══
     class ModuleReg {
-        std::map<std::string, NativeCallable>& builtins;
-        std::map<std::string, std::set<int>>& arity;
-        std::map<std::string, Value>& env;
+        std::unordered_map<std::string, NativeCallable>& builtins;
+        std::unordered_map<std::string, std::set<int>>& arity;
+        std::unordered_map<std::string, Value>& env;
     public:
-        ModuleReg(std::map<std::string, Value>& e,
-            std::map<std::string, NativeCallable>& b,
-            std::map<std::string, std::set<int>>& a)
+        ModuleReg(std::unordered_map<std::string, Value>& e,
+            std::unordered_map<std::string, NativeCallable>& b,
+            std::unordered_map<std::string, std::set<int>>& a)
             : builtins(b), arity(a), env(e) {
         }
 
@@ -56,9 +57,9 @@ namespace jc {
     // ═══ 模块定义宏 ═══
 #define JC2_MODULE(moduleName) \
         static void _jc2_load_##moduleName( \
-            std::map<std::string, jc::Value>& env, \
-            std::map<std::string, jc::NativeCallable>& builtins, \
-            std::map<std::string, std::set<int>>& arity); \
+            std::unordered_map<std::string, jc::Value>& env, \
+            std::unordered_map<std::string, jc::NativeCallable>& builtins, \
+            std::unordered_map<std::string, std::set<int>>& arity); \
         namespace { \
             struct _jc2_reg_##moduleName { \
                 _jc2_reg_##moduleName() { \
@@ -69,9 +70,9 @@ namespace jc {
             } _jc2_instance_##moduleName; \
         } \
         static void _jc2_load_##moduleName( \
-            std::map<std::string, jc::Value>& env, \
-            std::map<std::string, jc::NativeCallable>& builtins, \
-            std::map<std::string, std::set<int>>& arity)
+            std::unordered_map<std::string, jc::Value>& env, \
+            std::unordered_map<std::string, jc::NativeCallable>& builtins, \
+            std::unordered_map<std::string, std::set<int>>& arity)
 } // namespace jc
 
 #endif // JC2_MODULE_H

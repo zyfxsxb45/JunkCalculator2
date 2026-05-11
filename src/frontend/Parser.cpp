@@ -899,7 +899,8 @@ namespace jc {
                 t == TokenType::STATE ||                          // ★
                 t == TokenType::IMPORT || t == TokenType::SWITCH ||  // ★
                 t == TokenType::CASE || t == TokenType::DEFAULT ||
-                t == TokenType::SUPER || t == TokenType::CLASS;
+                t == TokenType::SUPER || t == TokenType::CLASS || t == TokenType::SELF ||
+                t == TokenType::TRUE_KW || t == TokenType::FALSE_KW || t == TokenType::NONE_KW;
             };
         if (isKeyword(peek().type) && current + 1 < static_cast<int>(tokens.size())
             && tokens[current + 1].type == TokenType::ASSIGN) {
@@ -919,7 +920,11 @@ namespace jc {
         if (match({ TokenType::STRING }))     return std::make_unique<Literal>(previous().lexeme, true);
         if (match({ TokenType::IDENTIFIER })) return std::make_unique<Variable>(previous());
         // ★ 控制流关键字
+        if (match({ TokenType::TRUE_KW }))  return std::make_unique<Literal>("true", false, false, true);
+        if (match({ TokenType::FALSE_KW })) return std::make_unique<Literal>("false", false, false, true);
+        if (match({ TokenType::NONE_KW }))  return std::make_unique<Literal>("none", false, false, true);
         if (match({ TokenType::SUPER }))    return std::make_unique<SuperExpr>();
+        if (match({ TokenType::SELF }))     return std::make_unique<SelfExpr>();
         if (match({ TokenType::CLASS }))    return classDefExpr();
         if (match({ TokenType::IF }))       return ifExpr();
         if (match({ TokenType::WHILE }))    return whileExpr();
@@ -1565,12 +1570,6 @@ namespace jc {
     }
 
     // ---- 辅助函数 (不变) ----
-    bool Parser::match(std::initializer_list<TokenType> types) { for (auto t : types) if (check(t)) { advance(); return true; } return false; }
-    bool Parser::check(TokenType type) const { if (isAtEnd()) return false; return peek().type == type; }
-    bool Parser::isAtEnd() const { return peek().type == TokenType::END_OF_FILE; }
-    Token Parser::advance() { if (!isAtEnd()) current++; return previous(); }
-    Token Parser::peek() const { return tokens[current]; }
-    Token Parser::previous() const { return tokens[current - 1]; }
     Token Parser::consume(TokenType type, const std::string& message) { if (check(type)) return advance(); throw std::runtime_error(message); }
 
 } // namespace jc

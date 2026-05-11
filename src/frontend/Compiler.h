@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 #include <set>
+#include <unordered_set>
 
 namespace jc {
 
@@ -23,8 +24,8 @@ namespace jc {
             int scopeDepth = 0;
             std::vector<Local> locals;
             int maxLocals = 0;                  // ★ 新增：跟踪该函数所使用的最大局部变量数
-            std::set<std::string> refNames;     // ★ 新增：跟踪当前作用域显式 ref 的外部变量
-            std::set<std::string> stateNames;   // ★ 新增：跟踪当前作用域显式 state 的外部变量
+            std::unordered_set<std::string> refNames;     // ★ 新增：跟踪当前作用域显式 ref 的外部变量
+            std::unordered_set<std::string> stateNames;   // ★ 新增：跟踪当前作用域显式 state 的外部变量
             int tryDepth = 0;
             std::string expectedReturnType = "";
         };
@@ -46,7 +47,7 @@ namespace jc {
         int functionIndexOffset = 0;
         int lastLine = 0;
         std::string currentSourceFile;
-        std::set<std::string> knownGlobals; // ★ 跟踪已知的全局变量
+        std::unordered_set<std::string> knownGlobals; // ★ 跟踪已知的全局变量
 
         CompilerState& current() { return stateStack.back(); }
         Chunk* chunk() { return &current().function->chunk; }
@@ -113,6 +114,7 @@ namespace jc {
         std::any visitDotAssign(DotAssign*) override;
         std::any visitMethodCallExpr(MethodCallExpr*) override;
         std::any visitSuperExpr(SuperExpr*) override;
+        std::any visitSelfExpr(SelfExpr*) override;
         std::any visitDestructAssign(DestructAssign*) override;
         std::any visitFStringExpr(FStringExpr*) override;
         std::any visitListCompExpr(ListCompExpr*) override;

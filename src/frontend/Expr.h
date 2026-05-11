@@ -46,6 +46,7 @@ namespace jc {
     struct DotAssign;          // ★
     struct MethodCallExpr;     // ★
     struct SuperExpr;
+    struct SelfExpr;           // ★
     struct DestructAssign;     // ★
     struct FStringExpr;
     struct ListCompExpr;       // ★
@@ -92,6 +93,7 @@ namespace jc {
         virtual std::any visitDotAssign(DotAssign* expr) = 0;           // ★
         virtual std::any visitMethodCallExpr(MethodCallExpr* expr) = 0; // ★
         virtual std::any visitSuperExpr(SuperExpr* expr) = 0;
+        virtual std::any visitSelfExpr(SelfExpr* expr) = 0;
         virtual std::any visitDestructAssign(DestructAssign* expr) = 0;  // ★
         virtual std::any visitFStringExpr(FStringExpr* expr) = 0;  // ★
         virtual std::any visitListCompExpr(ListCompExpr* expr) = 0;  // ★
@@ -131,8 +133,9 @@ namespace jc {
         std::string value;
         bool isString;
         bool isImaginary;  // ★
-        explicit Literal(std::string value, bool isStr = false, bool isImag = false)
-            : value(std::move(value)), isString(isStr), isImaginary(isImag) {
+        bool isKeyword;    // ★ 新增
+        explicit Literal(std::string value, bool isStr = false, bool isImag = false, bool isKw = false)
+            : value(std::move(value)), isString(isStr), isImaginary(isImag), isKeyword(isKw) {
         }
         std::any accept(ExprVisitor& visitor) override { return visitor.visitLiteral(this); }
     };
@@ -484,6 +487,11 @@ namespace jc {
     // ★ super — evaluates to a proxy that dispatches to parent class
     struct SuperExpr : public Expr {
         std::any accept(ExprVisitor& visitor) override { return visitor.visitSuperExpr(this); }
+    };
+
+    // ★ self
+    struct SelfExpr : public Expr {
+        std::any accept(ExprVisitor& visitor) override { return visitor.visitSelfExpr(this); }
     };
 
     // ★ [a, b, c] = expr

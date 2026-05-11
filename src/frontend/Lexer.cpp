@@ -3,10 +3,11 @@
 #include <stdexcept>
 #include <unordered_map>   // ★ 新增
 #include <filesystem>
+#include <string_view>
 
 namespace jc {
 
-    static const std::unordered_map<std::string, TokenType> keywords = {
+    static const std::unordered_map<std::string_view, TokenType> keywords = {
         {"if",       TokenType::IF},
         {"else",     TokenType::ELSE},
         {"while",    TokenType::WHILE},
@@ -29,6 +30,10 @@ namespace jc {
         {"default",  TokenType::DEFAULT},      // ★
         {"class",    TokenType::CLASS},
         {"super",    TokenType::SUPER},
+        {"self",     TokenType::SELF},
+        {"true",     TokenType::TRUE_KW},
+        {"false",    TokenType::FALSE_KW},
+        {"none",     TokenType::NONE_KW},
     };
 
     static bool isContinuationToken(TokenType t) {
@@ -248,7 +253,7 @@ namespace jc {
         while (std::isalnum(peek()) || peek() == '_') {
             advance();
         }
-        std::string text = source.substr(start, current - start);
+        std::string_view text(source.data() + start, current - start);
         auto it = keywords.find(text);
         if (it != keywords.end()) {
             addToken(it->second);   // ★ 命中关键字

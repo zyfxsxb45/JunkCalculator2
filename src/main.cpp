@@ -221,7 +221,7 @@ void saveWorkspace(const std::string& filename) {
 
     int count = 0;
     for (const auto& [name, value] : vm.getGlobals()) {
-        if (name == "PI" || name == "E" || name == "i" || name == "I" || name == "ANS" || name == "true" || name == "false" || name == "none") continue;
+        if (name == "PI" || name == "E" || name == "i" || name == "I" || name == "ANS") continue;
         out << name << " = " << value.toJC2Expression() << "\n";
         count++;
     }
@@ -263,9 +263,6 @@ int main(int argc, char* argv[]) {
     vm.setGlobal("E", jc::Value(2.71828182845904523536));
     vm.setGlobal("i", jc::Value(jc::Complex(0.0, 1.0)));
     vm.setGlobal("I", jc::Value(jc::Complex(0.0, 1.0)));
-    vm.setGlobal("true", jc::Value(1.0));
-    vm.setGlobal("false", jc::Value(0.0));
-    vm.setGlobal("none", jc::Value::none());
 
     // 绑定虚拟机外包服务给系统级运行时回调！
     jc::helpers::setGlobalCallback = [](const std::string& name, const jc::Value& val) { vm.setGlobal(name, val); };

@@ -5,6 +5,8 @@
 #include "../memory/Value.h"
 #include <chrono>
 #include <functional>
+#include <unordered_map>
+#include <unordered_set>
 #include <map>
 #include <set>
 #include <string>
@@ -33,24 +35,41 @@ namespace jc {
         std::vector<Value> stack;
         static constexpr int MAX_STACK = 65536;
 
-        std::map<std::string, Value> globals;
-        std::map<std::string, NativeCallable> nativeBuiltins;
-        std::set<std::string> constGlobals;              // ★ 新增：const 变量追踪
+        std::unordered_map<std::string, Value> globals;
+        std::unordered_map<std::string, NativeCallable> nativeBuiltins;
+        std::unordered_set<std::string> constGlobals;              // ★ 新增：const 变量追踪
 
         // ★ 存储编译后的函数对象
         std::vector<std::shared_ptr<CompiledFunction>> compiledFunctions;
 
-        // 栈操作
-        void push(const Value& val);
-        Value pop();
-        Value& peek(int distance = 0);
+        // 栈操作 (Inline 优化)
+        inline void push(const Value& val) {
+            if (static_cast<int>(stack.size()) >= MAX_STACK)
+                throw std::runtime_error("VM Error: Stack overflow.");
+            stack.push_back(val);
+        }
+        inline Value pop() {
+            if (stack.empty()) throw std::runtime_error("VM Error: Stack underflow.");
+            Value val = std::move(stack.back());
+            stack.pop_back();
+            return val;
+        }
+        inline Value& peek(int distance = 0) {
+            return stack[stack.size() - 1 - distance];
+        }
 
-        // 读取指令流（从当前帧）
-        uint8_t readByte();
-        uint16_t readShort();
-        OpCode readOp();
+        // 读取指令流（从当前帧）(Inline 优化)
+        inline uint8_t readByte() {
+            return currentChunk().code[frame().ip++];
+        }
+        inline uint16_t readShort() {
+            uint8_t hi = readByte();
+            uint8_t lo = readByte();
+            return static_cast<uint16_t>((hi << 8) | lo);
+        }
+        inline OpCode readOp() { return static_cast<OpCode>(readByte()); }
 
-        static bool isTruthy(const Value& val);
+        inline static bool isTruthy(const Value& val) { return val.truthy(); }
 
         // ★ 执行主循环
         Value run(int targetFrameDepth = 0);
@@ -83,8 +102,8 @@ namespace jc {
         std::string getTypeName(const Value& val);
         bool checkValueType(const Value& val, const std::string& typeStr);
 
-        std::map<std::string, std::set<int>> builtinArity;  // ★ 新增
-        std::set<std::string> importedModules;               // ★ 防重复导入
+        std::unordered_map<std::string, std::set<int>> builtinArity;  // ★ 新增
+        std::unordered_set<std::string> importedModules;               // ★ 防重复导入
 
         int currentLine();
 
@@ -142,12 +161,12 @@ namespace jc {
         Value callVMFunction(int fnIdx, const std::vector<Value>& args,
             std::shared_ptr<std::vector<std::shared_ptr<UpVal>>> upvalues = nullptr,
             Value boundSelf = Value::none(), Value boundClass = Value::none());
-        const std::map<std::string, NativeCallable>& getNativeBuiltins() const { return nativeBuiltins; }
+        const std::unordered_map<std::string, NativeCallable>& getNativeBuiltins() const { return nativeBuiltins; }
 
 
         Value execute(const Chunk& mainChunk);
 
-        const std::map<std::string, Value>& getGlobals() const { return globals; }
+        const std::unordered_map<std::string, Value>& getGlobals() const { return globals; }
         void clearGlobals() {
             globals.clear();
             constGlobals.clear();
@@ -158,9 +177,6 @@ namespace jc {
             globals["E"] = Value(2.71828182845904523536);
             globals["i"] = Value(Complex(0.0, 1.0));
             globals["I"] = Value(Complex(0.0, 1.0));
-            globals["true"] = Value(1.0);
-            globals["false"] = Value(0.0);
-            globals["none"] = Value::none();
         }
         void removeGlobal(const std::string& name) {
             globals.erase(name);

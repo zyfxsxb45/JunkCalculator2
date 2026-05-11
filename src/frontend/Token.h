@@ -52,6 +52,10 @@ namespace jc {
         DEFAULT,             // ★
         CLASS,
         SUPER,
+        SELF,                // ★ 新增
+        TRUE_KW,             // ★ 新增
+        FALSE_KW,            // ★ 新增
+        NONE_KW,             // ★ 新增
 
         // --- 逻辑运算符 ---
         AND_AND,        // &&
@@ -127,6 +131,10 @@ namespace jc {
         case TokenType::ELLIPSIS:      return "ELLIPSIS(...)";
         case TokenType::CLASS:         return "CLASS";
         case TokenType::SUPER:         return "SUPER";
+        case TokenType::SELF:          return "SELF";
+        case TokenType::TRUE_KW:       return "TRUE";
+        case TokenType::FALSE_KW:      return "FALSE";
+        case TokenType::NONE_KW:       return "NONE";
         case TokenType::IF:            return "IF";               // ★
         case TokenType::ELSE:          return "ELSE";             // ★
         case TokenType::WHILE:         return "WHILE";            // ★

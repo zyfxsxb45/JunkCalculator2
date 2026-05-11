@@ -102,13 +102,13 @@ function activate(context) {
 
             // 添加常用代码片段 (Snippets)
             const snippets = [
-                { label: 'for', detail: 'for loop', insertText: 'for (${1:i} = ${2:0}; ${1:i} < ${3:10}; ${1:i}++) {\n\t$0\n}' },
+                { label: 'for', detail: 'for loop', insertText: 'for (${1:i} = ${2:0}; ${1:i} < ${3:10}; ${1:i} += 1) {\n\t$0\n}' },
                 { label: 'forin', detail: 'for..in loop', insertText: 'for (${1:item} in ${2:collection}) {\n\t$0\n}' },
                 { label: 'while', detail: 'while loop', insertText: 'while (${1:condition}) {\n\t$0\n}' },
                 { label: 'if', detail: 'if statement', insertText: 'if (${1:condition}) {\n\t$0\n}' },
                 { label: 'ifelse', detail: 'if..else statement', insertText: 'if (${1:condition}) {\n\t$2\n} else {\n\t$0\n}' },
-                { label: 'class', detail: 'class definition', insertText: 'class ${1:ClassName} {\n\t${1:ClassName}() {\n\t\t$0\n\t}\n}' },
-                { label: 'func', detail: 'function definition', insertText: '${1:functionName}(${2:args}) {\n\t$0\n}' }
+                { label: 'class', detail: 'class definition', insertText: 'class ${1:ClassName} {\n\tinit() {\n\t\t$0\n\t}\n}' },
+                { label: 'func', detail: 'function definition', insertText: '${1:functionName}(${2:args}) = {\n\t$0\n}' }
             ];
             for (const snip of snippets) {
                 const item = new vscode.CompletionItem(snip.label, vscode.CompletionItemKind.Snippet);
