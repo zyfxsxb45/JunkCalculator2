@@ -1034,66 +1034,35 @@ namespace jc {
         if (match({ TokenType::LPAREN })) {
             // ★ 推测性 lambda 解析：(params) => body  [兼容了类型签名侦测]
             int savedPos = current;
-            std::vector<Token> lambdaParams;
-            bool validParams = true;
-
-            auto skipTypeAndDefault = [&]() {
-                if (current < static_cast<int>(tokens.size()) && tokens[current].type == TokenType::COLON) {
-                    current++; // skip :
-                    if (current < static_cast<int>(tokens.size()) && tokens[current].type == TokenType::IDENTIFIER) current++; // skip type
-                }
-                if (current < static_cast<int>(tokens.size()) && tokens[current].type == TokenType::ASSIGN) {
-                    current++; // skip =
-                    int depth = 0;
-                    while (current < static_cast<int>(tokens.size())) {
-                        auto tt = tokens[current].type;
-                        if (tt == TokenType::LPAREN || tt == TokenType::LBRACKET || tt == TokenType::LBRACE) { depth++; current++; }
-                        else if (tt == TokenType::RPAREN || tt == TokenType::RBRACKET || tt == TokenType::RBRACE) {
-                            if (depth == 0) break;
-                            depth--; current++;
-                        }
-                        else if (depth == 0 && tt == TokenType::COMMA) break;
-                        else current++;
-                    }
-                }
-                };
-
-            if (check(TokenType::RPAREN)) { /* () => expr */ }
-            else if (check(TokenType::IDENTIFIER)) {
-                lambdaParams.push_back(tokens[current]); current++;
-                skipTypeAndDefault();
-                while (current < static_cast<int>(tokens.size()) && tokens[current].type == TokenType::COMMA) {
-                    current++;
-                    if (current >= static_cast<int>(tokens.size()) || tokens[current].type != TokenType::IDENTIFIER) {
-                        validParams = false; break;
-                    }
-                    lambdaParams.push_back(tokens[current]); current++;
-                    skipTypeAndDefault();
-                }
-            }
-            else validParams = false;
-
             bool isLambda = false;
-            if (validParams && current < static_cast<int>(tokens.size()) && tokens[current].type == TokenType::RPAREN) {
-                current++; // skip )
-                while (current < static_cast<int>(tokens.size()) && tokens[current].type == TokenType::NEWLINE) current++;
+
+            int peekPos = current;
+            int depth = 1;
+            while (peekPos < static_cast<int>(tokens.size()) && depth > 0) {
+                TokenType tt = tokens[peekPos].type;
+                if (tt == TokenType::LPAREN || tt == TokenType::LBRACKET || tt == TokenType::LBRACE) depth++;
+                else if (tt == TokenType::RPAREN || tt == TokenType::RBRACKET || tt == TokenType::RBRACE) depth--;
+                peekPos++;
+            }
+
+            if (depth == 0) {
+                while (peekPos < static_cast<int>(tokens.size()) && tokens[peekPos].type == TokenType::NEWLINE) peekPos++;
 
                 // ★ 嗅探返回类型 ->
-                if (current < static_cast<int>(tokens.size()) && tokens[current].type == TokenType::RIGHT_ARROW) {
-                    current++;
-                    if (current < static_cast<int>(tokens.size()) && tokens[current].type == TokenType::IDENTIFIER) current++;
+                if (peekPos < static_cast<int>(tokens.size()) && tokens[peekPos].type == TokenType::RIGHT_ARROW) {
+                    peekPos++;
+                    if (peekPos < static_cast<int>(tokens.size()) && tokens[peekPos].type == TokenType::IDENTIFIER) peekPos++;
                 }
-                while (current < static_cast<int>(tokens.size()) && tokens[current].type == TokenType::NEWLINE) current++;
+                while (peekPos < static_cast<int>(tokens.size()) && tokens[peekPos].type == TokenType::NEWLINE) peekPos++;
 
-                if (current < static_cast<int>(tokens.size()) && tokens[current].type == TokenType::ARROW) {
-                    current++; // skip =>
+                if (peekPos < static_cast<int>(tokens.size()) && tokens[peekPos].type == TokenType::ARROW) {
                     isLambda = true;
                 }
             }
 
             if (isLambda) {
                 current = savedPos; // 回退，开启真正无坚不摧的 Lambda 解析！
-                lambdaParams.clear();
+                std::vector<Token> lambdaParams;
                 std::vector<bool> lambdaParamIsRef;
                 std::vector<std::shared_ptr<Expr>> lambdaDefaults;
                 std::vector<std::string> paramTypes; // ★
