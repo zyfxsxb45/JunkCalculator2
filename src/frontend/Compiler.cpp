@@ -1175,6 +1175,7 @@ namespace jc {
             
             emitStoreRoot();
             emit(OpCode::OP_POP, lastLine);
+            emit(OpCode::OP_POP, lastLine);
             current().locals.pop_back();
             return {};
         }
@@ -1201,6 +1202,7 @@ namespace jc {
             emit(static_cast<uint8_t>(expr->indexChain[0].size()), lastLine);
             
             emitStoreRoot();
+            emit(OpCode::OP_POP, lastLine);
             emit(OpCode::OP_POP, lastLine);
             
             current().locals.pop_back(); // untrack valTmpIdx
@@ -1414,12 +1416,12 @@ namespace jc {
 
             noMatchJump = chunk()->emitJump(OpCode::OP_JUMP, lastLine);
             for (int bj : bodyJumps) chunk()->patchJump(bj);
-            emit(OpCode::OP_POP, lastLine);
-            compileNode(body.get());
+            emit(OpCode::OP_POP, lastLine); // 弹出 subject
+            compileNode(body.get()); // 执行 body，压入 body 结果
             endJumps.push_back(chunk()->emitJump(OpCode::OP_JUMP, lastLine));
             chunk()->patchJump(noMatchJump);
         }
-        emit(OpCode::OP_POP, lastLine);
+        emit(OpCode::OP_POP, lastLine); // 弹出 subject
         if (expr->defaultBody) compileNode(expr->defaultBody.get());
         else emit(OpCode::OP_NONE, lastLine);
 
@@ -1548,7 +1550,6 @@ namespace jc {
 
     std::any Compiler::visitConstDecl(ConstDecl* expr) {
         compileNode(expr->value.get());
-        emit(OpCode::OP_DUP, lastLine);
         const std::string& name = expr->name.lexeme;
 
         if (stateStack.size() == 1) knownGlobals.insert(name);
