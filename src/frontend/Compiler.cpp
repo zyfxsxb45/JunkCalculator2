@@ -114,6 +114,8 @@ namespace jc {
 
         addLocal("", current().scopeDepth);
         int valTmpIdx = static_cast<int>(current().locals.size()) - 1;
+        emit(OpCode::OP_SET_LOCAL, lastLine);
+        emit16(static_cast<uint16_t>(valTmpIdx), lastLine);
 
         if (auto* dot = dynamic_cast<DotAccess*>(target)) {
             compileNode(dot->object.get());
@@ -1129,6 +1131,8 @@ namespace jc {
         compileNode(expr->value.get());
         addLocal("", current().scopeDepth);
         int valTmpIdx = static_cast<int>(current().locals.size()) - 1;
+        emit(OpCode::OP_SET_LOCAL, lastLine);
+        emit16(static_cast<uint16_t>(valTmpIdx), lastLine);
 
         auto emitStoreRoot = [&]() {
             if (!expr->hasObjectExpr()) {
@@ -1219,6 +1223,8 @@ namespace jc {
             emit(OpCode::OP_NONE, lastLine);
             addLocal("", current().scopeDepth);
             int chainTmpIdx = static_cast<int>(current().locals.size()) - 1;
+            emit(OpCode::OP_SET_LOCAL, lastLine);
+            emit16(static_cast<uint16_t>(chainTmpIdx), lastLine);
 
             emitLoadRoot();
             for (int level = 0; level < depth - 1; ++level) {
