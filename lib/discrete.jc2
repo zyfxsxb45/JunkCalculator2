@@ -62,7 +62,7 @@ class Prop {
 
     eval(env: dict) -> int = {
         tp = self.tp
-        if (tp == "var") return env[str(self.a)] ? 1 : 0
+        if (tp == "var") return env[self.a] ? 1 : 0
         if (tp == "not") return self.a.eval(env) ? 0 : 1
         
         ea = self.a.eval(env)
@@ -76,7 +76,7 @@ class Prop {
 
     vars() -> set = {
         tp = self.tp
-        if (tp == "var") return set(str(self.a))
+        if (tp == "var") return set(self.a)
         if (tp == "not") return self.a.vars()
         return self.a.vars() | self.b.vars()
     }
@@ -337,21 +337,19 @@ class Graph {
 
     // ── Construction & Erasure (CRUD API) ──
     addVertex(v: any) = {
-        k = str(v)
-        if (!hasKey(self.adj, k)) self.adj[k] = list()
+        if (!hasKey(self.adj, v)) self.adj[v] = list()
         return self
     }
 
     removeVertex(v: any) = {
-        k = str(v)
-        if (!hasKey(self.adj, k)) return self
-        discard(self.adj, k) 
+        if (!hasKey(self.adj, v)) return self
+        discard(self.adj, v) 
         
         // Cleanup orphans
         for (u in keys(self.adj)) {
             new_edges = list()
             for (e in self.adj[u]) {
-                if (e[0] != k) push(new_edges, e)
+                if (e[0] != v) push(new_edges, e)
             }
             self.adj[u] = new_edges
         }
@@ -364,32 +362,30 @@ class Graph {
     }
 
     addEdge(u: any, v: any, w: any = 1) = {
-        ku = str(u); kv = str(v)
-        self.addVertex(ku); self.addVertex(kv)
+        self.addVertex(u); self.addVertex(v)
         
-        push(self.adj[ku], list(kv, w))
-        if (!self.directed) push(self.adj[kv], list(ku, w))
+        push(self.adj[u], list(v, w))
+        if (!self.directed) push(self.adj[v], list(u, w))
         self._ec += 1
         return self
     }
 
     removeEdge(u: any, v: any) = {
-        ku = str(u); kv = str(v)
         removed = false
-        if (hasKey(self.adj, ku)) {
+        if (hasKey(self.adj, u)) {
             new_u = list()
-            for (e in self.adj[ku]) {
-                if (e[0] != kv) push(new_u, e)
+            for (e in self.adj[u]) {
+                if (e[0] != v) push(new_u, e)
                 else removed = true
             }
-            self.adj[ku] = new_u
+            self.adj[u] = new_u
         }
-        if (!self.directed && hasKey(self.adj, kv)) {
+        if (!self.directed && hasKey(self.adj, v)) {
             new_v = list()
-            for (e in self.adj[kv]) {
-                if (e[0] != ku) push(new_v, e)
+            for (e in self.adj[v]) {
+                if (e[0] != u) push(new_v, e)
             }
-            self.adj[kv] = new_v
+            self.adj[v] = new_v
         }
         if (removed) self._ec -= 1
         return self
@@ -404,27 +400,24 @@ class Graph {
     // ── Queries ──
     vertices() -> list           = return toList(keys(self.adj))
     edgeCount() -> int           = return self._ec
-    hasVertex(v: any) -> bool    = return hasKey(self.adj, str(v))
+    hasVertex(v: any) -> bool    = return hasKey(self.adj, v)
 
     hasEdge(u: any, v: any) -> bool = {
-        k = str(u); tv = str(v)
-        if (!hasKey(self.adj, k)) return false
-        for (e in self.adj[k]) { if (e[0] == tv) return true }
+        if (!hasKey(self.adj, u)) return false
+        for (e in self.adj[u]) { if (e[0] == v) return true }
         return false
     }
     
     getWeight(u: any, v: any) -> any = {
-        k = str(u); tv = str(v)
-        if (hasKey(self.adj, k)) {
-            for (e in self.adj[k]) { if (e[0] == tv) return e[1] }
+        if (hasKey(self.adj, u)) {
+            for (e in self.adj[u]) { if (e[0] == v) return e[1] }
         }
         return none()
     }
 
     neighbors(v: any) -> list = {
-        k = str(v)
-        if (!hasKey(self.adj, k)) return list()
-        return map((e) => e[0], self.adj[k])
+        if (!hasKey(self.adj, v)) return list()
+        return map((e) => e[0], self.adj[v])
     }
 
     edges() -> list = {
@@ -436,22 +429,20 @@ class Graph {
     }
 
     outDegree(v: any) -> int = {
-        k = str(v)
-        return hasKey(self.adj, k) ? len(self.adj[k]) : 0
+        return hasKey(self.adj, v) ? len(self.adj[v]) : 0
     }
 
     inDegree(v: any) -> int = {
-        tgt = str(v); c = 0
+        c = 0
         for (k in keys(self.adj)) {
-            for (e in self.adj[k]) { if (e[0] == tgt) c += 1 }
+            for (e in self.adj[k]) { if (e[0] == v) c += 1 }
         }
         return c
     }
 
     // ── Traversals ──
     bfs(start: any) -> list = {
-        ks = str(start)
-        visited = set(ks); q = list(ks); res = list()
+        visited = set(start); q = list(start); res = list()
         while (len(q) > 0) {
             curr = shift(q); push(res, curr)
             if (hasKey(self.adj, curr)) {
@@ -465,30 +456,29 @@ class Graph {
 
     dfs(start: any) -> list = {
         visited = set(); res = list()
-        _go(v: string) = {
+        _go(v: any) = {
             if (v in visited) return none
             add(visited, v); push(res, v)
             if (hasKey(self.adj, v)) {
                 for (e in self.adj[v]) _go(e[0])
             }
         }
-        _go(str(start))
+        _go(start)
         return res
     }
 
     // ── Path Algorithms ──
     findPath(start: any, end: any) -> list = {
-        ks = str(start); ke = str(end)
-        if (ks == ke) return list(ks)
+        if (start == end) return list(start)
         
-        visited = set(ks); q = list(list(ks))
+        visited = set(start); q = list(list(start))
         while (len(q) > 0) {
             path = shift(q); curr = last(path)
             if (hasKey(self.adj, curr)) {
                 for (e in self.adj[curr]) {
                     nbr = e[0]
                     np = list(); for (p in path) push(np, p); push(np, nbr)
-                    if (nbr == ke) return np
+                    if (nbr == end) return np
                     if (!(nbr in visited)) { add(visited, nbr); push(q, np) }
                 }
             }
@@ -497,10 +487,10 @@ class Graph {
     }
 
     dijkstra(start: any) -> dict = {
-        ks = str(start); vs = toList(keys(self.adj))
+        vs = toList(keys(self.adj))
         dist = dict(); prev = dict()
         for (v in vs) dist[v] = none
-        dist[ks] = 0; visited = set()
+        dist[start] = 0; visited = set()
         
         while (len(visited) < len(vs)) {
             minV = none; minD = none
@@ -526,15 +516,15 @@ class Graph {
     }
 
     shortestPath(start: any, end: any) -> dict = {
-        r = self.dijkstra(start); ke = str(end)
-        if (isnone(r.dist[ke])) return {path: list(), dist: none}
+        r = self.dijkstra(start)
+        if (isnone(r.dist[end])) return {path: list(), dist: none}
         
-        path = list(); curr = ke
+        path = list(); curr = end
         while (!isnone(curr)) {
             push(path, curr)
             curr = hasKey(r.prev, curr) ? r.prev[curr] : none
         }
-        return {path: reverse(path), dist: r.dist[ke]}
+        return {path: reverse(path), dist: r.dist[end]}
     }
 
     // ── Topology & Properties ──
@@ -544,7 +534,7 @@ class Graph {
 
         if (self.directed) {
             color = dict(); for (v in vs) color[v] = 0
-            _visit(v: string) = {
+            _visit(v: any) = {
                 if (found[0]) return none
                 color[v] = 1
                 if (hasKey(self.adj, v)) {
@@ -558,7 +548,7 @@ class Graph {
             for (v in vs) { if (color[v] == 0) _visit(v) }
         } else {
             visited = set()
-            _visit(v: string, parent: any) = {
+            _visit(v: any, parent: any) = {
                 if (found[0]) return none
                 add(visited, v)
                 if (hasKey(self.adj, v)) {

@@ -95,15 +95,14 @@ class DefaultDict {
     }
     
     __getitem__(key: any) = {
-        k = str(key)
-        if (!hasKey(self.data, k)) {
-            self.data[k] = self.factory()
+        if (!hasKey(self.data, key)) {
+            self.data[key] = self.factory()
         }
-        return self.data[k]
+        return self.data[key]
     }
     
-    __setitem__(key: any, val: any) = { self.data[str(key)] = val }
-    __contains__(key: any) -> bool  = return hasKey(self.data, str(key))
+    __setitem__(key: any, val: any) = { self.data[key] = val }
+    __contains__(key: any) -> bool  = return hasKey(self.data, key)
     
     keys() -> list   = return keys(self.data)
     values() -> list = return values(self.data)
@@ -120,16 +119,14 @@ class Counter {
     
     update(iterable: any) = {
         for (item in iterable) {
-            k = str(item)
-            if (hasKey(self.data, k)) { self.data[k] += 1 } 
-            else { self.data[k] = 1 }
+            if (hasKey(self.data, item)) { self.data[item] += 1 } 
+            else { self.data[item] = 1 }
         }
         return self
     }
     
     get(key: any) -> int = {
-        k = str(key)
-        return hasKey(self.data, k) ? self.data[k] : 0
+        return hasKey(self.data, key) ? self.data[key] : 0
     }
     
     mostCommon(n: int = 1) -> list = {
