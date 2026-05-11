@@ -93,11 +93,28 @@ function activate(context) {
             const keywords = [
                 'if', 'else', 'while', 'for', 'in', 'break', 'continue', 'return',
                 'switch', 'case', 'default', 'throw', 'try', 'catch',
-                'class', 'extends', 'const', 'state', 'delete', 'ref', 'import',
+                'class', 'extends', 'const', 'state', 'delete', 'ref', 'import', 'local',
                 'true', 'false', 'none', 'PI', 'E', 'ANS', 'self', 'super'
             ];
             for (const kw of keywords) {
                 completionItems.push(new vscode.CompletionItem(kw, vscode.CompletionItemKind.Keyword));
+            }
+
+            // 添加常用代码片段 (Snippets)
+            const snippets = [
+                { label: 'for', detail: 'for loop', insertText: 'for (${1:i} = ${2:0}; ${1:i} < ${3:10}; ${1:i}++) {\n\t$0\n}' },
+                { label: 'forin', detail: 'for..in loop', insertText: 'for (${1:item} in ${2:collection}) {\n\t$0\n}' },
+                { label: 'while', detail: 'while loop', insertText: 'while (${1:condition}) {\n\t$0\n}' },
+                { label: 'if', detail: 'if statement', insertText: 'if (${1:condition}) {\n\t$0\n}' },
+                { label: 'ifelse', detail: 'if..else statement', insertText: 'if (${1:condition}) {\n\t$2\n} else {\n\t$0\n}' },
+                { label: 'class', detail: 'class definition', insertText: 'class ${1:ClassName} {\n\t${1:ClassName}() {\n\t\t$0\n\t}\n}' },
+                { label: 'func', detail: 'function definition', insertText: '${1:functionName}(${2:args}) {\n\t$0\n}' }
+            ];
+            for (const snip of snippets) {
+                const item = new vscode.CompletionItem(snip.label, vscode.CompletionItemKind.Snippet);
+                item.detail = snip.detail;
+                item.insertText = new vscode.SnippetString(snip.insertText);
+                completionItems.push(item);
             }
 
             for (const [funcName, funcData] of Object.entries(functions)) {
@@ -193,6 +210,75 @@ function activate(context) {
         }
     }, '(', ',');
     context.subscriptions.push(signatureProvider);
+
+    // ★ 新增：悬停提示 (Hover Provider)
+    const hoverProvider = vscode.languages.registerHoverProvider('jc2', {
+        provideHover(document, position, token) {
+            const range = document.getWordRangeAtPosition(position, /[a-zA-Z_][a-zA-Z0-9_]*/);
+            if (!range) return null;
+            const word = document.getText(range);
+            
+            const funcData = functions[word];
+            if (funcData) {
+                const md = new vscode.MarkdownString();
+                md.appendCodeblock(funcData.signature || word, 'jc2');
+                if (funcData.desc) {
+                    md.appendMarkdown(`\n\n${funcData.desc}`);
+                }
+                if (funcData.examples && funcData.examples.length > 0) {
+                    md.appendMarkdown(`\n\n**Examples:**\n`);
+                    md.appendCodeblock(funcData.examples.join('\n'), 'jc2');
+                }
+                return new vscode.Hover(md, range);
+            }
+            return null;
+        }
+    });
+    context.subscriptions.push(hoverProvider);
+
+    // ★ 新增：大纲视图/文档符号 (Document Symbol Provider)
+    const symbolProvider = vscode.languages.registerDocumentSymbolProvider('jc2', {
+        provideDocumentSymbols(document, token) {
+            const symbols = [];
+            const text = document.getText();
+            const lines = text.split(/\r?\n/);
+            
+            for (let i = 0; i < lines.length; i++) {
+                const line = lines[i];
+                
+                // 匹配类定义: class MyClass
+                const classMatch = line.match(/^\s*class\s+([a-zA-Z_][a-zA-Z0-9_]*)/);
+                if (classMatch) {
+                    const range = new vscode.Range(i, 0, i, line.length);
+                    const selectionRange = new vscode.Range(i, line.indexOf(classMatch[1]), i, line.indexOf(classMatch[1]) + classMatch[1].length);
+                    symbols.push(new vscode.DocumentSymbol(
+                        classMatch[1],
+                        'class',
+                        vscode.SymbolKind.Class,
+                        range,
+                        selectionRange
+                    ));
+                    continue;
+                }
+                
+                // 匹配函数定义: funcName(args) { 或 local funcName(args) =
+                const funcMatch = line.match(/^\s*(?:local\s+)?([a-zA-Z_][a-zA-Z0-9_]*)\s*\([^)]*\)\s*(?:\{|=)/);
+                if (funcMatch) {
+                    const range = new vscode.Range(i, 0, i, line.length);
+                    const selectionRange = new vscode.Range(i, line.indexOf(funcMatch[1]), i, line.indexOf(funcMatch[1]) + funcMatch[1].length);
+                    symbols.push(new vscode.DocumentSymbol(
+                        funcMatch[1],
+                        'function',
+                        vscode.SymbolKind.Function,
+                        range,
+                        selectionRange
+                    ));
+                }
+            }
+            return symbols;
+        }
+    });
+    context.subscriptions.push(symbolProvider);
 
     context.subscriptions.push(
         vscode.commands.registerCommand('jc2.run', () => {

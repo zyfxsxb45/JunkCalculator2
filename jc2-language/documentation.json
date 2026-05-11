@@ -33,6 +33,15 @@
     "root": {
       "signature": "root(x, y)"
     },
+    "sqrtD": {
+      "signature": "sqrtD(x)"
+    },
+    "cbrtD": {
+      "signature": "cbrtD(x)"
+    },
+    "rootD": {
+      "signature": "rootD(x, y)"
+    },
     "pow": {
       "signature": "pow(x, y)"
     },
@@ -1071,6 +1080,9 @@
     "isnegative": {
       "signature": "isnegative(x)"
     },
+    "isapprox": {
+      "signature": "isapprox(a, b, [rtol], [atol])"
+    },
     "iszero": {
       "signature": "iszero(x)"
     },
@@ -1185,23 +1197,68 @@
     "json_pretty": {
       "signature": "json_pretty(val, [indent])"
     },
-    "addS": {
-      "signature": "addS(A, c)"
+    "addE": {
+      "signature": "addE(A, B)"
     },
-    "subS": {
-      "signature": "subS(A, c)"
+    "subE": {
+      "signature": "subE(A, B)"
     },
-    "mulS": {
-      "signature": "mulS(A, c)"
+    "mulE": {
+      "signature": "mulE(A, B)"
     },
-    "divS": {
-      "signature": "divS(A, c)"
+    "divE": {
+      "signature": "divE(A, B)"
     },
-    "powS": {
-      "signature": "powS(A, c)"
+    "idivE": {
+      "signature": "idivE(A, B)"
     },
-    "modS": {
-      "signature": "modS(A, c)"
+    "powE": {
+      "signature": "powE(A, B)"
+    },
+    "modE": {
+      "signature": "modE(A, B)"
+    },
+    "eqE": {
+      "signature": "eqE(A, B)"
+    },
+    "neqE": {
+      "signature": "neqE(A, B)"
+    },
+    "ltE": {
+      "signature": "ltE(A, B)"
+    },
+    "leE": {
+      "signature": "leE(A, B)"
+    },
+    "gtE": {
+      "signature": "gtE(A, B)"
+    },
+    "geE": {
+      "signature": "geE(A, B)"
+    },
+    "maxE": {
+      "signature": "maxE(A, B)"
+    },
+    "minE": {
+      "signature": "minE(A, B)"
+    },
+    "andE": {
+      "signature": "andE(A, B)"
+    },
+    "orE": {
+      "signature": "orE(A, B)"
+    },
+    "xorE": {
+      "signature": "xorE(A, B)"
+    },
+    "atan2E": {
+      "signature": "atan2E(Y, X)"
+    },
+    "hypotE": {
+      "signature": "hypotE(A, B)"
+    },
+    "whereE": {
+      "signature": "whereE(mask, A, B)"
     },
     "perm": {
       "signature": "perm(A)"
