@@ -1654,10 +1654,12 @@ namespace jc {
                     if (std::holds_alternative<std::shared_ptr<Instance>>(obj.data)) {
                         auto inst = std::get<std::shared_ptr<Instance>>(obj.data);
                         inst->fields.set(Value(field), val);
-                        push(Value(inst));
+                        push(val);
+                        push(obj);
                     }
                     else if (std::holds_alternative<Dict>(obj.data)) {
                         std::get<Dict>(obj.data).set(Value(field), val);
+                        push(val);
                         push(obj);
                     }
                     else {
@@ -2527,11 +2529,11 @@ namespace jc {
 
         if (dims == 1) {
             Value idx = pop();
-            Value& obj = peek(0);
+            Value obj = pop();
 
             if (std::holds_alternative<Dict>(obj.data)) {
                 std::get<Dict>(obj.data).set(idx, val);
-                return;
+                push(val); push(obj); return;
             }
 
             // ── Instance (__setitem__) ──
@@ -2554,7 +2556,7 @@ namespace jc {
                             captures = std::any_cast<std::shared_ptr<std::vector<std::shared_ptr<UpVal>>>>(setitemMethod->capturedEnv);
 
                         callVMFunction(setitemMethod->compiledFnIndex, { idx, val }, captures, Value(inst), Value(inst->classDef));
-                        return; // ★ 绝对返回防线！
+                        push(val); push(obj); return; // ★ 绝对返回防线！
                     }
                     else if (setitemMethod->isNative()) {
                         helpers::nativeSelfStack.push_back(Value(inst));
@@ -2568,7 +2570,7 @@ namespace jc {
                             throw;
                         }
                         helpers::nativeSelfStack.pop_back(); helpers::nativeClassStack.pop_back();
-                        return; // ★ 绝对返回防线！
+                        push(val); push(obj); return; // ★ 绝对返回防线！
                     }
                     else {
                         throw std::runtime_error("VM Error: __setitem__ has no callable implementation.");
@@ -2732,11 +2734,13 @@ namespace jc {
                     throw std::runtime_error("VM Error: String element assignment requires a single character.");
                 s[i] = std::get<std::string>(val.data)[0];
             }
+            push(val);
+            push(obj);
         }
         else if (dims == 2) {
             Value col = pop();
             Value row = pop();
-            Value& obj = peek(0);
+            Value obj = pop();
             int r = static_cast<int>(std::round(row.asDouble()));
             int c = static_cast<int>(std::round(col.asDouble()));
 
@@ -2775,6 +2779,8 @@ namespace jc {
             else {
                 throw std::runtime_error("VM Error: 2D index assignment requires a matrix.");
             }
+            push(val);
+            push(obj);
         }
     }
 
@@ -3032,7 +3038,7 @@ namespace jc {
             auto step = readOptionalInt();
             auto end = readOptionalInt();
             auto start = readOptionalInt();
-            Value& obj = peek(0);
+            Value obj = pop();
 
             if (std::holds_alternative<RealMatrix>(obj.data)) {
                 auto& m = std::get<RealMatrix>(obj.data);
@@ -3198,6 +3204,8 @@ namespace jc {
             else {
                 throw std::runtime_error("VM Error: Cannot slice-assign this type.");
             }
+            push(val);
+            push(obj);
         }
         else if (dims == 2) {
             Value val = pop();
@@ -3207,7 +3215,7 @@ namespace jc {
             auto rStep = readOptionalInt();
             auto rEnd = readOptionalInt();
             auto rStart = readOptionalInt();
-            Value& obj = peek(0);
+            Value obj = pop();
 
             auto processMatSliceSet = [&](auto& m) {
                 auto rIds = buildSliceIndices(m.getRows(), rStart, rEnd, rStep);
@@ -3304,6 +3312,8 @@ namespace jc {
             else {
                 throw std::runtime_error("VM Error: 2D slice assignment requires a matrix.");
             }
+            push(val);
+            push(obj);
         }
         else {
             throw std::runtime_error("VM Error: Unsupported slice assignment dimensionality.");

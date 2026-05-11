@@ -1,4 +1,5 @@
 #include "Compiler.h"
+#include "../vm/VM.h"
 #include <functional>
 
 namespace jc {
@@ -79,8 +80,6 @@ namespace jc {
     }
 
     void Compiler::emitStoreTarget(Expr* target) {
-        uint16_t tmpIdx = identifierConstant("<compound_tmp>");
-
         if (auto* var = dynamic_cast<Variable*>(target)) {
             const std::string& name = var->name.lexeme;
             int slot = resolveLocal(name);
@@ -113,21 +112,23 @@ namespace jc {
             return;
         }
 
-        if (auto* dot = dynamic_cast<DotAccess*>(target)) {
-            emit(OpCode::OP_SET_GLOBAL, lastLine);
-            emit16(tmpIdx, lastLine);
-            emit(OpCode::OP_POP, lastLine);
+        addLocal("", current().scopeDepth);
+        int valTmpIdx = static_cast<int>(current().locals.size()) - 1;
 
+        if (auto* dot = dynamic_cast<DotAccess*>(target)) {
             compileNode(dot->object.get());
 
-            emit(OpCode::OP_GET_GLOBAL, lastLine);
-            emit16(tmpIdx, lastLine);
+            emit(OpCode::OP_GET_LOCAL, lastLine);
+            emit16(static_cast<uint16_t>(valTmpIdx), lastLine);
 
             uint16_t fieldIdx = identifierConstant(dot->field.lexeme);
             emit(OpCode::OP_SET_PROPERTY, lastLine);
             emit16(fieldIdx, lastLine);
 
             emitStoreTarget(dot->object.get());
+            emit(OpCode::OP_POP, lastLine);
+            emit(OpCode::OP_POP, lastLine);
+            current().locals.pop_back();
             return;
         }
 
@@ -139,26 +140,23 @@ namespace jc {
             }
             uint8_t dimCount = static_cast<uint8_t>(idx->indices.size());
 
-            emit(OpCode::OP_SET_GLOBAL, lastLine);
-            emit16(tmpIdx, lastLine);
-            emit(OpCode::OP_POP, lastLine);
-
             compileNode(idx->object.get());
             for (auto& i : idx->indices)
                 compileNode(i.get());
 
-            emit(OpCode::OP_GET_GLOBAL, lastLine);
-            emit16(tmpIdx, lastLine);
+            emit(OpCode::OP_GET_LOCAL, lastLine);
+            emit16(static_cast<uint16_t>(valTmpIdx), lastLine);
 
             emit(OpCode::OP_INDEX_SET, lastLine);
             emit(dimCount, lastLine);
 
             emitStoreTarget(idx->object.get());
+            emit(OpCode::OP_POP, lastLine);
+            emit(OpCode::OP_POP, lastLine);
+
+            current().locals.pop_back();
             return;
         }
-
-        throw std::runtime_error(
-            "Compiler Error: Cannot store to this expression type in compound assignment.");
     }
 
     void Compiler::compileCompClause(ListCompExpr* expr, size_t clauseIdx) {
@@ -512,14 +510,20 @@ namespace jc {
     std::any Compiler::visitCall(Call* expr) {
         lastLine = expr->callee.line;
         const std::string& name = expr->callee.lexeme;
+
+        bool isBuiltin = false;
+        if (VM::activeVM) {
+            isBuiltin = VM::activeVM->getNativeBuiltins().count(name) > 0;
+        }
+
         int slot = resolveLocal(name);
-        if (slot != -1) {
+        if (slot != -1 && !isBuiltin) {
             emit(OpCode::OP_GET_LOCAL, expr->callee.line);
             emit16(static_cast<uint16_t>(slot), expr->callee.line);
         }
         else {
             int upvalue = resolveUpvalue(name);
-            if (upvalue != -1) {
+            if (upvalue != -1 && !isBuiltin) {
                 emit(OpCode::OP_GET_UPVALUE, expr->callee.line);
                 emit16(static_cast<uint16_t>(upvalue), expr->callee.line);
             }
@@ -956,6 +960,7 @@ namespace jc {
             compileNode(expr->target.get());
             compileNode(expr->value.get());
             emitOp(expr->op);
+            
             emitStoreTarget(expr->target.get());
             return {};
         }
@@ -1120,13 +1125,41 @@ namespace jc {
             }
         }
 
+        // 1. 编译右值并保存到临时变量
+        compileNode(expr->value.get());
+        addLocal("", current().scopeDepth);
+        int valTmpIdx = static_cast<int>(current().locals.size()) - 1;
+
+        auto emitStoreRoot = [&]() {
+            if (!expr->hasObjectExpr()) {
+                int slot = resolveLocal(expr->name.lexeme);
+                if (stateStack.size() > 1 && slot == -1 && current().refNames.count(expr->name.lexeme) == 0 && current().stateNames.count(expr->name.lexeme) == 0) {
+                    addLocal(expr->name.lexeme, 0); slot = resolveLocal(expr->name.lexeme);
+                }
+                if (slot != -1) { emit(OpCode::OP_SET_LOCAL, lastLine); emit16(static_cast<uint16_t>(slot), lastLine); }
+                else {
+                    int upvalue = resolveUpvalue(expr->name.lexeme);
+                    if (upvalue != -1) { emit(OpCode::OP_SET_UPVALUE, lastLine); emit16(static_cast<uint16_t>(upvalue), lastLine); }
+                    else { 
+                        uint16_t nameIdx = identifierConstant(expr->name.lexeme); 
+                        if (current().refNames.count(expr->name.lexeme) > 0) {
+                            emit(OpCode::OP_SET_GLOBAL_REF, lastLine);
+                        } else {
+                            emit(OpCode::OP_SET_GLOBAL, lastLine); 
+                        }
+                        emit16(nameIdx, lastLine); 
+                    }
+                }
+            }
+            else emitStoreTarget(expr->objectExpr.get());
+        };
+
         if (hasSlice) {
             if (expr->hasObjectExpr()) compileNode(expr->objectExpr.get());
             else {
                 int slot = resolveLocal(expr->name.lexeme);
                 if (slot != -1) { emit(OpCode::OP_GET_LOCAL, lastLine); emit16(static_cast<uint16_t>(slot), lastLine); }
                 else {
-                    // ★ 修改：引入 Upvalue 读取
                     int upvalue = resolveUpvalue(expr->name.lexeme);
                     if (upvalue != -1) { emit(OpCode::OP_GET_UPVALUE, lastLine); emit16(static_cast<uint16_t>(upvalue), lastLine); }
                     else { uint16_t idx = identifierConstant(expr->name.lexeme); emit(OpCode::OP_GET_GLOBAL, lastLine); emit16(idx, lastLine); }
@@ -1142,36 +1175,17 @@ namespace jc {
                 else {
                     compileNode(idx.get());
                     emit(OpCode::OP_NONE, lastLine);
-                    chunk()->emitConstant(Value(0.0), lastLine);  // ★ step = 0 (点索引标记)
+                    chunk()->emitConstant(Value(0.0), lastLine);
                 }
             }
 
-            compileNode(expr->value.get());
+            emit(OpCode::OP_GET_LOCAL, lastLine); emit16(static_cast<uint16_t>(valTmpIdx), lastLine);
             emit(OpCode::OP_SLICE_SET, lastLine);
             emit(static_cast<uint8_t>(expr->indexChain[0].size()), lastLine);
-
-            if (!expr->hasObjectExpr()) {
-                int slot = resolveLocal(expr->name.lexeme);
-                if (stateStack.size() > 1 && slot == -1 && current().refNames.count(expr->name.lexeme) == 0 && current().stateNames.count(expr->name.lexeme) == 0) {
-                    addLocal(expr->name.lexeme, 0); slot = resolveLocal(expr->name.lexeme);
-                }
-                if (slot != -1) { emit(OpCode::OP_SET_LOCAL, lastLine); emit16(static_cast<uint16_t>(slot), lastLine); }
-                else {
-                    // ★ 修改：引入 Upvalue 写入
-                    int upvalue = resolveUpvalue(expr->name.lexeme);
-                    if (upvalue != -1) { emit(OpCode::OP_SET_UPVALUE, lastLine); emit16(static_cast<uint16_t>(upvalue), lastLine); }
-                    else { 
-                        uint16_t idx = identifierConstant(expr->name.lexeme); 
-                        if (current().refNames.count(expr->name.lexeme) > 0) {
-                            emit(OpCode::OP_SET_GLOBAL_REF, lastLine);
-                        } else {
-                            emit(OpCode::OP_SET_GLOBAL, lastLine); 
-                        }
-                        emit16(idx, lastLine); 
-                    }
-                }
-            }
-            else { emitStoreTarget(expr->objectExpr.get()); }
+            
+            emitStoreRoot();
+            emit(OpCode::OP_POP, lastLine);
+            current().locals.pop_back();
             return {};
         }
 
@@ -1182,49 +1196,30 @@ namespace jc {
                 int slot = resolveLocal(expr->name.lexeme);
                 if (slot != -1) { emit(OpCode::OP_GET_LOCAL, lastLine); emit16(static_cast<uint16_t>(slot), lastLine); }
                 else {
-                    // ★ 修改引入读取环境
                     int upvalue = resolveUpvalue(expr->name.lexeme);
                     if (upvalue != -1) { emit(OpCode::OP_GET_UPVALUE, lastLine); emit16(static_cast<uint16_t>(upvalue), lastLine); }
                     else { uint16_t nameIdx = identifierConstant(expr->name.lexeme); emit(OpCode::OP_GET_GLOBAL, lastLine); emit16(nameIdx, lastLine); }
                 }
             }
-            };
-
-        auto emitStoreRoot = [&]() {
-            if (!expr->hasObjectExpr()) {
-                int slot = resolveLocal(expr->name.lexeme);
-                if (stateStack.size() > 1 && slot == -1 && current().refNames.count(expr->name.lexeme) == 0 && current().stateNames.count(expr->name.lexeme) == 0) {
-                    addLocal(expr->name.lexeme, 0); slot = resolveLocal(expr->name.lexeme);
-                }
-                if (slot != -1) { emit(OpCode::OP_SET_LOCAL, lastLine); emit16(static_cast<uint16_t>(slot), lastLine); }
-                else {
-                    // ★ 修改引入写入环境
-                    int upvalue = resolveUpvalue(expr->name.lexeme);
-                    if (upvalue != -1) { emit(OpCode::OP_SET_UPVALUE, lastLine); emit16(static_cast<uint16_t>(upvalue), lastLine); }
-                    else { 
-                        uint16_t nameIdx = identifierConstant(expr->name.lexeme); 
-                        if (current().refNames.count(expr->name.lexeme) > 0) {
-                            emit(OpCode::OP_SET_GLOBAL_REF, lastLine);
-                        } else {
-                            emit(OpCode::OP_SET_GLOBAL, lastLine); 
-                        }
-                        emit16(nameIdx, lastLine); 
-                    }
-                }
-            }
-            else emitStoreTarget(expr->objectExpr.get());
-            };
+        };
 
         if (depth == 1) {
             emitLoadRoot();
             for (auto& idx : expr->indexChain[0]) compileNode(idx.get());
-            compileNode(expr->value.get());
+            emit(OpCode::OP_GET_LOCAL, lastLine); emit16(static_cast<uint16_t>(valTmpIdx), lastLine);
             emit(OpCode::OP_INDEX_SET, lastLine);
             emit(static_cast<uint8_t>(expr->indexChain[0].size()), lastLine);
+            
             emitStoreRoot();
+            emit(OpCode::OP_POP, lastLine);
+            
+            current().locals.pop_back(); // untrack valTmpIdx
         }
         else {
-            uint16_t tmpIdx = identifierConstant("<idx_chain_tmp>");
+            emit(OpCode::OP_NONE, lastLine);
+            addLocal("", current().scopeDepth);
+            int chainTmpIdx = static_cast<int>(current().locals.size()) - 1;
+
             emitLoadRoot();
             for (int level = 0; level < depth - 1; ++level) {
                 for (auto& idx : expr->indexChain[level]) compileNode(idx.get());
@@ -1232,23 +1227,34 @@ namespace jc {
                 emit(static_cast<uint8_t>(expr->indexChain[level].size()), lastLine);
             }
             for (auto& idx : expr->indexChain[depth - 1]) compileNode(idx.get());
-            compileNode(expr->value.get());
+            emit(OpCode::OP_GET_LOCAL, lastLine); emit16(static_cast<uint16_t>(valTmpIdx), lastLine);
             emit(OpCode::OP_INDEX_SET, lastLine);
             emit(static_cast<uint8_t>(expr->indexChain[depth - 1].size()), lastLine);
 
             for (int level = depth - 2; level >= 0; --level) {
-                emit(OpCode::OP_SET_GLOBAL, lastLine); emit16(tmpIdx, lastLine); emit(OpCode::OP_POP, lastLine);
+                emit(OpCode::OP_SET_LOCAL, lastLine); emit16(static_cast<uint16_t>(chainTmpIdx), lastLine); 
+                emit(OpCode::OP_POP, lastLine); // pop obj_new
+                emit(OpCode::OP_POP, lastLine); // pop VAL
+                
                 emitLoadRoot();
                 for (int l = 0; l < level; ++l) {
                     for (auto& idx : expr->indexChain[l]) compileNode(idx.get());
                     emit(OpCode::OP_INDEX_GET, lastLine); emit(static_cast<uint8_t>(expr->indexChain[l].size()), lastLine);
                 }
                 for (auto& idx : expr->indexChain[level]) compileNode(idx.get());
-                emit(OpCode::OP_GET_GLOBAL, lastLine); emit16(tmpIdx, lastLine);
+                emit(OpCode::OP_GET_LOCAL, lastLine); emit16(static_cast<uint16_t>(chainTmpIdx), lastLine);
                 emit(OpCode::OP_INDEX_SET, lastLine); emit(static_cast<uint8_t>(expr->indexChain[level].size()), lastLine);
             }
             emitStoreRoot();
+            emit(OpCode::OP_POP, lastLine); // pop root_new
+            emit(OpCode::OP_POP, lastLine); // pop VAL
+            
+            current().locals.pop_back(); // untrack chainTmpIdx
+            emit(OpCode::OP_POP, lastLine); // pop NONE
+            
+            current().locals.pop_back(); // untrack valTmpIdx
         }
+        
         return {};
     }
 
@@ -1747,7 +1753,8 @@ namespace jc {
         lastLine = expr->field.line;
         if (dynamic_cast<SuperExpr*>(expr->object.get())) {
             uint16_t selfIdx = identifierConstant("self");
-            emit(OpCode::OP_GET_GLOBAL, lastLine); emit16(selfIdx, lastLine);
+            emit(OpCode::OP_GET_GLOBAL, lastLine);
+            emit16(selfIdx, lastLine);
             uint16_t nameIdx = identifierConstant(expr->field.lexeme);
             emit(OpCode::OP_GET_SUPER, lastLine); emit16(nameIdx, lastLine);
             return {};
@@ -1762,12 +1769,16 @@ namespace jc {
 
     std::any Compiler::visitDotAssign(DotAssign* expr) {
         lastLine = expr->field.line;
+        
         compileNode(expr->object.get());
         compileNode(expr->value.get());
+        
         uint16_t nameIdx = identifierConstant(expr->field.lexeme);
         emit(OpCode::OP_SET_PROPERTY, lastLine);
         emit16(nameIdx, lastLine);
+        
         emitStoreTarget(expr->object.get());
+        emit(OpCode::OP_POP, lastLine);
         return {};
     }
 
@@ -1775,7 +1786,8 @@ namespace jc {
         lastLine = expr->method.line;
         if (dynamic_cast<SuperExpr*>(expr->object.get())) {
             uint16_t selfIdx = identifierConstant("self");
-            emit(OpCode::OP_GET_GLOBAL, lastLine); emit16(selfIdx, lastLine);
+            emit(OpCode::OP_GET_GLOBAL, lastLine);
+            emit16(selfIdx, lastLine);
             for (auto& arg : expr->arguments) compileNode(arg.get());
             uint16_t nameIdx = identifierConstant(expr->method.lexeme);
             emit(OpCode::OP_SUPER_INVOKE, lastLine);
