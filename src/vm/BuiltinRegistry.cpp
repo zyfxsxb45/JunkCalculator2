@@ -831,68 +831,80 @@ void BuiltinRegistry::registerMatrixOps() {
 
     // --- 逐元素运算 (Element-wise) ---
     auto elementWiseOp = [](const Value& a, const Value& b, const std::string& opName, auto scalarOp) -> Value {
-        bool aMat = std::holds_alternative<RealMatrix>(a.data) || std::holds_alternative<ComplexMatrix>(a.data);
-        bool bMat = std::holds_alternative<RealMatrix>(b.data) || std::holds_alternative<ComplexMatrix>(b.data);
+        bool aMat = std::holds_alternative<RealMatrix>(a.data) || std::holds_alternative<ComplexMatrix>(a.data) || std::holds_alternative<StringMatrix>(a.data);
+        bool bMat = std::holds_alternative<RealMatrix>(b.data) || std::holds_alternative<ComplexMatrix>(b.data) || std::holds_alternative<StringMatrix>(b.data);
 
-        if (!aMat && !bMat) {
-            return scalarOp(a, b);
-        }
+        if (!aMat && !bMat) return scalarOp(a, b);
 
-        if (aMat && !bMat) {
-            if (std::holds_alternative<RealMatrix>(a.data) && !b.isComplex()) {
-                RealMatrix m = std::get<RealMatrix>(a.data);
-                std::vector<double> flat = m.rawData();
-                for (auto& v : flat) v = scalarOp(Value(v), b).asDouble();
-                return Value(RealMatrix(m.getRows(), m.getCols(), flat));
-            } else {
-                ComplexMatrix m = a.asComplexMatrix();
-                std::vector<Complex> flat = m.rawData();
-                for (auto& v : flat) v = scalarOp(Value(v), b).asComplex();
-                return Value(ComplexMatrix(m.getRows(), m.getCols(), flat));
+        int r1 = 1, c1 = 1, r2 = 1, c2 = 1;
+        auto getDims = [](const Value& v, int& r, int& c) {
+            if (std::holds_alternative<RealMatrix>(v.data)) { r = std::get<RealMatrix>(v.data).getRows(); c = std::get<RealMatrix>(v.data).getCols(); }
+            else if (std::holds_alternative<ComplexMatrix>(v.data)) { r = std::get<ComplexMatrix>(v.data).getRows(); c = std::get<ComplexMatrix>(v.data).getCols(); }
+            else if (std::holds_alternative<StringMatrix>(v.data)) { r = std::get<StringMatrix>(v.data).getRows(); c = std::get<StringMatrix>(v.data).getCols(); }
+        };
+        getDims(a, r1, c1); getDims(b, r2, c2);
+
+        if (aMat && bMat && (r1 != r2 || c1 != c2)) throw std::runtime_error("Math Error: Dimension mismatch in " + opName + "().");
+
+        int r = std::max(r1, r2);
+        int c = std::max(c1, c2);
+
+        auto getElem = [](const Value& v, int idx) -> Value {
+            if (std::holds_alternative<RealMatrix>(v.data)) return Value(std::get<RealMatrix>(v.data).rawData()[idx]);
+            if (std::holds_alternative<ComplexMatrix>(v.data)) return Value(std::get<ComplexMatrix>(v.data).rawData()[idx]);
+            if (std::holds_alternative<StringMatrix>(v.data)) return Value(std::get<StringMatrix>(v.data).rawData()[idx]);
+            return v;
+        };
+
+        Value firstRes = scalarOp(getElem(a, 0), getElem(b, 0));
+        bool isStr = std::holds_alternative<std::string>(firstRes.data);
+        bool isComp = std::holds_alternative<Complex>(firstRes.data);
+
+        if (isStr) {
+            std::vector<std::string> flat(r * c);
+            for (int i = 0; i < r * c; ++i) {
+                Value res = scalarOp(getElem(a, aMat ? i : 0), getElem(b, bMat ? i : 0));
+                flat[i] = std::holds_alternative<std::string>(res.data) ? std::get<std::string>(res.data) : res.toString();
             }
-        }
-
-        if (!aMat && bMat) {
-            if (!a.isComplex() && std::holds_alternative<RealMatrix>(b.data)) {
-                RealMatrix m = std::get<RealMatrix>(b.data);
-                std::vector<double> flat = m.rawData();
-                for (auto& v : flat) v = scalarOp(a, Value(v)).asDouble();
-                return Value(RealMatrix(m.getRows(), m.getCols(), flat));
-            } else {
-                ComplexMatrix m = b.asComplexMatrix();
-                std::vector<Complex> flat = m.rawData();
-                for (auto& v : flat) v = scalarOp(a, Value(v)).asComplex();
-                return Value(ComplexMatrix(m.getRows(), m.getCols(), flat));
+            return Value(StringMatrix(r, c, flat));
+        } else if (isComp) {
+            std::vector<Complex> flat(r * c);
+            for (int i = 0; i < r * c; ++i) {
+                flat[i] = scalarOp(getElem(a, aMat ? i : 0), getElem(b, bMat ? i : 0)).asComplex();
             }
-        }
-
-        // aMat && bMat
-        int r1 = std::holds_alternative<RealMatrix>(a.data) ? std::get<RealMatrix>(a.data).getRows() : std::get<ComplexMatrix>(a.data).getRows();
-        int c1 = std::holds_alternative<RealMatrix>(a.data) ? std::get<RealMatrix>(a.data).getCols() : std::get<ComplexMatrix>(a.data).getCols();
-        int r2 = std::holds_alternative<RealMatrix>(b.data) ? std::get<RealMatrix>(b.data).getRows() : std::get<ComplexMatrix>(b.data).getRows();
-        int c2 = std::holds_alternative<RealMatrix>(b.data) ? std::get<RealMatrix>(b.data).getCols() : std::get<ComplexMatrix>(b.data).getCols();
-
-        if (r1 != r2 || c1 != c2) throw std::runtime_error("Math Error: Dimension mismatch in " + opName + "().");
-
-        if (std::holds_alternative<RealMatrix>(a.data) && std::holds_alternative<RealMatrix>(b.data)) {
-            const auto& m1 = std::get<RealMatrix>(a.data).rawData();
-            const auto& m2 = std::get<RealMatrix>(b.data).rawData();
-            std::vector<double> flat(m1.size());
-            for (size_t i = 0; i < m1.size(); ++i) flat[i] = scalarOp(Value(m1[i]), Value(m2[i])).asDouble();
-            return Value(RealMatrix(r1, c1, flat));
+            return Value(ComplexMatrix(r, c, flat));
         } else {
-            const auto& m1 = a.asComplexMatrix().rawData();
-            const auto& m2 = b.asComplexMatrix().rawData();
-            std::vector<Complex> flat(m1.size());
-            for (size_t i = 0; i < m1.size(); ++i) flat[i] = scalarOp(Value(m1[i]), Value(m2[i])).asComplex();
-            return Value(ComplexMatrix(r1, c1, flat));
+            std::vector<double> flat(r * c);
+            for (int i = 0; i < r * c; ++i) {
+                flat[i] = scalarOp(getElem(a, aMat ? i : 0), getElem(b, bMat ? i : 0)).asDouble();
+            }
+            return Value(RealMatrix(r, c, flat));
         }
     };
 
-    reg("addE", { 2 }, [elementWiseOp](const std::vector<Value>& args) -> Value { return elementWiseOp(args[0], args[1], "addE", [](const Value& a, const Value& b) { return a + b; }); });
+    reg("addE", { 2 }, [elementWiseOp](const std::vector<Value>& args) -> Value { 
+        return elementWiseOp(args[0], args[1], "addE", [](const Value& a, const Value& b) { 
+            if (std::holds_alternative<std::string>(a.data) || std::holds_alternative<std::string>(b.data)) {
+                std::ostringstream oss; oss << a << b; return Value(oss.str());
+            }
+            return a + b; 
+        }); 
+    });
     reg("subE", { 2 }, [elementWiseOp](const std::vector<Value>& args) -> Value { return elementWiseOp(args[0], args[1], "subE", [](const Value& a, const Value& b) { return a - b; }); });
     reg("mulE", { 2 }, [elementWiseOp](const std::vector<Value>& args) -> Value { return elementWiseOp(args[0], args[1], "mulE", [](const Value& a, const Value& b) { return a * b; }); });
     reg("divE", { 2 }, [elementWiseOp](const std::vector<Value>& args) -> Value { return elementWiseOp(args[0], args[1], "divE", [](const Value& a, const Value& b) { return a / b; }); });
+    reg("idivE", { 2 }, [elementWiseOp](const std::vector<Value>& args) -> Value { 
+        return elementWiseOp(args[0], args[1], "idivE", [](const Value& a, const Value& b) { 
+            if (a.isBigInt() && b.isBigInt()) {
+                BigInt ba = std::get<BigInt>(a.data), bb = std::get<BigInt>(b.data);
+                if (bb.isZero()) throw std::runtime_error("Math Error: Division by zero.");
+                return Value(ba / bb);
+            }
+            double da = a.asDouble(), db = b.asDouble();
+            if (db == 0.0) throw std::runtime_error("Math Error: Division by zero.");
+            return Value(std::trunc(da / db));
+        }); 
+    });
     reg("powE", { 2 }, [elementWiseOp](const std::vector<Value>& args) -> Value { return elementWiseOp(args[0], args[1], "powE", [](const Value& a, const Value& b) { return a ^ b; }); });
     reg("modE", { 2 }, [elementWiseOp](const std::vector<Value>& args) -> Value { 
         return elementWiseOp(args[0], args[1], "modE", [](const Value& a, const Value& b) { 
@@ -908,6 +920,78 @@ void BuiltinRegistry::registerMatrixOps() {
             }
             return a % b; 
         }); 
+    });
+    reg("eqE", { 2 }, [elementWiseOp](const std::vector<Value>& args) -> Value { return elementWiseOp(args[0], args[1], "eqE", [](const Value& a, const Value& b) { return Value(helpers::checkEqual(a, b) ? 1.0 : 0.0); }); });
+    reg("neqE", { 2 }, [elementWiseOp](const std::vector<Value>& args) -> Value { return elementWiseOp(args[0], args[1], "neqE", [](const Value& a, const Value& b) { return Value(!helpers::checkEqual(a, b) ? 1.0 : 0.0); }); });
+    auto checkNoStr = [](const Value& a, const Value& b, const std::string& op) {
+        if (std::holds_alternative<std::string>(a.data) || std::holds_alternative<std::string>(b.data))
+            throw std::runtime_error("Type Error: " + op + "() does not support strings.");
+    };
+    reg("ltE", { 2 }, [elementWiseOp, checkNoStr](const std::vector<Value>& args) -> Value { return elementWiseOp(args[0], args[1], "ltE", [checkNoStr](const Value& a, const Value& b) { checkNoStr(a, b, "ltE"); return Value(helpers::checkLess(a, b) ? 1.0 : 0.0); }); });
+    reg("leE", { 2 }, [elementWiseOp, checkNoStr](const std::vector<Value>& args) -> Value { return elementWiseOp(args[0], args[1], "leE", [checkNoStr](const Value& a, const Value& b) { checkNoStr(a, b, "leE"); return Value(!helpers::checkGreater(a, b) ? 1.0 : 0.0); }); });
+    reg("gtE", { 2 }, [elementWiseOp, checkNoStr](const std::vector<Value>& args) -> Value { return elementWiseOp(args[0], args[1], "gtE", [checkNoStr](const Value& a, const Value& b) { checkNoStr(a, b, "gtE"); return Value(helpers::checkGreater(a, b) ? 1.0 : 0.0); }); });
+    reg("geE", { 2 }, [elementWiseOp, checkNoStr](const std::vector<Value>& args) -> Value { return elementWiseOp(args[0], args[1], "geE", [checkNoStr](const Value& a, const Value& b) { checkNoStr(a, b, "geE"); return Value(!helpers::checkLess(a, b) ? 1.0 : 0.0); }); });
+    reg("maxE", { 2 }, [elementWiseOp, checkNoStr](const std::vector<Value>& args) -> Value { return elementWiseOp(args[0], args[1], "maxE", [checkNoStr](const Value& a, const Value& b) { checkNoStr(a, b, "maxE"); return helpers::checkGreater(a, b) ? a : b; }); });
+    reg("minE", { 2 }, [elementWiseOp, checkNoStr](const std::vector<Value>& args) -> Value { return elementWiseOp(args[0], args[1], "minE", [checkNoStr](const Value& a, const Value& b) { checkNoStr(a, b, "minE"); return helpers::checkLess(a, b) ? a : b; }); });
+    reg("andE", { 2 }, [elementWiseOp](const std::vector<Value>& args) -> Value { return elementWiseOp(args[0], args[1], "andE", [](const Value& a, const Value& b) { return Value((helpers::isTruthy(a) && helpers::isTruthy(b)) ? 1.0 : 0.0); }); });
+    reg("orE", { 2 }, [elementWiseOp](const std::vector<Value>& args) -> Value { return elementWiseOp(args[0], args[1], "orE", [](const Value& a, const Value& b) { return Value((helpers::isTruthy(a) || helpers::isTruthy(b)) ? 1.0 : 0.0); }); });
+    reg("xorE", { 2 }, [elementWiseOp](const std::vector<Value>& args) -> Value { return elementWiseOp(args[0], args[1], "xorE", [](const Value& a, const Value& b) { return Value((helpers::isTruthy(a) != helpers::isTruthy(b)) ? 1.0 : 0.0); }); });
+    reg("atan2E", { 2 }, [elementWiseOp](const std::vector<Value>& args) -> Value { return elementWiseOp(args[0], args[1], "atan2E", [](const Value& a, const Value& b) { return Value(std::atan2(a.asDouble(), b.asDouble())); }); });
+    reg("hypotE", { 2 }, [elementWiseOp](const std::vector<Value>& args) -> Value { return elementWiseOp(args[0], args[1], "hypotE", [](const Value& a, const Value& b) { return Value(std::hypot(a.asDouble(), b.asDouble())); }); });
+    reg("whereE", { 3 }, [](const std::vector<Value>& args) -> Value {
+        const Value& mask = args[0]; const Value& a = args[1]; const Value& b = args[2];
+        bool mMat = std::holds_alternative<RealMatrix>(mask.data) || std::holds_alternative<ComplexMatrix>(mask.data) || std::holds_alternative<StringMatrix>(mask.data);
+        bool aMat = std::holds_alternative<RealMatrix>(a.data) || std::holds_alternative<ComplexMatrix>(a.data) || std::holds_alternative<StringMatrix>(a.data);
+        bool bMat = std::holds_alternative<RealMatrix>(b.data) || std::holds_alternative<ComplexMatrix>(b.data) || std::holds_alternative<StringMatrix>(b.data);
+
+        if (!mMat && !aMat && !bMat) return helpers::isTruthy(mask) ? a : b;
+
+        int r = 1, c = 1;
+        auto updateDims = [&](const Value& v) {
+            if (std::holds_alternative<RealMatrix>(v.data)) { r = std::max(r, std::get<RealMatrix>(v.data).getRows()); c = std::max(c, std::get<RealMatrix>(v.data).getCols()); }
+            else if (std::holds_alternative<ComplexMatrix>(v.data)) { r = std::max(r, std::get<ComplexMatrix>(v.data).getRows()); c = std::max(c, std::get<ComplexMatrix>(v.data).getCols()); }
+            else if (std::holds_alternative<StringMatrix>(v.data)) { r = std::max(r, std::get<StringMatrix>(v.data).getRows()); c = std::max(c, std::get<StringMatrix>(v.data).getCols()); }
+        };
+        updateDims(mask); updateDims(a); updateDims(b);
+
+        auto checkDims = [&](const Value& v, const std::string& name) {
+            if (std::holds_alternative<RealMatrix>(v.data)) { if (std::get<RealMatrix>(v.data).getRows() != r || std::get<RealMatrix>(v.data).getCols() != c) throw std::runtime_error("Math Error: Dimension mismatch in whereE() for " + name + "."); }
+            else if (std::holds_alternative<ComplexMatrix>(v.data)) { if (std::get<ComplexMatrix>(v.data).getRows() != r || std::get<ComplexMatrix>(v.data).getCols() != c) throw std::runtime_error("Math Error: Dimension mismatch in whereE() for " + name + "."); }
+            else if (std::holds_alternative<StringMatrix>(v.data)) { if (std::get<StringMatrix>(v.data).getRows() != r || std::get<StringMatrix>(v.data).getCols() != c) throw std::runtime_error("Math Error: Dimension mismatch in whereE() for " + name + "."); }
+        };
+        checkDims(mask, "mask"); checkDims(a, "true_val"); checkDims(b, "false_val");
+
+        auto getElem = [&](const Value& v, int idx) -> Value {
+            if (std::holds_alternative<RealMatrix>(v.data)) return Value(std::get<RealMatrix>(v.data).rawData()[idx]);
+            if (std::holds_alternative<ComplexMatrix>(v.data)) return Value(std::get<ComplexMatrix>(v.data).rawData()[idx]);
+            if (std::holds_alternative<StringMatrix>(v.data)) return Value(std::get<StringMatrix>(v.data).rawData()[idx]);
+            return v;
+        };
+
+        bool isStr = false, isComp = false;
+        if (std::holds_alternative<StringMatrix>(a.data) || std::holds_alternative<StringMatrix>(b.data)) isStr = true;
+        else if (!aMat && std::holds_alternative<std::string>(a.data)) isStr = true;
+        else if (!bMat && std::holds_alternative<std::string>(b.data)) isStr = true;
+        else if (std::holds_alternative<ComplexMatrix>(a.data) || std::holds_alternative<ComplexMatrix>(b.data)) isComp = true;
+        else if (!aMat && a.isComplex()) isComp = true;
+        else if (!bMat && b.isComplex()) isComp = true;
+
+        if (isStr) {
+            std::vector<std::string> flat(r * c);
+            for (int i = 0; i < r * c; ++i) {
+                Value res = helpers::isTruthy(getElem(mask, mMat ? i : 0)) ? getElem(a, aMat ? i : 0) : getElem(b, bMat ? i : 0);
+                flat[i] = std::holds_alternative<std::string>(res.data) ? std::get<std::string>(res.data) : res.toString();
+            }
+            return Value(StringMatrix(r, c, flat));
+        } else if (isComp) {
+            std::vector<Complex> flat(r * c);
+            for (int i = 0; i < r * c; ++i) flat[i] = helpers::isTruthy(getElem(mask, mMat ? i : 0)) ? getElem(a, aMat ? i : 0).asComplex() : getElem(b, bMat ? i : 0).asComplex();
+            return Value(ComplexMatrix(r, c, flat));
+        } else {
+            std::vector<double> flat(r * c);
+            for (int i = 0; i < r * c; ++i) flat[i] = helpers::isTruthy(getElem(mask, mMat ? i : 0)) ? getElem(a, aMat ? i : 0).asDouble() : getElem(b, bMat ? i : 0).asDouble();
+            return Value(RealMatrix(r, c, flat));
+        }
     });
 
     // --- 性质 ---

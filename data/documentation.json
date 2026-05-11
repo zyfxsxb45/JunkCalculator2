@@ -622,7 +622,10 @@
       "    ",
       "    A + c,  c + A               ≡ A + c·I   (square only, diagonal shift)",
       "    ",
-      "    addE(A, B)  subE(A, B)  mulE(A, B)  divE(A, B)  powE(A, B)  modE(A, B)",
+      "    addE(A, B)  subE(A, B)  mulE(A, B)  divE(A, B)  idivE(A, B) powE(A, B)  modE(A, B)",
+      "    eqE(A, B)   neqE(A, B)  ltE(A, B)   leE(A, B)   gtE(A, B)   geE(A, B)",
+      "    maxE(A, B)  minE(A, B)  andE(A, B)  orE(A, B)   xorE(A, B)",
+      "    atan2E(A, B) hypotE(A, B)  whereE(mask, A, B)",
       "      (Element-wise operations. Supports scalar-scalar, scalar-matrix broadcasting, and matrix-matrix)",
       "",
       "  Dimensions & Element Access",
@@ -5474,8 +5477,8 @@
     },
     "addE": {
       "signature": "addE(A, B)",
-      "desc": "Element-wise addition. Supports scalar-scalar, scalar-matrix broadcasting, and matrix-matrix.",
-      "examples": ["addE([1, 2], 3)"]
+      "desc": "Element-wise addition. Supports scalar-scalar, scalar-matrix broadcasting, and matrix-matrix. Also supports string concatenation.",
+      "examples": ["addE([1, 2], 3)", "addE(\"ID_\", [1, 2])"]
     },
     "subE": {
       "signature": "subE(A, B)",
@@ -5492,6 +5495,11 @@
       "desc": "Element-wise division. Supports scalar-scalar, scalar-matrix broadcasting, and matrix-matrix.",
       "examples": ["divE(1, [1, 2])"]
     },
+    "idivE": {
+      "signature": "idivE(A, B)",
+      "desc": "Element-wise integer division (truncating towards zero). Supports broadcasting.",
+      "examples": ["idivE([10, 11], 3)"]
+    },
     "powE": {
       "signature": "powE(A, B)",
       "desc": "Element-wise power. Supports scalar-scalar, scalar-matrix broadcasting, and matrix-matrix.",
@@ -5501,6 +5509,76 @@
       "signature": "modE(A, B)",
       "desc": "Element-wise modulo. Supports scalar-scalar, scalar-matrix broadcasting, and matrix-matrix.",
       "examples": ["modE([5, 6], 3)"]
+    },
+    "eqE": {
+      "signature": "eqE(A, B)",
+      "desc": "Element-wise equality comparison. Supports scalar-scalar, scalar-matrix broadcasting, and matrix-matrix. Also supports strings.",
+      "examples": ["eqE([1, 2], 1)", "eqE([\"a\", \"b\"], \"a\")"]
+    },
+    "neqE": {
+      "signature": "neqE(A, B)",
+      "desc": "Element-wise inequality comparison. Supports scalar-scalar, scalar-matrix broadcasting, and matrix-matrix. Also supports strings.",
+      "examples": ["neqE([1, 2], 1)", "neqE([\"a\", \"b\"], \"a\")"]
+    },
+    "ltE": {
+      "signature": "ltE(A, B)",
+      "desc": "Element-wise less-than comparison. Supports scalar-scalar, scalar-matrix broadcasting, and matrix-matrix.",
+      "examples": ["ltE([1, 2], 2)"]
+    },
+    "leE": {
+      "signature": "leE(A, B)",
+      "desc": "Element-wise less-than-or-equal comparison. Supports scalar-scalar, scalar-matrix broadcasting, and matrix-matrix.",
+      "examples": ["leE([1, 2], 2)"]
+    },
+    "gtE": {
+      "signature": "gtE(A, B)",
+      "desc": "Element-wise greater-than comparison. Supports scalar-scalar, scalar-matrix broadcasting, and matrix-matrix.",
+      "examples": ["gtE([1, 2], 1)"]
+    },
+    "geE": {
+      "signature": "geE(A, B)",
+      "desc": "Element-wise greater-than-or-equal comparison. Supports scalar-scalar, scalar-matrix broadcasting, and matrix-matrix.",
+      "examples": ["geE([1, 2], 1)"]
+    },
+    "maxE": {
+      "signature": "maxE(A, B)",
+      "desc": "Element-wise maximum. Supports scalar-scalar, scalar-matrix broadcasting, and matrix-matrix.",
+      "examples": ["maxE([1, 5], [3, 2])"]
+    },
+    "minE": {
+      "signature": "minE(A, B)",
+      "desc": "Element-wise minimum. Supports scalar-scalar, scalar-matrix broadcasting, and matrix-matrix.",
+      "examples": ["minE([1, 5], [3, 2])"]
+    },
+    "andE": {
+      "signature": "andE(A, B)",
+      "desc": "Element-wise logical AND. Returns 1.0 if both are truthy, else 0.0.",
+      "examples": ["andE([1, 0], [1, 1])"]
+    },
+    "orE": {
+      "signature": "orE(A, B)",
+      "desc": "Element-wise logical OR. Returns 1.0 if either is truthy, else 0.0.",
+      "examples": ["orE([1, 0], [0, 0])"]
+    },
+    "xorE": {
+      "signature": "xorE(A, B)",
+      "desc": "Element-wise logical XOR. Returns 1.0 if truthiness differs, else 0.0.",
+      "examples": ["xorE([1, 0], [1, 1])"]
+    },
+    "atan2E": {
+      "signature": "atan2E(Y, X)",
+      "desc": "Element-wise 2-argument arctangent.",
+      "examples": ["atan2E([0, 1], [1, 0])"]
+    },
+    "hypotE": {
+      "signature": "hypotE(A, B)",
+      "desc": "Element-wise hypotenuse (sqrt(A^2 + B^2)).",
+      "examples": ["hypotE([3, 5], [4, 12])"]
+    },
+    "whereE": {
+      "signature": "whereE(mask, A, B)",
+      "desc": "Element-wise ternary selection. Returns elements from A where mask is truthy, else from B. Supports broadcasting and strings.",
+      "examples": ["whereE([1, 0, 1], 99, [1, 2, 3])", "whereE([1, 0], \"Pass\", \"Fail\")"]
     },
     "perm": {
       "signature": "perm(A)",
