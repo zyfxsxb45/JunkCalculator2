@@ -84,11 +84,6 @@ namespace jc {
             const std::string& name = var->name.lexeme;
             int slot = resolveLocal(name);
 
-            if (stateStack.size() > 1 && slot == -1 && current().refNames.count(name) == 0 && current().stateNames.count(name) == 0) {
-                addLocal(name, 0);
-                slot = resolveLocal(name);
-            }
-
             if (slot != -1 && current().refNames.count(name) == 0 && current().stateNames.count(name) == 0) {
                 emit(OpCode::OP_SET_LOCAL, lastLine);
                 emit16(static_cast<uint16_t>(slot), lastLine);
@@ -127,7 +122,6 @@ namespace jc {
             emit(OpCode::OP_SET_PROPERTY, lastLine);
             emit16(fieldIdx, lastLine);
 
-            emitStoreTarget(dot->object.get());
             emit(OpCode::OP_POP, lastLine);
             emit(OpCode::OP_POP, lastLine);
             current().locals.pop_back();
@@ -923,11 +917,6 @@ namespace jc {
             compileNode(expr->value.get());
             emitOp(expr->op);
 
-            if (stateStack.size() > 1 && slot == -1 && current().refNames.count(name) == 0 && current().stateNames.count(name) == 0) {
-                addLocal(name, 0);
-                slot = resolveLocal(name);
-            }
-
             if (slot != -1 && current().refNames.count(name) == 0 && current().stateNames.count(name) == 0) {
                 emit(OpCode::OP_SET_LOCAL, lastLine);
                 emit16(static_cast<uint16_t>(slot), lastLine);
@@ -1137,9 +1126,6 @@ namespace jc {
         auto emitStoreRoot = [&]() {
             if (!expr->hasObjectExpr()) {
                 int slot = resolveLocal(expr->name.lexeme);
-                if (stateStack.size() > 1 && slot == -1 && current().refNames.count(expr->name.lexeme) == 0 && current().stateNames.count(expr->name.lexeme) == 0) {
-                    addLocal(expr->name.lexeme, 0); slot = resolveLocal(expr->name.lexeme);
-                }
                 if (slot != -1) { emit(OpCode::OP_SET_LOCAL, lastLine); emit16(static_cast<uint16_t>(slot), lastLine); }
                 else {
                     int upvalue = resolveUpvalue(expr->name.lexeme);
@@ -1783,7 +1769,6 @@ namespace jc {
         emit(OpCode::OP_SET_PROPERTY, lastLine);
         emit16(nameIdx, lastLine);
         
-        emitStoreTarget(expr->object.get());
         emit(OpCode::OP_POP, lastLine);
         return {};
     }
