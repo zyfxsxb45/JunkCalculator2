@@ -829,13 +829,86 @@ void BuiltinRegistry::registerMatrixOps() {
         throw std::runtime_error("Type Error: Expected a matrix.");
     };
 
-    // --- 标量广播 ---
-    reg("addS", { 2 }, [](const std::vector<Value>& args) -> Value { if (std::holds_alternative<RealMatrix>(args[0].data)) { RealMatrix m = std::get<RealMatrix>(args[0].data); double c = args[1].asDouble(); std::vector<double> flat = m.rawData(); for (auto& v : flat) v += c; return Value(RealMatrix(m.getRows(), m.getCols(), flat)); } if (std::holds_alternative<ComplexMatrix>(args[0].data)) { ComplexMatrix m = std::get<ComplexMatrix>(args[0].data); Complex c = args[1].asComplex(); std::vector<Complex> flat = m.rawData(); for (auto& v : flat) v = v + c; return Value(ComplexMatrix(m.getRows(), m.getCols(), flat)); } throw std::runtime_error("Type Error: addS() requires a matrix."); });
-    reg("subS", { 2 }, [](const std::vector<Value>& args) -> Value { if (std::holds_alternative<RealMatrix>(args[0].data)) { RealMatrix m = std::get<RealMatrix>(args[0].data); double c = args[1].asDouble(); std::vector<double> flat = m.rawData(); for (auto& v : flat) v -= c; return Value(RealMatrix(m.getRows(), m.getCols(), flat)); } if (std::holds_alternative<ComplexMatrix>(args[0].data)) { ComplexMatrix m = std::get<ComplexMatrix>(args[0].data); Complex c = args[1].asComplex(); std::vector<Complex> flat = m.rawData(); for (auto& v : flat) v = v - c; return Value(ComplexMatrix(m.getRows(), m.getCols(), flat)); } throw std::runtime_error("Type Error: subS() requires a matrix."); });
-    reg("mulS", { 2 }, [](const std::vector<Value>& args) -> Value { if (std::holds_alternative<RealMatrix>(args[0].data)) { RealMatrix m = std::get<RealMatrix>(args[0].data); double c = args[1].asDouble(); std::vector<double> flat = m.rawData(); for (auto& v : flat) v *= c; return Value(RealMatrix(m.getRows(), m.getCols(), flat)); } if (std::holds_alternative<ComplexMatrix>(args[0].data)) { ComplexMatrix m = std::get<ComplexMatrix>(args[0].data); Complex c = args[1].asComplex(); std::vector<Complex> flat = m.rawData(); for (auto& v : flat) v = v * c; return Value(ComplexMatrix(m.getRows(), m.getCols(), flat)); } throw std::runtime_error("Type Error: mulS() requires a matrix."); });
-    reg("divS", { 2 }, [](const std::vector<Value>& args) -> Value { if (std::holds_alternative<RealMatrix>(args[0].data)) { RealMatrix m = std::get<RealMatrix>(args[0].data); double c = args[1].asDouble(); if (c == 0.0) throw std::runtime_error("Math Error: Division by zero."); std::vector<double> flat = m.rawData(); for (auto& v : flat) v /= c; return Value(RealMatrix(m.getRows(), m.getCols(), flat)); } if (std::holds_alternative<ComplexMatrix>(args[0].data)) { ComplexMatrix m = std::get<ComplexMatrix>(args[0].data); Complex c = args[1].asComplex(); if (c.real == 0.0 && c.imag == 0.0) throw std::runtime_error("Math Error: Division by zero."); std::vector<Complex> flat = m.rawData(); for (auto& v : flat) v = v / c; return Value(ComplexMatrix(m.getRows(), m.getCols(), flat)); } throw std::runtime_error("Type Error: divS() requires a matrix."); });
-    reg("powS", { 2 }, [](const std::vector<Value>& args) -> Value { if (std::holds_alternative<RealMatrix>(args[0].data)) { RealMatrix m = std::get<RealMatrix>(args[0].data); double c = args[1].asDouble(); std::vector<double> flat = m.rawData(); for (auto& v : flat) v = std::pow(v, c); return Value(RealMatrix(m.getRows(), m.getCols(), flat)); } if (std::holds_alternative<ComplexMatrix>(args[0].data)) { ComplexMatrix m = std::get<ComplexMatrix>(args[0].data); Complex c = args[1].asComplex(); std::vector<Complex> flat = m.rawData(); for (auto& v : flat) v = v ^ c; return Value(ComplexMatrix(m.getRows(), m.getCols(), flat)); } throw std::runtime_error("Type Error: powS() requires a matrix."); });
-    reg("modS", { 2 }, [](const std::vector<Value>& args) -> Value { if (std::holds_alternative<RealMatrix>(args[0].data)) { RealMatrix m = std::get<RealMatrix>(args[0].data); double c = args[1].asDouble(); if (c == 0.0) throw std::runtime_error("Math Error: Modulo by zero."); std::vector<double> flat = m.rawData(); for (auto& v : flat) { v = std::fmod(v, c); if (v < 0) v += std::abs(c); } return Value(RealMatrix(m.getRows(), m.getCols(), flat)); } if (std::holds_alternative<ComplexMatrix>(args[0].data)) { ComplexMatrix m = std::get<ComplexMatrix>(args[0].data); double c = args[1].asDouble(); if (c == 0.0) throw std::runtime_error("Math Error: Modulo by zero."); std::vector<Complex> flat = m.rawData(); for (auto& v : flat) { double re = std::fmod(v.real, c); double im = std::fmod(v.imag, c); if (re < 0) re += std::abs(c); if (im < 0) im += std::abs(c); v = Complex(re, im); } return Value(ComplexMatrix(m.getRows(), m.getCols(), flat)); } throw std::runtime_error("Type Error: modS() requires a matrix."); });
+    // --- 逐元素运算 (Element-wise) ---
+    auto elementWiseOp = [](const Value& a, const Value& b, const std::string& opName, auto scalarOp) -> Value {
+        bool aMat = std::holds_alternative<RealMatrix>(a.data) || std::holds_alternative<ComplexMatrix>(a.data);
+        bool bMat = std::holds_alternative<RealMatrix>(b.data) || std::holds_alternative<ComplexMatrix>(b.data);
+
+        if (!aMat && !bMat) {
+            return scalarOp(a, b);
+        }
+
+        if (aMat && !bMat) {
+            if (std::holds_alternative<RealMatrix>(a.data) && !b.isComplex()) {
+                RealMatrix m = std::get<RealMatrix>(a.data);
+                std::vector<double> flat = m.rawData();
+                for (auto& v : flat) v = scalarOp(Value(v), b).asDouble();
+                return Value(RealMatrix(m.getRows(), m.getCols(), flat));
+            } else {
+                ComplexMatrix m = a.asComplexMatrix();
+                std::vector<Complex> flat = m.rawData();
+                for (auto& v : flat) v = scalarOp(Value(v), b).asComplex();
+                return Value(ComplexMatrix(m.getRows(), m.getCols(), flat));
+            }
+        }
+
+        if (!aMat && bMat) {
+            if (!a.isComplex() && std::holds_alternative<RealMatrix>(b.data)) {
+                RealMatrix m = std::get<RealMatrix>(b.data);
+                std::vector<double> flat = m.rawData();
+                for (auto& v : flat) v = scalarOp(a, Value(v)).asDouble();
+                return Value(RealMatrix(m.getRows(), m.getCols(), flat));
+            } else {
+                ComplexMatrix m = b.asComplexMatrix();
+                std::vector<Complex> flat = m.rawData();
+                for (auto& v : flat) v = scalarOp(a, Value(v)).asComplex();
+                return Value(ComplexMatrix(m.getRows(), m.getCols(), flat));
+            }
+        }
+
+        // aMat && bMat
+        int r1 = std::holds_alternative<RealMatrix>(a.data) ? std::get<RealMatrix>(a.data).getRows() : std::get<ComplexMatrix>(a.data).getRows();
+        int c1 = std::holds_alternative<RealMatrix>(a.data) ? std::get<RealMatrix>(a.data).getCols() : std::get<ComplexMatrix>(a.data).getCols();
+        int r2 = std::holds_alternative<RealMatrix>(b.data) ? std::get<RealMatrix>(b.data).getRows() : std::get<ComplexMatrix>(b.data).getRows();
+        int c2 = std::holds_alternative<RealMatrix>(b.data) ? std::get<RealMatrix>(b.data).getCols() : std::get<ComplexMatrix>(b.data).getCols();
+
+        if (r1 != r2 || c1 != c2) throw std::runtime_error("Math Error: Dimension mismatch in " + opName + "().");
+
+        if (std::holds_alternative<RealMatrix>(a.data) && std::holds_alternative<RealMatrix>(b.data)) {
+            const auto& m1 = std::get<RealMatrix>(a.data).rawData();
+            const auto& m2 = std::get<RealMatrix>(b.data).rawData();
+            std::vector<double> flat(m1.size());
+            for (size_t i = 0; i < m1.size(); ++i) flat[i] = scalarOp(Value(m1[i]), Value(m2[i])).asDouble();
+            return Value(RealMatrix(r1, c1, flat));
+        } else {
+            const auto& m1 = a.asComplexMatrix().rawData();
+            const auto& m2 = b.asComplexMatrix().rawData();
+            std::vector<Complex> flat(m1.size());
+            for (size_t i = 0; i < m1.size(); ++i) flat[i] = scalarOp(Value(m1[i]), Value(m2[i])).asComplex();
+            return Value(ComplexMatrix(r1, c1, flat));
+        }
+    };
+
+    reg("addE", { 2 }, [elementWiseOp](const std::vector<Value>& args) -> Value { return elementWiseOp(args[0], args[1], "addE", [](const Value& a, const Value& b) { return a + b; }); });
+    reg("subE", { 2 }, [elementWiseOp](const std::vector<Value>& args) -> Value { return elementWiseOp(args[0], args[1], "subE", [](const Value& a, const Value& b) { return a - b; }); });
+    reg("mulE", { 2 }, [elementWiseOp](const std::vector<Value>& args) -> Value { return elementWiseOp(args[0], args[1], "mulE", [](const Value& a, const Value& b) { return a * b; }); });
+    reg("divE", { 2 }, [elementWiseOp](const std::vector<Value>& args) -> Value { return elementWiseOp(args[0], args[1], "divE", [](const Value& a, const Value& b) { return a / b; }); });
+    reg("powE", { 2 }, [elementWiseOp](const std::vector<Value>& args) -> Value { return elementWiseOp(args[0], args[1], "powE", [](const Value& a, const Value& b) { return a ^ b; }); });
+    reg("modE", { 2 }, [elementWiseOp](const std::vector<Value>& args) -> Value { 
+        return elementWiseOp(args[0], args[1], "modE", [](const Value& a, const Value& b) { 
+            if (a.isComplex() && !b.isComplex()) {
+                Complex ca = a.asComplex();
+                double cb = b.asDouble();
+                if (cb == 0.0) throw std::runtime_error("Math Error: Modulo by zero.");
+                double re = std::fmod(ca.real, cb);
+                double im = std::fmod(ca.imag, cb);
+                if (re < 0) re += std::abs(cb);
+                if (im < 0) im += std::abs(cb);
+                return Value(Complex(re, im));
+            }
+            return a % b; 
+        }); 
+    });
 
     // --- 性质 ---
     reg("det", { 1 }, [](const std::vector<Value>& args) -> Value { if (std::holds_alternative<RealMatrix>(args[0].data)) return Value(std::get<RealMatrix>(args[0].data).determinant()); if (std::holds_alternative<ComplexMatrix>(args[0].data)) return Value(std::get<ComplexMatrix>(args[0].data).determinant()); throw std::runtime_error("Type Error: det() requires a matrix."); });

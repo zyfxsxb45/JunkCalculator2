@@ -622,8 +622,8 @@
       "    ",
       "    A + c,  c + A               ≡ A + c·I   (square only, diagonal shift)",
       "    ",
-      "    addS(A, c)  subS(A, c)  mulS(A, c)  divS(A, c)  powS  modS",
-      "      (Element-wise scalar broadcasting across ANY shape)",
+      "    addE(A, B)  subE(A, B)  mulE(A, B)  divE(A, B)  powE(A, B)  modE(A, B)",
+      "      (Element-wise operations. Supports scalar-scalar, scalar-matrix broadcasting, and matrix-matrix)",
       "",
       "  Dimensions & Element Access",
       "  ──────────────────────",
@@ -5472,35 +5472,35 @@
       "desc": "Serializes a JC2 value into a pretty-printed JSON string.",
       "examples": ["json_pretty({a: 1}, 2)"]
     },
-    "addS": {
-      "signature": "addS(A, c)",
-      "desc": "Element-wise scalar addition for matrices.",
-      "examples": ["addS([1, 2], 3)"]
+    "addE": {
+      "signature": "addE(A, B)",
+      "desc": "Element-wise addition. Supports scalar-scalar, scalar-matrix broadcasting, and matrix-matrix.",
+      "examples": ["addE([1, 2], 3)"]
     },
-    "subS": {
-      "signature": "subS(A, c)",
-      "desc": "Element-wise scalar subtraction for matrices.",
-      "examples": ["subS([1, 2], 3)"]
+    "subE": {
+      "signature": "subE(A, B)",
+      "desc": "Element-wise subtraction. Supports scalar-scalar, scalar-matrix broadcasting, and matrix-matrix.",
+      "examples": ["subE(1, [1, 2])"]
     },
-    "mulS": {
-      "signature": "mulS(A, c)",
-      "desc": "Element-wise scalar multiplication for matrices.",
-      "examples": ["mulS([1, 2], 3)"]
+    "mulE": {
+      "signature": "mulE(A, B)",
+      "desc": "Element-wise multiplication. Supports scalar-scalar, scalar-matrix broadcasting, and matrix-matrix.",
+      "examples": ["mulE([1, 2], [3, 4])"]
     },
-    "divS": {
-      "signature": "divS(A, c)",
-      "desc": "Element-wise scalar division for matrices.",
-      "examples": ["divS([1, 2], 3)"]
+    "divE": {
+      "signature": "divE(A, B)",
+      "desc": "Element-wise division. Supports scalar-scalar, scalar-matrix broadcasting, and matrix-matrix.",
+      "examples": ["divE(1, [1, 2])"]
     },
-    "powS": {
-      "signature": "powS(A, c)",
-      "desc": "Element-wise scalar power for matrices.",
-      "examples": ["powS([1, 2], 3)"]
+    "powE": {
+      "signature": "powE(A, B)",
+      "desc": "Element-wise power. Supports scalar-scalar, scalar-matrix broadcasting, and matrix-matrix.",
+      "examples": ["powE([1, 2], 2)"]
     },
-    "modS": {
-      "signature": "modS(A, c)",
-      "desc": "Element-wise scalar modulo for matrices.",
-      "examples": ["modS([1, 2], 3)"]
+    "modE": {
+      "signature": "modE(A, B)",
+      "desc": "Element-wise modulo. Supports scalar-scalar, scalar-matrix broadcasting, and matrix-matrix.",
+      "examples": ["modE([5, 6], 3)"]
     },
     "perm": {
       "signature": "perm(A)",
