@@ -263,6 +263,7 @@ int main(int argc, char* argv[]) {
     vm.setGlobal("E", jc::Value(2.71828182845904523536));
     vm.setGlobal("i", jc::Value(jc::Complex(0.0, 1.0)));
     vm.setGlobal("I", jc::Value(jc::Complex(0.0, 1.0)));
+    vm.setGlobal("ANS", jc::Value::none());
 
     // 绑定虚拟机外包服务给系统级运行时回调！
     jc::helpers::setGlobalCallback = [](const std::string& name, const jc::Value& val) { vm.setGlobal(name, val); };
@@ -552,7 +553,7 @@ int main(int argc, char* argv[]) {
                     "Bar zna'f whax vf nabgure zna'f Ghevat-pbzcyrgr ynathntr.",
                     "V jnf tbvat gb gryy n wbxr, ohg gur Tneontr Pbyyrpgbe fjrcg vg njnl.",
                     "Qvivqvat ol mreb vf whfg n zlgu vairagrq ol zngurzngvpvnaf gb fpner pnyphyngbef.",
-                    "Frtzragngvba snhyg (pber qhzcrq)... Whfg xvqqvat, P++20 tbg zl onpx.",
+                    "Frtzragngvba snhyg (pber qhzcrq)... Whfg xvqqvat, V jnf erjevggra va Ehfg. Jnvg, ab V jnfa'g!",
                     "0.1 + 0.2 == 0.3 vf SNYFR. V nz n Whax Pnyphyngbe, abg n yvne.",
                     "Gur Fgnpx IZ vf gnxvat n pbssrr oernx. Cyrnfr glcr tragyl.",
                     "Gb haqrefgnaq erphefvba, lbh zhfg svefg glcr /rtt.",
