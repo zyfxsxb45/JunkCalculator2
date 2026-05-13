@@ -261,7 +261,7 @@ namespace jc {
         }
     public:
         Value() : as_bits(QNAN | TAG_NONE) {}
-        Value(double val) { *this = fromDouble(val); }
+        Value(double val) : as_bits(QNAN | TAG_NONE) { *this = fromDouble(val); }
         Value(int val) : as_bits(INT32_MASK | static_cast<uint32_t>(val)) {}
         Value(bool val) : as_bits(val ? (QNAN | TAG_TRUE) : (QNAN | TAG_FALSE)) {}
         Value(Obj* obj) : as_bits(SIGN_BIT | QNAN | reinterpret_cast<uint64_t>(obj)) { 
@@ -320,7 +320,9 @@ namespace jc {
                 auto numNode = std::static_pointer_cast<SymNum>(val.ptr);
                 std::visit([this](auto&& arg) {
                     using T = std::decay_t<decltype(arg)>;
-                    if constexpr (std::is_same_v<T, Fraction>) {
+                    if constexpr (std::is_same_v<T, int32_t>) {
+                        *this = Value(arg);
+                    } else if constexpr (std::is_same_v<T, Fraction>) {
                         if (arg.getDen() == BigInt(1)) {
                             *this = Value(arg.getNum());
                         } else {
@@ -329,8 +331,6 @@ namespace jc {
                     } else if constexpr (std::is_same_v<T, double>) {
                         *this = Value(arg);
                     } else if constexpr (std::is_same_v<T, BigInt>) {
-                        *this = Value(arg);
-                    } else if constexpr (std::is_same_v<T, Complex>) {
                         *this = Value(arg);
                     }
                 }, numNode->value);

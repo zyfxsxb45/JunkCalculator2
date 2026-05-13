@@ -24,7 +24,7 @@ namespace jc {
     // ==========================================
     // 内部高精度数值载体 (隔离 VM)
     // ==========================================
-    using CASVal = std::variant<double, BigInt, Fraction>;
+    using CASVal = std::variant<double, BigInt, Fraction, int32_t>;
 
     bool isCasZero(const CASVal& v);
     bool isCasOne(const CASVal& v);
@@ -252,7 +252,14 @@ namespace jc {
 
     // 模板构造函数实现 (必须在 SymNum 完整定义之后)
     template<typename T, std::enable_if_t<std::is_integral_v<T>, int>>
-    SymExpr::SymExpr(T v) : ptr(intern(std::make_shared<SymNum>(BigInt(static_cast<int64_t>(v))))) {}
+    SymExpr::SymExpr(T v) {
+        int64_t val = static_cast<int64_t>(v);
+        if (val >= -2147483648LL && val <= 2147483647LL) {
+            ptr = intern(std::make_shared<SymNum>(static_cast<int32_t>(val)));
+        } else {
+            ptr = intern(std::make_shared<SymNum>(BigInt(val)));
+        }
+    }
 
 } // namespace jc
 

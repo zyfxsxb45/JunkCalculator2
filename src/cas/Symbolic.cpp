@@ -69,7 +69,7 @@ namespace jc {
         if (v.isObjType(ObjType::BIGINT))    return static_cast<ObjBigInt*>(v.asObj())->num;
         if (v.isObjType(ObjType::FRACTION))  return static_cast<ObjFraction*>(v.asObj())->frac;
         if (v.isDouble())                    return v.asDoubleRaw();
-        if (v.isInt32())                     return static_cast<double>(v.asInt32());
+        if (v.isInt32())                     return v.asInt32();
         throw std::runtime_error("CAS Error: Cannot convert value to CAS type.");
     }
 
@@ -94,6 +94,7 @@ namespace jc {
             if constexpr (std::is_same_v<T, BigInt>) return arg.isNegative();
             else if constexpr (std::is_same_v<T, Fraction>) return arg.getNum().isNegative() != arg.getDen().isNegative();
             else if constexpr (std::is_same_v<T, double>) return arg < 0.0;
+            else if constexpr (std::is_same_v<T, int32_t>) return arg < 0;
             else return false;
             }, v);
     }
@@ -115,6 +116,10 @@ namespace jc {
 
     // 从 CASVal 提取整数（委托 Value::asDouble）
     static std::pair<bool, int> casToInt(const CASVal& v) {
+        if (std::holds_alternative<int32_t>(v)) {
+            int32_t val = std::get<int32_t>(v);
+            if (std::abs(val) <= 1000) return { true, val };
+        }
         try {
             double d = casValToValue(v).asDouble();
             if (d == std::round(d) && std::abs(d) <= 1000)
@@ -327,7 +332,10 @@ namespace jc {
         return std::visit([](auto&& arg) -> std::pair<bool, int64_t> {
             using T = std::decay_t<decltype(arg)>;
 
-            if constexpr (std::is_same_v<T, BigInt>) {
+            if constexpr (std::is_same_v<T, int32_t>) {
+                return { true, static_cast<int64_t>(arg) };
+            }
+            else if constexpr (std::is_same_v<T, BigInt>) {
                 try {
                     return { true, arg.toInt64() };
                 } catch (const EngineInterruptError&) {
@@ -662,7 +670,14 @@ namespace jc {
                     if (isBInt && bInt != 0 && bInt != 1 && bInt != -1) {
                         while (true) {
                             bool extracted = false;
-                            if (std::holds_alternative<BigInt>(prodConst)) {
+                            if (std::holds_alternative<int32_t>(prodConst)) {
+                                int32_t p = std::get<int32_t>(prodConst);
+                                if (p % bInt == 0) {
+                                    prodConst = static_cast<int32_t>(p / bInt);
+                                    data.exp = casAdd(data.exp, BigInt(1));
+                                    extracted = true;
+                                }
+                            } else if (std::holds_alternative<BigInt>(prodConst)) {
                                 BigInt p = std::get<BigInt>(prodConst);
                                 if ((p % BigInt(bInt)).isZero()) {
                                     prodConst = p / BigInt(bInt);
@@ -912,7 +927,9 @@ namespace jc {
                     return res;
                 };
 
-                if (std::holds_alternative<BigInt>(baseNum->value)) {
+                if (std::holds_alternative<int32_t>(baseNum->value)) {
+                    return processIntBase(BigInt(std::get<int32_t>(baseNum->value)));
+                } else if (std::holds_alternative<BigInt>(baseNum->value)) {
                     return processIntBase(std::get<BigInt>(baseNum->value));
                 } else if (std::holds_alternative<Fraction>(baseNum->value)) {
                     Fraction baseF = std::get<Fraction>(baseNum->value);
@@ -1173,8 +1190,7 @@ namespace jc {
     // 精确匹配 AST 并记录捕获变量 (支持 ADD/MUL 的全排列交换律检测)
     bool matchAST(const std::shared_ptr<SymNode>& node, const std::shared_ptr<SymNode>& pat, std::map<std::string, SymExpr>& captures) {
         checkInterrupt();
-        if (!node) { std::cout << "[DEBUG] matchAST: node is null!" << std::endl; return false; }
-        if (!pat) { std::cout << "[DEBUG] matchAST: pat is null!" << std::endl; return false; }
+        if (!node || !pat) return false;
         
         std::string wcName;
         // 1. 若 pat 是通配符
@@ -1285,7 +1301,7 @@ namespace jc {
 
     // 将捕获的 AST 塞回目标模板中
     SymExpr substituteCaptures(const SymExpr& target, const std::map<std::string, SymExpr>& captures) {
-        if (!target.ptr) { std::cout << "[DEBUG] substituteCaptures: target.ptr is null!" << std::endl; return target; }
+        if (!target.ptr) return target;
         
         std::string wcName;
         if (isWildcard(target.ptr, wcName)) {
@@ -1327,7 +1343,7 @@ namespace jc {
     // 核心入口：后序遍历并尝试重写
     SymExpr applyRule(const SymExpr& expr, const SymExpr& pattern, const SymExpr& target) {
         checkInterrupt();
-        if (!expr.ptr) { std::cout << "[DEBUG] applyRule: expr.ptr is null!" << std::endl; return expr; }
+        if (!expr.ptr) return expr;
         
         // 1. 无情探底（Post-order traversal）
         SymExpr current = expr;
@@ -1392,14 +1408,10 @@ namespace jc {
         // 2. 尝试整体 matchAST
         std::map<std::string, SymExpr> captures;
         if (matchAST(current.ptr, pattern.ptr, captures)) {
-            std::cout << "[DEBUG] applyRule: matchAST overall success, calling substituteCaptures..." << std::endl;
             return substituteCaptures(target, captures);
         }
         
         // 3. 子集拦截匹配 (Subset Matching)
-        if (!current.ptr) std::cout << "[DEBUG] applyRule: current.ptr became null before subset matching!" << std::endl;
-        if (!pattern.ptr) std::cout << "[DEBUG] applyRule: pattern.ptr is null before subset matching!" << std::endl;
-
         if (current.ptr && pattern.ptr && 
             ((current.ptr->getType() == SymType::ADD && pattern.ptr->getType() == SymType::ADD) ||
              (current.ptr->getType() == SymType::MUL && pattern.ptr->getType() == SymType::MUL))) {
@@ -1456,30 +1468,18 @@ namespace jc {
 
                 std::map<std::string, SymExpr> initialCaps;
                 if (dfsSubset(0, initialCaps, cUsed)) {
-                    std::cout << "[DEBUG] applyRule: dfsSubset success, calling substituteCaptures..." << std::endl;
                     SymExpr replaced = substituteCaptures(target, finalCaptures);
-                    if (!replaced.ptr) std::cout << "[DEBUG] applyRule: replaced.ptr is null after substituteCaptures!" << std::endl;
-                    
                     std::vector<std::shared_ptr<SymNode>> remaining;
                     for (size_t i = 0; i < N; ++i) {
-                        if (!finalCUsed[i]) {
-                            if (!cArgs[i]) std::cout << "[DEBUG] applyRule: cArgs[" << i << "] is null!" << std::endl;
-                            remaining.push_back(cArgs[i]);
-                        }
+                        if (!finalCUsed[i]) remaining.push_back(cArgs[i]);
                     }
                     if (current.ptr->getType() == SymType::ADD) {
                         SymExpr res = replaced;
-                        for (auto& rem : remaining) {
-                            std::cout << "[DEBUG] applyRule: ADD remaining term..." << std::endl;
-                            res = res + SymExpr(rem);
-                        }
+                        for (auto& rem : remaining) res = res + SymExpr(rem);
                         return res;
                     } else {
                         SymExpr res = replaced;
-                        for (auto& rem : remaining) {
-                            std::cout << "[DEBUG] applyRule: MUL remaining term..." << std::endl;
-                            res = res * SymExpr(rem);
-                        }
+                        for (auto& rem : remaining) res = res * SymExpr(rem);
                         return res;
                     }
                 }
@@ -3037,7 +3037,8 @@ namespace jc {
                                     hasPi = true;
                                 } else if (arg->getType() == SymType::NUM) {
                                     auto num = std::static_pointer_cast<SymNum>(arg);
-                                    if (std::holds_alternative<BigInt>(num->value)) coeff = coeff * Fraction(std::get<BigInt>(num->value));
+                                    if (std::holds_alternative<int32_t>(num->value)) coeff = coeff * Fraction(BigInt(std::get<int32_t>(num->value)));
+                                    else if (std::holds_alternative<BigInt>(num->value)) coeff = coeff * Fraction(std::get<BigInt>(num->value));
                                     else if (std::holds_alternative<Fraction>(num->value)) coeff = coeff * std::get<Fraction>(num->value);
                                     else valid = false;
                                 } else {
@@ -5036,7 +5037,9 @@ namespace jc {
     static std::pair<Fraction, SymExpr> extractRationalCoeff(const SymExpr& expr) {
         if (expr.ptr->getType() == SymType::NUM) {
             auto num = std::static_pointer_cast<SymNum>(expr.ptr);
-            if (std::holds_alternative<BigInt>(num->value)) {
+            if (std::holds_alternative<int32_t>(num->value)) {
+                return {Fraction(BigInt(std::get<int32_t>(num->value)), BigInt(1)), SymExpr(BigInt(1))};
+            } else if (std::holds_alternative<BigInt>(num->value)) {
                 return {Fraction(std::get<BigInt>(num->value), BigInt(1)), SymExpr(BigInt(1))};
             } else if (std::holds_alternative<Fraction>(num->value)) {
                 return {std::get<Fraction>(num->value), SymExpr(BigInt(1))};
@@ -5049,7 +5052,9 @@ namespace jc {
             for (auto& arg : mul->args) {
                 if (arg->getType() == SymType::NUM) {
                     auto num = std::static_pointer_cast<SymNum>(arg);
-                    if (std::holds_alternative<BigInt>(num->value)) {
+                    if (std::holds_alternative<int32_t>(num->value)) {
+                        num_val = num_val * BigInt(std::get<int32_t>(num->value));
+                    } else if (std::holds_alternative<BigInt>(num->value)) {
                         num_val = num_val * std::get<BigInt>(num->value);
                     } else if (std::holds_alternative<Fraction>(num->value)) {
                         Fraction f = std::get<Fraction>(num->value);
