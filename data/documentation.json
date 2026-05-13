@@ -46,7 +46,7 @@
       "  ────────────────────────────────────────────────────────────────────",
       "    basic       Operators, constants, formatting, elementary functions",
       "    complex     Complex number creation, properties, promotion rules",
-      "    fraction    Exact rational arithmetic with BigInt backing",
+      "    fraction    Exact rational arithmetic with int backing",
       "    matrix      Matrix construction, indexing A[i,j], row/col ops",
       "    linalg      Determinant, inverse, rank, decompositions, eigenvalues",
       "    lineq       Solving Ax = b (unique / infinite / least-squares)",
@@ -56,7 +56,7 @@
       "    cas         Computer Algebra System (Symbolic math, limits, integrals)",
       "    function    User functions (single & multi-var), diff, integ, table",
       "    stat        Descriptive statistics, percentiles, regression",
-      "    bigint      Arbitrary-precision integers & number-theoretic functions",
+      "    int         Arbitrary-precision integers & number-theoretic functions",
       "    base        Radix conversion, display shells, bitwise operations",
       "    typecheck   Type predicates (isint, isstring, ismatrix, ...)",
       "    sys         RNG, prime engine, workspace, scripting, colors",
@@ -286,7 +286,13 @@
       "      [x*y for x in range(3) for y in range(3)] → [0,0,0, 0,1,2, 0,2,4]",
       "      [f\"{k}={v}\" for [k,v] in dict(\"a\",1)]  → [\"a=1\"]",
       "",
-      "    Returns a row vector if all elements are real numbers, otherwise a List.",
+      "    ★ Smart Matrix Collapse & Concatenation:",
+      "      If all generated elements are numbers, complex numbers, or strings, the",
+      "      comprehension automatically collapses into a 1D row Matrix.",
+      "      If the elements are themselves Matrices, it automatically performs",
+      "      HORIZONTAL CONCATENATION (block matrix assembly) across all iterations!",
+      "        [id(2) for i in range(3)]  →  [1,0, 1,0, 1,0; 0,1, 0,1, 0,1]",
+      "      If types are mixed and incompatible, it safely returns a standard List.",
       "",
       "  Pipe Operator (|>) & Multi-line Rules",
       "  ──────────────────────",
@@ -324,10 +330,10 @@
       "      argument is omitted (not at definition time).",
       "    • Works in named functions, lambdas, class methods, and constructors.",
       "",
-      "  Comparison Operators (return 1 = true, 0 = false)",
+      "  Comparison Operators (return true or false)",
       "  ──────────────────────",
       "    ==  !=  <  <=  >  >=",
-      "    • BigInt / Fraction  — exact, no rounding",
+      "    • int / Fraction     — exact, no rounding",
       "    • double             — exact, strict IEEE 754 equality",
       "    • Complex            — == and != compare both parts exactly",
       "    • Matrix / String    — == / != element-wise; ordering throws error",
@@ -337,16 +343,16 @@
       "                         Middle expressions are evaluated exactly once.",
       "                         Short-circuiting is fully supported.",
       "",
-      "    in                Membership / containment test (returns 1 or 0)",
-      "                        3 in [1,2,3]          → 1",
+      "    in                Membership / containment test (returns true or false)",
+      "                        3 in [1,2,3]          → true",
       "",
-      "  Logical Operators (short-circuit, return 1 or 0)",
+      "  Logical Operators (short-circuit, return true or false)",
       "  ──────────────────────",
       "    &&                AND    (right side not evaluated if left is false)",
       "    ||                OR     (right side not evaluated if left is true)",
       "    !expr             NOT    (prefix unary)",
       "    Truthiness:",
-      "      Falsy:  0, 0.0, BigInt(0), Fraction(0/n), none, \"\"",
+      "      Falsy:  0, 0.0, int(0), Fraction(0/n), none, \"\"",
       "      Truthy: everything else",
       "",
       "  Built-in Constants & Constant Factory Functions",
@@ -354,7 +360,7 @@
       "    PI          3.14159265358979…        (overridable, deletable)",
       "    E           2.71828182845904…        (overridable, deletable)",
       "    i  /  I     Imaginary unit (i² = −1) (overridable, deletable)",
-      "    true / false 1.0 / 0.0                (keywords, immutable)",
+      "    true / false                          (keywords, immutable)",
       "    none        None value                (keyword, immutable)",
       "",
       "    PI, E, i, I are ordinary global variables — you CAN overwrite or delete",
@@ -526,8 +532,8 @@
       "    double(3+0i)        → 3.0    (only if imaginary part is zero)",
       "    double(3+4i)        → Error  (nonzero imaginary part)",
       "    int(3+0i)           → 3      (only if imaginary part is zero)",
-      "    iscomplex(z)        → 1      (type predicate, see: /help typecheck)",
-      "    isreal(3+0i)        → 1      (real if imag ≈ 0)",
+      "    iscomplex(z)        → true   (type predicate, see: /help typecheck)",
+      "    isreal(3+0i)        → true   (real if imag ≈ 0)",
       "",
       "  Automatic Promotion",
       "  ──────────────────────",
@@ -545,7 +551,7 @@
     "fraction": [
       "═══ Exact Rational Arithmetic (Fractions) ═══",
       "",
-      "  Fractions use BigInt numerator/denominator and auto-reduce via GCD.",
+      "  Fractions use int numerator/denominator and auto-reduce via GCD.",
       "  This allows infinite-precision rational arithmetic without floating",
       "  point inaccuracies.",
       "",
@@ -556,13 +562,13 @@
       "",
       "  Properties",
       "  ──────────────────────",
-      "    num(f)              Numerator (BigInt)",
-      "    den(f)              Denominator (BigInt, always positive)",
+      "    num(f)              Numerator (int)",
+      "    den(f)              Denominator (int, always positive)",
       "",
       "  Arithmetic",
       "  ──────────────────────",
       "    Fraction ⊕ Fraction   → exact Fraction",
-      "    Fraction ⊕ BigInt     → exact Fraction",
+      "    Fraction ⊕ int        → exact Fraction",
       "    Fraction ⊕ double     → degrades to double",
       "    Fraction ⊕ Complex    → degrades to Complex",
       "",
@@ -575,14 +581,14 @@
       "",
       "  Type Predicates",
       "  ──────────────────────",
-      "    isfrac(x)           → 1 if x is a Fraction type",
-      "    isint(frac(6,3))    → 1 (denominator reduces to 1)",
-      "    isreal(frac(1,3))   → 1 (fractions are real numbers)",
+      "    isfrac(x)           → true if x is a Fraction type",
+      "    isint(frac(6,3))    → true (denominator reduces to 1)",
+      "    isreal(frac(1,3))   → true (fractions are real numbers)",
       "",
       "  Examples",
       "  ──────────────────────",
       "    f = frac(1, 3)",
-      "    f * 3               →  1           (exact, reduced to BigInt if den=1)",
+      "    f * 3               →  1           (exact, reduced to int if den=1)",
       "    f + frac(1, 6)      →  1/2         (auto-reduced)",
       "    f + 0.5             →  0.833333…   (double)",
       "    f ^ 2               →  1/9         (exact power)",
@@ -662,6 +668,11 @@
       "      C = [A, B]          Horizontal concat: [1,2,5,6; 3,4,7,8]",
       "      D = [A; B]          Vertical concat:   [1,2; 3,4; 5,6; 7,8]",
       "      [A, zeros(2,2); id(2), B]   Build a 4×4 block matrix!",
+      "",
+      "    List Comprehension Concatenation:",
+      "      List comprehensions automatically perform horizontal concatenation if",
+      "      they generate matrices:",
+      "        [id(2) for i in range(3)]  →  [1,0, 1,0, 1,0; 0,1, 0,1, 0,1]",
       "",
       "    Function equivalents:",
       "      integR(A, B)        Horizontal  [A | B]",
@@ -811,7 +822,7 @@
       "    vproj(a, b)         Vector projection of 'a' onto 'b'",
       "    angle(a, b)         Angle between 'a' and 'b' (in radians)",
       "",
-      "  Boolean Tests (return 1 or 0)",
+      "  Boolean Tests (return true or false)",
       "  ──────────────────────",
       "    isperp(a, b)        Are vectors perpendicular?",
       "    isparallel(a, b)    Are vectors parallel?"
@@ -905,7 +916,7 @@
       "    diff(sin(x^2), x)            → 2 * x * cos(x^2)",
       "    integ(exp(x^2), x)           → Risch Algorithm (Liouvillian extensions)",
       "    integ(x^2, x, 0, 1)          → 1/3 (Definite integral)",
-      "    verifyInteg(expr, x)         → 1 if diff(integ(expr, x), x) == expr, else 0",
+      "    verifyInteg(expr, x)         → true if diff(integ(expr, x), x) == expr, else false",
       "    limit(sin(x)/x, x, 0)        → 1 (Gruntz asymptotic expansion algorithm)",
       "    taylor(sin(x), x, 0, 5)      → x - 1/6 * x^3 + 1/120 * x^5",
       "    debugInteg(\"on\")             → Print detailed integration steps & Risch algorithm trace",
@@ -1095,10 +1106,10 @@
       "    s = d.sample(1000)",
       "    mean(s)                      ≈ 100"
     ],
-    "bigint": [
+    "int": [
       "═══ Arbitrary-Precision Integers & Number Theory ═══",
       "",
-      "  Every integer literal in JC2 is parsed natively as a base-10⁹ BigInt.",
+      "  Every integer literal in JC2 is parsed natively as a base-10⁹ int.",
       "  It can grow to millions of digits. Memory is your only limit.",
       "",
       "  Integer ÷ Integer → Exact Fraction.",
@@ -1107,12 +1118,11 @@
       "  ──────────────────────",
       "    int(3.7)            → 3           (truncate toward zero)",
       "    int(-3.7)           → -3",
-      "    int(frac(7,2))      → 3           (BigInt floor division)",
+      "    int(frac(7,2))      → 3           (int floor division)",
       "    int(\"12345\")        → 12345       (parse from string)",
       "    double(42)          → 42.0        (to floating point)",
-      "    isbigint(x)         → 1 if x is BigInt type",
       "",
-      "  Combinatorics (Exact BigInt Results)",
+      "  Combinatorics (Exact int Results)",
       "  ──────────────────────",
       "    factorial(n)         n!",
       "    fib(n)               Fibonacci Fₙ",
@@ -1143,7 +1153,8 @@
       "",
       "  Numeric Predicates (see also: /help typecheck)",
       "  ──────────────────────",
-      "    isint(x)             Is x an integer? (BigInt, or integer-valued double/Fraction)",
+      "    isint(x)             Is x an exact integer type? (int, or Fraction with den=1)",
+      "    iswhole(x)           Is x a whole number? (Includes integer-valued double)",
       "    iseven(n)            Is n even?",
       "    isodd(n)             Is n odd?",
       "    isprime(n)           Is n prime?",
@@ -1154,7 +1165,7 @@
     "base": [
       "═══ Radix Conversion & Bitwise Operations ═══",
       "",
-      "  BaseNum wraps a standard decimal BigInt inside a radix shell (2 to 36+).",
+      "  BaseNum wraps a standard decimal int inside a radix shell (2 to 36+).",
       "",
       "  Conversion Functions",
       "  ──────────────────────",
@@ -1163,7 +1174,7 @@
       "    bnum(\"str\", r)       Parse a string directly as base `r`.",
       "                           bnum(\"FF\", 16)     bnum(\"45_63_2\", 64)",
       "    changeBase(v, r)     Re-display an existing BaseNum in a new base `r`.",
-      "    data(b)              Strip the radix shell → return plain BigInt.",
+      "    data(b)              Strip the radix shell → return plain int.",
       "",
       "  Arithmetic Assimilation",
       "  ──────────────────────",
@@ -1796,7 +1807,7 @@
       "  ──────────────────────",
       "    indexOf(v, val)     First index of val (-1 if absent)",
       "    count(v, val)       Count occurrences",
-      "    val in v            Membership test → returns 1 or 0",
+      "    val in v            Membership test → returns true or false",
       "",
       "  Destructuring",
       "  ──────────────────────",
@@ -1830,8 +1841,8 @@
       "    reduce(f, v, init)  Left fold",
       "                          reduce((a,b) => a+b, [1,2,3,4])       → 10",
       "                          reduce((a,b) => a+\"+\"+b, [\"x\",\"y\",\"z\"]) → \"x+y+z\"",
-      "    any(f, v)           1 if any f(x) is truthy",
-      "    all(f, v)           1 if all f(x) are truthy",
+      "    any(f, v)           true if any f(x) is truthy",
+      "    all(f, v)           true if all f(x) are truthy",
       "    countIf(f, v)       Count elements where f(x) is truthy",
       "",
       "  Sorting (Works on ALL container types)",
@@ -1948,7 +1959,7 @@
       "  ──────────────────────",
       "    indexOf(L, val)         First index of val (-1 if absent)",
       "    count(L, val)           Count matching occurrences",
-      "    val in L                Membership test → returns 1 or 0",
+      "    val in L                Membership test → returns true or false",
       "",
       "  Sorting",
       "  ──────────────────────",
@@ -1962,8 +1973,8 @@
       "    filter(f, L)            Keep elements where f(x) is truthy → new list",
       "    reduce(f, L)            Left fold using first element as initial",
       "    reduce(f, L, init)      Left fold with explicit accumulator",
-      "    any(f, L)               1 if ANY f(x) is truthy",
-      "    all(f, L)               1 if ALL f(x) are truthy",
+      "    any(f, L)               true if ANY f(x) is truthy",
+      "    all(f, L)               true if ALL f(x) are truthy",
       "    countIf(f, L)           Count elements where f(x) is truthy",
       "",
       "  Accumulation",
@@ -2013,7 +2024,7 @@
       "    freeze(L)               Locks the list physically. Any future attempt to ",
       "                            modify it (push, pop, L[i]=) will throw an error.",
       "                            Returns the list itself.",
-      "    isFrozen(L)             Returns 1 if the list is locked, 0 otherwise.",
+      "    isFrozen(L)             Returns true if the list is locked, false otherwise.",
       "    val(L)                  Creates a deep-copy snapshot of the list (and all ",
       "                            nested containers), freezes the new copy, and returns it.",
       "                            Perfect for safely passing data to untrusted functions.",
@@ -2093,7 +2104,7 @@
       "",
       "    len(d) / dictSize(d) / size(d)      Number of key-value entries",
       "    type(d)                             Returns \"Dict\"",
-      "    hasKey(d, \"key\") / has(d, \"key\")    Returns 1 if the key exists",
+      "    hasKey(d, \"key\") / has(d, \"key\")    Returns true if the key exists",
       "    removeKey(d, \"key\")                 Removes the key (throws error if absent)",
       "    keys(d)                             Returns all keys as a StringMatrix row",
       "    values(d)                           Returns all values",
@@ -2103,7 +2114,7 @@
       "  Iteration & Membership",
       "  ──────────────────────",
       "    for (k in d) { ... }             Iterate over keys",
-      "    \"key\" in d                       Returns 1 if the key exists, 0 otherwise",
+      "    \"key\" in d                       Returns true if the key exists, false otherwise",
       "",
       "    Destructured iteration (extracts key-value pairs simultaneously):",
       "      for ([k, v] in d) {",
@@ -2124,19 +2135,19 @@
       "  Immutability & Hashing (Native Value Hashing)",
       "  ──────────────────────",
       "    JC2 uses a high-performance Native Value Hashing architecture.",
-      "    Keys are hashed directly by their semantic value, meaning `1.0`, `BigInt(1)`, ",
+      "    Keys are hashed directly by their semantic value, meaning `1.0`, `int(1)`, ",
       "    and `frac(1,1)` will all perfectly collide and map to the exact same key!",
       "",
       "    Keys MUST be hashable. Valid keys include:",
-      "      • Numbers (double, BigInt, Fraction, Complex, BaseNum)",
+      "      • Numbers (double, int, Fraction, Complex, BaseNum)",
       "      • Strings and Symbolic Expressions",
       "      • Frozen containers (frozen List, Dict, Set)",
       "      • Class Instances (ONLY if they define a `__hash__` dunder method)",
       "",
       "    freeze(d)                           Locks the dictionary permanently.",
-      "    isFrozen(d)                         Returns 1 if locked, 0 otherwise.",
+      "    isFrozen(d)                         Returns true if locked, false otherwise.",
       "    val(d)                              Returns a deep-copied, frozen snapshot.",
-      "    hash(x)                             Returns the native hash value of x (as BigInt).",
+      "    hash(x)                             Returns the native hash value of x (as int).",
       "    ",
       "  Copying & Mutability Matrix",
       "  ──────────────────────",
@@ -2166,7 +2177,7 @@
       "",
       "  Membership & Iteration",
       "  ──────────────────────",
-      "    3 in s                          1 if present, 0 otherwise (O(1) lookup)",
+      "    3 in s                          true if present, false otherwise (O(1) lookup)",
       "    for (x in s) { print(x) }      Iterates in insertion order",
       "    len(s)                          Number of unique elements",
       "",
@@ -2200,7 +2211,7 @@
       "    a |= b                          In-place union (a = a | b)",
       "    a &= b                          In-place intersection (a = a & b)",
       "",
-      "  Relation Predicates (return 1 or 0)",
+      "  Relation Predicates (return true or false)",
       "  ──────────────────────",
       "    isSubset(a, b)                  Is every element of a also in b?",
       "    isSuperset(a, b)                Is every element of b also in a?",
@@ -2209,9 +2220,9 @@
       "",
       "  Type Checks",
       "  ──────────────────────",
-      "    isset(x)                        1 if x is a Set",
+      "    isset(x)                        true if x is a Set",
       "    type(s)                         → \"Set\"",
-      "    isempty(s)                      1 if set has no elements",
+      "    isempty(s)                      true if set has no elements",
       "",
       "  Conversion",
       "  ──────────────────────",
@@ -2229,7 +2240,7 @@
       "  Immutability & Hashing (Native Value Hashing)",
       "  ──────────────────────",
       "    Sets use the same Native Value Hashing engine as Dicts.",
-      "    `set(1.0, BigInt(1), frac(1,1))` will result in a Set with exactly ONE element.",
+      "    `set(1.0, int(1), frac(1,1))` will result in a Set with exactly ONE element.",
       "",
       "    Elements MUST be hashable. Unfrozen containers will throw a TypeError ",
       "    if inserted. Built-in functions that generate nested sets (like setPow ",
@@ -2237,9 +2248,9 @@
       "    Class instances can be added ONLY if they define a `__hash__` method.",
       "",
       "    freeze(s)               Locks the set permanently.",
-      "    isFrozen(s)             Returns 1 if locked, 0 otherwise.",
+      "    isFrozen(s)             Returns true if locked, false otherwise.",
       "    val(s)                  Returns a deep-copied, frozen snapshot of the set.",
-      "    hash(x)                 Returns the native hash value of x (as BigInt).",
+      "    hash(x)                 Returns the native hash value of x (as int).",
       "    ",
       "  Copying & Mutability Matrix",
       "  ──────────────────────",
@@ -2263,9 +2274,9 @@
       "    setPow(set(1, 2))               → Set{Set{}, Set{1}, Set{2}, Set{1, 2}}",
       "",
       "    chars = toSet(\"abracadabra\")    → Set{\"a\", \"b\", \"c\", \"d\", \"r\"}",
-      "    3 in a                          → 1",
-      "    9 in a                          → 0",
-      "    isSubset(set(1, 2), a)          → 1"
+      "    3 in a                          → true",
+      "    9 in a                          → false",
+      "    isSubset(set(1, 2), a)          → true"
     ],
     "class": [
       "═══ Classes, Instances, Inheritance & Operator Overloading ═══",
@@ -2357,18 +2368,18 @@
       "  Introspection",
       "  ──────────────────────",
       "    type(p)                  Class name → \"Point\"",
-      "    isinstance(p)            1 if p is any class instance",
-      "    isinstance(p, Point)     1 if p is (or inherits from) Point",
-      "    hasField(p, \"x\")         1 if field exists",
+      "    isinstance(p)            true if p is any class instance",
+      "    isinstance(p, Point)     true if p is (or inherits from) Point",
+      "    hasField(p, \"x\")         true if field exists",
       "    getFields(p)             All field names as StringMatrix",
       "    getClass(p)              The class definition object",
       "    getParent(Dog)           Parent class or none",
       "",
       "  Type Predicates (see: /help typecheck)",
       "  ──────────────────────",
-      "    isclass(Point)           1 if argument is a class definition",
-      "    isinstance(p)            1 if argument is any instance",
-      "    isfunction(sin)          1 if argument is a function/closure"
+      "    isclass(Point)           true if argument is a class definition",
+      "    isinstance(p)            true if argument is any instance",
+      "    isfunction(sin)          true if argument is a function/closure"
     ],
     "error": [
       "═══ Error Handling & Tracebacks ═══",
@@ -2417,7 +2428,7 @@
       "    Returns `[0, errorMsg]` on failure.",
       "",
       "      status = pcall(riskyFunc)",
-      "      isError(status)       → 1 if error, 0 if success",
+      "      isError(status)       → true if error, false if success",
       "",
       "  Assertions",
       "  ──────────────────────",
@@ -2457,7 +2468,7 @@
       "",
       "  File System Operations",
       "  ──────────────────────",
-      "    fileExists(path)            Returns 1 if the file/folder exists, 0 otherwise.",
+      "    fileExists(path)            Returns true if the file/folder exists, false otherwise.",
       "    fileSize(path)              Returns the physical file size in bytes.",
       "    deleteFile(path)            Permanently deletes the specified file.",
       "    listDir(path)               Returns a List of filenames in the specified directory."
@@ -2492,27 +2503,30 @@
       "",
       "  Numeric Type Checks (Functions)",
       "  ──────────────────────",
-      "    isint(x)            Integer? (BigInt, integer-valued double, ",
+      "    isbool(x)           Boolean type specifically?",
+      "    isint(x)            Integer type specifically? (int, or Fraction ",
+      "                        with denominator = 1)",
+      "    iswhole(x)          Whole number? (int, integer-valued double, ",
       "                        or Fraction with denominator = 1)",
       "    isfloat(x)          double type specifically?",
-      "    isnumeric(x)        Any numeric type? (double, BigInt, Fraction, ",
+      "    isnumeric(x)        Any numeric type? (double, int, Fraction, ",
       "                        Complex, BaseNum)",
       "    isbase(x)           BaseNum type specifically?",
       "    iscomplex(x)        Complex type specifically?",
-      "    isreal(x)           Real number? (double, BigInt, Fraction, BaseNum,",
+      "    isreal(x)           Real number? (double, int, Fraction, BaseNum,",
       "                        or Complex with imaginary part ≈ 0)",
       "    isfrac(x)           Fraction type specifically?",
-      "    isbigint(x)         BigInt type specifically?",
       "    isbase(x)           BaseNum type specifically?",
       "",
       "    Examples:",
-      "      isint(42)           → 1     (BigInt literal)",
-      "      isint(3.0)          → 1     (integer-valued double)",
-      "      isint(3.5)          → 0",
-      "      isint(frac(6,3))    → 1     (reduces to 2)",
-      "      isreal(3+0i)        → 1     (imaginary part is zero)",
-      "      isreal(3+4i)        → 0",
-      "      isnumeric(\"hello\")  → 0",
+      "      isint(42)           → true  (int literal)",
+      "      isint(3.0)          → false (double, not an exact integer type)",
+      "      iswhole(3.0)        → true  (integer-valued double)",
+      "      isint(3.5)          → false",
+      "      isint(frac(6,3))    → true  (reduces to 2)",
+      "      isreal(3+0i)        → true  (imaginary part is zero)",
+      "      isreal(3+4i)        → false",
+      "      isnumeric(\"hello\")  → false",
       "",
       "  Container Type Checks",
       "  ──────────────────────",
@@ -2526,31 +2540,31 @@
       "    isdict(x)           Dict type?",
       "",
       "    Examples:",
-      "      ismatrix([1,2;3,4])       → 1",
-      "      isvector([1,2,3])         → 1   (1×3 row vector)",
-      "      isvector([1;2;3])         → 1   (3×1 column vector)",
-      "      isvector([1,2;3,4])       → 0   (2×2, not a vector)",
-      "      issquare([1,2;3,4])       → 1",
-      "      islist(list(1,2))         → 1",
-      "      isdict({a: 1})            → 1",
+      "      ismatrix([1,2;3,4])       → true",
+      "      isvector([1,2,3])         → true  (1×3 row vector)",
+      "      isvector([1;2;3])         → true  (3×1 column vector)",
+      "      isvector([1,2;3,4])       → false (2×2, not a vector)",
+      "      issquare([1,2;3,4])       → true",
+      "      islist(list(1,2))         → true",
+      "      isdict({a: 1})            → true",
       "",
       "  String Predicates",
       "  ──────────────────────",
       "    isstring(x)         Is x a String type?",
-      "    isalpha(s)          All characters alphabetic? (\"abc\" → 1)",
-      "    isdigit(s)          All characters digits? (\"123\" → 1)",
-      "    isalnum(s)          All characters alphanumeric? (\"abc123\" → 1)",
-      "    isspace(s)          All characters whitespace? (\"  \\\\t\" → 1)",
-      "    isupper(s)          All alphabetic chars uppercase? (\"ABC\" → 1)",
-      "    islower(s)          All alphabetic chars lowercase? (\"abc\" → 1)",
+      "    isalpha(s)          All characters alphabetic? (\"abc\" → true)",
+      "    isdigit(s)          All characters digits? (\"123\" → true)",
+      "    isalnum(s)          All characters alphanumeric? (\"abc123\" → true)",
+      "    isspace(s)          All characters whitespace? (\"  \\\\t\" → true)",
+      "    isupper(s)          All alphabetic chars uppercase? (\"ABC\" → true)",
+      "    islower(s)          All alphabetic chars lowercase? (\"abc\" → true)",
       "    isempty(x)          Empty string, empty List, empty Dict,",
       "                        or zero-dimension matrix?",
       "",
       "    Notes:",
-      "    • Non-string arguments return 0 for all string predicates",
+      "    • Non-string arguments return false for all string predicates",
       "      (except isempty, which also works on Lists, Dicts, matrices).",
-      "    • Empty strings return 0 for isalpha/isdigit/isalnum/isspace",
-      "      (nothing to test), but 1 for isempty.",
+      "    • Empty strings return false for isalpha/isdigit/isalnum/isspace",
+      "      (nothing to test), but true for isempty.",
       "",
       "  Special Type Checks",
       "  ──────────────────────",
@@ -2566,25 +2580,25 @@
       "  ──────────────────────",
       "    isnan(x)            Is x NaN? (only for double type)",
       "    isinf(x)            Is x ±Infinity? (only for double type)",
-      "    isfinite(x)         Is x a finite number? (BigInt/Fraction → always 1)",
+      "    isfinite(x)         Is x a finite number? (int/Fraction → always true)",
       "",
       "  Numeric Value Predicates",
       "  ──────────────────────",
       "    isapprox(a, b, [rtol], [atol])",
-      "                        Returns 1 if a and b are approximately equal.",
+      "                        Returns true if a and b are approximately equal.",
       "                        rtol defaults to 1e-9, atol defaults to 0.0.",
       "                        Formula: |a - b| <= max(atol, rtol * max(|a|, |b|))",
-      "    iszero(x)           Is x equal to zero? (works on double, BigInt,",
+      "    iszero(x)           Is x equal to zero? (works on double, int,",
       "                        Complex, Fraction — exact comparison)",
-      "    ispositive(x)       Is x > 0? (double, BigInt, Fraction)",
-      "    isnegative(x)       Is x < 0? (double, BigInt, Fraction)",
+      "    ispositive(x)       Is x > 0? (double, int, Fraction)",
+      "    isnegative(x)       Is x < 0? (double, int, Fraction)",
       "    iseven(n)           Is n an even integer?",
       "    isodd(n)            Is n an odd integer?",
       "    isprime(n)          Is n a prime number? (Miller-Rabin test)",
       "",
       "  Type Constructors (see also: /help basic)",
       "  ──────────────────────",
-      "    int(x)              Truncate to BigInt (toward zero)",
+      "    int(x)              Truncate to int (toward zero)",
       "    double(x)           Convert to double",
       "    complex(x)          Convert to Complex (imag=0)",
       "    complex(a, b)       Construct Complex from real and imaginary parts",
@@ -2612,7 +2626,7 @@
       "",
       "  Type Mapping (JC2 → JSON)",
       "  ──────────────────────",
-      "    double / BigInt / Fraction   →  number (integers are cleanly truncated)",
+      "    double / int / Fraction      →  number (integers are cleanly truncated)",
       "    String                       →  string (Deep RFC standard escaping)",
       "    List                         →  array",
       "    Dict                         →  object",
@@ -2622,12 +2636,12 @@
       "",
       "  Type Mapping (JSON → JC2)",
       "  ──────────────────────",
-      "    number (integer)             →  BigInt (avoids precision loss on IDs)",
+      "    number (integer)             →  int (avoids precision loss on IDs)",
       "    number (float)               →  double",
       "    string                       →  String",
       "    array                        →  List",
       "    object                       →  Dict",
-      "    true / false                 →  1.0 / 0.0 (JC2 native boolean representation)",
+      "    true / false                 →  true / false",
       "    null                         →  none()",
       "",
       "  Examples",
@@ -2637,13 +2651,13 @@
       "    // 1. Serialization (Object to String)",
       "    d = { name: \"Alice\", active: true, scores: [85, 92] }",
       "    s = stringify(d)             ",
-      "    // → '{\"name\": \"Alice\", \"active\": 1, \"scores\": [85, 92]}'",
+      "    // → '{\"name\": \"Alice\", \"active\": true, \"scores\": [85, 92]}'",
       "",
       "    // 2. Pretty Print (Perfect for writing config files)",
       "    print(json_pretty(d, 2))     ",
       "    // → {",
       "    //     \"name\": \"Alice\",",
-      "    //     \"active\": 1,",
+      "    //     \"active\": true,",
       "    //     \"scores\": [",
       "    //       85,",
       "    //       92",
@@ -2653,7 +2667,7 @@
       "    // 3. Deserialization (String to Object)",
       "    raw = r\"({\"host\": \"127.0.0.1\", \"port\": 8080})\"",
       "    conf = parse(raw)",
-      "    conf.port                    // → 8080 (Parsed as BigInt)",
+      "    conf.port                    // → 8080 (Parsed as int)",
       "    conf.host                    // → \"127.0.0.1\"",
       "",
       "    // 4. File I/O Full Pipeline",
@@ -2878,7 +2892,7 @@
       "    win = Window(title, width, height)",
       "        Requests the OS to create a fixed-size trackable window.",
       "    win.isOpen()",
-      "        Returns 1 if the window is alive, 0 if closed by the user.",
+      "        Returns true if the window is alive, false if closed by the user.",
       "    win.show(image_obj)",
       "        Bit-block transfers (Blits) a JC2 `Image` object's memory buffer ",
       "        directly onto the window's device context (HDC) instantly.",
@@ -2886,7 +2900,7 @@
       "  Mouse & Cursor Control (3D/FPS Mechanics)",
       "  ──────────────────────",
       "    win.showCursor(boolean)",
-      "        Dynamically hides (0.0) or shows (1.0) the Windows mouse pointer.",
+      "        Dynamically hides (false) or shows (true) the Windows mouse pointer.",
       "        Essential for creating immersive games and custom UI crosshairs.",
       "        ",
       "    win.setCursorPos(x, y)",
@@ -2899,8 +2913,8 @@
       "  ──────────────────────",
       "    win.setImeEnabled(boolean)",
       "        Dynamically enables or disables the OS Input Method (e.g., Pinyin).",
-      "        • Pass `false` (0) for action games to prevent the IME from intercepting WASD.",
-      "        • Pass `true`  (1) when expecting text input from the user.",
+      "        • Pass `false` for action games to prevent the IME from intercepting WASD.",
+      "        • Pass `true` when expecting text input from the user.",
       "",
       "  Real-Time Input Polling",
       "  ──────────────────────",
@@ -2910,7 +2924,7 @@
       "          \"W\", \"A\", \"S\", \"D\", \"0\"-\"9\"",
       "          \"UP\", \"DOWN\", \"LEFT\", \"RIGHT\"",
       "          \"SPACE\", \"ENTER\", \"ESC\", \"SHIFT\", \"CTRL\", \"ALT\", \"TAB\"",
-      "        Returns 1.0 if currently pressed, 0.0 otherwise.",
+      "        Returns true if currently pressed, false otherwise.",
       "",
       "  Event Queue (win.pollEvent)",
       "  ──────────────────────",
@@ -3041,7 +3055,7 @@
     },
     "int": {
       "signature": "int(x)",
-      "desc": "Truncates a value to an integer (BigInt) towards zero.",
+      "desc": "Truncates a value to an integer (int) towards zero.",
       "examples": [
         "int(3.7)",
         "int(-3.7)",
@@ -3171,7 +3185,7 @@
     },
     "idiv": {
       "signature": "idiv(a, b)",
-      "desc": "Performs integer division (truncating towards zero). Exact for BigInts.",
+      "desc": "Performs integer division (truncating towards zero). Exact for ints.",
       "examples": [
         "idiv(10, 3)"
       ]
@@ -3676,14 +3690,14 @@
     },
     "isperp": {
       "signature": "isperp(a, b)",
-      "desc": "Returns 1 if vectors a and b are perpendicular (orthogonal), 0 otherwise.",
+      "desc": "Returns true if vectors a and b are perpendicular (orthogonal), false otherwise.",
       "examples": [
         "isperp([1; 0], [0; 1])"
       ]
     },
     "isparallel": {
       "signature": "isparallel(a, b)",
-      "desc": "Returns 1 if vectors a and b are parallel, 0 otherwise.",
+      "desc": "Returns true if vectors a and b are parallel, false otherwise.",
       "examples": [
         "isparallel([1; 2], [2; 4])"
       ]
@@ -3698,7 +3712,7 @@
     },
     "factorial": {
       "signature": "factorial(n)",
-      "desc": "Returns the factorial of n (n!). Exact for BigInts.",
+      "desc": "Returns the factorial of n (n!). Exact for ints.",
       "examples": [
         "factorial(100)"
       ]
@@ -3726,14 +3740,14 @@
     },
     "digits": {
       "signature": "digits(n)",
-      "desc": "Returns the number of base-10 digits in a BigInt.",
+      "desc": "Returns the number of base-10 digits in an int.",
       "examples": [
         "digits(factorial(100))"
       ]
     },
     "isPrime": {
       "signature": "isPrime(n)",
-      "desc": "Returns 1 if n is a prime number (via Miller-Rabin test), 0 otherwise.",
+      "desc": "Returns true if n is a prime number (via Miller-Rabin test), false otherwise.",
       "aliases": [
         "isprime"
       ],
@@ -3806,7 +3820,7 @@
     },
     "isPerfect": {
       "signature": "isPerfect(n)",
-      "desc": "Returns 1 if n is a perfect number (sum of proper divisors equals n), 0 otherwise.",
+      "desc": "Returns true if n is a perfect number (sum of proper divisors equals n), false otherwise.",
       "examples": [
         "isPerfect(28)"
       ]
@@ -3869,7 +3883,7 @@
     },
     "data": {
       "signature": "data(b)",
-      "desc": "Strips the radix shell from a BaseNum, returning a plain BigInt.",
+      "desc": "Strips the radix shell from a BaseNum, returning a plain int.",
       "examples": [
         "data(base(255, 16))"
       ]
@@ -4207,7 +4221,7 @@
     },
     "hasKey": {
       "signature": "hasKey(d, key)",
-      "desc": "Returns 1 if the Dictionary contains the specified key, 0 otherwise.",
+      "desc": "Returns true if the Dictionary contains the specified key, false otherwise.",
       "aliases": ["has", "hasField"],
       "examples": [
         "hasKey({a: 1}, \"a\")"
@@ -4492,7 +4506,7 @@
     },
     "isOpen": {
       "signature": "win.isOpen()",
-      "desc": "Returns 1 if the window is still open, 0 if closed.",
+      "desc": "Returns true if the window is still open, false if closed.",
       "examples": [
         "while (win.isOpen()) { ... }"
       ]
@@ -4506,7 +4520,7 @@
     },
     "isKeyDown": {
       "signature": "win.isKeyDown(key)",
-      "desc": "Returns 1 if the specified physical key is currently pressed.",
+      "desc": "Returns true if the specified physical key is currently pressed.",
       "examples": [
         "if (win.isKeyDown(\"W\")) moveUp()"
       ]
@@ -4621,7 +4635,7 @@
     },
     "contains": {
       "signature": "contains(s, sub)",
-      "desc": "Returns 1 if sub is found in s, 0 otherwise.",
+      "desc": "Returns true if sub is found in s, false otherwise.",
       "examples": ["contains(\"hello\", \"ell\")"]
     },
     "repeat": {
@@ -4636,12 +4650,12 @@
     },
     "startsWith": {
       "signature": "startsWith(s, prefix)",
-      "desc": "Returns 1 if string s starts with prefix.",
+      "desc": "Returns true if string s starts with prefix.",
       "examples": ["startsWith(\"hello\", \"he\")"]
     },
     "endsWith": {
       "signature": "endsWith(s, suffix)",
-      "desc": "Returns 1 if string s ends with suffix.",
+      "desc": "Returns true if string s ends with suffix.",
       "examples": ["endsWith(\"hello\", \"lo\")"]
     },
     "ord": {
@@ -4656,7 +4670,7 @@
     },
     "parseNum": {
       "signature": "parseNum(s)",
-      "desc": "Parses a string into a number (double or BigInt).",
+      "desc": "Parses a string into a number (double or int).",
       "examples": ["parseNum(\"42.5\")"]
     },
     "first": {
@@ -4862,17 +4876,17 @@
     },
     "isSubset": {
       "signature": "isSubset(a, b)",
-      "desc": "Returns 1 if a is a subset of b.",
+      "desc": "Returns true if a is a subset of b.",
       "examples": ["isSubset(set(1), set(1, 2))"]
     },
     "isSuperset": {
       "signature": "isSuperset(a, b)",
-      "desc": "Returns 1 if a is a superset of b.",
+      "desc": "Returns true if a is a superset of b.",
       "examples": ["isSuperset(set(1, 2), set(1))"]
     },
     "isDisjoint": {
       "signature": "isDisjoint(a, b)",
-      "desc": "Returns 1 if a and b share no elements.",
+      "desc": "Returns true if a and b share no elements.",
       "examples": ["isDisjoint(set(1), set(2))"]
     },
     "setProduct": {
@@ -4902,7 +4916,7 @@
     },
     "fileExists": {
       "signature": "fileExists(path)",
-      "desc": "Returns 1 if the file or directory exists, 0 otherwise.",
+      "desc": "Returns true if the file or directory exists, false otherwise.",
       "examples": ["fileExists(\"data.txt\")"]
     },
     "deleteFile": {
@@ -5007,7 +5021,7 @@
     },
     "isError": {
       "signature": "isError(status)",
-      "desc": "Returns 1 if the pcall status array indicates an error.",
+      "desc": "Returns true if the pcall status array indicates an error.",
       "examples": ["isError(pcall(f))"]
     },
     "resetConst": {
@@ -5074,12 +5088,12 @@
     },
     "isFrozen": {
       "signature": "isFrozen(obj)",
-      "desc": "Returns 1 if the container is locked, 0 otherwise.",
+      "desc": "Returns true if the container is locked, false otherwise.",
       "examples": ["isFrozen(myList)"]
     },
     "hash": {
       "signature": "hash(x)",
-      "desc": "Returns the native hash value of x as a BigInt.",
+      "desc": "Returns the native hash value of x as an int.",
       "examples": ["hash(\"hello\")"]
     },
     "clone": {
@@ -5102,199 +5116,204 @@
       "desc": "Sets a specific CAS limit.",
       "examples": ["setSymLimit(\"maxDepth\", 10)"]
     },
+    "isbool": {
+      "signature": "isbool(x)",
+      "desc": "Returns true if x is a boolean (true or false).",
+      "examples": ["isbool(true)"]
+    },
     "isint": {
       "signature": "isint(x)",
-      "desc": "Returns 1 if x is an integer (BigInt, integer-valued double, or Fraction with den=1).",
+      "desc": "Returns true if x is an exact integer type (int, or Fraction with den=1).",
       "examples": ["isint(42)"]
+    },
+    "iswhole": {
+      "signature": "iswhole(x)",
+      "desc": "Returns true if x is a whole number (int, integer-valued double, or Fraction with den=1).",
+      "examples": ["iswhole(3.0)"]
     },
     "isfloat": {
       "signature": "isfloat(x)",
-      "desc": "Returns 1 if x is a double.",
+      "desc": "Returns true if x is a double.",
       "examples": ["isfloat(3.14)"]
     },
     "isnumeric": {
       "signature": "isnumeric(x)",
-      "desc": "Returns 1 if x is any numeric type.",
+      "desc": "Returns true if x is any numeric type.",
       "examples": ["isnumeric(1+2i)"]
     },
     "iscomplex": {
       "signature": "iscomplex(x)",
-      "desc": "Returns 1 if x is specifically a Complex type.",
+      "desc": "Returns true if x is specifically a Complex type.",
       "examples": ["iscomplex(1+2i)"]
     },
     "isreal": {
       "signature": "isreal(x)",
-      "desc": "Returns 1 if x is a real number (imaginary part is 0).",
+      "desc": "Returns true if x is a real number (imaginary part is 0).",
       "examples": ["isreal(42)"]
     },
     "isfrac": {
       "signature": "isfrac(x)",
-      "desc": "Returns 1 if x is specifically a Fraction type.",
+      "desc": "Returns true if x is specifically a Fraction type.",
       "examples": ["isfrac(frac(1, 2))"]
-    },
-    "isbigint": {
-      "signature": "isbigint(x)",
-      "desc": "Returns 1 if x is specifically a BigInt type.",
-      "examples": ["isbigint(42)"]
     },
     "isbase": {
       "signature": "isbase(x)",
-      "desc": "Returns 1 if x is specifically a BaseNum type.",
+      "desc": "Returns true if x is specifically a BaseNum type.",
       "examples": ["isbase(base(255, 16))"]
     },
     "ismatrix": {
       "signature": "ismatrix(x)",
-      "desc": "Returns 1 if x is any matrix type.",
+      "desc": "Returns true if x is any matrix type.",
       "examples": ["ismatrix([1, 2])"]
     },
     "isrealmat": {
       "signature": "isrealmat(x)",
-      "desc": "Returns 1 if x is specifically a RealMatrix.",
+      "desc": "Returns true if x is specifically a RealMatrix.",
       "examples": ["isrealmat([1, 2])"]
     },
     "iscomplexmat": {
       "signature": "iscomplexmat(x)",
-      "desc": "Returns 1 if x is specifically a ComplexMatrix.",
+      "desc": "Returns true if x is specifically a ComplexMatrix.",
       "examples": ["iscomplexmat([1i, 2i])"]
     },
     "isstringmat": {
       "signature": "isstringmat(x)",
-      "desc": "Returns 1 if x is specifically a StringMatrix.",
+      "desc": "Returns true if x is specifically a StringMatrix.",
       "examples": ["isstringmat([\"a\", \"b\"])"]
     },
     "isvector": {
       "signature": "isvector(x)",
-      "desc": "Returns 1 if x is a 1D row or column vector.",
+      "desc": "Returns true if x is a 1D row or column vector.",
       "examples": ["isvector([1, 2, 3])"]
     },
     "issquare": {
       "signature": "issquare(x)",
-      "desc": "Returns 1 if x is a square matrix.",
+      "desc": "Returns true if x is a square matrix.",
       "examples": ["issquare([1, 2; 3, 4])"]
     },
     "islist": {
       "signature": "islist(x)",
-      "desc": "Returns 1 if x is a List.",
+      "desc": "Returns true if x is a List.",
       "examples": ["islist(list(1, 2))"]
     },
     "isdict": {
       "signature": "isdict(x)",
-      "desc": "Returns 1 if x is a Dict.",
+      "desc": "Returns true if x is a Dict.",
       "examples": ["isdict({a: 1})"]
     },
     "isstring": {
       "signature": "isstring(x)",
-      "desc": "Returns 1 if x is a String.",
+      "desc": "Returns true if x is a String.",
       "examples": ["isstring(\"hello\")"]
     },
     "isalpha": {
       "signature": "isalpha(s)",
-      "desc": "Returns 1 if all characters in s are alphabetic.",
+      "desc": "Returns true if all characters in s are alphabetic.",
       "examples": ["isalpha(\"abc\")"]
     },
     "isdigit": {
       "signature": "isdigit(s)",
-      "desc": "Returns 1 if all characters in s are digits.",
+      "desc": "Returns true if all characters in s are digits.",
       "examples": ["isdigit(\"123\")"]
     },
     "isalnum": {
       "signature": "isalnum(s)",
-      "desc": "Returns 1 if all characters in s are alphanumeric.",
+      "desc": "Returns true if all characters in s are alphanumeric.",
       "examples": ["isalnum(\"abc123\")"]
     },
     "isspace": {
       "signature": "isspace(s)",
-      "desc": "Returns 1 if all characters in s are whitespace.",
+      "desc": "Returns true if all characters in s are whitespace.",
       "examples": ["isspace(\"  \\t\")"]
     },
     "isupper": {
       "signature": "isupper(s)",
-      "desc": "Returns 1 if all alphabetic characters in s are uppercase.",
+      "desc": "Returns true if all alphabetic characters in s are uppercase.",
       "examples": ["isupper(\"ABC\")"]
     },
     "islower": {
       "signature": "islower(s)",
-      "desc": "Returns 1 if all alphabetic characters in s are lowercase.",
+      "desc": "Returns true if all alphabetic characters in s are lowercase.",
       "examples": ["islower(\"abc\")"]
     },
     "isempty": {
       "signature": "isempty(x)",
-      "desc": "Returns 1 if the string, list, dict, or matrix is empty.",
+      "desc": "Returns true if the string, list, dict, or matrix is empty.",
       "examples": ["isempty(\"\")"]
     },
     "isnone": {
       "signature": "isnone(x)",
-      "desc": "Returns 1 if x is the none value.",
+      "desc": "Returns true if x is the none value.",
       "examples": ["isnone(none())"]
     },
     "isfunction": {
       "signature": "isfunction(x)",
-      "desc": "Returns 1 if x is a function or closure.",
+      "desc": "Returns true if x is a function or closure.",
       "examples": ["isfunction(sin)"]
     },
     "isclass": {
       "signature": "isclass(x)",
-      "desc": "Returns 1 if x is a class definition.",
+      "desc": "Returns true if x is a class definition.",
       "examples": ["isclass(Point)"]
     },
     "issym": {
       "signature": "issym(x)",
-      "desc": "Returns 1 if x is a Symbolic Expression.",
+      "desc": "Returns true if x is a Symbolic Expression.",
       "examples": ["issym(sym(\"x\"))"]
     },
     "isnan": {
       "signature": "isnan(x)",
-      "desc": "Returns 1 if x is NaN (Not a Number).",
+      "desc": "Returns true if x is NaN (Not a Number).",
       "examples": ["isnan(0/0)"]
     },
     "isinf": {
       "signature": "isinf(x)",
-      "desc": "Returns 1 if x is +/- Infinity.",
+      "desc": "Returns true if x is +/- Infinity.",
       "examples": ["isinf(1/0)"]
     },
     "isfinite": {
       "signature": "isfinite(x)",
-      "desc": "Returns 1 if x is a finite number.",
+      "desc": "Returns true if x is a finite number.",
       "examples": ["isfinite(42)"]
     },
     "isprime": {
       "signature": "isprime(x)",
-      "desc": "Returns 1 if x is a prime number.",
+      "desc": "Returns true if x is a prime number.",
       "examples": ["isprime(7)"]
     },
     "iseven": {
       "signature": "iseven(x)",
-      "desc": "Returns 1 if x is an even integer.",
+      "desc": "Returns true if x is an even integer.",
       "examples": ["iseven(4)"]
     },
     "isodd": {
       "signature": "isodd(x)",
-      "desc": "Returns 1 if x is an odd integer.",
+      "desc": "Returns true if x is an odd integer.",
       "examples": ["isodd(3)"]
     },
     "ispositive": {
       "signature": "ispositive(x)",
-      "desc": "Returns 1 if x > 0.",
+      "desc": "Returns true if x > 0.",
       "examples": ["ispositive(5)"]
     },
     "isnegative": {
       "signature": "isnegative(x)",
-      "desc": "Returns 1 if x < 0.",
+      "desc": "Returns true if x < 0.",
       "examples": ["isnegative(-5)"]
     },
     "isapprox": {
       "signature": "isapprox(a, b, [rtol], [atol])",
-      "desc": "Returns 1 if a and b are approximately equal within relative tolerance rtol (default 1e-9) and absolute tolerance atol (default 0.0).",
+      "desc": "Returns true if a and b are approximately equal within relative tolerance rtol (default 1e-9) and absolute tolerance atol (default 0.0).",
       "examples": ["isapprox(1.0000000001, 1.0)"]
     },
     "iszero": {
       "signature": "iszero(x)",
-      "desc": "Returns 1 if x is equal to zero.",
+      "desc": "Returns true if x is equal to zero.",
       "examples": ["iszero(0)"]
     },
     "isset": {
       "signature": "isset(x)",
-      "desc": "Returns 1 if x is a Set.",
+      "desc": "Returns true if x is a Set.",
       "examples": ["isset(set(1))"]
     },
     "Normal": {
@@ -5709,7 +5728,7 @@
     },
     "bool": {
       "signature": "bool(x)",
-      "desc": "Converts a value to its boolean equivalent (1.0 for true, 0.0 for false).",
+      "desc": "Converts a value to its boolean equivalent (true or false).",
       "examples": ["bool(42)"]
     },
     "not": {
@@ -5779,12 +5798,12 @@
     },
     "any": {
       "signature": "any(f, v)",
-      "desc": "Returns 1 if any element in v satisfies function f.",
+      "desc": "Returns true if any element in v satisfies function f.",
       "examples": ["any((x) => x > 0, [-1, 1])"]
     },
     "all": {
       "signature": "all(f, v)",
-      "desc": "Returns 1 if all elements in v satisfy function f.",
+      "desc": "Returns true if all elements in v satisfy function f.",
       "examples": ["all((x) => x > 0, [1, 2])"]
     },
     "countIf": {

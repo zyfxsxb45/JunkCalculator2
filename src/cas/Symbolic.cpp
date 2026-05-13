@@ -66,9 +66,10 @@ namespace jc {
     }
 
     static CASVal valueToCasVal(const Value& v) {
-        if (std::holds_alternative<BigInt>(v.data))    return std::get<BigInt>(v.data);
-        if (std::holds_alternative<Fraction>(v.data))  return std::get<Fraction>(v.data);
-        if (std::holds_alternative<double>(v.data))    return std::get<double>(v.data);
+        if (v.isObjType(ObjType::BIGINT))    return static_cast<ObjBigInt*>(v.asObj())->num;
+        if (v.isObjType(ObjType::FRACTION))  return static_cast<ObjFraction*>(v.asObj())->frac;
+        if (v.isDouble())                    return v.asDoubleRaw();
+        if (v.isInt32())                     return static_cast<double>(v.asInt32());
         throw std::runtime_error("CAS Error: Cannot convert value to CAS type.");
     }
 
@@ -790,7 +791,7 @@ namespace jc {
                     try {
                         Value result = aVal ^ bVal;
                         // 如果结果是精确的整数/分数，则接受折叠 (复数底层是 double，会引入浮点误差，拒绝折叠)
-                        if (std::holds_alternative<BigInt>(result.data) || std::holds_alternative<Fraction>(result.data)) {
+                        if (result.isObjType(ObjType::BIGINT) || result.isObjType(ObjType::FRACTION)) {
                             return result.asSymbolic();
                         } else if (result.isComplex()) {
                             Complex c = result.asComplex();
@@ -924,7 +925,7 @@ namespace jc {
                         Value expVal = casValToValue(expNum->value);
                         Value result = baseVal ^ expVal;
                         
-                        if (std::holds_alternative<double>(result.data) && std::isnan(std::get<double>(result.data))) {
+                        if (result.isDouble() && std::isnan(result.asDoubleRaw())) {
                             std::complex<double> bc(baseVal.asDouble(), 0.0);
                             std::complex<double> ec(expVal.asDouble(), 0.0);
                             std::complex<double> cres = std::pow(bc, ec);
@@ -943,7 +944,7 @@ namespace jc {
                     Value expVal = casValToValue(expNum->value);
                     Value result = baseVal ^ expVal;
                         
-                    if (std::holds_alternative<double>(result.data) && std::isnan(std::get<double>(result.data))) {
+                    if (result.isDouble() && std::isnan(result.asDoubleRaw())) {
                         std::complex<double> bc(baseVal.asDouble(), 0.0);
                         std::complex<double> ec(expVal.asDouble(), 0.0);
                         std::complex<double> cres = std::pow(bc, ec);
@@ -1172,7 +1173,8 @@ namespace jc {
     // 精确匹配 AST 并记录捕获变量 (支持 ADD/MUL 的全排列交换律检测)
     bool matchAST(const std::shared_ptr<SymNode>& node, const std::shared_ptr<SymNode>& pat, std::map<std::string, SymExpr>& captures) {
         checkInterrupt();
-        if (!node || !pat) return false;
+        if (!node) { std::cout << "[DEBUG] matchAST: node is null!" << std::endl; return false; }
+        if (!pat) { std::cout << "[DEBUG] matchAST: pat is null!" << std::endl; return false; }
         
         std::string wcName;
         // 1. 若 pat 是通配符
@@ -1283,7 +1285,7 @@ namespace jc {
 
     // 将捕获的 AST 塞回目标模板中
     SymExpr substituteCaptures(const SymExpr& target, const std::map<std::string, SymExpr>& captures) {
-        if (!target.ptr) return target;
+        if (!target.ptr) { std::cout << "[DEBUG] substituteCaptures: target.ptr is null!" << std::endl; return target; }
         
         std::string wcName;
         if (isWildcard(target.ptr, wcName)) {
@@ -1325,7 +1327,7 @@ namespace jc {
     // 核心入口：后序遍历并尝试重写
     SymExpr applyRule(const SymExpr& expr, const SymExpr& pattern, const SymExpr& target) {
         checkInterrupt();
-        if (!expr.ptr) return expr;
+        if (!expr.ptr) { std::cout << "[DEBUG] applyRule: expr.ptr is null!" << std::endl; return expr; }
         
         // 1. 无情探底（Post-order traversal）
         SymExpr current = expr;
@@ -1390,12 +1392,17 @@ namespace jc {
         // 2. 尝试整体 matchAST
         std::map<std::string, SymExpr> captures;
         if (matchAST(current.ptr, pattern.ptr, captures)) {
+            std::cout << "[DEBUG] applyRule: matchAST overall success, calling substituteCaptures..." << std::endl;
             return substituteCaptures(target, captures);
         }
         
         // 3. 子集拦截匹配 (Subset Matching)
-        if ((current.ptr->getType() == SymType::ADD && pattern.ptr->getType() == SymType::ADD) ||
-            (current.ptr->getType() == SymType::MUL && pattern.ptr->getType() == SymType::MUL)) {
+        if (!current.ptr) std::cout << "[DEBUG] applyRule: current.ptr became null before subset matching!" << std::endl;
+        if (!pattern.ptr) std::cout << "[DEBUG] applyRule: pattern.ptr is null before subset matching!" << std::endl;
+
+        if (current.ptr && pattern.ptr && 
+            ((current.ptr->getType() == SymType::ADD && pattern.ptr->getType() == SymType::ADD) ||
+             (current.ptr->getType() == SymType::MUL && pattern.ptr->getType() == SymType::MUL))) {
             
             const auto& cArgs = (current.ptr->getType() == SymType::ADD) ? std::static_pointer_cast<SymAdd>(current.ptr)->args : std::static_pointer_cast<SymMul>(current.ptr)->args;
             const auto& pArgs = (pattern.ptr->getType() == SymType::ADD) ? std::static_pointer_cast<SymAdd>(pattern.ptr)->args : std::static_pointer_cast<SymMul>(pattern.ptr)->args;
@@ -1449,18 +1456,30 @@ namespace jc {
 
                 std::map<std::string, SymExpr> initialCaps;
                 if (dfsSubset(0, initialCaps, cUsed)) {
+                    std::cout << "[DEBUG] applyRule: dfsSubset success, calling substituteCaptures..." << std::endl;
                     SymExpr replaced = substituteCaptures(target, finalCaptures);
+                    if (!replaced.ptr) std::cout << "[DEBUG] applyRule: replaced.ptr is null after substituteCaptures!" << std::endl;
+                    
                     std::vector<std::shared_ptr<SymNode>> remaining;
                     for (size_t i = 0; i < N; ++i) {
-                        if (!finalCUsed[i]) remaining.push_back(cArgs[i]);
+                        if (!finalCUsed[i]) {
+                            if (!cArgs[i]) std::cout << "[DEBUG] applyRule: cArgs[" << i << "] is null!" << std::endl;
+                            remaining.push_back(cArgs[i]);
+                        }
                     }
                     if (current.ptr->getType() == SymType::ADD) {
                         SymExpr res = replaced;
-                        for (auto& rem : remaining) res = res + SymExpr(rem);
+                        for (auto& rem : remaining) {
+                            std::cout << "[DEBUG] applyRule: ADD remaining term..." << std::endl;
+                            res = res + SymExpr(rem);
+                        }
                         return res;
                     } else {
                         SymExpr res = replaced;
-                        for (auto& rem : remaining) res = res * SymExpr(rem);
+                        for (auto& rem : remaining) {
+                            std::cout << "[DEBUG] applyRule: MUL remaining term..." << std::endl;
+                            res = res * SymExpr(rem);
+                        }
                         return res;
                     }
                 }
@@ -1796,9 +1815,9 @@ namespace jc {
                     if (!ok) return {false, Value()};
                     sum = sum + v;
                 }
-                if (!std::holds_alternative<double>(sum.data) &&
-                    !std::holds_alternative<BigInt>(sum.data) &&
-                    !std::holds_alternative<Fraction>(sum.data) &&
+                if (!sum.isDouble() && !sum.isInt32() &&
+                    !sum.isObjType(ObjType::BIGINT) &&
+                    !sum.isObjType(ObjType::FRACTION) &&
                     !sum.isComplex()) {
                     return {false, Value()};
                 }
@@ -1811,9 +1830,9 @@ namespace jc {
                     if (!ok) return {false, Value()};
                     prod = prod * v;
                 }
-                if (!std::holds_alternative<double>(prod.data) &&
-                    !std::holds_alternative<BigInt>(prod.data) &&
-                    !std::holds_alternative<Fraction>(prod.data) &&
+                if (!prod.isDouble() && !prod.isInt32() &&
+                    !prod.isObjType(ObjType::BIGINT) &&
+                    !prod.isObjType(ObjType::FRACTION) &&
                     !prod.isComplex()) {
                     return {false, Value()};
                 }
@@ -1827,7 +1846,7 @@ namespace jc {
                 if (!ok2) return {false, Value()};
                 try {
                     Value res = b ^ e;
-                    if (std::holds_alternative<double>(res.data) && std::isnan(std::get<double>(res.data))) {
+                    if (res.isDouble() && std::isnan(res.asDoubleRaw())) {
                         double br = 0.0, bi = 0.0, er = 0.0, ei = 0.0;
                         bool ok_cast = true;
                         try {
@@ -1846,9 +1865,9 @@ namespace jc {
                         }
                     }
                 
-                    if (!std::holds_alternative<double>(res.data) &&
-                        !std::holds_alternative<BigInt>(res.data) &&
-                        !std::holds_alternative<Fraction>(res.data) &&
+                    if (!res.isDouble() && !res.isInt32() &&
+                        !res.isObjType(ObjType::BIGINT) &&
+                        !res.isObjType(ObjType::FRACTION) &&
                         !res.isComplex()) {
                         return {false, Value()};
                     }
@@ -5317,7 +5336,7 @@ namespace jc {
             Value e = evalUniversal(p->exp, env, resolver);
             Value res = b ^ e;
             
-            if (std::holds_alternative<double>(res.data) && std::isnan(std::get<double>(res.data))) {
+            if (res.isDouble() && std::isnan(res.asDoubleRaw())) {
                 double br = 0.0, bi = 0.0, er = 0.0, ei = 0.0;
                 bool ok_cast = true;
                 try {
@@ -5351,7 +5370,7 @@ namespace jc {
                 std::complex<double> c(0.0, 0.0);
                 bool is_c = false;
                 if (arg.isComplex()) { c = std::complex<double>(arg.asComplex().real, arg.asComplex().imag); is_c = true; }
-                else if (std::holds_alternative<double>(arg.data) || std::holds_alternative<BigInt>(arg.data) || std::holds_alternative<Fraction>(arg.data)) {
+                else if (arg.isDouble() || arg.isInt32() || arg.isObjType(ObjType::BIGINT) || arg.isObjType(ObjType::FRACTION)) {
                     c = std::complex<double>(arg.asDouble(), 0.0); is_c = true;
                 }
                 

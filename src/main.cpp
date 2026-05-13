@@ -213,7 +213,7 @@ void saveWorkspace(const std::string& filename) {
 
     // 正确调用 C++ 原生的 getWorkspace
     jc::BuiltinRegistry reg; reg.registerAll();
-    std::string wp = std::get<std::string>(reg.getBuiltins()["getWorkspace"]({}).data);
+    std::string wp = reg.getBuiltins()["getWorkspace"]({}).asString();
 
     fs::path dir(wp);
     if (!fs::exists(dir)) fs::create_directories(dir);
@@ -233,7 +233,7 @@ void loadWorkspace(const std::string& filename) {
     namespace fs = std::filesystem;
 
     jc::BuiltinRegistry reg; reg.registerAll();
-    std::string wp = std::get<std::string>(reg.getBuiltins()["getWorkspace"]({}).data);
+    std::string wp = reg.getBuiltins()["getWorkspace"]({}).asString();
 
     std::string path = (fs::path(wp) / (filename + ".jc2")).string();
     if (!fs::exists(path)) { std::cerr << "   IO Error: Workspace not found.\n"; return; }
@@ -583,37 +583,33 @@ int main(int argc, char* argv[]) {
                 vm.setGlobal("ANS", result);
                 std::string typeColor;
                 bool isTopLevelMatrix = false;
-                std::visit([&typeColor, &isTopLevelMatrix](auto&& arg) {
-                    using T = std::decay_t<decltype(arg)>;
-                    if constexpr (std::is_same_v<T, double> || std::is_same_v<T, jc::BigInt> || std::is_same_v<T, jc::Fraction>)
-                        typeColor = jc::col(jc::Ansi::BRIGHT_YELLOW);
-                    else if constexpr (std::is_same_v<T, jc::Complex>)
-                        typeColor = jc::col(jc::Ansi::BRIGHT_MAGENTA);
-                    else if constexpr (std::is_same_v<T, std::string>)
-                        typeColor = jc::col(jc::Ansi::BRIGHT_GREEN);
-                    else if constexpr (std::is_same_v<T, jc::RealMatrix>) {
-                        typeColor = jc::col(jc::Ansi::BRIGHT_YELLOW);
-                        isTopLevelMatrix = true;
-                    }
-                    else if constexpr (std::is_same_v<T, jc::ComplexMatrix>) {
-                        typeColor = jc::col(jc::Ansi::BRIGHT_MAGENTA);
-                        isTopLevelMatrix = true;
-                    }
-                    else if constexpr (std::is_same_v<T, jc::StringMatrix>) {
-                        typeColor = jc::col(jc::Ansi::BRIGHT_GREEN);
-                        isTopLevelMatrix = true;
-                    }
-                    else if constexpr (std::is_same_v<T, jc::BaseNum>)
-                        typeColor = jc::col(jc::Ansi::BRIGHT_CYAN);
-                    else if constexpr (std::is_same_v<T, std::shared_ptr<jc::FunctionClosure>> || std::is_same_v<T, std::shared_ptr<jc::ClassDefinition>>)
-                        typeColor = jc::col(jc::Ansi::BRIGHT_BLUE);
-                    else if constexpr (std::is_same_v<T, std::shared_ptr<jc::Instance>>)
-                        typeColor = jc::col(jc::Ansi::BRIGHT_CYAN);
-                    else if constexpr (std::is_same_v<T, jc::Dict> || std::is_same_v<T, jc::List> || std::is_same_v<T, jc::Set>)
-                        typeColor = jc::col(jc::Ansi::CYAN);
-                    else
-                        typeColor = jc::col(jc::Ansi::WHITE); // SymExpr 等
-                    }, result.data);
+                
+                if (result.isNumber() || result.isObjType(jc::ObjType::BIGINT) || result.isObjType(jc::ObjType::FRACTION)) {
+                    typeColor = jc::col(jc::Ansi::BRIGHT_YELLOW);
+                } else if (result.isObjType(jc::ObjType::COMPLEX)) {
+                    typeColor = jc::col(jc::Ansi::BRIGHT_MAGENTA);
+                } else if (result.isObjType(jc::ObjType::STRING)) {
+                    typeColor = jc::col(jc::Ansi::BRIGHT_GREEN);
+                } else if (result.isObjType(jc::ObjType::REAL_MATRIX)) {
+                    typeColor = jc::col(jc::Ansi::BRIGHT_YELLOW);
+                    isTopLevelMatrix = true;
+                } else if (result.isObjType(jc::ObjType::COMPLEX_MATRIX)) {
+                    typeColor = jc::col(jc::Ansi::BRIGHT_MAGENTA);
+                    isTopLevelMatrix = true;
+                } else if (result.isObjType(jc::ObjType::STRING_MATRIX)) {
+                    typeColor = jc::col(jc::Ansi::BRIGHT_GREEN);
+                    isTopLevelMatrix = true;
+                } else if (result.isObjType(jc::ObjType::BASENUM)) {
+                    typeColor = jc::col(jc::Ansi::BRIGHT_CYAN);
+                } else if (result.isObjType(jc::ObjType::CLOSURE) || result.isObjType(jc::ObjType::CLASS)) {
+                    typeColor = jc::col(jc::Ansi::BRIGHT_BLUE);
+                } else if (result.isObjType(jc::ObjType::INSTANCE)) {
+                    typeColor = jc::col(jc::Ansi::BRIGHT_CYAN);
+                } else if (result.isObjType(jc::ObjType::DICT) || result.isObjType(jc::ObjType::LIST) || result.isObjType(jc::ObjType::SET)) {
+                    typeColor = jc::col(jc::Ansi::CYAN);
+                } else {
+                    typeColor = jc::col(jc::Ansi::WHITE); // SymExpr 等
+                }
 
                 jc::g_printMatrix2D = isTopLevelMatrix;
                 std::cout << typeColor << result << jc::col(jc::Ansi::RESET) << std::endl;

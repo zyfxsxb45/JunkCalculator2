@@ -7,19 +7,19 @@
 namespace jc_prob {
     using namespace jc;
 
-    inline std::shared_ptr<ClassDefinition> distClass;
+    inline ObjClass* distClass = nullptr;
 
     inline std::shared_ptr<Distribution>& getDist(const Value& v) {
-        if (!std::holds_alternative<std::shared_ptr<Instance>>(v.data))
+        if (!v.isInstance())
             throw std::runtime_error("Type Error: Expected a Distribution instance.");
-        auto inst = std::get<std::shared_ptr<Instance>>(v.data);
+        auto inst = v.asInstance();
         if (!inst->nativeData.has_value())
             throw std::runtime_error("Type Error: Expected a Distribution native object.");
         return std::any_cast<std::shared_ptr<Distribution>&>(inst->nativeData);
     }
 
     inline Value makeDist(Distribution d) {
-        auto inst = std::make_shared<Instance>();
+        auto inst = GcHeap::get().allocate<ObjInstance>();
         inst->classDef = distClass;
         inst->nativeData = std::make_shared<Distribution>(std::move(d));
         return Value(inst);
@@ -29,7 +29,7 @@ namespace jc_prob {
 JC2_MODULE(prob) {
     using namespace jc_prob;
     jc::ModuleReg R(env, builtins, arity);
-    distClass = std::make_shared<jc::ClassDefinition>();
+    distClass = GcHeap::get().allocate<ObjClass>();
     distClass->name = "Distribution";
     R.set("Distribution", jc::Value(distClass));
 
@@ -62,10 +62,10 @@ JC2_MODULE(prob) {
     // ★ 追加 OOP 成员方法绑定支持 (Method Bindings for Distribution Class)
     // =========================================================================
     auto addDistMethod = [&](const std::string& name, jc::NativeCallable fn) {
-        auto fc = std::make_shared<jc::FunctionClosure>(
+        auto fc = GcHeap::get().allocate<ObjClosure>(
             std::vector<std::string>{}, std::vector<bool>{}, name, nullptr);
         fc->nativeFn = std::make_any<jc::NativeCallable>(fn);
-        distClass->methods[name] = std::move(fc);
+        distClass->methods[name] = fc;
         };
 
     addDistMethod("pdf", [](const std::vector<jc::Value>& a) -> jc::Value {
@@ -135,9 +135,9 @@ JC2_MODULE(prob) {
 
     // ── 假设检验数据预处理 ──
     auto extractDS = [](const Value& v, const std::string& f) -> std::vector<double> {
-        if (std::holds_alternative<RealMatrix>(v.data)) return std::get<RealMatrix>(v.data).rawData();
-        if (std::holds_alternative<ComplexMatrix>(v.data)) {
-            const auto& cd = std::get<ComplexMatrix>(v.data).rawData();
+        if (v.isObjType(ObjType::REAL_MATRIX)) return static_cast<ObjRealMatrix*>(v.asObj())->mat.rawData();
+        if (v.isObjType(ObjType::COMPLEX_MATRIX)) {
+            const auto& cd = static_cast<ObjComplexMatrix*>(v.asObj())->mat.rawData();
             std::vector<double> r(cd.size());
             for (size_t i = 0; i < cd.size(); ++i) {
                 if (std::abs(cd[i].imag) > 1e-15) throw std::runtime_error(f + "() requires real data.");
@@ -192,8 +192,8 @@ JC2_MODULE(prob) {
     {
         auto oldMean = builtins["mean"];
         R.reg("mean", { 1 }, [oldMean](const std::vector<jc::Value>& args) -> jc::Value {
-            if (std::holds_alternative<std::shared_ptr<jc::Instance>>(args[0].data)) {
-                auto inst = std::get<std::shared_ptr<jc::Instance>>(args[0].data);
+            if (args[0].isInstance()) {
+                auto inst = args[0].asInstance();
                 if (inst->nativeData.has_value() &&
                     inst->nativeData.type() == typeid(std::shared_ptr<jc::Distribution>)) {
                     return jc::Value(getDist(args[0])->distMean());
@@ -205,8 +205,8 @@ JC2_MODULE(prob) {
     {
         auto oldVar = builtins["var"];
         R.reg("var", { 1 }, [oldVar](const std::vector<jc::Value>& args) -> jc::Value {
-            if (std::holds_alternative<std::shared_ptr<jc::Instance>>(args[0].data)) {
-                auto inst = std::get<std::shared_ptr<jc::Instance>>(args[0].data);
+            if (args[0].isInstance()) {
+                auto inst = args[0].asInstance();
                 if (inst->nativeData.has_value() &&
                     inst->nativeData.type() == typeid(std::shared_ptr<jc::Distribution>)) {
                     return jc::Value(getDist(args[0])->distVar());
@@ -218,8 +218,8 @@ JC2_MODULE(prob) {
     {
         auto oldStd = builtins["std"];
         R.reg("std", { 1 }, [oldStd](const std::vector<jc::Value>& args) -> jc::Value {
-            if (std::holds_alternative<std::shared_ptr<jc::Instance>>(args[0].data)) {
-                auto inst = std::get<std::shared_ptr<jc::Instance>>(args[0].data);
+            if (args[0].isInstance()) {
+                auto inst = args[0].asInstance();
                 if (inst->nativeData.has_value() &&
                     inst->nativeData.type() == typeid(std::shared_ptr<jc::Distribution>)) {
                     return jc::Value(std::sqrt(getDist(args[0])->distVar()));

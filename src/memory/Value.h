@@ -33,7 +33,6 @@
 
 namespace jc {
     class Value;
-    struct FunctionClosure;
     std::string setValueKey(const Value& v);
 
     struct ValueHasher {
@@ -56,119 +55,159 @@ namespace jc {
     };
 
     // =======================================================
-    // 高级引用语义 Dict (底层交由智能指针接管防深拷贝)
+    // NaN-Boxing 核心宏定义
     // =======================================================
-    struct DictData;
-    class Dict {
-    private:
-        std::shared_ptr<DictData> ptr;
-    public:
-        Dict();
-        void freeze();
-        bool isFrozen() const;
+    #define QNAN     ((uint64_t)0x7ffc000000000000)
+    #define SIGN_BIT ((uint64_t)0x8000000000000000)
+    #define TAG_NONE 1
+    #define TAG_FALSE 2
+    #define TAG_TRUE 3
+    #define INT32_MASK (QNAN | 0x0000000100000000ULL)
 
-        void set(const Value& key, const Value& val);
-        Value* get(const Value& key);
-        const Value* get(const Value& key) const;
-        bool has(const Value& key) const;
-        bool remove(const Value& key);
+    // =======================================================
+    // Obj 派生类前向声明
+    // =======================================================
+    struct ObjString;
+    struct ObjBigInt;
+    struct ObjFraction;
+    struct ObjComplex;
+    struct ObjBaseNum;
+    struct ObjRealMatrix;
+    struct ObjComplexMatrix;
+    struct ObjStringMatrix;
+    struct ObjList;
+    struct ObjDict;
+    struct ObjSet;
+    struct ObjClosure;
+    struct ObjClass;
+    struct ObjInstance;
+    struct ObjSuper;
+    struct ObjSym;
 
-        size_t size() const;
-        bool empty() const;
-
-        std::vector<Value> getKeys() const;
-        std::vector<std::pair<Value, Value>> getEntries() const;
-
-        const void* id() const { return ptr.get(); }
-        void clear();
+    // =======================================================
+    // Obj 派生类定义
+    // =======================================================
+    struct ObjString : public Obj {
+        std::string str;
+        ObjString(std::string s) : str(std::move(s)) { type = ObjType::STRING; }
     };
-
-    // =======================================================
-    // 高级引用语义 List (底层交由智能指针接管防深拷贝)
-    // =======================================================
-    struct ListData;
-    class List {
-    private:
-        std::shared_ptr<ListData> ptr;
-    public:
-        List();
-        void freeze();
-        bool isFrozen() const;
-
-        void push_back(const Value& val);
-        Value& at(int idx);
-        const Value& at(int idx) const;
-        void set(int idx, const Value& val);
-        void insert(int idx, const Value& val);
-        void removeAt(int idx);
-
-        size_t size() const;
-        bool empty() const;
-        const std::vector<Value>& raw() const;
-        std::vector<Value>& raw();
-        const void* id() const { return ptr.get(); }
-        void clear();
+    struct ObjBigInt : public Obj {
+        BigInt num;
+        ObjBigInt(BigInt n) : num(std::move(n)) { type = ObjType::BIGINT; }
     };
-
-    // =======================================================
-    // 高级引用语义 Set (无序去重集合，O(1) 查找)
-    // =======================================================
-    struct SetData;
-    class Set {
-    private:
-        std::shared_ptr<SetData> ptr;
-    public:
-        Set();
-        void freeze();
-        bool isFrozen() const;
-
-        bool insert(const Value& val);
-        bool contains(const Value& val) const;
-        bool erase(const Value& val);
-
-        size_t size() const;
-        bool empty() const;
-        const std::vector<Value>& raw() const;
-        const void* id() const { return ptr.get(); }
-        void clear();
+    struct ObjFraction : public Obj {
+        Fraction frac;
+        ObjFraction(Fraction f) : frac(std::move(f)) { type = ObjType::FRACTION; }
     };
-
-    struct ClassDefinition {
+    struct ObjComplex : public Obj {
+        Complex comp;
+        ObjComplex(Complex c) : comp(std::move(c)) { type = ObjType::COMPLEX; }
+    };
+    struct ObjBaseNum : public Obj {
+        BaseNum base;
+        ObjBaseNum(BaseNum b) : base(std::move(b)) { type = ObjType::BASENUM; }
+    };
+    struct ObjRealMatrix : public Obj {
+        RealMatrix mat;
+        ObjRealMatrix(RealMatrix m) : mat(std::move(m)) { type = ObjType::REAL_MATRIX; }
+    };
+    struct ObjComplexMatrix : public Obj {
+        ComplexMatrix mat;
+        ObjComplexMatrix(ComplexMatrix m) : mat(std::move(m)) { type = ObjType::COMPLEX_MATRIX; }
+    };
+    struct ObjStringMatrix : public Obj {
+        StringMatrix mat;
+        ObjStringMatrix(StringMatrix m) : mat(std::move(m)) { type = ObjType::STRING_MATRIX; }
+    };
+    struct ObjList : public Obj {
+        std::vector<Value> vec;
+        bool is_frozen = false;
+        ObjList() { type = ObjType::LIST; }
+    };
+    struct ObjDict : public Obj {
+        std::vector<std::pair<Value, Value>> elements;
+        std::unordered_map<Value, size_t, ValueHasher, ValueEqual> keyMap;
+        bool is_frozen = false;
+        ObjDict() { type = ObjType::DICT; }
+    };
+    struct ObjSet : public Obj {
+        std::vector<Value> elements;
+        std::unordered_set<Value, ValueHasher, ValueEqual> keys;
+        bool is_frozen = false;
+        ObjSet() { type = ObjType::SET; }
+    };
+    struct ObjClass : public Obj {
         std::string name;
-        std::shared_ptr<ClassDefinition> parent;
-        std::map<std::string, std::shared_ptr<FunctionClosure>> methods;
+        ObjClass* parent = nullptr;
+        std::map<std::string, ObjClosure*> methods;
+        ObjClass() { type = ObjType::CLASS; }
     };
-
-    struct Instance {
-        std::shared_ptr<ClassDefinition> classDef;
-        Dict fields;
+    struct ObjInstance : public Obj {
+        ObjClass* classDef = nullptr;
+        ObjDict* fields = nullptr;
         std::any nativeData;
+        ObjInstance() { type = ObjType::INSTANCE; }
     };
-
-    struct SuperProxy {
-        std::shared_ptr<Instance> instance;
-        std::shared_ptr<ClassDefinition> parentClass;
+    struct ObjSuper : public Obj {
+        ObjInstance* instance = nullptr;
+        ObjClass* parentClass = nullptr;
+        ObjSuper() { type = ObjType::SUPER_PROXY; }
     };
-
-    using SuperProxyPtr = std::shared_ptr<SuperProxy>;
-
-    using ValueVariant = std::variant<
-        std::monostate, double, BigInt, BaseNum, Fraction, std::string,
-        Complex, RealMatrix, ComplexMatrix, StringMatrix, Dict, List, Set,
-        std::shared_ptr<FunctionClosure>,
-        std::shared_ptr<ClassDefinition>,
-        std::shared_ptr<Instance>,
-        SuperProxyPtr, SymExpr
-    >;
+    struct ObjSym : public Obj {
+        SymExpr sym;
+        ObjSym(SymExpr s) : sym(std::move(s)) { type = ObjType::SYMBOLIC; }
+    };
 
     template<typename> struct always_false : std::false_type {};
 
-    std::pair<bool, Value> invokeDunder(const std::shared_ptr<Instance>& inst, const std::string& methodName, const std::vector<Value>& args = {});
+    std::pair<bool, Value> invokeDunder(ObjInstance* inst, const std::string& methodName, const std::vector<Value>& args = {});
 
     class Value {
-    private:
-        Value(std::monostate) : data(std::monostate{}) {}
+    public:
+        uint64_t as_bits;
 
+        inline double asDoubleRaw() const {
+            double d;
+            std::memcpy(&d, &as_bits, sizeof(double));
+            return d;
+        }
+        inline static Value fromDouble(double d) {
+            Value v;
+            if (std::isnan(d)) {
+                // ★ 归一化真正的 NaN (Quiet NaN)，严格保留其作为浮点数 NaN 的语义，绝不与 none 混淆
+                v.as_bits = 0x7FF8000000000000ULL;
+            } else {
+                std::memcpy(&v.as_bits, &d, sizeof(double));
+            }
+            return v;
+        }
+        inline static Value fromInt32(int32_t v) {
+            Value val;
+            val.as_bits = INT32_MASK | static_cast<uint32_t>(v);
+            return val;
+        }
+        inline static Value fromObj(Obj* obj) {
+            Value v;
+            v.as_bits = SIGN_BIT | QNAN | reinterpret_cast<uint64_t>(obj);
+            if (obj) obj->refCount++;
+            return v;
+        }
+
+        bool isDouble() const { return (as_bits & QNAN) != QNAN; }
+        bool isInt32() const { return (as_bits & 0xFFFFFFFF00000000ULL) == INT32_MASK; }
+        bool isNumber() const { return isDouble() || isInt32(); }
+        bool isObj() const { return (as_bits & (QNAN | SIGN_BIT)) == (QNAN | SIGN_BIT); }
+        bool isNone() const { return as_bits == (QNAN | TAG_NONE); }
+        bool isBool() const { return as_bits == (QNAN | TAG_FALSE) || as_bits == (QNAN | TAG_TRUE); }
+        bool asBool() const { return as_bits == (QNAN | TAG_TRUE); }
+        
+        int32_t asInt32() const { return static_cast<int32_t>(as_bits & 0xFFFFFFFFULL); }
+        double asNumber() const { return isInt32() ? static_cast<double>(asInt32()) : asDoubleRaw(); }
+
+        Obj* asObj() const { return reinterpret_cast<Obj*>(as_bits & ~(SIGN_BIT | QNAN)); }
+        bool isObjType(ObjType type) const { return isObj() && asObj()->type == type; }
+
+    private:
         static std::pair<bool, BigInt> getExactIntRoot(const BigInt& base, int64_t n) {
             if (n <= 0) return { false, BigInt(0) };
             if (n == 1) return { true, base };
@@ -211,82 +250,113 @@ namespace jc {
             if (!numOk) return { false, Value() };
             auto [denOk, denRoot] = getExactIntRoot(den, q);
             if (!denOk) return { false, Value() };
-            // 开根成功，求 p 次幂
             if (p >= 0) {
                 Fraction result = Fraction(numRoot, denRoot).pow(p);
                 return { true, Value::fromFraction(result) };
             }
             else {
-                // 负指数：先取倒数再求正幂
                 Fraction result = Fraction(denRoot, numRoot).pow(-p);
                 return { true, Value::fromFraction(result) };
             }
         }
     public:
-        ValueVariant data;
+        Value() : as_bits(QNAN | TAG_NONE) {}
+        Value(double val) { *this = fromDouble(val); }
+        Value(int val) : as_bits(INT32_MASK | static_cast<uint32_t>(val)) {}
+        Value(bool val) : as_bits(val ? (QNAN | TAG_TRUE) : (QNAN | TAG_FALSE)) {}
+        Value(Obj* obj) : as_bits(SIGN_BIT | QNAN | reinterpret_cast<uint64_t>(obj)) { 
+            if (obj) obj->refCount++; 
+        }
 
-        Value() : data(0.0) {}
-        Value(double val) : data(val) {}
-        Value(std::string val) : data(std::move(val)) {}
-        Value(const char* val) : data(std::string(val)) {}
-        Value(Complex val) : data(val) {}
-        Value(RealMatrix val) : data(std::move(val)) {}
-        Value(ComplexMatrix val) : data(std::move(val)) {}
-        Value(BigInt val) : data(std::move(val)) {}
-        Value(std::shared_ptr<FunctionClosure> val);
-        Value(Fraction val) : data(std::move(val)) {}
-        Value(BaseNum val) : data(std::move(val)) {}
-        Value(StringMatrix val) : data(std::move(val)) {}
-        Value(Dict val) : data(std::move(val)) {}
-        Value(List val) : data(std::move(val)) {}
-        Value(Set val) : data(std::move(val)) {}
-        Value(SymExpr val) {
+        Value(const Value& other) : as_bits(other.as_bits) {
+            if (isObj()) asObj()->refCount++;
+        }
+
+        Value(Value&& other) noexcept : as_bits(other.as_bits) {
+            other.as_bits = QNAN | TAG_NONE;
+        }
+
+        Value& operator=(const Value& other) {
+            if (this == &other) return *this;
+            if (other.isObj()) other.asObj()->refCount++;
+            if (isObj()) asObj()->refCount--;
+            as_bits = other.as_bits;
+            return *this;
+        }
+
+        Value& operator=(Value&& other) noexcept {
+            if (this == &other) return *this;
+            if (isObj()) asObj()->refCount--;
+            as_bits = other.as_bits;
+            other.as_bits = QNAN | TAG_NONE;
+            return *this;
+        }
+
+        ~Value() {
+            if (isObj()) asObj()->refCount--;
+        }
+        
+        Value(std::string val) : as_bits(QNAN | TAG_NONE) { *this = fromObj(GcHeap::get().allocate<ObjString>(std::move(val))); }
+        Value(const char* val) : as_bits(QNAN | TAG_NONE) { *this = fromObj(GcHeap::get().allocate<ObjString>(std::string(val))); }
+        Value(Complex val) : as_bits(QNAN | TAG_NONE) { *this = fromObj(GcHeap::get().allocate<ObjComplex>(std::move(val))); }
+        Value(RealMatrix val) : as_bits(QNAN | TAG_NONE) { *this = fromObj(GcHeap::get().allocate<ObjRealMatrix>(std::move(val))); }
+        Value(ComplexMatrix val) : as_bits(QNAN | TAG_NONE) { *this = fromObj(GcHeap::get().allocate<ObjComplexMatrix>(std::move(val))); }
+        Value(BigInt val) : as_bits(QNAN | TAG_NONE) {
+            try {
+                int64_t v = val.toInt64();
+                if (v >= -2147483648LL && v <= 2147483647LL) {
+                    *this = fromInt32(static_cast<int32_t>(v));
+                    return;
+                }
+            } catch (...) {}
+            *this = fromObj(GcHeap::get().allocate<ObjBigInt>(std::move(val)));
+        }
+        Value(Fraction val) : as_bits(QNAN | TAG_NONE) { *this = fromObj(GcHeap::get().allocate<ObjFraction>(std::move(val))); }
+        Value(BaseNum val) : as_bits(QNAN | TAG_NONE) { *this = fromObj(GcHeap::get().allocate<ObjBaseNum>(std::move(val))); }
+        Value(StringMatrix val) : as_bits(QNAN | TAG_NONE) { *this = fromObj(GcHeap::get().allocate<ObjStringMatrix>(std::move(val))); }
+        
+        Value(SymExpr val) : as_bits(QNAN | TAG_NONE) {
             if (val.ptr && val.ptr->getType() == SymType::NUM) {
                 auto numNode = std::static_pointer_cast<SymNum>(val.ptr);
-                // 拆包 CASVal (std::variant<double, BigInt, Fraction, Complex>)
                 std::visit([this](auto&& arg) {
                     using T = std::decay_t<decltype(arg)>;
                     if constexpr (std::is_same_v<T, Fraction>) {
-                        // 连同分母为 1 的 Fraction 也顺手击碎为 BigInt！
                         if (arg.getDen() == BigInt(1)) {
-                            this->data = arg.getNum();
+                            *this = Value(arg.getNum());
+                        } else {
+                            *this = Value(arg);
                         }
-                        else {
-                            this->data = arg;
-                        }
+                    } else if constexpr (std::is_same_v<T, double>) {
+                        *this = Value(arg);
+                    } else if constexpr (std::is_same_v<T, BigInt>) {
+                        *this = Value(arg);
+                    } else if constexpr (std::is_same_v<T, Complex>) {
+                        *this = Value(arg);
                     }
-                    else {
-                        // BigInt, double, Complex 直接降维接收
-                        this->data = arg;
-                    }
-                    }, numNode->value);
-            }
-            else {
-                // 若仍含有变量或算不尽的根式，则保留其符号表达式的高维形态
-                this->data = std::move(val);
+                }, numNode->value);
+            } else {
+                *this = fromObj(GcHeap::get().allocate<ObjSym>(std::move(val)));
             }
         }
-        Value(std::shared_ptr<ClassDefinition> val) : data(std::move(val)) {}
-        Value(std::shared_ptr<Instance> val) : data(std::move(val)) {}
 
-        bool isInstance() const { return std::holds_alternative<std::shared_ptr<Instance>>(data); }
-        bool isClass() const { return std::holds_alternative<std::shared_ptr<ClassDefinition>>(data); }
-        bool isComplex() const { return std::holds_alternative<Complex>(data);}
-        
-        bool isSymbolic() const { return std::holds_alternative<SymExpr>(data); }
+        bool isInstance() const { return isObjType(ObjType::INSTANCE); }
+        bool isClass() const { return isObjType(ObjType::CLASS); }
+        bool isComplex() const { return isObjType(ObjType::COMPLEX); }
+        bool isSymbolic() const { return isObjType(ObjType::SYMBOLIC); }
+
         SymExpr asSymbolic() const {
-            if (std::holds_alternative<SymExpr>(data)) return std::get<SymExpr>(data);
-            // 包容万象，随时准备将普通数字强行拔高为符号节点！
-            if (std::holds_alternative<double>(data))  return SymExpr(std::get<double>(data));
-            if (std::holds_alternative<BigInt>(data))  return SymExpr(std::get<BigInt>(data));
-            if (std::holds_alternative<Fraction>(data))return SymExpr(std::get<Fraction>(data));
-            if (std::holds_alternative<Complex>(data)) return SymExpr(std::get<Complex>(data));
+            if (isSymbolic()) return static_cast<ObjSym*>(asObj())->sym;
+            if (isInt32()) return SymExpr(BigInt(asInt32()));
+            if (isDouble()) return SymExpr(asDoubleRaw());
+            if (isObjType(ObjType::BIGINT)) return SymExpr(static_cast<ObjBigInt*>(asObj())->num);
+            if (isObjType(ObjType::FRACTION)) return SymExpr(static_cast<ObjFraction*>(asObj())->frac);
+            if (isObjType(ObjType::COMPLEX)) return SymExpr(static_cast<ObjComplex*>(asObj())->comp);
             throw std::runtime_error("TypeError: Expected a symbolic expression or exact number.");
         }
 
-        std::shared_ptr<Instance> asInstance() const {
+        ObjInstance* asInstance() const {
             if (!isInstance()) throw std::runtime_error("Type Error: Expected an instance.");
-            return std::get<std::shared_ptr<Instance>>(data);
+            return static_cast<ObjInstance*>(asObj());
         }
 
         static Value negativePow(double base, int64_t p, int64_t q) {
@@ -307,89 +377,82 @@ namespace jc {
             }
         }
 
-        Value(SuperProxyPtr sp) : data(std::move(sp)) {}
-        bool isSuperProxy() const {
-            return std::holds_alternative<SuperProxyPtr>(data);
-        }
-        SuperProxy asSuperProxy() const {
+        bool isSuperProxy() const { return isObjType(ObjType::SUPER_PROXY); }
+        ObjSuper* asSuperProxy() const {
             if (!isSuperProxy()) throw std::runtime_error("Type Error: Expected super proxy.");
-            return *std::get<SuperProxyPtr>(data);
+            return static_cast<ObjSuper*>(asObj());
         }
-        static Value makeSuperProxy(std::shared_ptr<Instance> inst,
-            std::shared_ptr<ClassDefinition> parent) {
-            return Value(std::make_shared<SuperProxy>(SuperProxy{ std::move(inst), std::move(parent) }));
+        static Value makeSuperProxy(ObjInstance* inst, ObjClass* parent) {
+            ObjSuper* sp = GcHeap::get().allocate<ObjSuper>();
+            sp->instance = inst;
+            sp->parentClass = parent;
+            return Value(sp);
         }
-
 
         static Value fromFraction(const Fraction& f) {
             if (f.getDen() == BigInt(1)) return Value(f.getNum());
             return Value(f);
         }
 
-        bool isBaseNum() const { return std::holds_alternative<BaseNum>(data); }
-        std::shared_ptr<FunctionClosure> asFunction() const {
-            if (std::holds_alternative<std::shared_ptr<FunctionClosure>>(data)) {
-                return std::get<std::shared_ptr<FunctionClosure>>(data);
-            }
-            throw std::runtime_error("Type Error: Expected a function.");
+        bool isBaseNum() const { return isObjType(ObjType::BASENUM); }
+        ObjClosure* asFunction() const;
+
+        bool isFunctionClosure() const { return isObjType(ObjType::CLOSURE); }
+        bool isString() const { return isObjType(ObjType::STRING); }
+        std::string asString() const {
+            if (isString()) return static_cast<ObjString*>(asObj())->str;
+            throw std::runtime_error("Type Error: Expected a string.");
         }
 
-        bool isFunctionClosure() const {
-            return std::holds_alternative<std::shared_ptr<FunctionClosure>>(data);
-        }
-        bool isString() const {
-            return std::holds_alternative<std::string>(data);
-        }
-
-        static Value none() { return Value(std::monostate{}); }
-        bool isNone() const { return std::holds_alternative<std::monostate>(data); }
+        static Value none() { return Value(); }
 
         double asDouble() const {
-            if (std::holds_alternative<double>(data)) return std::get<double>(data);
-            if (std::holds_alternative<BigInt>(data)) return std::get<BigInt>(data).toDouble();
-            if (std::holds_alternative<Fraction>(data)) return std::get<Fraction>(data).toDouble();
-            if (std::holds_alternative<BaseNum>(data)) return std::get<BaseNum>(data).getValue().toDouble();
+            if (isNumber()) return asNumber();
+            if (isObjType(ObjType::BIGINT)) return static_cast<ObjBigInt*>(asObj())->num.toDouble();
+            if (isObjType(ObjType::FRACTION)) return static_cast<ObjFraction*>(asObj())->frac.toDouble();
+            if (isObjType(ObjType::BASENUM)) return static_cast<ObjBaseNum*>(asObj())->base.getValue().toDouble();
             throw std::runtime_error("Type Error: Expected a real number.");
         }
 
         Complex asComplex() const {
-            if (std::holds_alternative<Complex>(data)) return std::get<Complex>(data);
-            if (std::holds_alternative<double>(data)) return Complex(std::get<double>(data));
-            if (std::holds_alternative<BigInt>(data)) return Complex(std::get<BigInt>(data).toDouble());
-            if (std::holds_alternative<Fraction>(data)) return Complex(std::get<Fraction>(data).toDouble());
-            if (std::holds_alternative<BaseNum>(data)) return Complex(std::get<BaseNum>(data).getValue().toDouble());
+            if (isObjType(ObjType::COMPLEX)) return static_cast<ObjComplex*>(asObj())->comp;
+            if (isNumber()) return Complex(asNumber());
+            if (isObjType(ObjType::BIGINT)) return Complex(static_cast<ObjBigInt*>(asObj())->num.toDouble());
+            if (isObjType(ObjType::FRACTION)) return Complex(static_cast<ObjFraction*>(asObj())->frac.toDouble());
+            if (isObjType(ObjType::BASENUM)) return Complex(static_cast<ObjBaseNum*>(asObj())->base.getValue().toDouble());
             throw std::runtime_error("Type Error: Expected a number or complex.");
         }
 
         BigInt asBigInt() const {
-            if (std::holds_alternative<BigInt>(data)) return std::get<BigInt>(data);
-            if (std::holds_alternative<double>(data)) {
-                double val = std::get<double>(data);
+            if (isInt32()) return BigInt(asInt32());
+            if (isObjType(ObjType::BIGINT)) return static_cast<ObjBigInt*>(asObj())->num;
+            if (isDouble()) {
+                double val = asDoubleRaw();
                 if (std::abs(val) > 9.22337e18) {
                     throw std::runtime_error("Math Error: Value too massively large to be safely converted to an exact layout integer.");
                 }
                 return BigInt(static_cast<int64_t>(std::round(val)));
             }
-            if (std::holds_alternative<BaseNum>(data)) return std::get<BaseNum>(data).getValue();
-            if (std::holds_alternative<Fraction>(data)) {
-                const auto& f = std::get<Fraction>(data);
+            if (isObjType(ObjType::BASENUM)) return static_cast<ObjBaseNum*>(asObj())->base.getValue();
+            if (isObjType(ObjType::FRACTION)) {
+                const auto& f = static_cast<ObjFraction*>(asObj())->frac;
                 if (f.getDen() == BigInt(1)) return f.getNum();
                 throw std::runtime_error("Type Error: Fraction is not an integer (" + f.toString() + ").");
             }
             throw std::runtime_error("Type Error: Expected an integer.");
         }
 
-        bool isBigInt() const { return std::holds_alternative<BigInt>(data); }
+        bool isBigInt() const { return isObjType(ObjType::BIGINT); }
 
         RealMatrix asRealMatrix() const {
-            if (std::holds_alternative<RealMatrix>(data)) return std::get<RealMatrix>(data);
+            if (isObjType(ObjType::REAL_MATRIX)) return static_cast<ObjRealMatrix*>(asObj())->mat;
             throw std::runtime_error("Type Error: Expected a real matrix.");
         }
 
         ComplexMatrix asComplexMatrix() const {
-            if (std::holds_alternative<ComplexMatrix>(data)) return std::get<ComplexMatrix>(data);
-            if (std::holds_alternative<RealMatrix>(data)) {
-                const RealMatrix& m = std::get<RealMatrix>(data);
+            if (isObjType(ObjType::COMPLEX_MATRIX)) return static_cast<ObjComplexMatrix*>(asObj())->mat;
+            if (isObjType(ObjType::REAL_MATRIX)) {
+                const RealMatrix& m = static_cast<ObjRealMatrix*>(asObj())->mat;
                 std::vector<Complex> flat(m.getRows() * m.getCols());
                 for (int r = 0; r < m.getRows(); ++r) {
                     for (int c = 0; c < m.getCols(); ++c) {
@@ -406,238 +469,217 @@ namespace jc {
         // ==========================================
         bool isHashable() const {
             static thread_local std::vector<const void*> visited;
-            return std::visit([this](auto&& arg) -> bool {
-                using T = std::decay_t<decltype(arg)>;
-                if constexpr (std::is_same_v<T, std::monostate> ||
-                              std::is_same_v<T, double> ||
-                              std::is_same_v<T, BigInt> ||
-                              std::is_same_v<T, Fraction> ||
-                              std::is_same_v<T, Complex> ||
-                              std::is_same_v<T, BaseNum> ||
-                              std::is_same_v<T, std::string> ||
-                              std::is_same_v<T, SymExpr> ||
-                              std::is_same_v<T, RealMatrix> ||
-                              std::is_same_v<T, ComplexMatrix> ||
-                              std::is_same_v<T, StringMatrix> ||
-                              std::is_same_v<T, std::shared_ptr<FunctionClosure>> ||
-                              std::is_same_v<T, std::shared_ptr<ClassDefinition>>) {
+            if (isNumber() || isBool() || isNone()) return true;
+            Obj* obj = asObj();
+            switch (obj->type) {
+                case ObjType::STRING:
+                case ObjType::BIGINT:
+                case ObjType::FRACTION:
+                case ObjType::COMPLEX:
+                case ObjType::BASENUM:
+                case ObjType::REAL_MATRIX:
+                case ObjType::COMPLEX_MATRIX:
+                case ObjType::STRING_MATRIX:
+                case ObjType::CLOSURE:
+                case ObjType::CLASS:
+                case ObjType::SYMBOLIC:
                     return true;
-                }
-                else if constexpr (std::is_same_v<T, List>) {
-                    if (!arg.isFrozen()) return false;
-                    RecursionGuard guard(visited, arg.id());
+                case ObjType::LIST: {
+                    ObjList* list = static_cast<ObjList*>(obj);
+                    if (!list->is_frozen) return false;
+                    RecursionGuard guard(visited, list);
                     if (guard.isCycle) return true;
-                    for (const auto& e : arg.raw()) {
-                        try {
-                            if (!e.isHashable()) return false;
-                        } catch (...) { return false; }
+                    for (const auto& e : list->vec) {
+                        try { if (!e.isHashable()) return false; } catch (...) { return false; }
                     }
                     return true;
                 }
-                else if constexpr (std::is_same_v<T, Dict>) {
-                    if (!arg.isFrozen()) return false;
-                    RecursionGuard guard(visited, arg.id());
+                case ObjType::DICT: {
+                    ObjDict* dict = static_cast<ObjDict*>(obj);
+                    if (!dict->is_frozen) return false;
+                    RecursionGuard guard(visited, dict);
                     if (guard.isCycle) return true;
-                    for (const auto& [k, v] : arg.getEntries()) {
-                        try {
-                            if (!v.isHashable()) return false;
-                        } catch (...) { return false; }
+                    for (const auto& [k, v] : dict->elements) {
+                        try { if (!v.isHashable()) return false; } catch (...) { return false; }
                     }
                     return true;
                 }
-                else if constexpr (std::is_same_v<T, Set>) {
-                    if (!arg.isFrozen()) return false;
-                    RecursionGuard guard(visited, arg.id());
+                case ObjType::SET: {
+                    ObjSet* set = static_cast<ObjSet*>(obj);
+                    if (!set->is_frozen) return false;
+                    RecursionGuard guard(visited, set);
                     if (guard.isCycle) return true;
-                    for (const auto& v : arg.raw()) {
-                        try {
-                            if (!v.isHashable()) return false;
-                        } catch (...) { return false; }
+                    for (const auto& v : set->elements) {
+                        try { if (!v.isHashable()) return false; } catch (...) { return false; }
                     }
                     return true;
                 }
-                else if constexpr (std::is_same_v<T, std::shared_ptr<Instance>>) {
-                    if (!arg) return false;
-                    RecursionGuard guard(visited, arg.get());
+                case ObjType::INSTANCE: {
+                    ObjInstance* inst = static_cast<ObjInstance*>(obj);
+                    RecursionGuard guard(visited, inst);
                     if (guard.isCycle) return true;
-                    auto c = arg->classDef;
+                    auto c = inst->classDef;
                     while (c) {
                         if (c->methods.count("__hash__")) return true;
                         c = c->parent;
                     }
                     return false;
                 }
-                return false;
-            }, data);
+                case ObjType::SUPER_PROXY:
+                    return false;
+            }
+            return false;
         }
 
         // ==========================================
-// 统一真值判定 (The One and Only Truthiness)
-// ==========================================
+        // 统一真值判定 (The One and Only Truthiness)
+        // ==========================================
         bool truthy() const {
-            if (std::holds_alternative<std::monostate>(data)) return false;
-            if (std::holds_alternative<double>(data)) {
-                double d = std::get<double>(data);
+            if (isNone()) return false;
+            if (isBool()) return asBool();
+            if (isInt32()) return asInt32() != 0;
+            if (isDouble()) {
+                double d = asDoubleRaw();
                 return d != 0.0 && !std::isnan(d);
             }
-            if (std::holds_alternative<BigInt>(data))
-                return !std::get<BigInt>(data).isZero();
-            if (std::holds_alternative<Complex>(data)) {
-                const auto& c = std::get<Complex>(data);
-                return c.real != 0.0 || c.imag != 0.0;
+            Obj* obj = asObj();
+            switch (obj->type) {
+                case ObjType::BIGINT: return !static_cast<ObjBigInt*>(obj)->num.isZero();
+                case ObjType::COMPLEX: {
+                    const auto& c = static_cast<ObjComplex*>(obj)->comp;
+                    return c.real != 0.0 || c.imag != 0.0;
+                }
+                case ObjType::FRACTION: return !static_cast<ObjFraction*>(obj)->frac.getNum().isZero();
+                case ObjType::BASENUM: return !static_cast<ObjBaseNum*>(obj)->base.getValue().isZero();
+                case ObjType::STRING: return !static_cast<ObjString*>(obj)->str.empty();
+                case ObjType::LIST: return !static_cast<ObjList*>(obj)->vec.empty();
+                case ObjType::DICT: return !static_cast<ObjDict*>(obj)->elements.empty();
+                case ObjType::SET: return !static_cast<ObjSet*>(obj)->elements.empty();
+                case ObjType::SYMBOLIC: return !static_cast<ObjSym*>(obj)->sym.isZero();
+                default: return true;
             }
-            if (std::holds_alternative<Fraction>(data))
-                return !std::get<Fraction>(data).getNum().isZero();
-            if (std::holds_alternative<BaseNum>(data))
-                return !std::get<BaseNum>(data).getValue().isZero();
-            if (std::holds_alternative<std::string>(data))
-                return !std::get<std::string>(data).empty();
-            if (std::holds_alternative<List>(data))
-                return !std::get<List>(data).empty();
-            if (std::holds_alternative<Dict>(data))
-                return !std::get<Dict>(data).empty();
-            if (std::holds_alternative<Set>(data))
-                return !std::get<Set>(data).empty();
-            if (std::holds_alternative<SymExpr>(data))
-                return !std::get<SymExpr>(data).isZero();
-            return true;
         }
 
         // ==========================================
         // 统一相等判定 (The One and Only Equality)
         // ==========================================
         static bool equals(const Value& lhs, const Value& rhs) {
+            if (lhs.as_bits == rhs.as_bits) return true;
+
             // 防循环递归锁
             static thread_local std::vector<std::pair<const void*, const void*>> comparingPairs;
 
-            // 同类型快速通道
-            if (lhs.data.index() == rhs.data.index()) {
-                if (std::holds_alternative<std::monostate>(lhs.data)) return true;
-                if (std::holds_alternative<double>(lhs.data))
-                    return std::get<double>(lhs.data) == std::get<double>(rhs.data);
-                if (std::holds_alternative<BigInt>(lhs.data))
-                    return std::get<BigInt>(lhs.data) == std::get<BigInt>(rhs.data);
-                if (std::holds_alternative<Complex>(lhs.data))
-                    return std::get<Complex>(lhs.data) == std::get<Complex>(rhs.data);
-                if (std::holds_alternative<Fraction>(lhs.data))
-                    return std::get<Fraction>(lhs.data) == std::get<Fraction>(rhs.data);
-                if (std::holds_alternative<std::string>(lhs.data))
-                    return std::get<std::string>(lhs.data) == std::get<std::string>(rhs.data);
-                if (std::holds_alternative<BaseNum>(lhs.data))
-                    return std::get<BaseNum>(lhs.data).getValue() == std::get<BaseNum>(rhs.data).getValue();
-                if (std::holds_alternative<SymExpr>(lhs.data))
-                    return std::get<SymExpr>(lhs.data) == std::get<SymExpr>(rhs.data);
+            if (lhs.isInt32() && rhs.isInt32()) return lhs.asInt32() == rhs.asInt32();
+            if (lhs.isNumber() && rhs.isNumber()) return lhs.asNumber() == rhs.asNumber();
+            if (lhs.isNone() || rhs.isNone()) return false;
+            if (lhs.isBool() && rhs.isBool()) return lhs.asBool() == rhs.asBool();
+            if (lhs.isBool() && rhs.isNumber()) return (lhs.asBool() ? 1.0 : 0.0) == rhs.asNumber();
+            if (rhs.isBool() && lhs.isNumber()) return (rhs.asBool() ? 1.0 : 0.0) == lhs.asNumber();
 
-                if (std::holds_alternative<RealMatrix>(lhs.data)) {
-                    const auto& a = std::get<RealMatrix>(lhs.data);
-                    const auto& b = std::get<RealMatrix>(rhs.data);
-                    if (a.getRows() != b.getRows() || a.getCols() != b.getCols()) return false;
-                    for (int i = 0; i < a.getRows(); ++i)
-                        for (int j = 0; j < a.getCols(); ++j)
-                            if (a(i, j) != b(i, j)) return false;
-                    return true;
-                }
-                if (std::holds_alternative<ComplexMatrix>(lhs.data)) {
-                    const auto& a = std::get<ComplexMatrix>(lhs.data);
-                    const auto& b = std::get<ComplexMatrix>(rhs.data);
-                    if (a.getRows() != b.getRows() || a.getCols() != b.getCols()) return false;
-                    for (int i = 0; i < a.getRows(); ++i)
-                        for (int j = 0; j < a.getCols(); ++j)
-                            if (!(a(i, j) == b(i, j))) return false;
-                    return true;
-                }
-                if (std::holds_alternative<StringMatrix>(lhs.data)) {
-                    const auto& a = std::get<StringMatrix>(lhs.data);
-                    const auto& b = std::get<StringMatrix>(rhs.data);
-                    if (a.getRows() != b.getRows() || a.getCols() != b.getCols()) return false;
-                    for (int i = 0; i < a.getRows(); ++i)
-                        for (int j = 0; j < a.getCols(); ++j)
-                            if (a(i, j) != b(i, j)) return false;
-                    return true;
-                }
-                if (std::holds_alternative<List>(lhs.data)) {
-                    const auto& a = std::get<List>(lhs.data);
-                    const auto& b = std::get<List>(rhs.data);
-                    if (a.id() == b.id()) return true;
-                    if (a.size() != b.size()) return false;
-                    auto pair = a.id() < b.id() ? std::make_pair(a.id(), b.id()) : std::make_pair(b.id(), a.id());
-                    if (std::find(comparingPairs.begin(), comparingPairs.end(), pair) != comparingPairs.end()) return true;
-                    comparingPairs.push_back(pair);
-                    bool eq = true;
-                    for (size_t i = 0; i < a.size(); ++i) {
-                        try {
-                            Value va = a.raw()[i];
-                            Value vb = b.raw()[i];
-                            if (!equals(va, vb)) { eq = false; break; }
+            // 同类型快速通道
+            if (lhs.isObj() && rhs.isObj() && lhs.asObj()->type == rhs.asObj()->type) {
+                Obj* lobj = lhs.asObj();
+                Obj* robj = rhs.asObj();
+                switch (lobj->type) {
+                    case ObjType::STRING: return static_cast<ObjString*>(lobj)->str == static_cast<ObjString*>(robj)->str;
+                    case ObjType::BIGINT: return static_cast<ObjBigInt*>(lobj)->num == static_cast<ObjBigInt*>(robj)->num;
+                    case ObjType::COMPLEX: return static_cast<ObjComplex*>(lobj)->comp == static_cast<ObjComplex*>(robj)->comp;
+                    case ObjType::FRACTION: return static_cast<ObjFraction*>(lobj)->frac == static_cast<ObjFraction*>(robj)->frac;
+                    case ObjType::BASENUM: return static_cast<ObjBaseNum*>(lobj)->base.getValue() == static_cast<ObjBaseNum*>(robj)->base.getValue();
+                    case ObjType::SYMBOLIC: return static_cast<ObjSym*>(lobj)->sym == static_cast<ObjSym*>(robj)->sym;
+                    case ObjType::REAL_MATRIX: {
+                        const auto& a = static_cast<ObjRealMatrix*>(lobj)->mat;
+                        const auto& b = static_cast<ObjRealMatrix*>(robj)->mat;
+                        if (a.getRows() != b.getRows() || a.getCols() != b.getCols()) return false;
+                        for (int i = 0; i < a.getRows(); ++i)
+                            for (int j = 0; j < a.getCols(); ++j)
+                                if (a(i, j) != b(i, j)) return false;
+                        return true;
+                    }
+                    case ObjType::COMPLEX_MATRIX: {
+                        const auto& a = static_cast<ObjComplexMatrix*>(lobj)->mat;
+                        const auto& b = static_cast<ObjComplexMatrix*>(robj)->mat;
+                        if (a.getRows() != b.getRows() || a.getCols() != b.getCols()) return false;
+                        for (int i = 0; i < a.getRows(); ++i)
+                            for (int j = 0; j < a.getCols(); ++j)
+                                if (!(a(i, j) == b(i, j))) return false;
+                        return true;
+                    }
+                    case ObjType::STRING_MATRIX: {
+                        const auto& a = static_cast<ObjStringMatrix*>(lobj)->mat;
+                        const auto& b = static_cast<ObjStringMatrix*>(robj)->mat;
+                        if (a.getRows() != b.getRows() || a.getCols() != b.getCols()) return false;
+                        for (int i = 0; i < a.getRows(); ++i)
+                            for (int j = 0; j < a.getCols(); ++j)
+                                if (a(i, j) != b(i, j)) return false;
+                        return true;
+                    }
+                    case ObjType::LIST: {
+                        const auto& a = static_cast<ObjList*>(lobj)->vec;
+                        const auto& b = static_cast<ObjList*>(robj)->vec;
+                        if (a.size() != b.size()) return false;
+                        auto pair = lobj < robj ? std::make_pair((const void*)lobj, (const void*)robj) : std::make_pair((const void*)robj, (const void*)lobj);
+                        if (std::find(comparingPairs.begin(), comparingPairs.end(), pair) != comparingPairs.end()) return true;
+                        comparingPairs.push_back(pair);
+                        bool eq = true;
+                        for (size_t i = 0; i < a.size(); ++i) {
+                            try { if (!equals(a[i], b[i])) { eq = false; break; } }
+                            catch (...) { eq = false; break; }
                         }
-                        catch (...) { eq = false; break; }
+                        comparingPairs.pop_back();
+                        return eq;
                     }
-                    comparingPairs.pop_back();
-                    return eq;
-                }
-                if (std::holds_alternative<Dict>(lhs.data)) {
-                    const auto& a = std::get<Dict>(lhs.data);
-                    const auto& b = std::get<Dict>(rhs.data);
-                    if (a.id() == b.id()) return true;
-                    if (a.size() != b.size()) return false;
-                    auto pair = a.id() < b.id() ? std::make_pair(a.id(), b.id()) : std::make_pair(b.id(), a.id());
-                    if (std::find(comparingPairs.begin(), comparingPairs.end(), pair) != comparingPairs.end()) return true;
-                    comparingPairs.push_back(pair);
-                    bool eq = true;
-                    for (const auto& [key, val] : a.getEntries()) {
-                        const auto* bval = b.get(key);
-                        if (!bval) { eq = false; break; }
-                        try {
-                            Value va = val;
-                            Value vb = *bval;
-                            if (!equals(va, vb)) { eq = false; break; }
+                    case ObjType::DICT: {
+                        auto a = static_cast<ObjDict*>(lobj);
+                        auto b = static_cast<ObjDict*>(robj);
+                        if (a->elements.size() != b->elements.size()) return false;
+                        auto pair = lobj < robj ? std::make_pair((const void*)lobj, (const void*)robj) : std::make_pair((const void*)robj, (const void*)lobj);
+                        if (std::find(comparingPairs.begin(), comparingPairs.end(), pair) != comparingPairs.end()) return true;
+                        comparingPairs.push_back(pair);
+                        bool eq = true;
+                        for (const auto& [key, val] : a->elements) {
+                            auto it = b->keyMap.find(key);
+                            if (it == b->keyMap.end()) { eq = false; break; }
+                            try { if (!equals(val, b->elements[it->second].second)) { eq = false; break; } }
+                            catch (...) { eq = false; break; }
                         }
-                        catch (...) { eq = false; break; }
+                        comparingPairs.pop_back();
+                        return eq;
                     }
-                    comparingPairs.pop_back();
-                    return eq;
-                }
-                if (std::holds_alternative<Set>(lhs.data)) {
-                    const auto& a = std::get<Set>(lhs.data);
-                    const auto& b = std::get<Set>(rhs.data);
-                    if (a.id() == b.id()) return true;
-                    if (a.size() != b.size()) return false;
-                    for (const auto& val : a.raw()) {
-                        if (!b.contains(val)) return false;
+                    case ObjType::SET: {
+                        auto a = static_cast<ObjSet*>(lobj);
+                        auto b = static_cast<ObjSet*>(robj);
+                        if (a->elements.size() != b->elements.size()) return false;
+                        for (const auto& val : a->elements) {
+                            if (b->keys.find(val) == b->keys.end()) return false;
+                        }
+                        return true;
                     }
-                    return true;
+                    case ObjType::INSTANCE: {
+                        auto inst1 = static_cast<ObjInstance*>(lobj);
+                        auto [found, res] = invokeDunder(inst1, "__eq__", {rhs});
+                        if (found) return res.truthy();
+                        return false;
+                    }
+                    case ObjType::CLOSURE:
+                    case ObjType::CLASS:
+                        return false; // Pointer equality already checked
+                    case ObjType::SUPER_PROXY: {
+                        auto sp1 = static_cast<ObjSuper*>(lobj);
+                        auto sp2 = static_cast<ObjSuper*>(robj);
+                        return sp1->instance == sp2->instance && sp1->parentClass == sp2->parentClass;
+                    }
                 }
-                if (std::holds_alternative<std::shared_ptr<Instance>>(lhs.data)) {
-                    auto inst1 = std::get<std::shared_ptr<Instance>>(lhs.data);
-                    auto inst2 = std::get<std::shared_ptr<Instance>>(rhs.data);
-                    if (inst1.get() == inst2.get()) return true;
-                    auto [found, res] = invokeDunder(inst1, "__eq__", {rhs});
-                    if (found) return res.truthy();
-                    return false;
-                }
-                if (std::holds_alternative<std::shared_ptr<FunctionClosure>>(lhs.data))
-                    return std::get<std::shared_ptr<FunctionClosure>>(lhs.data).get() ==
-                    std::get<std::shared_ptr<FunctionClosure>>(rhs.data).get();
-                if (std::holds_alternative<std::shared_ptr<ClassDefinition>>(lhs.data))
-                    return std::get<std::shared_ptr<ClassDefinition>>(lhs.data).get() ==
-                    std::get<std::shared_ptr<ClassDefinition>>(rhs.data).get();
-                if (std::holds_alternative<SuperProxyPtr>(lhs.data)) {
-                    auto sp1 = std::get<SuperProxyPtr>(lhs.data);
-                    auto sp2 = std::get<SuperProxyPtr>(rhs.data);
-                    if (!sp1 || !sp2) return sp1 == sp2;
-                    return sp1->instance.get() == sp2->instance.get() && sp1->parentClass.get() == sp2->parentClass.get();
-                }
-                return false;
             }
 
             // 跨类型兼容比较
-            if (std::holds_alternative<BigInt>(lhs.data) && std::holds_alternative<Fraction>(rhs.data))
-                return Fraction(std::get<BigInt>(lhs.data)) == std::get<Fraction>(rhs.data);
-            if (std::holds_alternative<Fraction>(lhs.data) && std::holds_alternative<BigInt>(rhs.data))
-                return std::get<Fraction>(lhs.data) == Fraction(std::get<BigInt>(rhs.data));
+            if (lhs.isObjType(ObjType::BIGINT) && rhs.isObjType(ObjType::FRACTION))
+                return Fraction(static_cast<ObjBigInt*>(lhs.asObj())->num) == static_cast<ObjFraction*>(rhs.asObj())->frac;
+            if (lhs.isObjType(ObjType::FRACTION) && rhs.isObjType(ObjType::BIGINT))
+                return static_cast<ObjFraction*>(lhs.asObj())->frac == Fraction(static_cast<ObjBigInt*>(rhs.asObj())->num);
 
-            if ((std::holds_alternative<RealMatrix>(lhs.data) && std::holds_alternative<ComplexMatrix>(rhs.data)) ||
-                (std::holds_alternative<ComplexMatrix>(lhs.data) && std::holds_alternative<RealMatrix>(rhs.data))) {
+            if ((lhs.isObjType(ObjType::REAL_MATRIX) && rhs.isObjType(ObjType::COMPLEX_MATRIX)) ||
+                (lhs.isObjType(ObjType::COMPLEX_MATRIX) && rhs.isObjType(ObjType::REAL_MATRIX))) {
                 try {
                     ComplexMatrix a = lhs.asComplexMatrix(), b = rhs.asComplexMatrix();
                     if (a.getRows() != b.getRows() || a.getCols() != b.getCols()) return false;
@@ -649,28 +691,25 @@ namespace jc {
                 catch (...) { return false; }
             }
 
-            if (std::holds_alternative<std::shared_ptr<Instance>>(lhs.data)) {
-                auto [found, res] = invokeDunder(std::get<std::shared_ptr<Instance>>(lhs.data), "__eq__", {rhs});
+            if (lhs.isInstance()) {
+                auto [found, res] = invokeDunder(lhs.asInstance(), "__eq__", {rhs});
                 if (found) return res.truthy();
             }
-            if (std::holds_alternative<std::shared_ptr<Instance>>(rhs.data)) {
-                auto [found, res] = invokeDunder(std::get<std::shared_ptr<Instance>>(rhs.data), "__eq__", {lhs});
+            if (rhs.isInstance()) {
+                auto [found, res] = invokeDunder(rhs.asInstance(), "__eq__", {lhs});
                 if (found) return res.truthy();
             }
-
-            if (std::holds_alternative<std::monostate>(lhs.data) ||
-                std::holds_alternative<std::monostate>(rhs.data))
-                return false;
 
             // ★ 终极数值降维防线：安全处理极大 BigInt 与浮点/复数的跨类型比较
-            if (std::holds_alternative<BaseNum>(lhs.data)) return equals(Value(std::get<BaseNum>(lhs.data).getValue()), rhs);
-            if (std::holds_alternative<BaseNum>(rhs.data)) return equals(lhs, Value(std::get<BaseNum>(rhs.data).getValue()));
+            if (lhs.isObjType(ObjType::BASENUM)) return equals(Value(static_cast<ObjBaseNum*>(lhs.asObj())->base.getValue()), rhs);
+            if (rhs.isObjType(ObjType::BASENUM)) return equals(lhs, Value(static_cast<ObjBaseNum*>(rhs.asObj())->base.getValue()));
 
             auto getNumeric = [](const Value& v) -> std::optional<Complex> {
                 try {
-                    if (std::holds_alternative<double>(v.data)) return Complex(std::get<double>(v.data));
-                    if (std::holds_alternative<Complex>(v.data)) return std::get<Complex>(v.data);
-                    if (std::holds_alternative<Fraction>(v.data)) return Complex(std::get<Fraction>(v.data).toDouble());
+                    if (v.isNumber()) return Complex(v.asNumber());
+                    if (v.isBool()) return Complex(v.asBool() ? 1.0 : 0.0);
+                    if (v.isObjType(ObjType::COMPLEX)) return static_cast<ObjComplex*>(v.asObj())->comp;
+                    if (v.isObjType(ObjType::FRACTION)) return Complex(static_cast<ObjFraction*>(v.asObj())->frac.toDouble());
                 } catch (...) {}
                 return std::nullopt;
             };
@@ -680,16 +719,16 @@ namespace jc {
 
             if (numL && numR) return *numL == *numR;
 
-            if (std::holds_alternative<BigInt>(lhs.data) && numR) {
-                const BigInt& b = std::get<BigInt>(lhs.data);
+            if (lhs.isObjType(ObjType::BIGINT) && numR) {
+                const BigInt& b = static_cast<ObjBigInt*>(lhs.asObj())->num;
                 if (numR->imag != 0.0) return false;
                 double d = numR->real;
                 if (std::floor(d) != d) return false;
                 if (std::abs(d) < 9e15) return b == BigInt(static_cast<int64_t>(d));
                 try { return b.toDouble() == d; } catch (...) { return false; }
             }
-            if (std::holds_alternative<BigInt>(rhs.data) && numL) {
-                const BigInt& b = std::get<BigInt>(rhs.data);
+            if (rhs.isObjType(ObjType::BIGINT) && numL) {
+                const BigInt& b = static_cast<ObjBigInt*>(rhs.asObj())->num;
                 if (numL->imag != 0.0) return false;
                 double d = numL->real;
                 if (std::floor(d) != d) return false;
@@ -700,843 +739,726 @@ namespace jc {
             return false;
         }
 
-        // Value.h 的 class Value 内部
         std::string typeName() const {
-            if (std::holds_alternative<std::monostate>(data)) return "none";
-            if (std::holds_alternative<double>(data)) return "double";
-            if (std::holds_alternative<BigInt>(data)) return "BigInt";
-            if (std::holds_alternative<Fraction>(data)) return "Fraction";
-            if (std::holds_alternative<Complex>(data)) return "Complex";
-            if (std::holds_alternative<std::string>(data)) return "string";
-            if (std::holds_alternative<List>(data)) return "list";
-            if (std::holds_alternative<Dict>(data)) return "dict";
-            if (std::holds_alternative<Set>(data)) return "set";
-            if (std::holds_alternative<RealMatrix>(data)) return "RealMatrix";
-            if (std::holds_alternative<ComplexMatrix>(data)) return "ComplexMatrix";
-            if (std::holds_alternative<StringMatrix>(data)) return "StringMatrix";
-            if (std::holds_alternative<std::shared_ptr<FunctionClosure>>(data)) return "function";
-            if (std::holds_alternative<std::shared_ptr<Instance>>(data)) {
-                auto inst = std::get<std::shared_ptr<Instance>>(data);
-                return (inst && inst->classDef) ? inst->classDef->name : "instance";
+            if (isNone()) return "none";
+            if (isBool()) return "bool";
+            if (isInt32()) return "int";
+            if (isDouble()) return "double";
+            Obj* obj = asObj();
+            switch (obj->type) {
+                case ObjType::STRING: return "string";
+                case ObjType::BIGINT: return "int";
+                case ObjType::FRACTION: return "Fraction";
+                case ObjType::COMPLEX: return "Complex";
+                case ObjType::BASENUM: return "BaseNum";
+                case ObjType::REAL_MATRIX: return "RealMatrix";
+                case ObjType::COMPLEX_MATRIX: return "ComplexMatrix";
+                case ObjType::STRING_MATRIX: return "StringMatrix";
+                case ObjType::LIST: return "list";
+                case ObjType::DICT: return "dict";
+                case ObjType::SET: return "set";
+                case ObjType::CLOSURE: return "function";
+                case ObjType::CLASS: return "class";
+                case ObjType::INSTANCE: {
+                    auto inst = static_cast<ObjInstance*>(obj);
+                    return inst->classDef ? inst->classDef->name : "instance";
+                }
+                case ObjType::SUPER_PROXY: return "super";
+                case ObjType::SYMBOLIC: return "symbolic";
             }
-            if (std::holds_alternative<std::shared_ptr<ClassDefinition>>(data)) return "class";
-            if (std::holds_alternative<BaseNum>(data)) return "BaseNum";
-            if (std::holds_alternative<SuperProxyPtr>(data)) return "super";
-            if (std::holds_alternative<SymExpr>(data)) return "symbolic";
             return "unknown";
         }
 
         Value operator-() const {
-            return std::visit([](auto&& a) -> Value {
-                if constexpr (requires { -a; }) { return -a; }
-                else { throw std::runtime_error("Type Error: Cannot negate this type."); }
-                }, data);
+            if (isInt32()) {
+                int32_t v = asInt32();
+                if (v == -2147483648) return Value(BigInt(2147483648LL));
+                return Value::fromInt32(-v);
+            }
+            if (isDouble()) return Value(-asDoubleRaw());
+            if (isObj()) {
+                Obj* obj = asObj();
+                switch (obj->type) {
+                    case ObjType::BIGINT: return Value(-static_cast<ObjBigInt*>(obj)->num);
+                    case ObjType::FRACTION: return Value(-static_cast<ObjFraction*>(obj)->frac);
+                    case ObjType::COMPLEX: return Value(-static_cast<ObjComplex*>(obj)->comp);
+                    case ObjType::BASENUM: return Value(-static_cast<ObjBaseNum*>(obj)->base);
+                    case ObjType::REAL_MATRIX: return Value(-static_cast<ObjRealMatrix*>(obj)->mat);
+                    case ObjType::COMPLEX_MATRIX: return Value(-static_cast<ObjComplexMatrix*>(obj)->mat);
+                    case ObjType::SYMBOLIC: return Value(-static_cast<ObjSym*>(obj)->sym);
+                    default: break;
+                }
+            }
+            throw std::runtime_error("Type Error: Cannot negate this type.");
         }
 
         friend Value operator+(const Value& lhs, const Value& rhs) {
-            return std::visit([&](auto&& a, auto&& b) -> Value {
-                using T1 = std::decay_t<decltype(a)>;
-                using T2 = std::decay_t<decltype(b)>;
-                if constexpr (requires { a + b; }) {
-                    auto result = a + b;
-                    if constexpr (std::is_same_v<decltype(result), Fraction>) {
-                        return Value::fromFraction(result);
+            if (lhs.isInt32() && rhs.isInt32()) {
+                int64_t sum = static_cast<int64_t>(lhs.asInt32()) + rhs.asInt32();
+                if (sum >= -2147483648LL && sum <= 2147483647LL) return Value::fromInt32(static_cast<int32_t>(sum));
+                return Value(BigInt(sum));
+            }
+            if (lhs.isNumber() && rhs.isNumber()) return Value(lhs.asNumber() + rhs.asNumber());
+            if (lhs.isObjType(ObjType::STRING) && rhs.isObjType(ObjType::STRING)) {
+                return Value(static_cast<ObjString*>(lhs.asObj())->str + static_cast<ObjString*>(rhs.asObj())->str);
+            }
+            if (lhs.isObjType(ObjType::LIST) && rhs.isObjType(ObjType::LIST)) {
+                ObjList* l1 = static_cast<ObjList*>(lhs.asObj());
+                ObjList* l2 = static_cast<ObjList*>(rhs.asObj());
+                ObjList* res = GcHeap::get().allocate<ObjList>();
+                res->vec.reserve(l1->vec.size() + l2->vec.size());
+                res->vec.insert(res->vec.end(), l1->vec.begin(), l1->vec.end());
+                res->vec.insert(res->vec.end(), l2->vec.begin(), l2->vec.end());
+                return Value(res);
+            }
+            
+            try {
+                if (lhs.isObjType(ObjType::REAL_MATRIX) && rhs.isObjType(ObjType::REAL_MATRIX)) return Value(static_cast<ObjRealMatrix*>(lhs.asObj())->mat + static_cast<ObjRealMatrix*>(rhs.asObj())->mat);
+                if (lhs.isObjType(ObjType::COMPLEX_MATRIX) && rhs.isObjType(ObjType::COMPLEX_MATRIX)) return Value(static_cast<ObjComplexMatrix*>(lhs.asObj())->mat + static_cast<ObjComplexMatrix*>(rhs.asObj())->mat);
+                if (lhs.isObjType(ObjType::REAL_MATRIX) && rhs.isObjType(ObjType::COMPLEX_MATRIX)) return Value(lhs.asComplexMatrix() + rhs.asComplexMatrix());
+                if (lhs.isObjType(ObjType::COMPLEX_MATRIX) && rhs.isObjType(ObjType::REAL_MATRIX)) return Value(lhs.asComplexMatrix() + rhs.asComplexMatrix());
+                
+                bool lhsIsMat = lhs.isObjType(ObjType::REAL_MATRIX) || lhs.isObjType(ObjType::COMPLEX_MATRIX);
+                bool rhsIsMat = rhs.isObjType(ObjType::REAL_MATRIX) || rhs.isObjType(ObjType::COMPLEX_MATRIX);
+                bool lhsIsScalar = lhs.isNumber() || lhs.isBigInt() || lhs.isObjType(ObjType::FRACTION) || lhs.isComplex();
+                bool rhsIsScalar = rhs.isNumber() || rhs.isBigInt() || rhs.isObjType(ObjType::FRACTION) || rhs.isComplex();
+
+                if (lhsIsMat && rhsIsScalar) {
+                    if (lhs.isObjType(ObjType::REAL_MATRIX) && !rhs.isComplex()) {
+                        RealMatrix m = static_cast<ObjRealMatrix*>(lhs.asObj())->mat;
+                        if (m.getRows() != m.getCols()) throw std::runtime_error("Math Error: Matrix-scalar addition requires a square matrix.");
+                        double c = rhs.asDouble();
+                        for (int i = 0; i < m.getRows(); ++i) m(i, i) += c;
+                        return Value(m);
                     }
-                    return result;
+                    ComplexMatrix m = lhs.asComplexMatrix();
+                    if (m.getRows() != m.getCols()) throw std::runtime_error("Math Error: Matrix-scalar addition requires a square matrix.");
+                    Complex c = rhs.asComplex();
+                    for (int i = 0; i < m.getRows(); ++i) m(i, i) = m(i, i) + c;
+                    return Value(m);
                 }
-                else if constexpr (std::is_same_v<T1, RealMatrix> && std::is_same_v<T2, ComplexMatrix>) {
-                    return lhs.asComplexMatrix() + rhs.asComplexMatrix();
+                if (lhsIsScalar && rhsIsMat) {
+                    if (rhs.isObjType(ObjType::REAL_MATRIX) && !lhs.isComplex()) {
+                        RealMatrix m = static_cast<ObjRealMatrix*>(rhs.asObj())->mat;
+                        if (m.getRows() != m.getCols()) throw std::runtime_error("Math Error: Matrix-scalar addition requires a square matrix.");
+                        double c = lhs.asDouble();
+                        for (int i = 0; i < m.getRows(); ++i) m(i, i) += c;
+                        return Value(m);
+                    }
+                    ComplexMatrix m = rhs.asComplexMatrix();
+                    if (m.getRows() != m.getCols()) throw std::runtime_error("Math Error: Matrix-scalar addition requires a square matrix.");
+                    Complex c = lhs.asComplex();
+                    for (int i = 0; i < m.getRows(); ++i) m(i, i) = m(i, i) + c;
+                    return Value(m);
                 }
-                else if constexpr (std::is_same_v<T1, ComplexMatrix> && std::is_same_v<T2, RealMatrix>) {
-                    return lhs.asComplexMatrix() + rhs.asComplexMatrix();
-                }
-                else if constexpr (std::is_same_v<T1, RealMatrix> && std::is_same_v<T2, Complex>) {
-                    return lhs.asComplexMatrix() + b;
-                }
-                else if constexpr (std::is_same_v<T1, Complex> && std::is_same_v<T2, RealMatrix>) {
-                    return a + rhs.asComplexMatrix();
-                }
-                else if constexpr (std::is_same_v<T1, BaseNum> && std::is_same_v<T2, BaseNum>) {
-                    return Value(a + b);
-                }
-                else if constexpr (std::is_same_v<T1, BaseNum> && (std::is_same_v<T2, double> || std::is_same_v<T2, BigInt>)) {
-                    return Value(a + BaseNum(rhs.asBigInt(), 10));
-                }
-                else if constexpr (std::is_same_v<T2, BaseNum> && (std::is_same_v<T1, double> || std::is_same_v<T1, BigInt>)) {
-                    return Value(BaseNum(lhs.asBigInt(), 10) + b);
-                }
-                else if constexpr (std::is_same_v<T1, BaseNum>) { return Value(a.getValue()) + rhs; }
-                else if constexpr (std::is_same_v<T2, BaseNum>) { return lhs + Value(b.getValue()); }
-                else if constexpr (std::is_same_v<T1, BigInt>) { return Value(a.toDouble()) + rhs; }
-                else if constexpr (std::is_same_v<T2, BigInt>) { return lhs + Value(b.toDouble()); }
-                else if constexpr (std::is_same_v<T1, Fraction>) { return Value(a.toDouble()) + rhs; }
-                else if constexpr (std::is_same_v<T2, Fraction>) { return lhs + Value(b.toDouble()); }
-                else if constexpr (std::is_same_v<T1, StringMatrix> && std::is_same_v<T2, StringMatrix>) {
-                    if (a.getRows() != b.getRows() || a.getCols() != b.getCols())
-                        throw std::runtime_error("Type Error: StringMatrix dimensions must match for +.");
+                
+                if (lhs.isObjType(ObjType::STRING_MATRIX) && rhs.isObjType(ObjType::STRING_MATRIX)) {
+                    const auto& a = static_cast<ObjStringMatrix*>(lhs.asObj())->mat;
+                    const auto& b = static_cast<ObjStringMatrix*>(rhs.asObj())->mat;
+                    if (a.getRows() != b.getRows() || a.getCols() != b.getCols()) throw std::runtime_error("Type Error: StringMatrix dimensions must match for +.");
                     std::vector<std::string> flat(a.getRows() * a.getCols());
                     for (int i = 0; i < a.getRows(); ++i)
                         for (int j = 0; j < a.getCols(); ++j)
                             flat[i * a.getCols() + j] = a(i, j) + b(i, j);
                     return Value(StringMatrix(a.getRows(), a.getCols(), flat));
                 }
-                else {
-                    throw std::runtime_error("Type Error: Cannot add these types.");
-                }
-                }, lhs.data, rhs.data);
+
+                if (lhs.isSymbolic() || rhs.isSymbolic()) return Value(lhs.asSymbolic() + rhs.asSymbolic());
+
+                if (lhs.isObjType(ObjType::BASENUM) && rhs.isObjType(ObjType::BASENUM)) return Value(static_cast<ObjBaseNum*>(lhs.asObj())->base + static_cast<ObjBaseNum*>(rhs.asObj())->base);
+                if (lhs.isObjType(ObjType::BASENUM)) return Value(static_cast<ObjBaseNum*>(lhs.asObj())->base + BaseNum(rhs.asBigInt(), static_cast<ObjBaseNum*>(lhs.asObj())->base.getRadix()));
+                if (rhs.isObjType(ObjType::BASENUM)) return Value(BaseNum(lhs.asBigInt(), static_cast<ObjBaseNum*>(rhs.asObj())->base.getRadix()) + static_cast<ObjBaseNum*>(rhs.asObj())->base);
+
+                if (lhs.isObjType(ObjType::COMPLEX) || rhs.isObjType(ObjType::COMPLEX)) return Value(lhs.asComplex() + rhs.asComplex());
+                
+                bool lhsIsExactInt = lhs.isBigInt() || lhs.isInt32();
+                bool rhsIsExactInt = rhs.isBigInt() || rhs.isInt32();
+                if (lhsIsExactInt && rhsIsExactInt) return Value(lhs.asBigInt() + rhs.asBigInt());
+                if (lhs.isObjType(ObjType::FRACTION) && rhs.isObjType(ObjType::FRACTION)) return Value::fromFraction(static_cast<ObjFraction*>(lhs.asObj())->frac + static_cast<ObjFraction*>(rhs.asObj())->frac);
+                if (lhs.isObjType(ObjType::FRACTION) && rhsIsExactInt) return Value::fromFraction(static_cast<ObjFraction*>(lhs.asObj())->frac + Fraction(rhs.asBigInt()));
+                if (lhsIsExactInt && rhs.isObjType(ObjType::FRACTION)) return Value::fromFraction(Fraction(lhs.asBigInt()) + static_cast<ObjFraction*>(rhs.asObj())->frac);
+                
+                if (lhs.isDouble() || rhs.isDouble()) return Value(lhs.asDouble() + rhs.asDouble());
+            } catch (...) {}
+            
+            throw std::runtime_error("Type Error: Cannot add these types.");
         }
 
         friend Value operator-(const Value& lhs, const Value& rhs) {
-            return std::visit([&](auto&& a, auto&& b) -> Value {
-                using T1 = std::decay_t<decltype(a)>;
-                using T2 = std::decay_t<decltype(b)>;
-                if constexpr (requires { a - b; }) {
-                    auto result = a - b;
-                    if constexpr (std::is_same_v<decltype(result), Fraction>) {
-                        return Value::fromFraction(result);
+            if (lhs.isInt32() && rhs.isInt32()) {
+                int64_t diff = static_cast<int64_t>(lhs.asInt32()) - rhs.asInt32();
+                if (diff >= -2147483648LL && diff <= 2147483647LL) return Value::fromInt32(static_cast<int32_t>(diff));
+                return Value(BigInt(diff));
+            }
+            if (lhs.isNumber() && rhs.isNumber()) return Value(lhs.asNumber() - rhs.asNumber());
+            
+            try {
+                if (lhs.isObjType(ObjType::REAL_MATRIX) && rhs.isObjType(ObjType::REAL_MATRIX)) return Value(static_cast<ObjRealMatrix*>(lhs.asObj())->mat - static_cast<ObjRealMatrix*>(rhs.asObj())->mat);
+                if (lhs.isObjType(ObjType::COMPLEX_MATRIX) && rhs.isObjType(ObjType::COMPLEX_MATRIX)) return Value(static_cast<ObjComplexMatrix*>(lhs.asObj())->mat - static_cast<ObjComplexMatrix*>(rhs.asObj())->mat);
+                if (lhs.isObjType(ObjType::REAL_MATRIX) && rhs.isObjType(ObjType::COMPLEX_MATRIX)) return Value(lhs.asComplexMatrix() - rhs.asComplexMatrix());
+                if (lhs.isObjType(ObjType::COMPLEX_MATRIX) && rhs.isObjType(ObjType::REAL_MATRIX)) return Value(lhs.asComplexMatrix() - rhs.asComplexMatrix());
+                
+                bool lhsIsMat = lhs.isObjType(ObjType::REAL_MATRIX) || lhs.isObjType(ObjType::COMPLEX_MATRIX);
+                bool rhsIsMat = rhs.isObjType(ObjType::REAL_MATRIX) || rhs.isObjType(ObjType::COMPLEX_MATRIX);
+                bool lhsIsScalar = lhs.isNumber() || lhs.isBigInt() || lhs.isObjType(ObjType::FRACTION) || lhs.isComplex();
+                bool rhsIsScalar = rhs.isNumber() || rhs.isBigInt() || rhs.isObjType(ObjType::FRACTION) || rhs.isComplex();
+
+                if (lhsIsMat && rhsIsScalar) {
+                    if (lhs.isObjType(ObjType::REAL_MATRIX) && !rhs.isComplex()) {
+                        RealMatrix m = static_cast<ObjRealMatrix*>(lhs.asObj())->mat;
+                        if (m.getRows() != m.getCols()) throw std::runtime_error("Math Error: Matrix-scalar subtraction requires a square matrix.");
+                        double c = rhs.asDouble();
+                        for (int i = 0; i < m.getRows(); ++i) m(i, i) -= c;
+                        return Value(m);
                     }
-                    return result;
+                    ComplexMatrix m = lhs.asComplexMatrix();
+                    if (m.getRows() != m.getCols()) throw std::runtime_error("Math Error: Matrix-scalar subtraction requires a square matrix.");
+                    Complex c = rhs.asComplex();
+                    for (int i = 0; i < m.getRows(); ++i) m(i, i) = m(i, i) - c;
+                    return Value(m);
                 }
-                else if constexpr (std::is_same_v<T1, RealMatrix> && std::is_same_v<T2, ComplexMatrix>) {
-                    return lhs.asComplexMatrix() - rhs.asComplexMatrix();
-                }
-                else if constexpr (std::is_same_v<T1, ComplexMatrix> && std::is_same_v<T2, RealMatrix>) {
-                    return lhs.asComplexMatrix() - rhs.asComplexMatrix();
-                }
-                else if constexpr (std::is_same_v<T1, RealMatrix> && std::is_same_v<T2, Complex>) {
-                    return lhs.asComplexMatrix() - b;
-                }
-                else if constexpr (std::is_same_v<T1, Complex> && std::is_same_v<T2, RealMatrix>) {
-                    return a - rhs.asComplexMatrix();
-                }
-                else if constexpr (std::is_same_v<T1, BaseNum> && std::is_same_v<T2, BaseNum>) {
-                    return Value(a - b);
-                }
-                else if constexpr (std::is_same_v<T1, BaseNum> && (std::is_same_v<T2, double> || std::is_same_v<T2, BigInt>)) {
-                    return Value(a - BaseNum(rhs.asBigInt(), 10));
-                }
-                else if constexpr (std::is_same_v<T2, BaseNum> && (std::is_same_v<T1, double> || std::is_same_v<T1, BigInt>)) {
-                    return Value(BaseNum(lhs.asBigInt(), 10) - b);
-                }
-                else if constexpr (std::is_same_v<T1, Set> && std::is_same_v<T2, Set>) {
-                    Set result;
-                    for (const auto& val : a.raw()) {
-                        if (!b.contains(val)) result.insert(val);
+                if (lhsIsScalar && rhsIsMat) {
+                    if (rhs.isObjType(ObjType::REAL_MATRIX) && !lhs.isComplex()) {
+                        RealMatrix m = static_cast<ObjRealMatrix*>(rhs.asObj())->mat;
+                        if (m.getRows() != m.getCols()) throw std::runtime_error("Math Error: Matrix-scalar subtraction requires a square matrix.");
+                        double c = lhs.asDouble();
+                        RealMatrix res(m.getRows(), m.getCols());
+                        for (int i = 0; i < m.getRows(); ++i) {
+                            for (int j = 0; j < m.getCols(); ++j) {
+                                res(i, j) = (i == j ? c : 0.0) - m(i, j);
+                            }
+                        }
+                        return Value(res);
                     }
-                    return Value(result);
+                    ComplexMatrix m = rhs.asComplexMatrix();
+                    if (m.getRows() != m.getCols()) throw std::runtime_error("Math Error: Matrix-scalar subtraction requires a square matrix.");
+                    Complex c = lhs.asComplex();
+                    ComplexMatrix res(m.getRows(), m.getCols());
+                    for (int i = 0; i < m.getRows(); ++i) {
+                        for (int j = 0; j < m.getCols(); ++j) {
+                            res(i, j) = (i == j ? c : Complex(0.0, 0.0)) - m(i, j);
+                        }
+                    }
+                    return Value(res);
                 }
-                else if constexpr (std::is_same_v<T1, BaseNum>) { return Value(a.getValue()) - rhs; }
-                else if constexpr (std::is_same_v<T2, BaseNum>) { return lhs - Value(b.getValue()); }
-                else if constexpr (std::is_same_v<T1, BigInt>) { return Value(a.toDouble()) - rhs; }
-                else if constexpr (std::is_same_v<T2, BigInt>) { return lhs - Value(b.toDouble()); }
-                else if constexpr (std::is_same_v<T1, Fraction>) { return Value(a.toDouble()) - rhs; }
-                else if constexpr (std::is_same_v<T2, Fraction>) { return lhs - Value(b.toDouble()); }
-                else { throw std::runtime_error("Type Error: Subtraction not supported for these types."); }
-                }, lhs.data, rhs.data);
+                
+                if (lhs.isObjType(ObjType::SET) && rhs.isObjType(ObjType::SET)) {
+                    ObjSet* s1 = static_cast<ObjSet*>(lhs.asObj());
+                    ObjSet* s2 = static_cast<ObjSet*>(rhs.asObj());
+                    ObjSet* res = GcHeap::get().allocate<ObjSet>();
+                    for (const auto& val : s1->elements) {
+                        if (s2->keys.find(val) == s2->keys.end()) {
+                            res->keys.insert(val);
+                            res->elements.push_back(val);
+                        }
+                    }
+                    return Value(res);
+                }
+
+                if (lhs.isSymbolic() || rhs.isSymbolic()) return Value(lhs.asSymbolic() - rhs.asSymbolic());
+
+                if (lhs.isObjType(ObjType::BASENUM) && rhs.isObjType(ObjType::BASENUM)) return Value(static_cast<ObjBaseNum*>(lhs.asObj())->base - static_cast<ObjBaseNum*>(rhs.asObj())->base);
+                if (lhs.isObjType(ObjType::BASENUM)) return Value(static_cast<ObjBaseNum*>(lhs.asObj())->base - BaseNum(rhs.asBigInt(), static_cast<ObjBaseNum*>(lhs.asObj())->base.getRadix()));
+                if (rhs.isObjType(ObjType::BASENUM)) return Value(BaseNum(lhs.asBigInt(), static_cast<ObjBaseNum*>(rhs.asObj())->base.getRadix()) - static_cast<ObjBaseNum*>(rhs.asObj())->base);
+
+                if (lhs.isObjType(ObjType::COMPLEX) || rhs.isObjType(ObjType::COMPLEX)) return Value(lhs.asComplex() - rhs.asComplex());
+                
+                bool lhsIsExactInt = lhs.isBigInt() || lhs.isInt32();
+                bool rhsIsExactInt = rhs.isBigInt() || rhs.isInt32();
+                if (lhsIsExactInt && rhsIsExactInt) return Value(lhs.asBigInt() - rhs.asBigInt());
+                if (lhs.isObjType(ObjType::FRACTION) && rhs.isObjType(ObjType::FRACTION)) return Value::fromFraction(static_cast<ObjFraction*>(lhs.asObj())->frac - static_cast<ObjFraction*>(rhs.asObj())->frac);
+                if (lhs.isObjType(ObjType::FRACTION) && rhsIsExactInt) return Value::fromFraction(static_cast<ObjFraction*>(lhs.asObj())->frac - Fraction(rhs.asBigInt()));
+                if (lhsIsExactInt && rhs.isObjType(ObjType::FRACTION)) return Value::fromFraction(Fraction(lhs.asBigInt()) - static_cast<ObjFraction*>(rhs.asObj())->frac);
+                
+                if (lhs.isDouble() || rhs.isDouble()) return Value(lhs.asDouble() - rhs.asDouble());
+            } catch (...) {}
+            
+            throw std::runtime_error("Type Error: Subtraction not supported for these types.");
         }
 
         friend Value operator*(const Value& lhs, const Value& rhs) {
-            return std::visit([&](auto&& a, auto&& b) -> Value {
-                using T1 = std::decay_t<decltype(a)>;
-                using T2 = std::decay_t<decltype(b)>;
-                if constexpr (requires { a* b; }) {
-                    auto result = a * b;
-                    if constexpr (std::is_same_v<decltype(result), Fraction>) {
-                        return Value::fromFraction(result);
-                    }
-                    return result;
+            if (lhs.isInt32() && rhs.isInt32()) {
+                int64_t prod = static_cast<int64_t>(lhs.asInt32()) * rhs.asInt32();
+                if (prod >= -2147483648LL && prod <= 2147483647LL) return Value::fromInt32(static_cast<int32_t>(prod));
+                return Value(BigInt(prod));
+            }
+            if (lhs.isNumber() && rhs.isNumber()) return Value(lhs.asNumber() * rhs.asNumber());
+            
+            try {
+                if (lhs.isObjType(ObjType::REAL_MATRIX) && rhs.isObjType(ObjType::REAL_MATRIX)) return Value(static_cast<ObjRealMatrix*>(lhs.asObj())->mat * static_cast<ObjRealMatrix*>(rhs.asObj())->mat);
+                if (lhs.isObjType(ObjType::COMPLEX_MATRIX) && rhs.isObjType(ObjType::COMPLEX_MATRIX)) return Value(static_cast<ObjComplexMatrix*>(lhs.asObj())->mat * static_cast<ObjComplexMatrix*>(rhs.asObj())->mat);
+                if (lhs.isObjType(ObjType::REAL_MATRIX) && rhs.isObjType(ObjType::COMPLEX_MATRIX)) return Value(lhs.asComplexMatrix() * rhs.asComplexMatrix());
+                if (lhs.isObjType(ObjType::COMPLEX_MATRIX) && rhs.isObjType(ObjType::REAL_MATRIX)) return Value(lhs.asComplexMatrix() * rhs.asComplexMatrix());
+                
+                bool lhsIsMat = lhs.isObjType(ObjType::REAL_MATRIX) || lhs.isObjType(ObjType::COMPLEX_MATRIX);
+                bool rhsIsMat = rhs.isObjType(ObjType::REAL_MATRIX) || rhs.isObjType(ObjType::COMPLEX_MATRIX);
+                bool lhsIsScalar = lhs.isNumber() || lhs.isBigInt() || lhs.isObjType(ObjType::FRACTION) || lhs.isComplex();
+                bool rhsIsScalar = rhs.isNumber() || rhs.isBigInt() || rhs.isObjType(ObjType::FRACTION) || rhs.isComplex();
+
+                if (lhsIsMat && rhsIsScalar) {
+                    if (lhs.isObjType(ObjType::REAL_MATRIX) && !rhs.isComplex()) return Value(static_cast<ObjRealMatrix*>(lhs.asObj())->mat * rhs.asDouble());
+                    return Value(lhs.asComplexMatrix() * rhs.asComplex());
                 }
-                else if constexpr (std::is_same_v<T1, RealMatrix> && std::is_same_v<T2, ComplexMatrix>) {
-                    return lhs.asComplexMatrix() * rhs.asComplexMatrix();
+                if (lhsIsScalar && rhsIsMat) {
+                    if (rhs.isObjType(ObjType::REAL_MATRIX) && !lhs.isComplex()) return Value(static_cast<ObjRealMatrix*>(rhs.asObj())->mat * lhs.asDouble());
+                    return Value(rhs.asComplexMatrix() * lhs.asComplex());
                 }
-                else if constexpr (std::is_same_v<T1, ComplexMatrix> && std::is_same_v<T2, RealMatrix>) {
-                    return lhs.asComplexMatrix() * rhs.asComplexMatrix();
-                }
-                else if constexpr (std::is_same_v<T1, RealMatrix> && std::is_same_v<T2, Complex>) {
-                    return lhs.asComplexMatrix() * b;
-                }
-                else if constexpr (std::is_same_v<T1, Complex> && std::is_same_v<T2, RealMatrix>) {
-                    return a * rhs.asComplexMatrix();
-                }
-                else if constexpr (std::is_same_v<T1, BaseNum> && std::is_same_v<T2, BaseNum>) {
-                    return Value(a * b);
-                }
-                else if constexpr (std::is_same_v<T1, BaseNum> && (std::is_same_v<T2, double> || std::is_same_v<T2, BigInt>)) {
-                    return Value(a * BaseNum(rhs.asBigInt(), 10));
-                }
-                else if constexpr (std::is_same_v<T2, BaseNum> && (std::is_same_v<T1, double> || std::is_same_v<T1, BigInt>)) {
-                    return Value(BaseNum(lhs.asBigInt(), 10) * b);
-                }
-                // 在 operator* 的 std::visit lambda 中，最终 throw 之前添加：
-                else if constexpr (std::is_same_v<T1, std::string> && std::is_same_v<T2, double>) {
-                    int n = static_cast<int>(std::round(b));
+                
+                if (lhs.isObjType(ObjType::STRING) && (rhs.isNumber() || rhs.isObjType(ObjType::BIGINT))) {
+                    int n = static_cast<int>(rhs.asDouble());
                     if (n < 0) throw std::runtime_error("Type Error: String repeat count must be non-negative.");
                     std::string result;
-                    result.reserve(a.size() * n);
-                    for (int i = 0; i < n; ++i) result += a;
+                    const std::string& s = static_cast<ObjString*>(lhs.asObj())->str;
+                    result.reserve(s.size() * n);
+                    for (int i = 0; i < n; ++i) result += s;
                     return Value(result);
                 }
-                else if constexpr (std::is_same_v<T1, double> && std::is_same_v<T2, std::string>) {
-                    int n = static_cast<int>(std::round(a));
+                if ((lhs.isNumber() || lhs.isObjType(ObjType::BIGINT)) && rhs.isObjType(ObjType::STRING)) {
+                    int n = static_cast<int>(lhs.asDouble());
                     if (n < 0) throw std::runtime_error("Type Error: String repeat count must be non-negative.");
                     std::string result;
-                    result.reserve(b.size() * n);
-                    for (int i = 0; i < n; ++i) result += b;
+                    const std::string& s = static_cast<ObjString*>(rhs.asObj())->str;
+                    result.reserve(s.size() * n);
+                    for (int i = 0; i < n; ++i) result += s;
                     return Value(result);
                 }
-                else if constexpr (std::is_same_v<T1, std::string> && std::is_same_v<T2, BigInt>) {
-                    int n = static_cast<int>(b.toDouble());
-                    if (n < 0) throw std::runtime_error("Type Error: String repeat count must be non-negative.");
-                    std::string result;
-                    result.reserve(a.size() * n);
-                    for (int i = 0; i < n; ++i) result += a;
-                    return Value(result);
-                }
-                else if constexpr (std::is_same_v<T1, BigInt> && std::is_same_v<T2, std::string>) {
-                    int n = static_cast<int>(a.toDouble());
-                    if (n < 0) throw std::runtime_error("Type Error: String repeat count must be non-negative.");
-                    std::string result;
-                    result.reserve(b.size() * n);
-                    for (int i = 0; i < n; ++i) result += b;
-                    return Value(result);
-                }
-                else if constexpr (std::is_same_v<T1, Set> && std::is_same_v<T2, Set>) {
-                    Set result;
-                    // 笛卡尔积：返回由两两组合的 List(二元组) 构成的 Set
-                    for (const auto& v1Any : a.raw()) {
-                        for (const auto& v2Any : b.raw()) {
-                            List pair;
-                            pair.push_back(v1Any);
-                            pair.push_back(v2Any);
-                            pair.freeze();
+
+                if (lhs.isObjType(ObjType::SET) && rhs.isObjType(ObjType::SET)) {
+                    ObjSet* s1 = static_cast<ObjSet*>(lhs.asObj());
+                    ObjSet* s2 = static_cast<ObjSet*>(rhs.asObj());
+                    ObjSet* res = GcHeap::get().allocate<ObjSet>();
+                    for (const auto& v1 : s1->elements) {
+                        for (const auto& v2 : s2->elements) {
+                            ObjList* pair = GcHeap::get().allocate<ObjList>();
+                            pair->vec.push_back(v1);
+                            pair->vec.push_back(v2);
+                            pair->is_frozen = true;
                             Value pairVal(pair);
-                            result.insert(pairVal);
+                            if (res->keys.find(pairVal) == res->keys.end()) {
+                                res->keys.insert(pairVal);
+                                res->elements.push_back(pairVal);
+                            }
                         }
                     }
-                    return Value(result);
+                    return Value(res);
                 }
-                else if constexpr (std::is_same_v<T1, BaseNum>) { return Value(a.getValue()) * rhs; }
-                else if constexpr (std::is_same_v<T2, BaseNum>) { return lhs * Value(b.getValue()); }
-                else if constexpr (std::is_same_v<T1, BigInt>) { return Value(a.toDouble()) * rhs; }
-                else if constexpr (std::is_same_v<T2, BigInt>) { return lhs * Value(b.toDouble()); }
-                else if constexpr (std::is_same_v<T1, Fraction>) { return Value(a.toDouble()) * rhs; }
-                else if constexpr (std::is_same_v<T2, Fraction>) { return lhs * Value(b.toDouble()); }
-                else { throw std::runtime_error("Type Error: Multiplication not supported for these types."); }
-                }, lhs.data, rhs.data);
+
+                if (lhs.isSymbolic() || rhs.isSymbolic()) return Value(lhs.asSymbolic() * rhs.asSymbolic());
+
+                if (lhs.isObjType(ObjType::BASENUM) && rhs.isObjType(ObjType::BASENUM)) return Value(static_cast<ObjBaseNum*>(lhs.asObj())->base * static_cast<ObjBaseNum*>(rhs.asObj())->base);
+                if (lhs.isObjType(ObjType::BASENUM)) return Value(static_cast<ObjBaseNum*>(lhs.asObj())->base * BaseNum(rhs.asBigInt(), static_cast<ObjBaseNum*>(lhs.asObj())->base.getRadix()));
+                if (rhs.isObjType(ObjType::BASENUM)) return Value(BaseNum(lhs.asBigInt(), static_cast<ObjBaseNum*>(rhs.asObj())->base.getRadix()) * static_cast<ObjBaseNum*>(rhs.asObj())->base);
+
+                if (lhs.isObjType(ObjType::COMPLEX) || rhs.isObjType(ObjType::COMPLEX)) return Value(lhs.asComplex() * rhs.asComplex());
+                
+                bool lhsIsExactInt = lhs.isBigInt() || lhs.isInt32();
+                bool rhsIsExactInt = rhs.isBigInt() || rhs.isInt32();
+                if (lhsIsExactInt && rhsIsExactInt) return Value(lhs.asBigInt() * rhs.asBigInt());
+                if (lhs.isObjType(ObjType::FRACTION) && rhs.isObjType(ObjType::FRACTION)) return Value::fromFraction(static_cast<ObjFraction*>(lhs.asObj())->frac * static_cast<ObjFraction*>(rhs.asObj())->frac);
+                if (lhs.isObjType(ObjType::FRACTION) && rhsIsExactInt) return Value::fromFraction(static_cast<ObjFraction*>(lhs.asObj())->frac * Fraction(rhs.asBigInt()));
+                if (lhsIsExactInt && rhs.isObjType(ObjType::FRACTION)) return Value::fromFraction(Fraction(lhs.asBigInt()) * static_cast<ObjFraction*>(rhs.asObj())->frac);
+                
+                if (lhs.isDouble() || rhs.isDouble()) return Value(lhs.asDouble() * rhs.asDouble());
+            } catch (...) {}
+            
+            throw std::runtime_error("Type Error: Multiplication not supported for these types.");
         }
 
         friend Value operator/(const Value& lhs, const Value& rhs) {
-            return std::visit([&](auto&& a, auto&& b) -> Value {
-                using T1 = std::decay_t<decltype(a)>;
-                using T2 = std::decay_t<decltype(b)>;
-                if constexpr (std::is_same_v<T1, BigInt> && std::is_same_v<T2, BigInt>) {
-                    if (b.isZero()) throw std::runtime_error("Math Error: Division by zero.");
-                    if ((a % b).isZero()) {
-                        return Value(a / b);
+            if (lhs.isInt32() && rhs.isInt32()) {
+                int32_t a = lhs.asInt32(), b = rhs.asInt32();
+                if (b == 0) throw std::runtime_error("Math Error: Division by zero.");
+                if (a % b == 0) {
+                    if (a == -2147483648 && b == -1) return Value(BigInt(2147483648LL));
+                    return Value::fromInt32(a / b);
+                }
+                return Value(Fraction(BigInt(a), BigInt(b)));
+            }
+            if (lhs.isNumber() && rhs.isNumber()) {
+                double b = rhs.asNumber();
+                if (b == 0.0) throw std::runtime_error("Math Error: Division by zero.");
+                return Value(lhs.asNumber() / b);
+            }
+            
+            try {
+                if (rhs.isObjType(ObjType::REAL_MATRIX) || rhs.isObjType(ObjType::COMPLEX_MATRIX)) {
+                    return lhs * Value(rhs.asComplexMatrix().inverse());
+                }
+
+                bool lhsIsMat = lhs.isObjType(ObjType::REAL_MATRIX) || lhs.isObjType(ObjType::COMPLEX_MATRIX);
+                bool rhsIsScalar = rhs.isNumber() || rhs.isBigInt() || rhs.isObjType(ObjType::FRACTION) || rhs.isComplex();
+
+                if (lhsIsMat && rhsIsScalar) {
+                    if (rhs.isComplex()) {
+                        Complex c = rhs.asComplex();
+                        if (c == 0.0) throw std::runtime_error("Math Error: Division by zero complex number.");
+                        return Value(lhs.asComplexMatrix() / c);
+                    } else {
+                        double d = rhs.asDouble();
+                        if (d == 0.0) throw std::runtime_error("Math Error: Division by zero.");
+                        if (lhs.isObjType(ObjType::REAL_MATRIX)) return Value(static_cast<ObjRealMatrix*>(lhs.asObj())->mat / d);
+                        return Value(lhs.asComplexMatrix() / Complex(d, 0.0));
                     }
+                }
+
+                if (lhs.isSymbolic() || rhs.isSymbolic()) return Value(lhs.asSymbolic() / rhs.asSymbolic());
+
+                if (lhs.isObjType(ObjType::BASENUM) && rhs.isObjType(ObjType::BASENUM)) return Value(static_cast<ObjBaseNum*>(lhs.asObj())->base / static_cast<ObjBaseNum*>(rhs.asObj())->base);
+                if (lhs.isObjType(ObjType::BASENUM)) return Value(static_cast<ObjBaseNum*>(lhs.asObj())->base / BaseNum(rhs.asBigInt(), static_cast<ObjBaseNum*>(lhs.asObj())->base.getRadix()));
+                if (rhs.isObjType(ObjType::BASENUM)) return Value(BaseNum(lhs.asBigInt(), static_cast<ObjBaseNum*>(rhs.asObj())->base.getRadix()) / static_cast<ObjBaseNum*>(rhs.asObj())->base);
+
+                bool lhsIsExactInt = lhs.isBigInt() || lhs.isInt32();
+                bool rhsIsExactInt = rhs.isBigInt() || rhs.isInt32();
+                if (lhsIsExactInt && rhsIsExactInt) {
+                    BigInt a = lhs.asBigInt();
+                    BigInt b = rhs.asBigInt();
+                    if (b.isZero()) throw std::runtime_error("Math Error: Division by zero.");
+                    if ((a % b).isZero()) return Value(a / b);
                     return Value(Fraction(a, b));
                 }
-                else if constexpr (std::is_same_v<T2, RealMatrix> || std::is_same_v<T2, ComplexMatrix>) {
-                    return lhs * Value(b.inverse());
+                if (lhs.isObjType(ObjType::FRACTION) && rhs.isObjType(ObjType::FRACTION)) return Value::fromFraction(static_cast<ObjFraction*>(lhs.asObj())->frac / static_cast<ObjFraction*>(rhs.asObj())->frac);
+                if (lhs.isObjType(ObjType::FRACTION) && rhsIsExactInt) return Value::fromFraction(static_cast<ObjFraction*>(lhs.asObj())->frac / Fraction(rhs.asBigInt()));
+                if (lhsIsExactInt && rhs.isObjType(ObjType::FRACTION)) return Value::fromFraction(Fraction(lhs.asBigInt()) / static_cast<ObjFraction*>(rhs.asObj())->frac);
+
+                if (lhs.isObjType(ObjType::COMPLEX) || rhs.isObjType(ObjType::COMPLEX)) {
+                    Complex b = rhs.asComplex();
+                    if (b == 0.0) throw std::runtime_error("Math Error: Division by zero.");
+                    return Value(lhs.asComplex() / b);
                 }
-                else if constexpr (requires { a / b; }) {
-                    if constexpr (requires { b == 0.0; }) {
-                        if (b == 0.0) throw std::runtime_error("Math Error: Division by zero.");
-                    }
-                    auto result = a / b;
-                    if constexpr (std::is_same_v<decltype(result), Fraction>) {
-                        return Value::fromFraction(result);
-                    }
-                    return result;
+                if (lhs.isDouble() || rhs.isDouble()) {
+                    double b = rhs.asDouble();
+                    if (b == 0.0) throw std::runtime_error("Math Error: Division by zero.");
+                    return Value(lhs.asDouble() / b);
                 }
-                else if constexpr (std::is_same_v<T1, RealMatrix> && std::is_same_v<T2, Complex>) {
-                    if (b == 0.0) throw std::runtime_error("Math Error: Division by zero complex number.");
-                    return lhs.asComplexMatrix() / b;
-                }
-                else if constexpr (std::is_same_v<T1, BaseNum> && std::is_same_v<T2, BaseNum>) {
-                    return Value(a / b);
-                }
-                else if constexpr (std::is_same_v<T1, BaseNum> && (std::is_same_v<T2, double> || std::is_same_v<T2, BigInt>)) {
-                    return Value(a / BaseNum(rhs.asBigInt(), 10));
-                }
-                else if constexpr (std::is_same_v<T2, BaseNum> && (std::is_same_v<T1, double> || std::is_same_v<T1, BigInt>)) {
-                    return Value(BaseNum(lhs.asBigInt(), 10) / b);
-                }
-                else if constexpr (std::is_same_v<T1, BaseNum>) { return Value(a.getValue()) / rhs; }
-                else if constexpr (std::is_same_v<T2, BaseNum>) { return lhs / Value(b.getValue()); }
-                else if constexpr (std::is_same_v<T1, BigInt>) { return Value(a.toDouble()) / rhs; }
-                else if constexpr (std::is_same_v<T2, BigInt>) { return lhs / Value(b.toDouble()); }
-                else if constexpr (std::is_same_v<T1, Fraction>) { return Value(a.toDouble()) / rhs; }
-                else if constexpr (std::is_same_v<T2, Fraction>) { return lhs / Value(b.toDouble()); }
-                else { throw std::runtime_error("Type Error: Division not supported for these types."); }
-                }, lhs.data, rhs.data);
+            } catch (...) {}
+            
+            throw std::runtime_error("Type Error: Division not supported for these types.");
         }
 
         friend Value operator^(const Value& lhs, const Value& rhs) {
-            if (lhs.isSymbolic() || rhs.isSymbolic())
-                return Value(lhs.asSymbolic() ^ rhs.asSymbolic());
-            return std::visit([&](auto&& a, auto&& b) -> Value {
-                using T1 = std::decay_t<decltype(a)>;
-                using T2 = std::decay_t<decltype(b)>;
+            if (lhs.isSymbolic() || rhs.isSymbolic()) return Value(lhs.asSymbolic() ^ rhs.asSymbolic());
+            
+            try {
+                if (lhs.isObjType(ObjType::COMPLEX) || rhs.isObjType(ObjType::COMPLEX)) return Value(lhs.asComplex() ^ rhs.asComplex());
 
-                if constexpr (std::is_same_v<T1, double> && std::is_same_v<T2, double>) {
-                    if (a < 0 && std::floor(b) != b) {
-                        for (int q = 2; q <= 1000; ++q) {
-                            double p = b * q;
-                            double rounded = std::round(p);
-                            if (Tol::isEq(p, rounded, 1e5)) {
-                                int64_t pInt = static_cast<int64_t>(rounded);
-                                int64_t g = std::gcd(std::abs(pInt), static_cast<int64_t>(q));
-                                int64_t pRed = pInt / g;
-                                int64_t qRed = q / g;
-                                return Value::negativePow(a, pRed, qRed);
+                if (lhs.isObjType(ObjType::REAL_MATRIX) || lhs.isObjType(ObjType::COMPLEX_MATRIX)) {
+                    bool rhsIsScalar = rhs.isNumber() || rhs.isBigInt() || rhs.isObjType(ObjType::FRACTION) || rhs.isComplex();
+                    if (rhsIsScalar) {
+                        if (rhs.isComplex()) {
+                            return Value((matLog(lhs.asComplexMatrix()) * rhs.asComplex()).matExp());
+                        } else {
+                            double b = rhs.asDouble();
+                            if (Tol::isEq(b, std::round(b), 1e5)) return Value(lhs.asComplexMatrix().power(static_cast<int>(std::round(b))));
+                            return Value((matLog(lhs.asComplexMatrix()) * Complex(b)).matExp());
+                        }
+                    }
+                    if (rhs.isObjType(ObjType::REAL_MATRIX) || rhs.isObjType(ObjType::COMPLEX_MATRIX)) return Value(matPow(lhs.asComplexMatrix(), rhs.asComplexMatrix()));
+                }
+                bool lhsIsScalar = lhs.isNumber() || lhs.isBigInt() || lhs.isObjType(ObjType::FRACTION) || lhs.isComplex();
+                if (lhsIsScalar && (rhs.isObjType(ObjType::REAL_MATRIX) || rhs.isObjType(ObjType::COMPLEX_MATRIX))) {
+                    return Value((rhs.asComplexMatrix() * log(lhs.asComplex())).matExp());
+                }
+
+                if (lhs.isObjType(ObjType::BASENUM) && rhs.isObjType(ObjType::BASENUM)) return Value(static_cast<ObjBaseNum*>(lhs.asObj())->base ^ static_cast<ObjBaseNum*>(rhs.asObj())->base);
+                if (lhs.isObjType(ObjType::BASENUM)) return Value(static_cast<ObjBaseNum*>(lhs.asObj())->base ^ BaseNum(rhs.asBigInt(), static_cast<ObjBaseNum*>(lhs.asObj())->base.getRadix()));
+                if (rhs.isObjType(ObjType::BASENUM)) return Value(BaseNum(lhs.asBigInt(), static_cast<ObjBaseNum*>(rhs.asObj())->base.getRadix()) ^ static_cast<ObjBaseNum*>(rhs.asObj())->base);
+
+                bool rhsIsExactInt = false;
+                BigInt rhsInt(0);
+                if (rhs.isObjType(ObjType::BIGINT)) {
+                    rhsIsExactInt = true;
+                    rhsInt = static_cast<ObjBigInt*>(rhs.asObj())->num;
+                } else if (rhs.isInt32()) {
+                    rhsIsExactInt = true;
+                    rhsInt = BigInt(rhs.asInt32());
+                } else if (rhs.isDouble()) {
+                    double d = rhs.asDoubleRaw();
+                    if (std::isfinite(d) && d == std::floor(d) && std::abs(d) < 9e18) {
+                        rhsIsExactInt = true;
+                        rhsInt = BigInt(static_cast<int64_t>(d));
+                    }
+                } else if (rhs.isObjType(ObjType::FRACTION)) {
+                    const auto& f = static_cast<ObjFraction*>(rhs.asObj())->frac;
+                    if (f.getDen() == BigInt(1)) {
+                        rhsIsExactInt = true;
+                        rhsInt = f.getNum();
+                    }
+                }
+
+                if (rhsIsExactInt) {
+                    if (lhs.isObjType(ObjType::BIGINT)) {
+                        const BigInt& a = static_cast<ObjBigInt*>(lhs.asObj())->num;
+                        if (rhsInt.isNegative()) return Value::fromFraction(Fraction(BigInt(1), a).pow(rhsInt.abs().toInt64()));
+                        return Value(a.pow(rhsInt));
+                    }
+                    if (lhs.isObjType(ObjType::FRACTION)) {
+                        const Fraction& a = static_cast<ObjFraction*>(lhs.asObj())->frac;
+                        if (rhsInt.isNegative()) return Value::fromFraction(Fraction(a.getDen(), a.getNum()).pow(rhsInt.abs().toInt64()));
+                        return Value::fromFraction(a.pow(rhsInt.toInt64()));
+                    }
+                    if (lhs.isInt32()) {
+                        BigInt a(lhs.asInt32());
+                        if (rhsInt.isNegative()) return Value::fromFraction(Fraction(BigInt(1), a).pow(rhsInt.abs().toInt64()));
+                        return Value(a.pow(rhsInt));
+                    }
+                }
+
+                if (lhs.isObjType(ObjType::BIGINT) || lhs.isObjType(ObjType::FRACTION) || lhs.isInt32()) {
+                    if (rhs.isObjType(ObjType::FRACTION)) {
+                        Fraction b = static_cast<ObjFraction*>(rhs.asObj())->frac;
+                        BigInt aNum = lhs.isObjType(ObjType::FRACTION) ? static_cast<ObjFraction*>(lhs.asObj())->frac.getNum() : lhs.asBigInt();
+                        BigInt aDen = lhs.isObjType(ObjType::FRACTION) ? static_cast<ObjFraction*>(lhs.asObj())->frac.getDen() : BigInt(1);
+                        
+                        int64_t p = b.getNum().toInt64(), q = b.getDen().toInt64();
+                        if (q < 0) { p = -p; q = -q; }
+                        
+                        auto [ok, val] = Value::tryExactRationalPow(aNum, aDen, p, q);
+                        if (ok) return val;
+                        
+                        if (q > 0) {
+                            int64_t k = p / q, r = p % q;
+                            if (r < 0) { r += q; k -= 1; }
+                            if (k != 0 && r != 0) {
+                                Value exactPart = lhs ^ Value(BigInt(k));
+                                Value symPart = Value(SymExpr(Fraction(aNum, aDen)) ^ SymExpr(Fraction(BigInt(r), BigInt(q))));
+                                return exactPart * symPart;
                             }
                         }
-                        return Value(Complex(a, 0.0) ^ Complex(b, 0.0));
+                        return Value(SymExpr(Fraction(aNum, aDen)) ^ SymExpr(b));
                     }
-                    double res = std::pow(a, b);
-                    double rounded = std::round(res);
-                    if (Tol::isEq(res, rounded, 1e5) && std::abs(rounded) < 9e15) {
-                        return Value(BigInt(static_cast<int64_t>(rounded)));
-                    }
-                    return Value(res);
                 }
-                else if constexpr ((std::is_same_v<T1, Complex> && std::is_same_v<T2, Complex>) ||
-                    (std::is_same_v<T1, Complex> && std::is_same_v<T2, double>) ||
-                    (std::is_same_v<T1, double> && std::is_same_v<T2, Complex>)) {
-                    return a ^ b;
-                }
-                else if constexpr ((std::is_same_v<T1, RealMatrix> || std::is_same_v<T1, ComplexMatrix>) &&
-                    std::is_same_v<T2, double>) {
-                    if (Tol::isEq(b, std::round(b), 1e5)) {
-                        return a.power(static_cast<int>(std::round(b)));
-                    }
-                    return Value((matLog(lhs.asComplexMatrix()) * Complex(b)).matExp());
-                }
-                else if constexpr ((std::is_same_v<T1, RealMatrix> || std::is_same_v<T1, ComplexMatrix>) &&
-                    std::is_same_v<T2, Complex>) {
-                    return Value((matLog(lhs.asComplexMatrix()) * b).matExp());
-                }
-                else if constexpr ((std::is_same_v<T1, RealMatrix> || std::is_same_v<T1, ComplexMatrix>) &&
-                    (std::is_same_v<T2, RealMatrix> || std::is_same_v<T2, ComplexMatrix>)) {
-                    return Value(matPow(lhs.asComplexMatrix(), rhs.asComplexMatrix()));
-                }
-                else if constexpr ((std::is_same_v<T1, double> || std::is_same_v<T1, Complex>) &&
-                    (std::is_same_v<T2, RealMatrix> || std::is_same_v<T2, ComplexMatrix>)) {
-                    Complex base_val;
-                    if constexpr (std::is_same_v<T1, double>) base_val = Complex(a);
-                    else base_val = a;
-                    return Value((rhs.asComplexMatrix() * log(base_val)).matExp());
-                }
-                // ==============================================================
-// 精确整数幂：BigInt ^ BigInt
-// ==============================================================
-                else if constexpr (std::is_same_v<T1, BigInt> && std::is_same_v<T2, BigInt>) {
-                    if (b.isNegative()) {
-                        Fraction res = Fraction(BigInt(1), a).pow(b.abs().toInt64());
-                        return Value::fromFraction(res);
-                    }
-                    return Value(a.pow(b));
-                }
-                // ==============================================================
-                // 精确分数幂：Fraction ^ BigInt
-                // ==============================================================
-                else if constexpr (std::is_same_v<T1, Fraction> && std::is_same_v<T2, BigInt>) {
-                    Fraction res = a.pow(b.toInt64());
-                    return Value::fromFraction(res);
-                }
-                // ==============================================================
-                // ★ BigInt ^ Fraction：尝试精确开根 + 指数自动规范化
-                // ==============================================================
-                else if constexpr (std::is_same_v<T1, BigInt> && std::is_same_v<T2, Fraction>) {
-                    if (b.getDen() == BigInt(1))
-                        return lhs ^ Value(b.getNum());
 
-                    int64_t p = 0, q = 0;
-                    try {
-                        p = b.getNum().toInt64();
-                        q = b.getDen().toInt64();
-                        if (q < 0) { p = -p; q = -q; }
-
-                        // 尝试彻底算尽（如 8^(1/3) -> 2）
-                        auto [ok, val] = Value::tryExactRationalPow(a, BigInt(1), p, q);
-                        if (ok) return val;
-                    }
-                    catch (...) {}
-
-                    // ★ 算不尽时的自动化简：欧几里得带余除法 p = k*q + r (其中 0 <= r < q)
-                    if (q > 0) {
-                        int64_t k = p / q;
-                        int64_t r = p % q;
-                        if (r < 0) { r += q; k -= 1; }
-
-                        // 如果能提炼出整数部分 k，则计算 base^k 再乘上剩余根式
-                        if (k != 0 && r != 0) {
-                            Value exactPart = lhs ^ Value(BigInt(k));
-                            Value symPart = Value(SymExpr(a) ^ SymExpr(Fraction(BigInt(r), BigInt(q))));
-                            return exactPart * symPart;
+                double a = lhs.asDouble(), b = rhs.asDouble();
+                if (a < 0 && std::floor(b) != b) {
+                    for (int q = 2; q <= 1000; ++q) {
+                        double p = b * q;
+                        double rounded = std::round(p);
+                        if (Tol::isEq(p, rounded, 1e5)) {
+                            int64_t pInt = static_cast<int64_t>(rounded);
+                            int64_t g = std::gcd(std::abs(pInt), static_cast<int64_t>(q));
+                            return Value::negativePow(a, pInt / g, q / g);
                         }
                     }
+                    return Value(Complex(a, 0.0) ^ Complex(b, 0.0));
+                }
+                double res = std::pow(a, b);
+                double rounded = std::round(res);
+                if (Tol::isEq(res, rounded, 1e5) && std::abs(rounded) < 9e15) return Value(BigInt(static_cast<int64_t>(rounded)));
+                return Value(res);
 
-                    // 完全无法化简，保留最简符号形式
-                    return Value(SymExpr(a) ^ SymExpr(b));
-                }
-                // ==============================================================
-                // ★ Fraction ^ Fraction：尝试精确开根 + 指数自动规范化
-                // ==============================================================
-                else if constexpr (std::is_same_v<T1, Fraction> && std::is_same_v<T2, Fraction>) {
-                    if (b.getDen() == BigInt(1))
-                        return lhs ^ Value(b.getNum());
-
-                    int64_t p = 0, q = 0;
-                    try {
-                        p = b.getNum().toInt64();
-                        q = b.getDen().toInt64();
-                        if (q < 0) { p = -p; q = -q; }
-
-                        auto [ok, val] = Value::tryExactRationalPow(a.getNum(), a.getDen(), p, q);
-                        if (ok) return val;
-                    }
-                    catch (...) {}
-
-                    // ★ 同理提取带余除法
-                    if (q > 0) {
-                        int64_t k = p / q;
-                        int64_t r = p % q;
-                        if (r < 0) { r += q; k -= 1; }
-
-                        if (k != 0 && r != 0) {
-                            Value exactPart = lhs ^ Value(BigInt(k));
-                            Value symPart = Value(SymExpr(a) ^ SymExpr(Fraction(BigInt(r), BigInt(q))));
-                            return exactPart * symPart;
-                        }
-                    }
-
-                    // 完全无法化简，保留最简符号形式
-                    return Value(SymExpr(a) ^ SymExpr(b));
-                }
-                // ==============================================================
-                // double 参与：走普通浮点科学计算
-                // ==============================================================
-                else if constexpr (std::is_same_v<T1, double> && std::is_same_v<T2, Fraction>) {
-                    if (a < 0) {
-                        try {
-                            int64_t p = b.getNum().toInt64();
-                            int64_t q = b.getDen().toInt64();
-                            return Value::negativePow(a, p, q);
-                        } catch (...) {
-                            return Value(Complex(a, 0.0) ^ Complex(b.toDouble(), 0.0));
-                        }
-                    }
-                    double res = std::pow(a, b.toDouble());
-                    double rounded = std::round(res);
-                    if (Tol::isEq(res, rounded, 1e5) && std::abs(rounded) < 9e15) {
-                        return Value(BigInt(static_cast<int64_t>(rounded)));
-                    }
-                    return Value(res);
-                }
-                else if constexpr (std::is_same_v<T1, BigInt> && std::is_same_v<T2, double>) {
-                    double res = std::pow(a.toDouble(), b);
-                    double rounded = std::round(res);
-                    if (Tol::isEq(res, rounded, 1e5) && std::abs(rounded) < 9e15) {
-                        return Value(BigInt(static_cast<int64_t>(rounded)));
-                    }
-                    return Value(res);
-                }
-                else if constexpr (std::is_same_v<T1, Fraction> && std::is_same_v<T2, double>) {
-                    double res = std::pow(a.toDouble(), b);
-                    double rounded = std::round(res);
-                    if (Tol::isEq(res, rounded, 1e5) && std::abs(rounded) < 9e15) {
-                        return Value(BigInt(static_cast<int64_t>(rounded)));
-                    }
-                    return Value(res);
-                }
-                else if constexpr (std::is_same_v<T1, BaseNum> && std::is_same_v<T2, BaseNum>) {
-                    return Value(a ^ b);
-                }
-                else if constexpr (std::is_same_v<T1, BaseNum> && (std::is_same_v<T2, double> || std::is_same_v<T2, BigInt>)) {
-                    return Value(a ^ BaseNum(rhs.asBigInt(), 10));
-                }
-                else if constexpr (std::is_same_v<T2, BaseNum> && (std::is_same_v<T1, double> || std::is_same_v<T1, BigInt>)) {
-                    return Value(BaseNum(lhs.asBigInt(), 10) ^ b);
-                }
-                else if constexpr (std::is_same_v<T1, BaseNum>) { return Value(a.getValue()) ^ rhs; }
-                else if constexpr (std::is_same_v<T2, BaseNum>) { return lhs ^ Value(b.getValue()); }
-                else if constexpr (std::is_same_v<T1, BigInt>) { return Value(a.toDouble()) ^ rhs; }
-                else if constexpr (std::is_same_v<T2, BigInt>) { return lhs ^ Value(b.toDouble()); }
-                else if constexpr (std::is_same_v<T1, Fraction>) { return Value(a.toDouble()) ^ rhs; }
-                else if constexpr (std::is_same_v<T2, Fraction>) { return lhs ^ Value(b.toDouble()); }
-                else {
-                    throw std::runtime_error("Type Error: Power operation not supported for these types.");
-                }
-                }, lhs.data, rhs.data);
+            } catch (...) {}
+            
+            throw std::runtime_error("Type Error: Power operation not supported for these types.");
         }
 
         friend Value operator%(const Value& lhs, const Value& rhs) {
-            return std::visit([&](auto&& a, auto&& b) -> Value {
-                using T1 = std::decay_t<decltype(a)>;
-                using T2 = std::decay_t<decltype(b)>;
-                if constexpr (std::is_same_v<T1, double> && std::is_same_v<T2, double>) {
+            if (lhs.isInt32() && rhs.isInt32()) {
+                int32_t a = lhs.asInt32(), b = rhs.asInt32();
+                if (b == 0) throw std::runtime_error("Math Error: Modulo by zero.");
+                if (a == -2147483648 && b == -1) return Value::fromInt32(0);
+                return Value::fromInt32(a % b);
+            }
+            if (lhs.isNumber() && rhs.isNumber()) {
+                double b = rhs.asNumber();
+                if (b == 0.0) throw std::runtime_error("Math Error: Modulo by zero.");
+                return Value(std::fmod(lhs.asNumber(), b));
+            }
+            
+            try {
+                bool rhsIsRealScalar = rhs.isNumber() || rhs.isBigInt() || rhs.isObjType(ObjType::FRACTION);
+                if (lhs.isObjType(ObjType::REAL_MATRIX) && rhsIsRealScalar) {
+                    double b = rhs.asDouble();
                     if (b == 0.0) throw std::runtime_error("Math Error: Modulo by zero.");
-                    return std::fmod(a, b);
-                }
-                else if constexpr (requires { a% b; }) {
-                    auto result = a % b;
-                    if constexpr (std::is_same_v<decltype(result), Fraction>) {
-                        return Value::fromFraction(result);
-                    }
-                    return result;
-                }
-                else if constexpr (std::is_same_v<T1, RealMatrix> && std::is_same_v<T2, double>) {
-                    if (b == 0.0) throw std::runtime_error("Math Error: Modulo by zero.");
+                    const auto& a = static_cast<ObjRealMatrix*>(lhs.asObj())->mat;
                     RealMatrix res(a.getRows(), a.getCols());
-                    for (int i = 0; i < a.getRows(); ++i) {
-                        for (int j = 0; j < a.getCols(); ++j) {
+                    for (int i = 0; i < a.getRows(); ++i)
+                        for (int j = 0; j < a.getCols(); ++j)
                             res(i, j) = std::fmod(a(i, j), b);
-                        }
-                    }
                     return Value(res);
                 }
-                else if constexpr (std::is_same_v<T1, ComplexMatrix> && std::is_same_v<T2, double>) {
+                if (lhs.isObjType(ObjType::COMPLEX_MATRIX) && rhsIsRealScalar) {
+                    double b = rhs.asDouble();
                     if (b == 0.0) throw std::runtime_error("Math Error: Modulo by zero.");
+                    const auto& a = static_cast<ObjComplexMatrix*>(lhs.asObj())->mat;
                     ComplexMatrix res(a.getRows(), a.getCols());
-                    for (int i = 0; i < a.getRows(); ++i) {
-                        for (int j = 0; j < a.getCols(); ++j) {
-                            double re = std::fmod(a(i, j).real, b);
-                            double im = std::fmod(a(i, j).imag, b);
-                            res(i, j) = Complex(re, im);
-                        }
-                    }
+                    for (int i = 0; i < a.getRows(); ++i)
+                        for (int j = 0; j < a.getCols(); ++j)
+                            res(i, j) = Complex(std::fmod(a(i, j).real, b), std::fmod(a(i, j).imag, b));
                     return Value(res);
                 }
-                else if constexpr (std::is_same_v<T1, BaseNum> && std::is_same_v<T2, BaseNum>) {
-                    return Value(a % b);
-                }
-                else if constexpr (std::is_same_v<T1, BaseNum> && (std::is_same_v<T2, double> || std::is_same_v<T2, BigInt>)) {
-                    return Value(a % BaseNum(rhs.asBigInt(), 10));
-                }
-                else if constexpr (std::is_same_v<T2, BaseNum> && (std::is_same_v<T1, double> || std::is_same_v<T1, BigInt>)) {
-                    return Value(BaseNum(lhs.asBigInt(), 10) % b);
-                }
-                else if constexpr (std::is_same_v<T1, BaseNum>) { return Value(a.getValue()) % rhs; }
-                else if constexpr (std::is_same_v<T2, BaseNum>) { return lhs % Value(b.getValue()); }
-                else if constexpr (std::is_same_v<T1, BigInt>) { return Value(a.toDouble()) % rhs; }
-                else if constexpr (std::is_same_v<T2, BigInt>) { return lhs % Value(b.toDouble()); }
-                else if constexpr (std::is_same_v<T1, Fraction>) { return Value(a.toDouble()) % rhs; }
-                else if constexpr (std::is_same_v<T2, Fraction>) { return lhs % Value(b.toDouble()); }
-                else {
-                    throw std::runtime_error("Type Error: Modulo not supported for these types.");
-                }
-                }, lhs.data, rhs.data);
+
+                if (lhs.isObjType(ObjType::BASENUM) && rhs.isObjType(ObjType::BASENUM)) return Value(static_cast<ObjBaseNum*>(lhs.asObj())->base % static_cast<ObjBaseNum*>(rhs.asObj())->base);
+                if (lhs.isObjType(ObjType::BASENUM)) return Value(static_cast<ObjBaseNum*>(lhs.asObj())->base % BaseNum(rhs.asBigInt(), static_cast<ObjBaseNum*>(lhs.asObj())->base.getRadix()));
+                if (rhs.isObjType(ObjType::BASENUM)) return Value(BaseNum(lhs.asBigInt(), static_cast<ObjBaseNum*>(rhs.asObj())->base.getRadix()) % static_cast<ObjBaseNum*>(rhs.asObj())->base);
+
+                bool lhsIsExactInt = lhs.isBigInt() || lhs.isInt32();
+                bool rhsIsExactInt = rhs.isBigInt() || rhs.isInt32();
+                if (lhsIsExactInt && rhsIsExactInt) return Value(lhs.asBigInt() % rhs.asBigInt());
+                if (lhs.isObjType(ObjType::FRACTION) && rhs.isObjType(ObjType::FRACTION)) return Value::fromFraction(static_cast<ObjFraction*>(lhs.asObj())->frac % static_cast<ObjFraction*>(rhs.asObj())->frac);
+                if (lhs.isObjType(ObjType::FRACTION) && rhsIsExactInt) return Value::fromFraction(static_cast<ObjFraction*>(lhs.asObj())->frac % Fraction(rhs.asBigInt()));
+                if (lhsIsExactInt && rhs.isObjType(ObjType::FRACTION)) return Value::fromFraction(Fraction(lhs.asBigInt()) % static_cast<ObjFraction*>(rhs.asObj())->frac);
+            } catch (...) {}
+            
+            throw std::runtime_error("Type Error: Modulo not supported for these types.");
         }
 
-        friend std::ostream& operator<<(std::ostream& os, const Value& val) {
-            static thread_local std::vector<const void*> visited;
-            auto printNested = [&os](const Value& v) {
-                if (v.isNone()) os << "none";
-                else os << v;
-                };
-            std::visit([&os, &printNested](auto&& arg) {
-                using T = std::decay_t<decltype(arg)>;
-                if constexpr (std::is_same_v<T, std::monostate>) {}
-                else if constexpr (std::is_same_v<T, double>) {
-                    double v = arg;
-                    double rounded = std::round(v);
-                    if (rounded != 0.0 && v != 0.0 && Tol::isEq(v, rounded, 1e5) && std::abs(rounded) < 1e15) {
-                        if (rounded == std::trunc(rounded)) { os << static_cast<int64_t>(rounded); }
-                        else { os << rounded; }
-                    }
-                    else { os << v; }
-                }
-                else if constexpr (std::is_same_v<T, std::string>) os << arg;
-                else if constexpr (std::is_same_v<T, jc::Complex>) os << arg;
-                else if constexpr (std::is_same_v<T, jc::RealMatrix>) os << arg;
-                else if constexpr (std::is_same_v<T, jc::ComplexMatrix>) os << arg;
-                else if constexpr (std::is_same_v<T, BigInt>) os << arg;
-                else if constexpr (std::is_same_v<T, std::shared_ptr<FunctionClosure>>) {
-                    if (arg) os << arg->toString();
-                    else os << "<function null>";
-                }
-                else if constexpr (std::is_same_v<T, Fraction>) os << arg;
-                else if constexpr (std::is_same_v<T, BaseNum>) os << arg;
-                else if constexpr (std::is_same_v<T, jc::StringMatrix>) os << arg;
-                else if constexpr (std::is_same_v<T, jc::Dict>) {
-                    RecursionGuard guard(visited, arg.id());
-                    if (guard.isCycle) { os << "{...}"; return; }
-                    os << "{";
-                    const auto& entries = arg.getEntries();
-                    for (size_t ii = 0; ii < entries.size(); ++ii) {
-                        try { printNested(entries[ii].first); } catch (...) { os << "?"; }
-                        os << ": ";
-                        try {
-                            const auto& v = entries[ii].second;
-                            printNested(v);  // ★ 替换 os << v
-                        }
-                        catch (...) { os << "?"; }
-                        if (ii < entries.size() - 1) os << ", ";
-                    }
-                    os << "}";
-                }
-                else if constexpr (std::is_same_v<T, jc::List>) {
-                    RecursionGuard guard(visited, arg.id());
-                    if (guard.isCycle) { os << "[...]"; return; }
-                    os << "[";
-                    for (size_t ii = 0; ii < arg.size(); ++ii) {
-                        try {
-                            const auto& v = arg.raw()[ii];
-                            printNested(v);  // ★ 替换 os << v
-                        }
-                        catch (...) { os << "?"; }
-                        if (ii < arg.size() - 1) os << ", ";
-                    }
-                    os << "]";
-                }
-                else if constexpr (std::is_same_v<T, std::shared_ptr<ClassDefinition>>) {
-                    if (!arg) os << "<class null>";
-                    else os << "<class " << arg->name << ">";
-                }
-                else if constexpr (std::is_same_v<T, std::shared_ptr<Instance>>) {
-                    if (!arg) { os << "<instance null>"; return; }
-                    RecursionGuard guard(visited, arg.get());
-                    std::string cname = arg->classDef ? arg->classDef->name : "unknown";
-                    if (guard.isCycle) {
-                        os << "<" << cname << " {...}>";
-                        return;
-                    }
-                    bool printedNative = false;
-                    if (arg->nativeData.has_value()) {
-                        if (arg->nativeData.type() == typeid(std::shared_ptr<Image>)) {
-                            auto& img = std::any_cast<std::shared_ptr<Image>&>(arg->nativeData);
-                            os << "<Image " << img->width() << "x" << img->height() << ">";
-                            printedNative = true;
-                        }
-                        else if (arg->nativeData.type() == typeid(std::shared_ptr<Distribution>)) {
-                            auto& dist = std::any_cast<std::shared_ptr<Distribution>&>(arg->nativeData);
-                            os << dist->toString();
-                            printedNative = true;
-                        }
-                    }
-                    if (!printedNative) {
-                        os << "<" << cname << " {";
-                        const auto& entries = arg->fields.getEntries();
-                        for (size_t ii = 0; ii < entries.size(); ++ii) {
-                            if (ii > 0) os << ", ";
-                            try { printNested(entries[ii].first); } catch (...) { os << "?"; }
-                            os << ": ";
-                            try { printNested(entries[ii].second); }  // ★
-                            catch (...) { os << "?"; }
-                        }
-                        os << "}>";
-                    }
-                }
-                else if constexpr (std::is_same_v<T, jc::Set>) {
-                    RecursionGuard guard(visited, arg.id());
-                    if (guard.isCycle) { os << "Set{...}"; return; }
-                    os << "Set{";
-                    const auto& elems = arg.raw();
-                    for (size_t ii = 0; ii < elems.size(); ++ii) {
-                        try {
-                            const auto& v = elems[ii];
-                            printNested(v);
-                        }
-                        catch (...) { os << "?"; }
-                        if (ii < elems.size() - 1) os << ", ";
-                    }
-                    os << "}";
-                }
-                else if constexpr (std::is_same_v<T, SuperProxyPtr>) {
-                    os << (arg ? "<super>" : "<super null>");
-                }
-                else if constexpr (std::is_same_v<T, SymExpr>) {
-                    os << arg.toString();
-                }
-                else static_assert(always_false<T>::value, "Unsupported type for ostream <<");
-                }, val.data);
-            return os;
-        }
+        friend std::ostream& operator<<(std::ostream& os, const Value& val);
 
         friend Value operator&(const Value& lhs, const Value& rhs) {
-            return std::visit([&](auto&& a, auto&& b) -> Value {
-                using T1 = std::decay_t<decltype(a)>;
-                using T2 = std::decay_t<decltype(b)>;
-
-                if constexpr (std::is_same_v<T1, Set> && std::is_same_v<T2, Set>) {
-                    Set result;
-                    for (const auto& val : a.raw()) {
-                        if (b.contains(val)) result.insert(val);
+            if (lhs.isObjType(ObjType::SET) && rhs.isObjType(ObjType::SET)) {
+                ObjSet* s1 = static_cast<ObjSet*>(lhs.asObj());
+                ObjSet* s2 = static_cast<ObjSet*>(rhs.asObj());
+                ObjSet* res = GcHeap::get().allocate<ObjSet>();
+                for (const auto& val : s1->elements) {
+                    if (s2->keys.find(val) != s2->keys.end()) {
+                        res->keys.insert(val);
+                        res->elements.push_back(val);
                     }
-                    return Value(result);
                 }
-                else if constexpr (std::is_same_v<T1, BaseNum> && std::is_same_v<T2, BaseNum>) {
-                    return Value(a.bitAnd(b)); // 底层的 bitAnd 已经具备校验进制合法性的能力
-                }
-                else {
-                    throw std::runtime_error("Type Error: Bitwise/Set AND '&' not supported for these types.");
-                }
-                }, lhs.data, rhs.data);
+                return Value(res);
+            }
+            if (lhs.isObjType(ObjType::BASENUM) && rhs.isObjType(ObjType::BASENUM)) return Value(static_cast<ObjBaseNum*>(lhs.asObj())->base.bitAnd(static_cast<ObjBaseNum*>(rhs.asObj())->base));
+            if (lhs.isObjType(ObjType::BASENUM)) return Value(static_cast<ObjBaseNum*>(lhs.asObj())->base.bitAnd(BaseNum(rhs.asBigInt(), static_cast<ObjBaseNum*>(lhs.asObj())->base.getRadix())));
+            if (rhs.isObjType(ObjType::BASENUM)) return Value(BaseNum(lhs.asBigInt(), static_cast<ObjBaseNum*>(rhs.asObj())->base.getRadix()).bitAnd(static_cast<ObjBaseNum*>(rhs.asObj())->base));
+            throw std::runtime_error("Type Error: Bitwise/Set AND '&' not supported for these types.");
         }
 
         friend Value operator|(const Value& lhs, const Value& rhs) {
-            return std::visit([&](auto&& a, auto&& b) -> Value {
-                using T1 = std::decay_t<decltype(a)>;
-                using T2 = std::decay_t<decltype(b)>;
-
-                if constexpr (std::is_same_v<T1, Set> && std::is_same_v<T2, Set>) {
-                    Set result;
-                    for (const auto& val : a.raw()) result.insert(val);
-                    for (const auto& val : b.raw()) result.insert(val);
-                    return Value(result);
+            if (lhs.isObjType(ObjType::SET) && rhs.isObjType(ObjType::SET)) {
+                ObjSet* s1 = static_cast<ObjSet*>(lhs.asObj());
+                ObjSet* s2 = static_cast<ObjSet*>(rhs.asObj());
+                ObjSet* res = GcHeap::get().allocate<ObjSet>();
+                for (const auto& val : s1->elements) { res->keys.insert(val); res->elements.push_back(val); }
+                for (const auto& val : s2->elements) {
+                    if (res->keys.find(val) == res->keys.end()) {
+                        res->keys.insert(val);
+                        res->elements.push_back(val);
+                    }
                 }
-                else if constexpr (std::is_same_v<T1, BaseNum> && std::is_same_v<T2, BaseNum>) {
-                    return Value(a.bitOr(b));
-                }
-                else {
-                    throw std::runtime_error("Type Error: Bitwise/Set OR '|' not supported for these types.");
-                }
-                }, lhs.data, rhs.data);
+                return Value(res);
+            }
+            if (lhs.isObjType(ObjType::BASENUM) && rhs.isObjType(ObjType::BASENUM)) return Value(static_cast<ObjBaseNum*>(lhs.asObj())->base.bitOr(static_cast<ObjBaseNum*>(rhs.asObj())->base));
+            if (lhs.isObjType(ObjType::BASENUM)) return Value(static_cast<ObjBaseNum*>(lhs.asObj())->base.bitOr(BaseNum(rhs.asBigInt(), static_cast<ObjBaseNum*>(lhs.asObj())->base.getRadix())));
+            if (rhs.isObjType(ObjType::BASENUM)) return Value(BaseNum(lhs.asBigInt(), static_cast<ObjBaseNum*>(rhs.asObj())->base.getRadix()).bitOr(static_cast<ObjBaseNum*>(rhs.asObj())->base));
+            throw std::runtime_error("Type Error: Bitwise/Set OR '|' not supported for these types.");
         }
 
         std::string toJC2Expression() const {
             static thread_local std::vector<const void*> visited;
-            return std::visit([](auto&& arg) -> std::string {
-                using T = std::decay_t<decltype(arg)>;
-
-                if constexpr (std::is_same_v<T, std::monostate>) { return "none()"; }
-                else if constexpr (std::is_same_v<T, double>) {
+            if (isNone()) return "none()";
+            if (isBool()) return asBool() ? "true" : "false";
+            if (isInt32()) return std::to_string(asInt32());
+            if (isDouble()) {
+                std::ostringstream oss;
+                oss << std::setprecision(16) << asDoubleRaw();
+                return oss.str();
+            }
+            Obj* obj = asObj();
+            switch (obj->type) {
+                case ObjType::STRING: return "\"" + static_cast<ObjString*>(obj)->str + "\"";
+                case ObjType::BIGINT: return static_cast<ObjBigInt*>(obj)->num.toString();
+                case ObjType::FRACTION: return static_cast<ObjFraction*>(obj)->frac.toString();
+                case ObjType::BASENUM: return "base(" + static_cast<ObjBaseNum*>(obj)->base.getValue().toString() + ", " + std::to_string(static_cast<ObjBaseNum*>(obj)->base.getRadix()) + ")";
+                case ObjType::COMPLEX: {
                     std::ostringstream oss;
-                    oss << std::setprecision(16) << arg;
+                    oss << "(" << std::setprecision(16) << static_cast<ObjComplex*>(obj)->comp.real << ") + (" << static_cast<ObjComplex*>(obj)->comp.imag << ")*i";
                     return oss.str();
                 }
-                else if constexpr (std::is_same_v<T, BaseNum>) {
-                    return "base(" + arg.getValue().toString() + ", " + std::to_string(arg.getRadix()) + ")";
-                }
-                else if constexpr (std::is_same_v<T, BigInt> || std::is_same_v<T, Fraction>) {
-                    return arg.toString();
-                }
-                else if constexpr (std::is_same_v<T, std::string>) {
-                    return "\"" + arg + "\"";
-                }
-                else if constexpr (std::is_same_v<T, Complex>) {
-                    std::ostringstream oss;
-                    oss << "(" << std::setprecision(16) << arg.real << ") + (" << arg.imag << ")*i";
-                    return oss.str();
-                }
-                else if constexpr (std::is_same_v<T, RealMatrix> || std::is_same_v<T, ComplexMatrix>) {
+                case ObjType::REAL_MATRIX: {
+                    const auto& mat = static_cast<ObjRealMatrix*>(obj)->mat;
                     std::string res = "[";
-                    int r = arg.getRows(), c = arg.getCols();
-                    for (int i = 0; i < r; ++i) {
-                        for (int j = 0; j < c; ++j) {
-                            res += Value(arg(i, j)).toJC2Expression();
-                            if (j < c - 1) res += ", ";
+                    for (int i = 0; i < mat.getRows(); ++i) {
+                        for (int j = 0; j < mat.getCols(); ++j) {
+                            res += Value(mat(i, j)).toJC2Expression();
+                            if (j < mat.getCols() - 1) res += ", ";
                         }
-                        if (i < r - 1) res += "; ";
+                        if (i < mat.getRows() - 1) res += "; ";
                     }
-                    res += "]";
-                    return res;
+                    return res + "]";
                 }
-                else if constexpr (std::is_same_v<T, std::shared_ptr<FunctionClosure>>) {
-                    return arg ? "\"<function>\"" : "\"<function null>\"";
-                }
-                else if constexpr (std::is_same_v<T, StringMatrix>) {
-                    std::string res = "strmat(";
-                    int r = arg.getRows(), c = arg.getCols();
-                    res += std::to_string(r) + ", " + std::to_string(c);
-                    for (int i = 0; i < r; ++i)
-                        for (int j = 0; j < c; ++j)
-                            res += ", \"" + arg(i, j) + "\"";
-                    res += ")";
-                    return res;
-                }
-                else if constexpr (std::is_same_v<T, Dict>) {
-                    RecursionGuard guard(visited, arg.id());
-                    if (guard.isCycle) return "dict()";
-                    const auto& entries = arg.getEntries();
-                    std::string res = "dict(";
-                    for (size_t ii = 0; ii < entries.size(); ++ii) {
-                        try { res += entries[ii].first.toJC2Expression(); } catch (...) { res += "0"; }
-                        res += ", ";
-                        try {
-                            const auto& v = entries[ii].second;
-                            res += v.toJC2Expression();
+                case ObjType::COMPLEX_MATRIX: {
+                    const auto& mat = static_cast<ObjComplexMatrix*>(obj)->mat;
+                    std::string res = "[";
+                    for (int i = 0; i < mat.getRows(); ++i) {
+                        for (int j = 0; j < mat.getCols(); ++j) {
+                            res += Value(mat(i, j)).toJC2Expression();
+                            if (j < mat.getCols() - 1) res += ", ";
                         }
-                        catch (...) { res += "0"; }
-                        if (ii < entries.size() - 1) res += ", ";
+                        if (i < mat.getRows() - 1) res += "; ";
                     }
-                    res += ")";
-                    return res;
+                    return res + "]";
                 }
-                else if constexpr (std::is_same_v<T, List>) {
-                    RecursionGuard guard(visited, arg.id());
+                case ObjType::STRING_MATRIX: {
+                    const auto& mat = static_cast<ObjStringMatrix*>(obj)->mat;
+                    std::string res = "strmat(" + std::to_string(mat.getRows()) + ", " + std::to_string(mat.getCols());
+                    for (int i = 0; i < mat.getRows(); ++i)
+                        for (int j = 0; j < mat.getCols(); ++j)
+                            res += ", \"" + mat(i, j) + "\"";
+                    return res + ")";
+                }
+                case ObjType::CLOSURE: return "\"<function>\"";
+                case ObjType::CLASS: return "\"<class " + static_cast<ObjClass*>(obj)->name + ">\"";
+                case ObjType::INSTANCE: {
+                    auto inst = static_cast<ObjInstance*>(obj);
+                    return "\"<" + (inst->classDef ? inst->classDef->name : "unknown") + " instance>\"";
+                }
+                case ObjType::SUPER_PROXY: return "\"<super>\"";
+                case ObjType::SYMBOLIC: return "sym(\" " + static_cast<ObjSym*>(obj)->sym.toString() + "\")";
+                case ObjType::LIST: {
+                    ObjList* list = static_cast<ObjList*>(obj);
+                    RecursionGuard guard(visited, list);
                     if (guard.isCycle) return "list()";
                     std::string res = "list(";
-                    for (size_t ii = 0; ii < arg.size(); ++ii) {
-                        try {
-                            const auto& v = arg.raw()[ii];
-                            res += v.toJC2Expression();
-                        }
-                        catch (...) { res += "0"; }
-                        if (ii < arg.size() - 1) res += ", ";
+                    for (size_t i = 0; i < list->vec.size(); ++i) {
+                        try { res += list->vec[i].toJC2Expression(); } catch (...) { res += "0"; }
+                        if (i < list->vec.size() - 1) res += ", ";
                     }
-                    res += ")";
-                    return res;
+                    return res + ")";
                 }
-                else if constexpr (std::is_same_v<T, Set>) {
-                    RecursionGuard guard(visited, arg.id());
+                case ObjType::DICT: {
+                    ObjDict* dict = static_cast<ObjDict*>(obj);
+                    RecursionGuard guard(visited, dict);
+                    if (guard.isCycle) return "dict()";
+                    std::string res = "dict(";
+                    for (size_t i = 0; i < dict->elements.size(); ++i) {
+                        try { res += dict->elements[i].first.toJC2Expression(); } catch (...) { res += "0"; }
+                        res += ", ";
+                        try { res += dict->elements[i].second.toJC2Expression(); } catch (...) { res += "0"; }
+                        if (i < dict->elements.size() - 1) res += ", ";
+                    }
+                    return res + ")";
+                }
+                case ObjType::SET: {
+                    ObjSet* set = static_cast<ObjSet*>(obj);
+                    RecursionGuard guard(visited, set);
                     if (guard.isCycle) return "Set()";
                     std::string res = "Set(";
-                    const auto& elems = arg.raw();
-                    for (size_t ii = 0; ii < elems.size(); ++ii) {
-                        try {
-                            const auto& v = elems[ii];
-                            res += v.toJC2Expression();
-                        }
-                        catch (...) { res += "0"; }
-                        if (ii < elems.size() - 1) res += ", ";
+                    for (size_t i = 0; i < set->elements.size(); ++i) {
+                        try { res += set->elements[i].toJC2Expression(); } catch (...) { res += "0"; }
+                        if (i < set->elements.size() - 1) res += ", ";
                     }
-                    res += ")";
-                    return res;
+                    return res + ")";
                 }
-                else if constexpr (std::is_same_v<T, std::shared_ptr<ClassDefinition>>) {
-                    return arg ? "\"<class " + arg->name + ">\"" : "\"<class null>\"";
-                }
-                else if constexpr (std::is_same_v<T, std::shared_ptr<Instance>>) {
-                    if (!arg) return "\"<instance null>\"";
-                    std::string cname = arg->classDef ? arg->classDef->name : "unknown";
-                    return "\"<" + cname + " instance>\"";
-                }
-                else if constexpr (std::is_same_v<T, SuperProxyPtr>) {
-                    return arg ? "\"<super>\"" : "\"<super null>\"";
-                }
-                else if constexpr (std::is_same_v<T, SymExpr>) {
-                    return "sym(\" " + arg.toString() + "\")";
-                }
-                else { return "none()"; }
-                }, data);
+            }
+            return "none()";
         }
 
         std::string toString() const {
-            if (std::holds_alternative<std::string>(data)) {
-                return std::get<std::string>(data);
-            }
+            if (isString()) return static_cast<ObjString*>(asObj())->str;
             std::ostringstream oss;
-            oss << *this; // 直接复用我们写好的 operator<< 完美格式化
+            oss << *this;
             return oss.str();
         }
     }; // class Value
 
     inline Value ldivide(const Value& lhs, const Value& rhs) {
-        return std::visit([&](auto&& a, [[maybe_unused]] auto&& b) -> Value {
-            using T1 = std::decay_t<decltype(a)>;
-            if constexpr (std::is_same_v<T1, RealMatrix> || std::is_same_v<T1, ComplexMatrix>) {
-                return Value(a.inverse()) * rhs;
-            }
-            else {
-                return rhs / lhs;
-            }
-            }, lhs.data, rhs.data);
+        if (lhs.isObjType(ObjType::REAL_MATRIX) || lhs.isObjType(ObjType::COMPLEX_MATRIX)) {
+            return Value(lhs.asComplexMatrix().inverse()) * rhs;
+        }
+        return rhs / lhs;
     }
 
-    struct FunctionClosure {
+    struct ObjClosure : public Obj {
         std::vector<std::string> paramNames;
         std::vector<bool> isRef;
         std::string rawBody;
@@ -1547,54 +1469,41 @@ namespace jc {
         std::vector<Value> defaultValues;
         bool hasRestParam = false;
 
-        // ★ 新增：闭包词法绑定的上下文 (Arrow Function this绑定)
-        Value boundSelf = Value::none();
-        Value boundClass = Value::none();
+        Value boundSelf;
+        Value boundClass;
 
         int minArgs() const {
             int count = static_cast<int>(paramNames.size());
-            if (hasRestParam && count > 0) {
-                count--; // 可变参数本身是可选的
-            }
+            if (hasRestParam && count > 0) count--;
             for (int i = count - 1; i >= 0; --i) {
-                if (i < static_cast<int>(defaultValues.size()) && !defaultValues[i].isNone())
-                    count--;
-                else
-                    break;
+                if (i < static_cast<int>(defaultValues.size()) && !defaultValues[i].isNone()) count--;
+                else break;
             }
             return count;
         }
         int maxArgs() const { return static_cast<int>(paramNames.size()); }
-        bool acceptsArgCount(int n) const { 
-            return n >= minArgs() && (hasRestParam || n <= maxArgs()); 
-        }
-        bool hasRef() const {
-            for (bool b : isRef) if (b) return true;
-            return false;
-        }
+        bool acceptsArgCount(int n) const { return n >= minArgs() && (hasRestParam || n <= maxArgs()); }
+        bool hasRef() const { for (bool b : isRef) if (b) return true; return false; }
         bool hasCaptures() const { return capturedEnv.has_value(); }
-
-        // ★ 核心改动：isNative 此时仅代表它持有一个 C++ 可调用的回调。
         bool isNative() const { return nativeFn.has_value(); }
-
-        // ★ 核心改动：它是否归属于 VM 字节码
         bool isBytecode() const { return compiledFnIndex >= 0; }
 
-        FunctionClosure(std::vector<std::string> paramNames, std::vector<bool> isRef,
-            std::string rawBody, std::shared_ptr<Expr> body, bool hasRestParam = false)  // ★
+        ObjClosure(std::vector<std::string> paramNames, std::vector<bool> isRef,
+            std::string rawBody, std::shared_ptr<Expr> body, bool hasRestParam = false)
             : paramNames(std::move(paramNames)), isRef(std::move(isRef)),
             rawBody(std::move(rawBody)), body(std::move(body)), hasRestParam(hasRestParam) {
+            type = ObjType::CLOSURE;
         }
-        FunctionClosure(std::vector<std::string> paramNames, std::vector<bool> isRef,
+        ObjClosure(std::vector<std::string> paramNames, std::vector<bool> isRef,
             std::string rawBody, std::shared_ptr<Expr> body,
-            std::any capturedEnv, bool hasRestParam = false)  // ★
+            std::any capturedEnv, bool hasRestParam = false)
             : paramNames(std::move(paramNames)), isRef(std::move(isRef)),
             rawBody(std::move(rawBody)), body(std::move(body)),
             capturedEnv(std::move(capturedEnv)), hasRestParam(hasRestParam) {
+            type = ObjType::CLOSURE;
         }
 
         std::string toString() const {
-            // isBytecode 的不再直接显示 <function ()> 如果它是通过 nativeFn 构建的壳
             if (isNative() && !isBytecode()) return "<function " + rawBody + "()>";
             std::string params;
             for (size_t i = 0; i < paramNames.size(); ++i) {
@@ -1618,340 +1527,144 @@ namespace jc {
             : std::runtime_error(fullTraceText), rawMessage(raw) {}
     };
 
-    inline Value::Value(std::shared_ptr<FunctionClosure> val) {
-        if (val) {
-            GcHeap::get().track(
-                val.get(),
-                [w = std::weak_ptr<FunctionClosure>(val)]() { return !w.expired(); },
-                [w = std::weak_ptr<FunctionClosure>(val)]() {
-                    auto sp = w.lock();
-                    if (sp) {
-                        sp->boundSelf = Value::none();
-                        sp->boundClass = Value::none();
-                        sp->capturedEnv.reset();
-                    }
-                }
-            );
-        }
-        data = std::move(val);
+inline ObjClosure* Value::asFunction() const {
+    if (isObjType(ObjType::CLOSURE)) return static_cast<ObjClosure*>(asObj());
+    throw std::runtime_error("Type Error: Expected a function.");
+}
+
+inline std::ostream& operator<<(std::ostream& os, const Value& val) {
+    static thread_local std::vector<const void*> visited;
+    auto printNested = [&os](const Value& v) {
+        if (v.isNone()) os << "none";
+        else os << v;
+    };
+
+    if (val.isNone()) return os;
+    if (val.isBool()) { os << (val.asBool() ? "true" : "false"); return os; }
+    if (val.isInt32()) { os << val.asInt32(); return os; }
+    if (val.isDouble()) {
+        double v = val.asDoubleRaw();
+        double rounded = std::round(v);
+        if (rounded != 0.0 && v != 0.0 && Tol::isEq(v, rounded, 1e5) && std::abs(rounded) < 1e15) {
+            if (rounded == std::trunc(rounded)) os << static_cast<int64_t>(rounded);
+            else os << rounded;
+        } else os << v;
+        return os;
     }
 
-struct DictData {
-    std::vector<std::pair<Value, Value>> elements;
-    std::unordered_map<Value, size_t, ValueHasher, ValueEqual> keyMap;
-    bool is_frozen = false;
-};
-
-struct ListData {
-    std::vector<Value> vec;
-    bool is_frozen = false;
-};
-
-struct SetData {
-    std::vector<Value> elements;
-    std::unordered_set<Value, ValueHasher, ValueEqual> keys;
-    bool is_frozen = false;
-};
-
-inline Dict::Dict() : ptr(std::make_shared<DictData>()) {
-    GcHeap::get().track(
-        ptr.get(),
-        [w = std::weak_ptr<DictData>(ptr)]() { return !w.expired(); },
-        [w = std::weak_ptr<DictData>(ptr)]() {
-            auto sp = w.lock(); if (sp) { sp->elements.clear(); sp->keyMap.clear(); }
+    Obj* obj = val.asObj();
+    switch (obj->type) {
+        case ObjType::STRING: os << static_cast<ObjString*>(obj)->str; break;
+        case ObjType::BIGINT: os << static_cast<ObjBigInt*>(obj)->num; break;
+        case ObjType::FRACTION: os << static_cast<ObjFraction*>(obj)->frac; break;
+        case ObjType::COMPLEX: os << static_cast<ObjComplex*>(obj)->comp; break;
+        case ObjType::BASENUM: os << static_cast<ObjBaseNum*>(obj)->base; break;
+        case ObjType::REAL_MATRIX: os << static_cast<ObjRealMatrix*>(obj)->mat; break;
+        case ObjType::COMPLEX_MATRIX: os << static_cast<ObjComplexMatrix*>(obj)->mat; break;
+        case ObjType::STRING_MATRIX: os << static_cast<ObjStringMatrix*>(obj)->mat; break;
+        case ObjType::SYMBOLIC: os << static_cast<ObjSym*>(obj)->sym.toString(); break;
+        case ObjType::CLOSURE: os << static_cast<ObjClosure*>(obj)->toString(); break;
+        case ObjType::CLASS: os << "<class " << static_cast<ObjClass*>(obj)->name << ">"; break;
+        case ObjType::SUPER_PROXY: os << "<super>"; break;
+        case ObjType::LIST: {
+            ObjList* list = static_cast<ObjList*>(obj);
+            RecursionGuard guard(visited, list);
+            if (guard.isCycle) { os << "[...]"; break; }
+            os << "[";
+            for (size_t i = 0; i < list->vec.size(); ++i) {
+                try { printNested(list->vec[i]); } catch (...) { os << "?"; }
+                if (i < list->vec.size() - 1) os << ", ";
+            }
+            os << "]";
+            break;
         }
-    );
-}
-inline void Dict::freeze() { ptr->is_frozen = true; }
-inline bool Dict::isFrozen() const { return ptr->is_frozen; }
-inline size_t Dict::size() const { return ptr->elements.size(); }
-inline bool Dict::empty() const { return ptr->elements.empty(); }
-inline void Dict::clear() {
-    if (ptr->is_frozen) throw std::runtime_error("Runtime Error: Object is frozen.");
-    ptr->elements.clear();
-    ptr->keyMap.clear();
-}
-
-inline List::List() : ptr(std::make_shared<ListData>()) {
-    GcHeap::get().track(
-        ptr.get(),
-        [w = std::weak_ptr<ListData>(ptr)]() { return !w.expired(); },
-        [w = std::weak_ptr<ListData>(ptr)]() {
-            auto sp = w.lock(); if (sp) sp->vec.clear();
+        case ObjType::DICT: {
+            ObjDict* dict = static_cast<ObjDict*>(obj);
+            RecursionGuard guard(visited, dict);
+            if (guard.isCycle) { os << "{...}"; break; }
+            os << "{";
+            for (size_t i = 0; i < dict->elements.size(); ++i) {
+                try { printNested(dict->elements[i].first); } catch (...) { os << "?"; }
+                os << ": ";
+                try { printNested(dict->elements[i].second); } catch (...) { os << "?"; }
+                if (i < dict->elements.size() - 1) os << ", ";
+            }
+            os << "}";
+            break;
         }
-    );
-}
-inline void List::freeze() { ptr->is_frozen = true; }
-inline bool List::isFrozen() const { return ptr->is_frozen; }
-inline size_t List::size() const { return ptr->vec.size(); }
-inline bool List::empty() const { return ptr->vec.empty(); }
-inline void List::clear() {
-    if (ptr->is_frozen) throw std::runtime_error("Runtime Error: Object is frozen.");
-    ptr->vec.clear();
-}
-
-inline Set::Set() : ptr(std::make_shared<SetData>()) {
-    GcHeap::get().track(
-        ptr.get(),
-        [w = std::weak_ptr<SetData>(ptr)]() { return !w.expired(); },
-        [w = std::weak_ptr<SetData>(ptr)]() {
-            auto sp = w.lock();
-            if (sp) { sp->elements.clear(); sp->keys.clear(); }
+        case ObjType::SET: {
+            ObjSet* set = static_cast<ObjSet*>(obj);
+            RecursionGuard guard(visited, set);
+            if (guard.isCycle) { os << "Set{...}"; break; }
+            os << "Set{";
+            for (size_t i = 0; i < set->elements.size(); ++i) {
+                try { printNested(set->elements[i]); } catch (...) { os << "?"; }
+                if (i < set->elements.size() - 1) os << ", ";
+            }
+            os << "}";
+            break;
         }
-    );
-}
-inline void Set::freeze() { ptr->is_frozen = true; }
-inline bool Set::isFrozen() const { return ptr->is_frozen; }
-inline size_t Set::size() const { return ptr->elements.size(); }
-inline bool Set::empty() const { return ptr->elements.empty(); }
-inline void Set::clear() {
-    if (ptr->is_frozen) throw std::runtime_error("Runtime Error: Object is frozen.");
-    ptr->elements.clear(); ptr->keys.clear();
+        case ObjType::INSTANCE: {
+            ObjInstance* inst = static_cast<ObjInstance*>(obj);
+            RecursionGuard guard(visited, inst);
+            std::string cname = inst->classDef ? inst->classDef->name : "unknown";
+            if (guard.isCycle) { os << "<" << cname << " {...}>"; break; }
+            
+            bool printedNative = false;
+            if (inst->nativeData.has_value()) {
+                if (inst->nativeData.type() == typeid(std::shared_ptr<Image>)) {
+                    auto& img = std::any_cast<std::shared_ptr<Image>&>(inst->nativeData);
+                    os << "<Image " << img->width() << "x" << img->height() << ">";
+                    printedNative = true;
+                } else if (inst->nativeData.type() == typeid(std::shared_ptr<Distribution>)) {
+                    auto& dist = std::any_cast<std::shared_ptr<Distribution>&>(inst->nativeData);
+                    os << dist->toString();
+                    printedNative = true;
+                }
+            }
+            if (!printedNative) {
+                os << "<" << cname << " {";
+                if (inst->fields) {
+                    for (size_t i = 0; i < inst->fields->elements.size(); ++i) {
+                        if (i > 0) os << ", ";
+                        try { printNested(inst->fields->elements[i].first); } catch (...) { os << "?"; }
+                        os << ": ";
+                        try { printNested(inst->fields->elements[i].second); } catch (...) { os << "?"; }
+                    }
+                }
+                os << "}>";
+            }
+            break;
+        }
+    }
+    return os;
 }
 
 inline size_t ValueHasher::operator()(const Value& v) const {
-    static thread_local std::vector<const void*> visited;
-
-    if (v.isString()) return std::hash<std::string>{}(std::get<std::string>(v.data));
+    // 统一将 int32, double, bool 转换为 double 进行哈希，确保 1 == 1.0 == true 时哈希值绝对一致
+    if (v.isInt32()) return std::hash<double>{}(static_cast<double>(v.asInt32()));
+    if (v.isDouble()) return std::hash<double>{}(v.asDoubleRaw());
+    if (v.isBool()) return std::hash<double>{}(v.asBool() ? 1.0 : 0.0);
     if (v.isNone()) return 0;
     
-    if (std::holds_alternative<std::shared_ptr<Instance>>(v.data)) {
-        auto inst = std::get<std::shared_ptr<Instance>>(v.data);
-        RecursionGuard guard(visited, inst.get());
-        if (guard.isCycle) return 0;
-        auto [found, res] = invokeDunder(inst, "__hash__");
-        if (found) return operator()(res); // 递归哈希其返回值（如数字或字符串）
-        return std::hash<const void*>{}(inst.get());
-    }
-    if (std::holds_alternative<std::shared_ptr<ClassDefinition>>(v.data)) return std::hash<const void*>{}(std::get<std::shared_ptr<ClassDefinition>>(v.data).get());
-    if (std::holds_alternative<std::shared_ptr<FunctionClosure>>(v.data)) return std::hash<const void*>{}(std::get<std::shared_ptr<FunctionClosure>>(v.data).get());
-
-    if (std::holds_alternative<BaseNum>(v.data)) {
-        return operator()(Value(std::get<BaseNum>(v.data).getValue()));
-    }
-
-    if (std::holds_alternative<List>(v.data)) {
-        auto& l = std::get<List>(v.data);
-        RecursionGuard guard(visited, l.id());
-        if (guard.isCycle) return 0;
-        size_t h = 0;
-        for (const auto& e : l.raw()) {
-            h ^= operator()(e) + 0x9e3779b9 + (h << 6) + (h >> 2);
+    Obj* obj = v.asObj();
+    switch (obj->type) {
+        case ObjType::STRING: return std::hash<std::string>{}(static_cast<ObjString*>(obj)->str);
+        case ObjType::BIGINT: return std::hash<std::string>{}(static_cast<ObjBigInt*>(obj)->num.toString());
+        case ObjType::FRACTION: return std::hash<std::string>{}(static_cast<ObjFraction*>(obj)->frac.toString());
+        case ObjType::COMPLEX: {
+            auto c = static_cast<ObjComplex*>(obj)->comp;
+            return std::hash<double>{}(c.real) ^ (std::hash<double>{}(c.imag) << 1);
         }
-        return h;
-    }
-    if (std::holds_alternative<Dict>(v.data)) {
-        auto& d = std::get<Dict>(v.data);
-        RecursionGuard guard(visited, d.id());
-        if (guard.isCycle) return 0;
-        size_t h = 0;
-        for (const auto& [k, val] : d.getEntries()) {
-            size_t kv_hash = operator()(k);
-            kv_hash ^= operator()(val) + 0x9e3779b9 + (kv_hash << 6) + (kv_hash >> 2);
-            // MurmurHash3 风格的雪崩扰乱，打散位分布
-            kv_hash ^= (kv_hash >> 16);
-            kv_hash *= 0x85ebca6b;
-            kv_hash ^= (kv_hash >> 13);
-            kv_hash *= 0xc2b2ae35;
-            kv_hash ^= (kv_hash >> 16);
-            // 满足交换律的累加，彻底无视插入顺序
-            h += kv_hash;
-        }
-        return h;
-    }
-    if (std::holds_alternative<Set>(v.data)) {
-        auto& s = std::get<Set>(v.data);
-        RecursionGuard guard(visited, s.id());
-        if (guard.isCycle) return 0;
-        size_t h = 0;
-        for (const auto& val : s.raw()) {
-            size_t e_hash = operator()(val);
-            // 雪崩扰乱
-            e_hash ^= (e_hash >> 16);
-            e_hash *= 0x85ebca6b;
-            e_hash ^= (e_hash >> 13);
-            e_hash *= 0xc2b2ae35;
-            e_hash ^= (e_hash >> 16);
-            // 满足交换律的累加
-            h += e_hash;
-        }
-        return h;
-    }
-
-    if (std::holds_alternative<RealMatrix>(v.data)) {
-        const auto& m = std::get<RealMatrix>(v.data);
-        size_t h = std::hash<int>{}(m.getRows()) ^ (std::hash<int>{}(m.getCols()) << 1);
-        for (double d : m.rawData()) h ^= operator()(Value(d)) + 0x9e3779b9 + (h << 6) + (h >> 2);
-        return h;
-    }
-    if (std::holds_alternative<ComplexMatrix>(v.data)) {
-        const auto& m = std::get<ComplexMatrix>(v.data);
-        size_t h = std::hash<int>{}(m.getRows()) ^ (std::hash<int>{}(m.getCols()) << 1);
-        for (const Complex& c : m.rawData()) h ^= operator()(Value(c)) + 0x9e3779b9 + (h << 6) + (h >> 2);
-        return h;
-    }
-    if (std::holds_alternative<StringMatrix>(v.data)) {
-        const auto& m = std::get<StringMatrix>(v.data);
-        size_t h = std::hash<int>{}(m.getRows()) ^ (std::hash<int>{}(m.getCols()) << 1);
-        for (const std::string& s : m.rawData()) h ^= operator()(Value(s)) + 0x9e3779b9 + (h << 6) + (h >> 2);
-        return h;
-    }
-    if (std::holds_alternative<SymExpr>(v.data)) {
-        const auto& sym = std::get<SymExpr>(v.data);
-        if (sym.ptr) return std::hash<std::string>{}(sym.ptr->getSignature());
-        return 0;
-    }
-
-    try {
-        Complex c = v.asComplex();
-        double r = (c.real == 0.0) ? 0.0 : c.real; // 抹平 -0.0
-        if (r == std::round(r)) r = std::round(r); // 抹平 1.0 与 1 的差异
-        double i = (c.imag == 0.0) ? 0.0 : c.imag;
-        if (i == std::round(i)) i = std::round(i);
-        size_t h1 = std::hash<double>{}(r);
-        size_t h2 = std::hash<double>{}(i);
-        return h1 ^ (h2 << 1);
-    } catch (...) {
-        return std::hash<std::string>{}(v.toJC2Expression());
+        case ObjType::BASENUM: return std::hash<std::string>{}(static_cast<ObjBaseNum*>(obj)->base.getValue().toString());
+        case ObjType::SYMBOLIC: return std::hash<std::string>{}(static_cast<ObjSym*>(obj)->sym.toString());
+        default: return std::hash<const void*>{}(obj);
     }
 }
 
 inline bool ValueEqual::operator()(const Value& lhs, const Value& rhs) const {
     return Value::equals(lhs, rhs);
 }
-
-inline void Dict::set(const Value& key, const Value& val) {
-    if (!key.isHashable()) throw std::runtime_error("TypeError: unhashable type as dict key.");
-    if (ptr->is_frozen) throw std::runtime_error("Runtime Error: Object is frozen.");
-    auto it = ptr->keyMap.find(key);
-    if (it != ptr->keyMap.end()) {
-        ptr->elements[it->second].second = val;
-    } else {
-        ptr->keyMap[key] = ptr->elements.size();
-        ptr->elements.push_back({key, val});
-    }
-}
-
-inline Value* Dict::get(const Value& key) {
-    auto it = ptr->keyMap.find(key);
-    if (it != ptr->keyMap.end()) return &ptr->elements[it->second].second;
-    return nullptr;
-}
-
-inline const Value* Dict::get(const Value& key) const {
-    auto it = ptr->keyMap.find(key);
-    if (it != ptr->keyMap.end()) return &ptr->elements[it->second].second;
-    return nullptr;
-}
-
-inline bool Dict::has(const Value& key) const {
-    if (!key.isHashable()) throw std::runtime_error("TypeError: unhashable type as dict key.");
-    return ptr->keyMap.find(key) != ptr->keyMap.end();
-}
-
-inline bool Dict::remove(const Value& key) {
-    if (!key.isHashable()) throw std::runtime_error("TypeError: unhashable type as dict key.");
-    if (ptr->is_frozen) throw std::runtime_error("Runtime Error: Object is frozen.");
-    auto it = ptr->keyMap.find(key);
-    if (it == ptr->keyMap.end()) return false;
-    size_t idx = it->second;
-    ptr->keyMap.erase(it);
-    ptr->elements.erase(ptr->elements.begin() + idx);
-    for (size_t i = idx; i < ptr->elements.size(); ++i) {
-        ptr->keyMap[ptr->elements[i].first] = i;
-    }
-    return true;
-}
-
-inline std::vector<Value> Dict::getKeys() const {
-    std::vector<Value> keys;
-    keys.reserve(ptr->elements.size());
-    for (const auto& kv : ptr->elements) keys.push_back(kv.first);
-    return keys;
-}
-
-inline std::vector<std::pair<Value, Value>> Dict::getEntries() const {
-    return ptr->elements;
-}
-
-inline bool Set::insert(const Value& val) {
-    if (!val.isHashable()) throw std::runtime_error("TypeError: unhashable type as set element.");
-    if (ptr->is_frozen) throw std::runtime_error("Runtime Error: Object is frozen.");
-    if (ptr->keys.count(val)) return false;
-    ptr->keys.insert(val);
-    ptr->elements.push_back(val);
-    return true;
-}
-
-inline bool Set::contains(const Value& val) const {
-    if (!val.isHashable()) throw std::runtime_error("TypeError: unhashable type as set element.");
-    return ptr->keys.count(val) > 0;
-}
-
-inline bool Set::erase(const Value& val) {
-    if (!val.isHashable()) throw std::runtime_error("TypeError: unhashable type as set element.");
-    if (ptr->is_frozen) throw std::runtime_error("Runtime Error: Object is frozen.");
-    if (!ptr->keys.erase(val)) return false;
-    for (auto it = ptr->elements.begin(); it != ptr->elements.end(); ++it) {
-        if (Value::equals(*it, val)) { ptr->elements.erase(it); return true; }
-    }
-    return true;
-}
-
-inline const std::vector<Value>& Set::raw() const {
-    return ptr->elements;
-}
-
-inline void List::push_back(const Value& val) {
-    if (ptr->is_frozen) throw std::runtime_error("Runtime Error: Object is frozen.");
-    ptr->vec.push_back(val);
-}
-
-inline Value& List::at(int idx) {
-    int n = static_cast<int>(ptr->vec.size());
-    if (idx < 0) idx = n + idx;
-    if (idx < 0 || idx >= n)
-        throw std::out_of_range("List Error: Index out of bounds.");
-    return ptr->vec[idx];
-}
-
-inline const Value& List::at(int idx) const {
-    int n = static_cast<int>(ptr->vec.size());
-    if (idx < 0) idx = n + idx;
-    if (idx < 0 || idx >= n)
-        throw std::out_of_range("List Error: Index out of bounds.");
-    return ptr->vec[idx];
-}
-
-inline void List::set(int idx, const Value& val) {
-    if (ptr->is_frozen) throw std::runtime_error("Runtime Error: Object is frozen.");
-    int n = static_cast<int>(ptr->vec.size());
-    if (idx < 0) idx = n + idx;
-    if (idx < 0 || idx >= n)
-        throw std::out_of_range("List Error: Index out of bounds.");
-    ptr->vec[idx] = val;
-}
-
-inline void List::insert(int idx, const Value& val) {
-    if (ptr->is_frozen) throw std::runtime_error("Runtime Error: Object is frozen.");
-    int n = static_cast<int>(ptr->vec.size());
-    if (idx < 0) idx = n + idx;
-    if (idx < 0 || idx > n)
-        throw std::out_of_range("List Error: Insert index out of bounds.");
-    ptr->vec.insert(ptr->vec.begin() + idx, val);
-}
-
-inline void List::removeAt(int idx) {
-    if (ptr->is_frozen) throw std::runtime_error("Runtime Error: Object is frozen.");
-    int n = static_cast<int>(ptr->vec.size());
-    if (idx < 0) idx = n + idx;
-    if (idx < 0 || idx >= n)
-        throw std::out_of_range("List Error: Remove index out of bounds.");
-    ptr->vec.erase(ptr->vec.begin() + idx);
-}
-
-inline const std::vector<Value>& List::raw() const { return ptr->vec; }
-inline std::vector<Value>& List::raw() { return ptr->vec; }
 
 } // namespace jc
 

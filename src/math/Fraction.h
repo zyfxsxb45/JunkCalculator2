@@ -98,6 +98,14 @@ namespace jc {
             return Fraction(new_num, new_den, SkipReduce{});
         }
 
+        Fraction operator%(const Fraction& other) const {
+            if (other.num.isZero()) throw std::runtime_error("Math Error: Modulo by zero fraction.");
+            BigInt ad = num * other.den;
+            BigInt bc = den * other.num;
+            BigInt rem = ad % bc;
+            return Fraction(rem, den * other.den);
+        }
+
         // 整数次幂运算
         Fraction pow(int64_t p) const {
             if (p == 0) return Fraction(1);
@@ -136,6 +144,8 @@ namespace jc {
         friend Fraction operator*(const BigInt& b, const Fraction& f) { return Fraction(b) * f; }
         friend Fraction operator/(const Fraction& f, const BigInt& b) { return f / Fraction(b); }
         friend Fraction operator/(const BigInt& b, const Fraction& f) { return Fraction(b) / f; }
+        friend Fraction operator%(const Fraction& f, const BigInt& b) { return f % Fraction(b); }
+        friend Fraction operator%(const BigInt& b, const Fraction& f) { return Fraction(b) % f; }
 
         // Fraction <-> Complex (转化为 double 后与复数运算)
         friend Complex operator+(const Fraction& f, const Complex& c) { return Complex(f.toDouble()) + c; }

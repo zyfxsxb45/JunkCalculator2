@@ -18,12 +18,9 @@ using NativeCallable = std::function<Value(const std::vector<Value>&)>;
 // ═══════════════════════════════════════════
 namespace helpers {
 
-    inline Value anyToVal(const Value& a) { return a; }
-    inline Value valToAny(const Value& v) { return v; }
-
-    inline Dict getDictMap(const Value& v, const std::string& fnName) {
-        if (std::holds_alternative<Dict>(v.data)) return std::get<Dict>(v.data);
-        if (std::holds_alternative<std::shared_ptr<Instance>>(v.data)) return std::get<std::shared_ptr<Instance>>(v.data)->fields;
+    inline ObjDict* getDictMap(const Value& v, const std::string& fnName) {
+        if (v.isObjType(ObjType::DICT)) return static_cast<ObjDict*>(v.asObj());
+        if (v.isInstance()) return v.asInstance()->fields;
         throw std::runtime_error("Type Error: " + fnName + "() expects a Dict or Instance.");
     }
 
@@ -32,10 +29,10 @@ namespace helpers {
     }
 
     inline std::vector<double> extractDS(const Value& v, const std::string& f) {
-        if (std::holds_alternative<RealMatrix>(v.data))
-            return std::get<RealMatrix>(v.data).rawData();
-        if (std::holds_alternative<ComplexMatrix>(v.data)) {
-            const auto& cd = std::get<ComplexMatrix>(v.data).rawData();
+        if (v.isObjType(ObjType::REAL_MATRIX))
+            return static_cast<ObjRealMatrix*>(v.asObj())->mat.rawData();
+        if (v.isObjType(ObjType::COMPLEX_MATRIX)) {
+            const auto& cd = static_cast<ObjComplexMatrix*>(v.asObj())->mat.rawData();
             std::vector<double> r(cd.size());
             for (size_t i = 0; i < cd.size(); ++i) {
                 if (std::abs(cd[i].imag) > 1e-15)
@@ -71,10 +68,10 @@ namespace helpers {
     }
 
     inline std::vector<double> toVecHelper(const Value& v, const std::string& fn) {
-        if (std::holds_alternative<RealMatrix>(v.data))
-            return std::get<RealMatrix>(v.data).rawData();
-        if (std::holds_alternative<ComplexMatrix>(v.data)) {
-            const auto& cd = std::get<ComplexMatrix>(v.data).rawData();
+        if (v.isObjType(ObjType::REAL_MATRIX))
+            return static_cast<ObjRealMatrix*>(v.asObj())->mat.rawData();
+        if (v.isObjType(ObjType::COMPLEX_MATRIX)) {
+            const auto& cd = static_cast<ObjComplexMatrix*>(v.asObj())->mat.rawData();
             std::vector<double> r(cd.size());
             for (size_t i = 0; i < cd.size(); ++i) {
                 if (!Tol::isEq(cd[i].imag, 0.0))
@@ -92,7 +89,7 @@ namespace helpers {
         return Value(RealMatrix(1, n, v));
     }
 
-    inline Value callClosure(const std::shared_ptr<FunctionClosure>& cl,
+    inline Value callClosure(ObjClosure* cl,
         const std::vector<Value>& args) {
         if (!cl || !cl->isNative())
             throw std::runtime_error(
@@ -103,12 +100,12 @@ namespace helpers {
 
     // ═══ Phase 2 回调 ═══
     // 通用闭包调用器（Evaluator 注入带作用域管理的版本，VM 走 nativeFn）
-    inline std::function<Value(std::shared_ptr<FunctionClosure>,
+    inline std::function<Value(ObjClosure*,
         const std::vector<Value>&)> callFunctionCallback = nullptr;
     // 路径解析器（相对路径 → 绝对路径）
     inline std::function<std::string(const std::string&)> resolvePathCallback = nullptr;
     // 安全调用闭包：优先用回调，降级到 nativeFn
-    inline Value safeCallFunction(const std::shared_ptr<FunctionClosure>& cl,
+    inline Value safeCallFunction(ObjClosure* cl,
         const std::vector<Value>& args) {
         if (callFunctionCallback) return callFunctionCallback(cl, args);
         return callClosure(cl, args);  // 降级到 nativeFn 直调
@@ -128,8 +125,8 @@ namespace helpers {
     inline std::function<Value(const std::string&)> getGlobalCallback = nullptr;
     // 检查 Instance 是否有指定 dunder 方法（沿继承链查找）
     inline bool hasDunder(const Value& val, const std::string& name) {
-        if (!std::holds_alternative<std::shared_ptr<Instance>>(val.data)) return false;
-        auto c = std::get<std::shared_ptr<Instance>>(val.data)->classDef;
+        if (!val.isInstance()) return false;
+        auto c = val.asInstance()->classDef;
         while (c) {
             if (c->methods.count(name)) return true;
             c = c->parent;
@@ -143,7 +140,7 @@ namespace helpers {
     inline std::vector<Value> nativeClassStack;
 
     inline std::pair<bool, Value> tryCallDunder(
-        const std::shared_ptr<Instance>& inst,
+        ObjInstance* inst,
         const std::string& methodName,
         const std::vector<Value>& args = {})
     {
@@ -179,64 +176,36 @@ namespace helpers {
 // 值比较引擎 (Value Comparison)
 // ═══════════════════════════════════════════
     inline bool checkEqual(const Value& lhs, const Value& rhs) {
-        if (lhs.data.index() == rhs.data.index()) {
-            if (std::holds_alternative<std::monostate>(lhs.data)) return true;
-            if (std::holds_alternative<double>(lhs.data))
-                return Tol::isEq(std::get<double>(lhs.data), std::get<double>(rhs.data));
-            if (std::holds_alternative<BigInt>(lhs.data))
-                return std::get<BigInt>(lhs.data) == std::get<BigInt>(rhs.data);
-            if (std::holds_alternative<Complex>(lhs.data))
-                return std::get<Complex>(lhs.data) == std::get<Complex>(rhs.data);
-            if (std::holds_alternative<Fraction>(lhs.data))
-                return std::get<Fraction>(lhs.data) == std::get<Fraction>(rhs.data);
-            if (std::holds_alternative<std::string>(lhs.data))
-                return std::get<std::string>(lhs.data) == std::get<std::string>(rhs.data);
-            if (std::holds_alternative<BaseNum>(lhs.data))
-                return std::get<BaseNum>(lhs.data).getValue() == std::get<BaseNum>(rhs.data).getValue();
-            if (std::holds_alternative<Set>(lhs.data) && std::holds_alternative<Set>(rhs.data)) {
-                const auto& a = std::get<Set>(lhs.data);
-                const auto& b = std::get<Set>(rhs.data);
-                if (a.id() == b.id()) return true;
-                if (a.size() != b.size()) return false;
-                for (const auto& val : a.raw()) {
-                    if (!b.contains(val)) return false;
-                }
-                return true;
-            }
-            return false;
+        if (lhs.isNumber() && rhs.isNumber()) return Tol::isEq(lhs.asNumber(), rhs.asNumber());
+        if (lhs.isComplex() && rhs.isComplex()) {
+            Complex a = lhs.asComplex(), b = rhs.asComplex();
+            return Tol::isEq(a.real, b.real) && Tol::isEq(a.imag, b.imag);
         }
-
-        if (std::holds_alternative<BigInt>(lhs.data) && std::holds_alternative<Fraction>(rhs.data))
-            return Fraction(std::get<BigInt>(lhs.data)) == std::get<Fraction>(rhs.data);
-        if (std::holds_alternative<Fraction>(lhs.data) && std::holds_alternative<BigInt>(rhs.data))
-            return std::get<Fraction>(lhs.data) == Fraction(std::get<BigInt>(rhs.data));
-
-        try { return lhs.asComplex() == rhs.asComplex(); }
-        catch (...) { return false; }
+        return Value::equals(lhs, rhs);
     }
 
     inline bool checkLess(const Value& lhs, const Value& rhs) {
-        if (std::holds_alternative<std::string>(lhs.data) && std::holds_alternative<std::string>(rhs.data))
-            return std::get<std::string>(lhs.data) < std::get<std::string>(rhs.data);
+        if (lhs.isString() && rhs.isString())
+            return lhs.asString() < rhs.asString();
 
-        if (std::holds_alternative<std::string>(lhs.data) || std::holds_alternative<std::string>(rhs.data))
+        if (lhs.isString() || rhs.isString())
             throw std::runtime_error("Type Error: Cannot compare string with non-string type.");
 
-        if (std::holds_alternative<BigInt>(lhs.data) && std::holds_alternative<BigInt>(rhs.data))
-            return std::get<BigInt>(lhs.data) < std::get<BigInt>(rhs.data);
+        if (lhs.isBigInt() && rhs.isBigInt())
+            return lhs.asBigInt() < rhs.asBigInt();
 
-        if (std::holds_alternative<Fraction>(lhs.data) && std::holds_alternative<Fraction>(rhs.data))
-            return std::get<Fraction>(lhs.data) < std::get<Fraction>(rhs.data);
+        if (lhs.isObjType(ObjType::FRACTION) && rhs.isObjType(ObjType::FRACTION))
+            return static_cast<ObjFraction*>(lhs.asObj())->frac < static_cast<ObjFraction*>(rhs.asObj())->frac;
 
-        if ((std::holds_alternative<BigInt>(lhs.data) && std::holds_alternative<Fraction>(rhs.data)) ||
-            (std::holds_alternative<Fraction>(lhs.data) && std::holds_alternative<BigInt>(rhs.data))) {
-            Fraction a = std::holds_alternative<Fraction>(lhs.data) ? std::get<Fraction>(lhs.data) : Fraction(std::get<BigInt>(lhs.data));
-            Fraction b = std::holds_alternative<Fraction>(rhs.data) ? std::get<Fraction>(rhs.data) : Fraction(std::get<BigInt>(rhs.data));
+        if ((lhs.isBigInt() && rhs.isObjType(ObjType::FRACTION)) ||
+            (lhs.isObjType(ObjType::FRACTION) && rhs.isBigInt())) {
+            Fraction a = lhs.isObjType(ObjType::FRACTION) ? static_cast<ObjFraction*>(lhs.asObj())->frac : Fraction(lhs.asBigInt());
+            Fraction b = rhs.isObjType(ObjType::FRACTION) ? static_cast<ObjFraction*>(rhs.asObj())->frac : Fraction(rhs.asBigInt());
             return a < b;
         }
 
         // ★ 新增：符号表达式不支持数值大小比较
-        if (std::holds_alternative<SymExpr>(lhs.data) || std::holds_alternative<SymExpr>(rhs.data))
+        if (lhs.isSymbolic() || rhs.isSymbolic())
             throw std::runtime_error("Type Error: Cannot compare symbolic expressions with '<' or '>'.");
 
         double a = lhs.asDouble(), b = rhs.asDouble();

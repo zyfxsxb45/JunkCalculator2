@@ -22,10 +22,11 @@ namespace jc {
             std::string sp = (indent > 0) ? " " : "";
 
             if (val.isNone()) return "null";
+            if (val.isBool()) return val.asBool() ? "true" : "false";
 
             // 1. 处理所有底层数值类型
-            if (std::holds_alternative<double>(val.data)) {
-                double d = std::get<double>(val.data);
+            if (val.isDouble()) {
+                double d = val.asDoubleRaw();
                 double rounded = std::round(d);
                 // 整数消除浮点尾巴
                 if (jc::Tol::isEq(d, rounded, 1e5) && std::abs(rounded) < 1e15 && rounded == std::trunc(rounded)) {
@@ -35,18 +36,21 @@ namespace jc {
                 oss << d;
                 return oss.str();
             }
-            if (std::holds_alternative<jc::BigInt>(val.data)) {
-                return std::get<jc::BigInt>(val.data).toString();
+            if (val.isInt32()) {
+                return std::to_string(val.asInt32());
             }
-            if (std::holds_alternative<jc::Fraction>(val.data)) {
+            if (val.isObjType(ObjType::BIGINT)) {
+                return static_cast<ObjBigInt*>(val.asObj())->num.toString();
+            }
+            if (val.isObjType(ObjType::FRACTION)) {
                 std::ostringstream oss;
-                oss << std::get<jc::Fraction>(val.data).toDouble();
+                oss << static_cast<ObjFraction*>(val.asObj())->frac.toDouble();
                 return oss.str();
             }
 
             // 2. 字符串深层转义
-            if (std::holds_alternative<std::string>(val.data)) {
-                std::string s = std::get<std::string>(val.data);
+            if (val.isString()) {
+                std::string s = val.asString();
                 std::string escaped = "\"";
                 for (unsigned char c : s) {
                     switch (c) {
@@ -73,9 +77,8 @@ namespace jc {
             }
 
             // 3. 递归容器
-            if (std::holds_alternative<jc::List>(val.data)) {
-                const auto& L = std::get<jc::List>(val.data);
-                const auto& raw = L.raw();
+            if (val.isObjType(ObjType::LIST)) {
+                const auto& raw = static_cast<ObjList*>(val.asObj())->vec;
                 if (raw.empty()) return "[]";
 
                 std::string r = "[" + nl;
@@ -86,9 +89,8 @@ namespace jc {
                 r += nl + pad + "]";
                 return r;
             }
-            if (std::holds_alternative<jc::Dict>(val.data)) {
-                const auto& d = std::get<jc::Dict>(val.data);
-                const auto entries = d.getEntries(); // 按值临时抽取
+            if (val.isObjType(ObjType::DICT)) {
+                const auto& entries = static_cast<ObjDict*>(val.asObj())->elements;
                 if (entries.empty()) return "{}";
 
                 std::string r = "{" + nl;
@@ -107,8 +109,8 @@ namespace jc {
                 r += nl + pad + "}";
                 return r;
             }
-            if (std::holds_alternative<jc::RealMatrix>(val.data)) {
-                const auto& m = std::get<jc::RealMatrix>(val.data);
+            if (val.isObjType(ObjType::REAL_MATRIX)) {
+                const auto& m = static_cast<ObjRealMatrix*>(val.asObj())->mat;
                 std::string r = "[";
                 for (int i = 0; i < m.getRows(); ++i) {
                     if (i > 0) r += ", ";
@@ -230,7 +232,7 @@ namespace jc {
             skipWS();
             if (pos < s.size() && s[pos] == ']') {
                 pos++;
-                return jc::Value(jc::List());
+                return jc::Value(GcHeap::get().allocate<ObjList>());
             }
 
             while (true) {
@@ -246,14 +248,14 @@ namespace jc {
             if (pos >= s.size() || s[pos] != ']') throw std::runtime_error("JSON Parse Error: Expected ']' array closer.");
             pos++;
 
-            jc::List L;
-            for (auto& e : elements) L.push_back(e);
+            ObjList* L = GcHeap::get().allocate<ObjList>();
+            L->vec = std::move(elements);
             return jc::Value(L);
         }
 
         jc::Value parseObject() {
             pos++; // skip '{'
-            jc::Dict d;
+            ObjDict* d = GcHeap::get().allocate<ObjDict>();
             skipWS();
             if (pos < s.size() && s[pos] == '}') { pos++; return jc::Value(d); }
 
@@ -265,7 +267,9 @@ namespace jc {
                 if (pos >= s.size() || s[pos] != ':') throw std::runtime_error("JSON Parse Error: Expected ':' separator.");
                 pos++; skipWS();
 
-                d.set(jc::Value(key), parseValue());
+                jc::Value v = parseValue();
+                d->keyMap[jc::Value(key)] = d->elements.size();
+                d->elements.push_back({jc::Value(key), v});
                 skipWS();
 
                 if (pos < s.size() && s[pos] == ',') { 
@@ -288,8 +292,8 @@ namespace jc {
             if (c == '[') return parseArray();
             if (c == '{') return parseObject();
 
-            if (s.compare(pos, 4, "true") == 0) { pos += 4; return jc::Value(1.0); }
-            if (s.compare(pos, 5, "false") == 0) { pos += 5; return jc::Value(0.0); }
+            if (s.compare(pos, 4, "true") == 0) { pos += 4; return jc::Value(true); }
+            if (s.compare(pos, 5, "false") == 0) { pos += 5; return jc::Value(false); }
             if (s.compare(pos, 4, "null") == 0) { pos += 4; return jc::Value::none(); }
 
             if (c == '-' || std::isdigit(static_cast<unsigned char>(c))) return parseNumber();
@@ -319,17 +323,17 @@ namespace jc {
 
         // deserialize 函数挂载
         R.reg("json_decode", { 1 }, [](const std::vector<jc::Value>& args) -> jc::Value {
-            if (!std::holds_alternative<std::string>(args[0].data)) {
+            if (!args[0].isString()) {
                 throw std::runtime_error("Type Error: json_decode() expects a string.");
             }
-            JsonParser parser(std::get<std::string>(args[0].data));
+            JsonParser parser(args[0].asString());
             return parser.parseValue();
             });
         R.reg("parse", { 1 }, [](const std::vector<jc::Value>& args) -> jc::Value {
-            if (!std::holds_alternative<std::string>(args[0].data)) {
+            if (!args[0].isString()) {
                 throw std::runtime_error("Type Error: parse() expects a string.");
             }
-            JsonParser parser(std::get<std::string>(args[0].data));
+            JsonParser parser(args[0].asString());
             return parser.parseValue();
             });
     }

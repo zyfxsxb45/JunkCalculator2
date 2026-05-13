@@ -224,56 +224,60 @@ namespace jc_window {
     };
 #endif
 
-    inline std::shared_ptr<ClassDefinition> windowClass;
+    inline ObjClass* windowClass = nullptr;
 }
 
 JC2_MODULE(window) {
     using namespace jc_window;
     jc::ModuleReg R(env, builtins, arity);
 
-    windowClass = std::make_shared<jc::ClassDefinition>();
+    windowClass = GcHeap::get().allocate<ObjClass>();
     windowClass->name = "Window";
     R.set("Window", jc::Value(windowClass));
 
     auto addWinMethod = [&](const std::string& name, jc::NativeCallable fn) {
-        auto fc = std::make_shared<FunctionClosure>(std::vector<std::string>{}, std::vector<bool>{}, name, nullptr);
+        auto fc = GcHeap::get().allocate<ObjClosure>(std::vector<std::string>{}, std::vector<bool>{}, name, nullptr);
         fc->nativeFn = std::make_any<NativeCallable>(fn);
-        windowClass->methods[name] = std::move(fc);
+        windowClass->methods[name] = fc;
         };
 
     addWinMethod("init", [](const std::vector<jc::Value>& args) -> jc::Value {
         if (args.size() != 3) { throw std::runtime_error("TypeError: Window takes exactly 3 arguments (title, width, height)."); }
-        std::string title = std::get<std::string>(args[0].data);
+        std::string title = args[0].asString();
         int w = static_cast<int>(args[1].asDouble());
         int h = static_cast<int>(args[2].asDouble());
 
         auto selfVal = jc::helpers::getGlobalCallback("self");
-        auto inst = std::get<std::shared_ptr<Instance>>(selfVal.data);
+        auto inst = selfVal.asInstance();
         inst->nativeData = std::make_shared<NativeWindow>(title, w, h);
         return jc::Value::none();
         });
 
     addWinMethod("isOpen", [](const std::vector<jc::Value>&) -> jc::Value {
-        auto inst = std::get<std::shared_ptr<Instance>>(jc::helpers::getGlobalCallback("self").data);
+        auto inst = jc::helpers::getGlobalCallback("self").asInstance();
         auto win = std::any_cast<std::shared_ptr<NativeWindow>&>(inst->nativeData);
         return jc::Value(win->isOpen() ? 1.0 : 0.0);
         });
 
     // ─── 暴露 pollEvent：无阻塞抓取单次键鼠事件（带智能字符串按键！） ───
     addWinMethod("pollEvent", [](const std::vector<jc::Value>&) -> jc::Value {
-        auto inst = std::get<std::shared_ptr<Instance>>(jc::helpers::getGlobalCallback("self").data);
+        auto inst = jc::helpers::getGlobalCallback("self").asInstance();
         auto win = std::any_cast<std::shared_ptr<NativeWindow>&>(inst->nativeData);
 
         WinEvent ev;
         if (win->pollEvent(ev)) {
-            jc::Dict d;
-            d.set("type", jc::Value(ev.type));
+            ObjDict* d = GcHeap::get().allocate<ObjDict>();
+            auto setDict = [&](const std::string& k, jc::Value v) {
+                d->keyMap[jc::Value(k)] = d->elements.size();
+                d->elements.push_back({jc::Value(k), v});
+            };
+            setDict("type", jc::Value(ev.type));
 
             // 处理鼠标移动与点击
             if (ev.type == "mousemove" || ev.type == "mousedown" || ev.type == "mouseup") {
-                d.set("x", jc::Value((double)ev.x));
-                d.set("y", jc::Value((double)ev.y));
-                if (ev.type != "mousemove") d.set("button", jc::Value((double)ev.button));
+                setDict("x", jc::Value((double)ev.x));
+                setDict("y", jc::Value((double)ev.y));
+                if (ev.type != "mousemove") setDict("button", jc::Value((double)ev.button));
             }
 
             // 处理键盘按键
@@ -300,8 +304,8 @@ JC2_MODULE(window) {
                     }
                 }
 #endif
-                d.set("key", jc::Value(keyStr));              // 人类可读的直观字符串!
-                d.set("keycode", jc::Value((double)ev.key));  // 依然保留底层硬核数字供骨灰级玩家查阅
+                setDict("key", jc::Value(keyStr));              // 人类可读的直观字符串!
+                setDict("keycode", jc::Value((double)ev.key));  // 依然保留底层硬核数字供骨灰级玩家查阅
             }
             return jc::Value(d);
         }
@@ -314,8 +318,8 @@ JC2_MODULE(window) {
         int key = 0;
 
         // 智能解析：如果传入的是字符串
-        if (std::holds_alternative<std::string>(args[0].data)) {
-            std::string s = std::get<std::string>(args[0].data);
+        if (args[0].isString()) {
+            std::string s = args[0].asString();
 
             // 强行大写化，显式转换为 char 消除警告
             std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) -> char {
@@ -361,7 +365,7 @@ JC2_MODULE(window) {
         });
 
     addWinMethod("show", [](const std::vector<jc::Value>& args) -> jc::Value {
-        auto inst = std::get<std::shared_ptr<Instance>>(jc::helpers::getGlobalCallback("self").data);
+        auto inst = jc::helpers::getGlobalCallback("self").asInstance();
         auto win = std::any_cast<std::shared_ptr<NativeWindow>&>(inst->nativeData);
         auto im = jc_image::getImg(args[0]);
         win->show(im);
@@ -370,7 +374,7 @@ JC2_MODULE(window) {
 
     addWinMethod("setImeEnabled", [](const std::vector<jc::Value>& args) -> jc::Value {
         if (args.empty()) return jc::Value::none();
-        auto inst = std::get<std::shared_ptr<Instance>>(jc::helpers::getGlobalCallback("self").data);
+        auto inst = jc::helpers::getGlobalCallback("self").asInstance();
         auto win = std::any_cast<std::shared_ptr<NativeWindow>&>(inst->nativeData);
 
         bool enable = args[0].asDouble() != 0.0;
@@ -381,7 +385,7 @@ JC2_MODULE(window) {
     // ★ 暴露强行接管鼠标渲染与位置权限的系统级 API
     addWinMethod("showCursor", [](const std::vector<jc::Value>& args) -> jc::Value {
         if (args.empty()) return jc::Value::none();
-        auto inst = std::get<std::shared_ptr<Instance>>(jc::helpers::getGlobalCallback("self").data);
+        auto inst = jc::helpers::getGlobalCallback("self").asInstance();
         auto win = std::any_cast<std::shared_ptr<NativeWindow>&>(inst->nativeData);
         win->showCursor(args[0].asDouble() != 0.0);
         return jc::Value::none();
@@ -389,7 +393,7 @@ JC2_MODULE(window) {
 
     addWinMethod("setCursorPos", [](const std::vector<jc::Value>& args) -> jc::Value {
         if (args.size() < 2) return jc::Value::none();
-        auto inst = std::get<std::shared_ptr<Instance>>(jc::helpers::getGlobalCallback("self").data);
+        auto inst = jc::helpers::getGlobalCallback("self").asInstance();
         auto win = std::any_cast<std::shared_ptr<NativeWindow>&>(inst->nativeData);
         win->setCursorPos(
             static_cast<int>(args[0].asDouble()),

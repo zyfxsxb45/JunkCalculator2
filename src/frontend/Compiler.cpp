@@ -376,10 +376,10 @@ namespace jc {
                 emit(OpCode::OP_SET_UPVALUE, expr->name.line);
                 emit16(static_cast<uint16_t>(upvalue), expr->name.line);
                 
-                chunk()->emitConstant(Value(1.0), expr->name.line);
+                chunk()->emitConstant(Value(true), expr->name.line);
                 emit(OpCode::OP_SET_UPVALUE, expr->name.line);
                 emit16(static_cast<uint16_t>(flagUpvalue), expr->name.line);
-                emit(OpCode::OP_POP, expr->name.line); // pop 1.0
+                emit(OpCode::OP_POP, expr->name.line); // pop true
                 
                 int endJump = chunk()->emitJump(OpCode::OP_JUMP, expr->name.line);
                 
@@ -1364,10 +1364,10 @@ namespace jc {
                     emit(OpCode::OP_SET_UPVALUE, lastLine);
                     emit16(static_cast<uint16_t>(upvalue), lastLine);
                     
-                    chunk()->emitConstant(Value(1.0), lastLine);
+                    chunk()->emitConstant(Value(true), lastLine);
                     emit(OpCode::OP_SET_UPVALUE, lastLine);
                     emit16(static_cast<uint16_t>(flagUpvalue), lastLine);
-                    emit(OpCode::OP_POP, lastLine); // pop 1.0
+                    emit(OpCode::OP_POP, lastLine); // pop true
                     
                     int endJump = chunk()->emitJump(OpCode::OP_JUMP, lastLine);
                     
@@ -1612,6 +1612,7 @@ namespace jc {
         beginScope(); // ★ 列表推导式自带块级作用域
         emit(OpCode::OP_LIST_INIT, lastLine);
         compileCompClause(expr, 0);
+        emit(OpCode::OP_LIST_COMP_END, lastLine); // ★ 底层指令降维
         endScope();
         return {};
     }
@@ -1897,10 +1898,10 @@ namespace jc {
                     emit(OpCode::OP_SET_UPVALUE, lastLine);
                     emit16(static_cast<uint16_t>(upvalue), lastLine);
                     
-                    chunk()->emitConstant(Value(1.0), lastLine);
+                    chunk()->emitConstant(Value(true), lastLine);
                     emit(OpCode::OP_SET_UPVALUE, lastLine);
                     emit16(static_cast<uint16_t>(flagUpvalue), lastLine);
-                    emit(OpCode::OP_POP, lastLine); // pop 1.0
+                    emit(OpCode::OP_POP, lastLine); // pop true
                     
                     int endJump = chunk()->emitJump(OpCode::OP_JUMP, lastLine);
                     

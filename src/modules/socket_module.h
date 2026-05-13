@@ -73,15 +73,18 @@ namespace jc {
         ~SocketWrapper() { if (sock != INVALID_SOCKET) closesocket(sock); }
     };
 
-    inline std::shared_ptr<ClassDefinition> getSocketClass() {
-        static auto cls = std::make_shared<ClassDefinition>();
-        cls->name = "NativeSocket";
+    inline ObjClass* getSocketClass() {
+        static ObjClass* cls = nullptr;
+        if (!cls) {
+            cls = GcHeap::get().allocate<ObjClass>();
+            cls->name = "NativeSocket";
+        }
         return cls;
     }
 
     inline std::shared_ptr<SocketWrapper> getSock(const Value& v, const std::string& fn) {
-        if (std::holds_alternative<std::shared_ptr<Instance>>(v.data)) {
-            auto inst = std::get<std::shared_ptr<Instance>>(v.data);
+        if (v.isInstance()) {
+            auto inst = v.asInstance();
             if (inst->nativeData.has_value() && inst->nativeData.type() == typeid(std::shared_ptr<SocketWrapper>)) {
                 return std::any_cast<std::shared_ptr<SocketWrapper>>(inst->nativeData);
             }
@@ -94,7 +97,7 @@ namespace jc {
         jc::ModuleReg R(env, builtins, arity);
 
         R.reg("net_tcp_connect", { 2 }, [](const std::vector<Value>& args) -> Value {
-            std::string host = std::get<std::string>(args[0].data);
+            std::string host = args[0].asString();
             std::string port = std::to_string(static_cast<int>(std::round(args[1].asDouble())));
 
             struct addrinfo hints = { 0 }, * res = nullptr;
@@ -118,7 +121,7 @@ namespace jc {
             }
             freeaddrinfo(res);
 
-            auto inst = std::make_shared<Instance>();
+            auto inst = GcHeap::get().allocate<ObjInstance>();
             inst->classDef = getSocketClass();
             inst->nativeData = std::make_any<std::shared_ptr<SocketWrapper>>(std::make_shared<SocketWrapper>(s));
             return Value(inst);
@@ -126,7 +129,7 @@ namespace jc {
 
         R.reg("net_send", { 2 }, [](const std::vector<Value>& args) -> Value {
             auto wrapper = getSock(args[0], "net_send");
-            std::string data = std::get<std::string>(args[1].data);
+            std::string data = args[1].asString();
             if (send(wrapper->sock, data.c_str(), (int)data.size(), 0) == SOCKET_ERROR) {
                 throw std::runtime_error("Network Error: Connection lost during send.");
             }
@@ -160,7 +163,7 @@ namespace jc {
         // 接待前台: 监听本机端口 (Server Bind & Listen)
         // ==========================================================
         R.reg("net_tcp_server", { 2 }, [](const std::vector<Value>& args) -> Value {
-            std::string host = std::get<std::string>(args[0].data);
+            std::string host = args[0].asString();
             std::string port = std::to_string(static_cast<int>(std::round(args[1].asDouble())));
 
             struct addrinfo hints = { 0 }, * res = nullptr;
@@ -200,7 +203,7 @@ namespace jc {
                 throw std::runtime_error("Network Error: Listen failed.");
             }
 
-            auto inst = std::make_shared<Instance>();
+            auto inst = GcHeap::get().allocate<ObjInstance>();
             inst->classDef = getSocketClass();
             inst->nativeData = std::make_any<std::shared_ptr<SocketWrapper>>(std::make_shared<SocketWrapper>(s));
             return Value(inst);
@@ -219,7 +222,7 @@ namespace jc {
                 throw std::runtime_error("Network Error: Accept failed.");
             }
 
-            auto inst = std::make_shared<Instance>();
+            auto inst = GcHeap::get().allocate<ObjInstance>();
             inst->classDef = getSocketClass();
             inst->nativeData = std::make_any<std::shared_ptr<SocketWrapper>>(std::make_shared<SocketWrapper>(client_sock));
             return Value(inst);

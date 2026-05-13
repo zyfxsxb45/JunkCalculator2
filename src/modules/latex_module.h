@@ -20,17 +20,18 @@ namespace jc_latex {
     // 1. [序列化引擎] Object -> LaTeX
     // ====================================================================
     std::string valueToLatex(const Value& val) {
-        if (std::holds_alternative<double>(val.data)) {
-            std::ostringstream oss; oss << std::defaultfloat << std::setprecision(6) << std::get<double>(val.data);
+        if (val.isDouble()) {
+            std::ostringstream oss; oss << std::defaultfloat << std::setprecision(6) << val.asDoubleRaw();
             return oss.str();
         }
-        else if (std::holds_alternative<BigInt>(val.data)) return std::get<BigInt>(val.data).toString();
-        else if (std::holds_alternative<Fraction>(val.data)) {
-            auto frac = std::get<Fraction>(val.data);
+        else if (val.isInt32()) return std::to_string(val.asInt32());
+        else if (val.isObjType(ObjType::BIGINT)) return static_cast<ObjBigInt*>(val.asObj())->num.toString();
+        else if (val.isObjType(ObjType::FRACTION)) {
+            auto frac = static_cast<ObjFraction*>(val.asObj())->frac;
             return "\\frac{" + frac.getNum().toString() + "}{" + frac.getDen().toString() + "}";
         }
-        else if (std::holds_alternative<Complex>(val.data)) {
-            auto c = std::get<Complex>(val.data);
+        else if (val.isObjType(ObjType::COMPLEX)) {
+            auto c = static_cast<ObjComplex*>(val.asObj())->comp;
             std::ostringstream oss; oss << std::defaultfloat << std::setprecision(4);
             if (c.real == 0.0 && c.imag == 0.0) return "0";
             if (c.real != 0.0) oss << c.real;
@@ -42,8 +43,8 @@ namespace jc_latex {
             }
             return oss.str();
         }
-        else if (std::holds_alternative<RealMatrix>(val.data)) {
-            const auto& m = std::get<RealMatrix>(val.data);
+        else if (val.isObjType(ObjType::REAL_MATRIX)) {
+            const auto& m = static_cast<ObjRealMatrix*>(val.asObj())->mat;
             std::ostringstream oss; oss << "\\begin{pmatrix}\n";
             for (int i = 0; i < m.getRows(); ++i) {
                 for (int j = 0; j < m.getCols(); ++j) {
@@ -55,11 +56,11 @@ namespace jc_latex {
             oss << "\\end{pmatrix}";
             return oss.str();
         }
-        else if (std::holds_alternative<List>(val.data)) {
-            const auto& l = std::get<List>(val.data);
+        else if (val.isObjType(ObjType::LIST)) {
+            const auto& l = static_cast<ObjList*>(val.asObj())->vec;
             std::string s = "\\left[ ";
             for (size_t i = 0; i < l.size(); ++i) {
-                s += valueToLatex(std::any_cast<Value>(l.raw()[i]));
+                s += valueToLatex(l[i]);
                 if (i < l.size() - 1) s += ", ";
             }
             return s + " \\right]";
@@ -290,7 +291,7 @@ JC2_MODULE(latex) {
         [](const std::string& name, int argCount, NativeCallable fn) -> Value {
             std::vector<std::string> pNames(argCount, "_");
             std::vector<bool> pRefs(argCount, false);
-            auto cls = std::make_shared<FunctionClosure>(pNames, pRefs, name, nullptr);
+            auto cls = GcHeap::get().allocate<ObjClosure>(pNames, pRefs, name, nullptr);
             cls->defaultValues.resize(argCount, Value::none());
             cls->nativeFn = std::make_any<NativeCallable>(std::move(fn));
             return Value(cls);
@@ -303,10 +304,10 @@ JC2_MODULE(latex) {
         }));
 
     R.set("eval_latex", (*makeNativeFn)("eval_latex", 1, [](const std::vector<Value>& args) -> Value {
-        if (args.empty() || !std::holds_alternative<std::string>(args[0].data))
+        if (args.empty() || !args[0].isString())
             throw std::runtime_error("eval_latex() requires a LaTeX string.");
         LatexParser parser;
-        auto ast = parser.compile(std::get<std::string>(args[0].data));
+        auto ast = parser.compile(args[0].asString());
 
         // ★ 核心收尾：C++ 的 complex 落回到 JC2 的类型系统中
         cplx res = ast->eval({});
@@ -315,21 +316,20 @@ JC2_MODULE(latex) {
         }));
 
     R.set("compile_latex", (*makeNativeFn)("compile_latex", 2, [makeNativeFn](const std::vector<Value>& args) -> Value {
-        if (args.size() < 2 || !std::holds_alternative<std::string>(args[0].data))
+        if (args.size() < 2 || !args[0].isString())
             throw std::runtime_error("compile_latex(string, vars): Requires formula and variable names.");
 
-        std::string latex_str = std::get<std::string>(args[0].data);
+        std::string latex_str = args[0].asString();
         std::vector<std::string> varNames;
 
-        if (std::holds_alternative<List>(args[1].data)) {
-            for (const auto& anyVar : std::get<List>(args[1].data).raw()) {
-                Value v = std::any_cast<Value>(anyVar);
-                if (!std::holds_alternative<std::string>(v.data)) throw std::runtime_error("Variable names must be strings.");
-                varNames.push_back(std::get<std::string>(v.data));
+        if (args[1].isObjType(ObjType::LIST)) {
+            for (const auto& v : static_cast<ObjList*>(args[1].asObj())->vec) {
+                if (!v.isString()) throw std::runtime_error("Variable names must be strings.");
+                varNames.push_back(v.asString());
             }
         }
-        else if (std::holds_alternative<StringMatrix>(args[1].data)) {
-            for (const auto& s : std::get<StringMatrix>(args[1].data).rawData()) {
+        else if (args[1].isObjType(ObjType::STRING_MATRIX)) {
+            for (const auto& s : static_cast<ObjStringMatrix*>(args[1].asObj())->mat.rawData()) {
                 varNames.push_back(s);
             }
         }
@@ -345,8 +345,8 @@ JC2_MODULE(latex) {
             // ★ 新的参数拆包逻辑：兼容用户传入 JC2_Complex 或者 JC2_Double
             std::unordered_map<std::string, cplx> env;
             for (size_t i = 0; i < varNames.size(); ++i) {
-                if (std::holds_alternative<Complex>(call_args[i].data)) {
-                    auto c = std::get<Complex>(call_args[i].data);
+                if (call_args[i].isObjType(ObjType::COMPLEX)) {
+                    auto c = static_cast<ObjComplex*>(call_args[i].asObj())->comp;
                     env[varNames[i]] = cplx(c.real, c.imag);
                 }
                 else {

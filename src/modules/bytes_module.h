@@ -13,15 +13,18 @@
 namespace jc {
 
     // 生成或获取统一的 Bytes 类模板
-    inline std::shared_ptr<ClassDefinition> getBytesClass() {
-        static auto cls = std::make_shared<ClassDefinition>();
-        cls->name = "Bytes";
+    inline ObjClass* getBytesClass() {
+        static ObjClass* cls = nullptr;
+        if (!cls) {
+            cls = GcHeap::get().allocate<ObjClass>();
+            cls->name = "Bytes";
+        }
         return cls;
     }
 
     // 将 std::vector<uint8_t> 包装给 JC2 对象
     inline Value makeBytesInstance(std::vector<uint8_t> data) {
-        auto inst = std::make_shared<Instance>();
+        auto inst = GcHeap::get().allocate<ObjInstance>();
         inst->classDef = getBytesClass();
         inst->nativeData = std::make_any<std::shared_ptr<std::vector<uint8_t>>>(
             std::make_shared<std::vector<uint8_t>>(std::move(data)));
@@ -30,8 +33,8 @@ namespace jc {
 
     // 从 JC2 对象中解包到底层指针
     inline std::shared_ptr<std::vector<uint8_t>> getBuf(const Value& v, const std::string& fn) {
-        if (std::holds_alternative<std::shared_ptr<Instance>>(v.data)) {
-            auto inst = std::get<std::shared_ptr<Instance>>(v.data);
+        if (v.isInstance()) {
+            auto inst = v.asInstance();
             if (inst->nativeData.has_value() && inst->nativeData.type() == typeid(std::shared_ptr<std::vector<uint8_t>>)) {
                 return std::any_cast<std::shared_ptr<std::vector<uint8_t>>>(inst->nativeData);
             }
@@ -65,8 +68,8 @@ namespace jc {
 
         // 3. 读文件到 Buffer: readFileBytes(path)
         R.reg("readFileBytes", { 1 }, [](const std::vector<Value>& args) -> Value {
-            if (!std::holds_alternative<std::string>(args[0].data)) throw std::runtime_error("Type Error: expects string path.");
-            std::string path = helpers::safeResolvePath(std::get<std::string>(args[0].data));
+            if (!args[0].isString()) throw std::runtime_error("Type Error: expects string path.");
+            std::string path = helpers::safeResolvePath(args[0].asString());
             std::ifstream f(path, std::ios::binary | std::ios::ate);
             if (!f) throw std::runtime_error("IO Error: Cannot open file '" + path + "'.");
             std::streamsize size = f.tellg();
@@ -80,8 +83,8 @@ namespace jc {
 
         // 4. 写 Buffer 到文件: writeFileBytes(path, buffer)
         R.reg("writeFileBytes", { 2 }, [](const std::vector<Value>& args) -> Value {
-            if (!std::holds_alternative<std::string>(args[0].data)) throw std::runtime_error("Type Error: expects string path.");
-            std::string path = helpers::safeResolvePath(std::get<std::string>(args[0].data));
+            if (!args[0].isString()) throw std::runtime_error("Type Error: expects string path.");
+            std::string path = helpers::safeResolvePath(args[0].asString());
             auto buf = getBuf(args[1], "writeFileBytes");
             std::ofstream f(path, std::ios::binary);
             if (!f) throw std::runtime_error("IO Error: Cannot write to file '" + path + "'.");
@@ -94,8 +97,8 @@ namespace jc {
         R.reg("b_set", { 4 }, [](const std::vector<Value>& args) -> Value {
             auto buf = getBuf(args[0], "b_set");
             size_t offset = static_cast<size_t>(std::max(0.0, args[1].asDouble()));
-            if (!std::holds_alternative<std::string>(args[3].data)) throw std::runtime_error("Type Error: type must be string.");
-            std::string type = std::get<std::string>(args[3].data);
+            if (!args[3].isString()) throw std::runtime_error("Type Error: type must be string.");
+            std::string type = args[3].asString();
 
             auto writeMem = [&](const void* data, size_t size) {
                 if (offset + size > buf->size()) throw std::runtime_error("Buffer Error: Write out of bounds.");
@@ -103,7 +106,7 @@ namespace jc {
                 };
 
             if (type == "str") {
-                std::string s = std::holds_alternative<std::string>(args[2].data) ? std::get<std::string>(args[2].data) : args[2].toString();
+                std::string s = args[2].isString() ? args[2].asString() : args[2].toString();
                 writeMem(s.data(), s.size());
             }
             else {
@@ -125,7 +128,7 @@ namespace jc {
             auto buf = getBuf(args[0], "b_write_arr");
             size_t offset = static_cast<size_t>(std::max(0.0, args[1].asDouble()));
             auto arr = helpers::toVecHelper(args[2], "b_write_arr"); // C++ 层瞬间提取 15 万个浮点数
-            std::string type = std::get<std::string>(args[3].data);
+            std::string type = args[3].asString();
             if (type == "i16") {
                 if (offset + arr.size() * 2 > buf->size()) throw std::runtime_error("Buffer out of bounds.");
                 int16_t* ptr = reinterpret_cast<int16_t*>(buf->data() + offset);
@@ -149,8 +152,8 @@ namespace jc {
         R.reg("b_get", { 3, 4 }, [](const std::vector<Value>& args) -> Value {
             auto buf = getBuf(args[0], "b_get");
             size_t offset = static_cast<size_t>(std::max(0.0, args[1].asDouble()));
-            if (!std::holds_alternative<std::string>(args[2].data)) throw std::runtime_error("Type Error: type must be string.");
-            std::string type = std::get<std::string>(args[2].data);
+            if (!args[2].isString()) throw std::runtime_error("Type Error: type must be string.");
+            std::string type = args[2].asString();
 
             auto readMem = [&](void* data, size_t size) {
                 if (offset + size > buf->size()) throw std::runtime_error("Buffer Error: Read out of bounds at offset " + std::to_string(offset));

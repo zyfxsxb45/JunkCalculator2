@@ -88,14 +88,14 @@ namespace jc {
     }
 
     void VM::triggerParamTypeError(const Value& val, uint16_t typeIdx, uint16_t nameIdx) {
-        const std::string& expectedType = std::get<std::string>(currentChunk().constants[typeIdx].data);
-        const std::string& paramName = std::get<std::string>(currentChunk().constants[nameIdx].data);
+        const std::string& expectedType = currentChunk().constants[typeIdx].asString();
+        const std::string& paramName = currentChunk().constants[nameIdx].asString();
         throw std::runtime_error("TypeError: Parameter '" + paramName +
             "' expected type '" + expectedType +
             "', got '" + getTypeName(val) + "'.");
     }
     void VM::triggerReturnTypeError(const Value& val, uint16_t typeIdx) {
-        const std::string& expectedType = std::get<std::string>(currentChunk().constants[typeIdx].data);
+        const std::string& expectedType = currentChunk().constants[typeIdx].asString();
         throw std::runtime_error("TypeError: Function '" + frame().function->name +
             "' expected to return '" + expectedType +
             "', but returned '" + getTypeName(val) + "'.");
@@ -105,38 +105,32 @@ namespace jc {
         if (typeStr == "any" || typeStr.empty()) return true;
 
         if (typeStr == "int") {
-            if (std::holds_alternative<BigInt>(val.data)) return true;
-            if (std::holds_alternative<double>(val.data)) {
-                double d = std::get<double>(val.data);
+            if (val.isObjType(ObjType::BIGINT)) return true;
+            if (val.isInt32()) return true;
+            if (val.isDouble()) {
+                double d = val.asDoubleRaw();
                 return std::round(d) == d;
             }
             return false;
         }
         if (typeStr == "double" || typeStr == "float" || typeStr == "real" || typeStr == "number")
-            return std::holds_alternative<double>(val.data);
-        if (typeStr == "string") return std::holds_alternative<std::string>(val.data);
-        if (typeStr == "matrix") return std::holds_alternative<RealMatrix>(val.data) || std::holds_alternative<ComplexMatrix>(val.data) || std::holds_alternative<StringMatrix>(val.data);
-        if (typeStr == "list") return std::holds_alternative<List>(val.data);
-        if (typeStr == "dict") return std::holds_alternative<Dict>(val.data);
-        if (typeStr == "set") return std::holds_alternative<Set>(val.data);
-        if (typeStr == "bool") {
-            if (std::holds_alternative<double>(val.data)) {
-                double d = std::get<double>(val.data);
-                return d == 0.0 || d == 1.0;
-            }
-            return false;
-        }
+            return val.isNumber();
+        if (typeStr == "string") return val.isString();
+        if (typeStr == "matrix") return val.isObjType(ObjType::REAL_MATRIX) || val.isObjType(ObjType::COMPLEX_MATRIX) || val.isObjType(ObjType::STRING_MATRIX);
+        if (typeStr == "list") return val.isObjType(ObjType::LIST);
+        if (typeStr == "dict") return val.isObjType(ObjType::DICT);
+        if (typeStr == "set") return val.isObjType(ObjType::SET);
+        if (typeStr == "bool") return val.isBool();
         if (typeStr == "func" || typeStr == "function")
-            return std::holds_alternative<std::shared_ptr<FunctionClosure>>(val.data) ||
-            std::holds_alternative<std::string>(val.data);
-        if (typeStr == "complex") return std::holds_alternative<Complex>(val.data);
-        if (typeStr == "fraction") return std::holds_alternative<Fraction>(val.data);
-        if (typeStr == "class") return std::holds_alternative<std::shared_ptr<ClassDefinition>>(val.data);
-        if (typeStr == "instance") return std::holds_alternative<std::shared_ptr<Instance>>(val.data);
-        if (typeStr == "symbolic"|| typeStr == "symbol" || typeStr == "expr") return std::holds_alternative<SymExpr>(val.data);
+            return val.isFunctionClosure() || val.isString();
+        if (typeStr == "complex") return val.isComplex();
+        if (typeStr == "fraction") return val.isObjType(ObjType::FRACTION);
+        if (typeStr == "class") return val.isClass();
+        if (typeStr == "instance") return val.isInstance();
+        if (typeStr == "symbolic"|| typeStr == "symbol" || typeStr == "expr") return val.isSymbolic();
 
-        if (std::holds_alternative<std::shared_ptr<Instance>>(val.data)) {
-            auto inst = std::get<std::shared_ptr<Instance>>(val.data);
+        if (val.isInstance()) {
+            auto inst = val.asInstance();
             auto c = inst->classDef;
             while (c) {
                 if (c->name == typeStr) return true;
@@ -146,12 +140,12 @@ namespace jc {
         return false;
     }
 
-    static std::shared_ptr<FunctionClosure> findDunder(
+    static ObjClosure* findDunder(
         const Value& val, const std::string& name)
     {
-        if (!std::holds_alternative<std::shared_ptr<Instance>>(val.data))
+        if (!val.isInstance())
             return nullptr;
-        auto inst = std::get<std::shared_ptr<Instance>>(val.data);
+        auto inst = val.asInstance();
         auto c = inst->classDef;
         while (c) {
             auto it = c->methods.find(name);
@@ -164,7 +158,7 @@ namespace jc {
     Value VM::callDunder(const Value& obj, const std::string& name,
         const std::vector<Value>& args)
     {
-        auto inst = std::get<std::shared_ptr<Instance>>(obj.data);
+        auto inst = obj.asInstance();
         auto method = findDunder(obj, name);
         if (!method) throw std::runtime_error("VM Error: No callable dunder '" + name + "'.");
 
@@ -237,9 +231,9 @@ namespace jc {
         globals["I"] = Value(Complex(0.0, 1.0));
 
         registerBuiltin("__vm_delete__", [this](const std::vector<Value>& args) -> Value {
-            if (args.size() != 1 || !std::holds_alternative<std::string>(args[0].data))
+            if (args.size() != 1 || !args[0].isString())
                 throw std::runtime_error("VM Error: __vm_delete__ expects a string variable name.");
-            const std::string& name = std::get<std::string>(args[0].data);
+            const std::string& name = args[0].asString();
 
             // ★ 允许删除所有变量（包括 const 和系统常量）
             // 用户可通过 resetConst() 或 pi() 等函数恢复
@@ -298,7 +292,7 @@ namespace jc {
                 throw std::runtime_error("VM Error: '" + fn->name + "' requires at least " + std::to_string(fn->arity) + " arguments.");
             }
 
-            List restList;
+            ObjList* restList = GcHeap::get().allocate<ObjList>();
             if (static_cast<int>(argc) > fixedMax) {
                 int restCount = static_cast<int>(argc) - fixedMax;
                 std::vector<Value> tempValues(restCount);
@@ -306,7 +300,7 @@ namespace jc {
                     tempValues[restCount - 1 - j] = pop();
                 }
                 for (int j = 0; j < restCount; j++) {
-                    restList.push_back(tempValues[j]);
+                    restList->vec.push_back(tempValues[j]);
                 }
                 argc = static_cast<uint8_t>(fixedMax);
             }
@@ -454,8 +448,8 @@ namespace jc {
                     break;
                 }
                 case OpCode::OP_NONE:  push(Value::none()); break;
-                case OpCode::OP_TRUE:  push(Value(1.0)); break;
-                case OpCode::OP_FALSE: push(Value(0.0)); break;
+                case OpCode::OP_TRUE:  push(Value(true)); break;
+                case OpCode::OP_FALSE: push(Value(false)); break;
                 case OpCode::OP_POP:   pop(); break;
 
                 case OpCode::OP_GET_SELF: {
@@ -525,7 +519,7 @@ namespace jc {
                     push(-a);
                     break;
                 }
-                case OpCode::OP_NOT: { push(Value(isTruthy(pop()) ? 0.0 : 1.0)); break; }
+                case OpCode::OP_NOT: { push(Value(!pop().truthy())); break; }
 
                 case OpCode::OP_BIT_AND: {
                     Value b = pop(), a = pop();
@@ -545,80 +539,80 @@ namespace jc {
                 case OpCode::OP_EQUAL: {
                     Value b = pop(), a = pop();
                     auto d = findDunder(a, "__eq__");
-                    if (d) { push(Value(isTruthy(callDunder(a, "__eq__", { b })) ? 1.0 : 0.0)); break; }
-                    push(Value(Value::equals(a, b) ? 1.0 : 0.0));
+                    if (d) { push(Value(callDunder(a, "__eq__", { b }).truthy())); break; }
+                    push(Value(Value::equals(a, b)));
                     break;
                 }
                 case OpCode::OP_NOT_EQUAL: {
                     Value b = pop(), a = pop();
                     auto d = findDunder(a, "__neq__");
-                    if (d) { push(Value(isTruthy(callDunder(a, "__neq__", { b })) ? 1.0 : 0.0)); break; }
+                    if (d) { push(Value(callDunder(a, "__neq__", { b }).truthy())); break; }
                     d = findDunder(a, "__eq__");
-                    if (d) { push(Value(isTruthy(callDunder(a, "__eq__", { b })) ? 0.0 : 1.0)); break; }
-                    push(Value(Value::equals(a, b) ? 0.0 : 1.0));
+                    if (d) { push(Value(!callDunder(a, "__eq__", { b }).truthy())); break; }
+                    push(Value(!Value::equals(a, b)));
                     break;
                 }
                 case OpCode::OP_LESS: {
                     Value b = pop(), a = pop();
                     auto d = findDunder(a, "__lt__");
-                    if (d) { push(Value(isTruthy(callDunder(a, "__lt__", { b })) ? 1.0 : 0.0)); break; }
-                    if (std::holds_alternative<BigInt>(a.data) && std::holds_alternative<BigInt>(b.data))
-                        push(Value(std::get<BigInt>(a.data) < std::get<BigInt>(b.data) ? 1.0 : 0.0));
-                    else if (std::holds_alternative<Fraction>(a.data) && std::holds_alternative<Fraction>(b.data))
-                        push(Value(std::get<Fraction>(a.data) < std::get<Fraction>(b.data) ? 1.0 : 0.0));
-                    else if (std::holds_alternative<std::string>(a.data) && std::holds_alternative<std::string>(b.data))
-                        push(Value(std::get<std::string>(a.data) < std::get<std::string>(b.data) ? 1.0 : 0.0));
+                    if (d) { push(Value(callDunder(a, "__lt__", { b }).truthy())); break; }
+                    if ((a.isBigInt() || a.isInt32()) && (b.isBigInt() || b.isInt32()))
+                        push(Value(a.asBigInt() < b.asBigInt()));
+                    else if (a.isObjType(ObjType::FRACTION) && b.isObjType(ObjType::FRACTION))
+                        push(Value(static_cast<ObjFraction*>(a.asObj())->frac < static_cast<ObjFraction*>(b.asObj())->frac));
+                    else if (a.isString() && b.isString())
+                        push(Value(a.asString() < b.asString()));
                     else {
                         double da = a.asDouble(), db = b.asDouble();
-                        push(Value((da < db) ? 1.0 : 0.0));
+                        push(Value(da < db));
                     }
                     break;
                 }
                 case OpCode::OP_LESS_EQUAL: {
                     Value b = pop(), a = pop();
                     auto d = findDunder(a, "__le__");
-                    if (d) { push(Value(isTruthy(callDunder(a, "__le__", { b })) ? 1.0 : 0.0)); break; }
-                    if (std::holds_alternative<BigInt>(a.data) && std::holds_alternative<BigInt>(b.data))
-                        push(Value(std::get<BigInt>(a.data) <= std::get<BigInt>(b.data) ? 1.0 : 0.0));
-                    else if (std::holds_alternative<Fraction>(a.data) && std::holds_alternative<Fraction>(b.data))
-                        push(Value(std::get<Fraction>(a.data) <= std::get<Fraction>(b.data) ? 1.0 : 0.0));
-                    else if (std::holds_alternative<std::string>(a.data) && std::holds_alternative<std::string>(b.data))
-                        push(Value(std::get<std::string>(a.data) <= std::get<std::string>(b.data) ? 1.0 : 0.0));
+                    if (d) { push(Value(callDunder(a, "__le__", { b }).truthy())); break; }
+                    if ((a.isBigInt() || a.isInt32()) && (b.isBigInt() || b.isInt32()))
+                        push(Value(a.asBigInt() <= b.asBigInt()));
+                    else if (a.isObjType(ObjType::FRACTION) && b.isObjType(ObjType::FRACTION))
+                        push(Value(static_cast<ObjFraction*>(a.asObj())->frac <= static_cast<ObjFraction*>(b.asObj())->frac));
+                    else if (a.isString() && b.isString())
+                        push(Value(a.asString() <= b.asString()));
                     else {
                         double da = a.asDouble(), db = b.asDouble();
-                        push(Value((da <= db) ? 1.0 : 0.0));
+                        push(Value(da <= db));
                     }
                     break;
                 }
                 case OpCode::OP_GREATER: {
                     Value b = pop(), a = pop();
                     auto d = findDunder(a, "__gt__");
-                    if (d) { push(Value(isTruthy(callDunder(a, "__gt__", { b })) ? 1.0 : 0.0)); break; }
-                    if (std::holds_alternative<BigInt>(a.data) && std::holds_alternative<BigInt>(b.data))
-                        push(Value(std::get<BigInt>(a.data) > std::get<BigInt>(b.data) ? 1.0 : 0.0));
-                    else if (std::holds_alternative<Fraction>(a.data) && std::holds_alternative<Fraction>(b.data))
-                        push(Value(std::get<Fraction>(a.data) > std::get<Fraction>(b.data) ? 1.0 : 0.0));
-                    else if (std::holds_alternative<std::string>(a.data) && std::holds_alternative<std::string>(b.data))
-                        push(Value(std::get<std::string>(a.data) > std::get<std::string>(b.data) ? 1.0 : 0.0));
+                    if (d) { push(Value(callDunder(a, "__gt__", { b }).truthy())); break; }
+                    if ((a.isBigInt() || a.isInt32()) && (b.isBigInt() || b.isInt32()))
+                        push(Value(a.asBigInt() > b.asBigInt()));
+                    else if (a.isObjType(ObjType::FRACTION) && b.isObjType(ObjType::FRACTION))
+                        push(Value(static_cast<ObjFraction*>(a.asObj())->frac > static_cast<ObjFraction*>(b.asObj())->frac));
+                    else if (a.isString() && b.isString())
+                        push(Value(a.asString() > b.asString()));
                     else {
                         double da = a.asDouble(), db = b.asDouble();
-                        push(Value((da > db) ? 1.0 : 0.0));
+                        push(Value(da > db));
                     }
                     break;
                 }
                 case OpCode::OP_GREATER_EQUAL: {
                     Value b = pop(), a = pop();
                     auto d = findDunder(a, "__ge__");
-                    if (d) { push(Value(isTruthy(callDunder(a, "__ge__", { b })) ? 1.0 : 0.0)); break; }
-                    if (std::holds_alternative<BigInt>(a.data) && std::holds_alternative<BigInt>(b.data))
-                        push(Value(std::get<BigInt>(a.data) >= std::get<BigInt>(b.data) ? 1.0 : 0.0));
-                    else if (std::holds_alternative<Fraction>(a.data) && std::holds_alternative<Fraction>(b.data))
-                        push(Value(std::get<Fraction>(a.data) >= std::get<Fraction>(b.data) ? 1.0 : 0.0));
-                    else if (std::holds_alternative<std::string>(a.data) && std::holds_alternative<std::string>(b.data))
-                        push(Value(std::get<std::string>(a.data) >= std::get<std::string>(b.data) ? 1.0 : 0.0));
+                    if (d) { push(Value(callDunder(a, "__ge__", { b }).truthy())); break; }
+                    if ((a.isBigInt() || a.isInt32()) && (b.isBigInt() || b.isInt32()))
+                        push(Value(a.asBigInt() >= b.asBigInt()));
+                    else if (a.isObjType(ObjType::FRACTION) && b.isObjType(ObjType::FRACTION))
+                        push(Value(static_cast<ObjFraction*>(a.asObj())->frac >= static_cast<ObjFraction*>(b.asObj())->frac));
+                    else if (a.isString() && b.isString())
+                        push(Value(a.asString() >= b.asString()));
                     else {
                         double da = a.asDouble(), db = b.asDouble();
-                        push(Value((da >= db) ? 1.0 : 0.0));
+                        push(Value(da >= db));
                     }
                     break;
                 }
@@ -639,7 +633,7 @@ namespace jc {
 
                 case OpCode::OP_GET_GLOBAL: {
                     uint16_t idx = readShort();
-                    std::string name = std::get<std::string>(currentChunk().constants[idx].data);
+                    std::string name = currentChunk().constants[idx].asString();
 
                     // ★ 虚拟机级别拦截：遇到 '__class__'，直接去它该在的物理寄存器里拿！
                     if (name == "__class__") {
@@ -653,7 +647,7 @@ namespace jc {
                         push(it->second);
                     }
                     else if (nativeBuiltins.count(name)) {
-                        auto closure = std::make_shared<FunctionClosure>(
+                        auto closure = GcHeap::get().allocate<ObjClosure>(
                             std::vector<std::string>{},
                             std::vector<bool>{},
                             name,
@@ -686,7 +680,7 @@ namespace jc {
                 case OpCode::OP_SET_GLOBAL:
                 case OpCode::OP_SET_GLOBAL_REF: {
                     uint16_t idx = readShort();
-                    std::string name = std::get<std::string>(currentChunk().constants[idx].data);
+                    std::string name = currentChunk().constants[idx].asString();
 
                     // ★ 关键字保护：绝不许改写上下文关键字 !
                     if (name == "__class__")
@@ -703,11 +697,11 @@ namespace jc {
 
                     // ★ 检查是否与内建函数 arity 冲突
                     Value& val = peek(0);
-                    if (std::holds_alternative<std::shared_ptr<FunctionClosure>>(val.data)) {
+                    if (val.isFunctionClosure()) {
                         auto nit = nativeBuiltins.find(name);
                         if (nit != nativeBuiltins.end()) {
                             auto ait = builtinArity.find(name);
-                            auto closure = std::get<std::shared_ptr<FunctionClosure>>(val.data);
+                            auto closure = val.asFunction();
 
                             if (ait == builtinArity.end() || ait->second.empty()) {
                                 // 原生函数接受任意参数数量 → 完全禁止同名函数
@@ -733,7 +727,7 @@ namespace jc {
                 }
                 case OpCode::OP_DEFINE_GLOBAL: {
                     uint16_t idx = readShort();
-                    std::string name = std::get<std::string>(currentChunk().constants[idx].data);
+                    std::string name = currentChunk().constants[idx].asString();
                     globals[name] = peek(0);
                     constGlobals.insert(name);
                     break;
@@ -757,7 +751,7 @@ namespace jc {
                 }
                 case OpCode::OP_JUMP_IF_FALSE: {
                     uint16_t offset = readShort();
-                    if (!isTruthy(peek(0))) frame().ip += offset;
+                    if (!peek(0).truthy()) frame().ip += offset;
                     break;
                 }
                 case OpCode::OP_LOOP: {
@@ -830,7 +824,7 @@ namespace jc {
                         }
                     }
 
-                    auto closure = std::make_shared<FunctionClosure>(
+                    auto closure = GcHeap::get().allocate<ObjClosure>(
                         std::vector<std::string>{},
                         std::vector<bool>{},
                         fn->name,
@@ -942,26 +936,26 @@ namespace jc {
 
                 case OpCode::OP_GET_SUPER: {
                     uint16_t nameIdx = readShort();
-                    std::string field = std::get<std::string>(currentChunk().constants[nameIdx].data);
+                    std::string field = currentChunk().constants[nameIdx].asString();
 
                     Value selfVal = pop();
 
-                    if (!std::holds_alternative<std::shared_ptr<Instance>>(selfVal.data))
+                    if (!selfVal.isInstance())
                         throw std::runtime_error("VM Error: 'super' requires an instance context.");
 
-                    auto inst = std::get<std::shared_ptr<Instance>>(selfVal.data);
+                    auto inst = selfVal.asInstance();
 
                     Value classVal = frame().classContext;
-                    if (!std::holds_alternative<std::shared_ptr<ClassDefinition>>(classVal.data))
+                    if (!classVal.isClass())
                         throw std::runtime_error("VM Error: 'super' requires class context.");
 
-                    auto currentClass = std::get<std::shared_ptr<ClassDefinition>>(classVal.data);
+                    auto currentClass = static_cast<ObjClass*>(classVal.asObj());
                     auto parentClass = currentClass->parent;
                     if (!parentClass)
                         throw std::runtime_error("VM Error: No parent class.");
 
-                    std::shared_ptr<FunctionClosure> rawMethod;
-                    std::shared_ptr<ClassDefinition> ownerClass;
+                    ObjClosure* rawMethod = nullptr;
+                    ObjClass* ownerClass = nullptr;
                     auto c = parentClass;
                     while (c) {
                         auto it = c->methods.find(field);
@@ -976,7 +970,7 @@ namespace jc {
                         throw std::runtime_error("VM Error: Parent class has no method '" + field + "'.");
 
                     // ★ FIX: 像 OP_GET_PROPERTY 一样，打包一个携带严格上下文的绑定方法（Bound Method）！
-                    auto bound = std::make_shared<FunctionClosure>(
+                    auto bound = GcHeap::get().allocate<ObjClosure>(
                         std::vector<std::string>{}, std::vector<bool>{},
                         field, nullptr
                     );
@@ -1053,8 +1047,7 @@ namespace jc {
 
                         switch (sourceType) {
                         case 1: {
-                            std::string name = std::get<std::string>(
-                                currentChunk().constants[sourceRef].data);
+                            std::string name = currentChunk().constants[sourceRef].asString();
                             globals[name] = modifiedVal;
                             break;
                         }
@@ -1086,7 +1079,7 @@ namespace jc {
 
                 case OpCode::OP_STRINGIFY: {
                     Value v = pop();
-                    if (std::holds_alternative<std::string>(v.data)) {
+                    if (v.isString()) {
                         push(v);
                     }
                     else {
@@ -1109,8 +1102,8 @@ namespace jc {
                     std::vector<std::string> parts(count);
                     for (int j = count - 1; j >= 0; --j) {
                         Value v = pop();
-                        if (std::holds_alternative<std::string>(v.data))
-                            parts[j] = std::get<std::string>(v.data);
+                        if (v.isString())
+                            parts[j] = v.asString();
                         else {
                             std::ostringstream oss; oss << v;
                             parts[j] = oss.str();
@@ -1132,24 +1125,24 @@ namespace jc {
                     Value& rhs = peek(0);   // ★ 提取它的引用！不要剥夺它的栈地位！
 
                     std::vector<Value> elements;
-                    if (std::holds_alternative<RealMatrix>(rhs.data)) {
-                        for (double d : std::get<RealMatrix>(rhs.data).rawData())
+                    if (rhs.isObjType(ObjType::REAL_MATRIX)) {
+                        for (double d : static_cast<ObjRealMatrix*>(rhs.asObj())->mat.rawData())
                             elements.push_back(Value(d));
                     }
-                    else if (std::holds_alternative<ComplexMatrix>(rhs.data)) {
-                        for (const auto& c : std::get<ComplexMatrix>(rhs.data).rawData())
+                    else if (rhs.isObjType(ObjType::COMPLEX_MATRIX)) {
+                        for (const auto& c : static_cast<ObjComplexMatrix*>(rhs.asObj())->mat.rawData())
                             elements.push_back(Value(c));
                     }
-                    else if (std::holds_alternative<List>(rhs.data)) {
-                        for (const auto& e : std::get<List>(rhs.data).raw())
+                    else if (rhs.isObjType(ObjType::LIST)) {
+                        for (const auto& e : static_cast<ObjList*>(rhs.asObj())->vec)
                             elements.push_back(e);
                     }
-                    else if (std::holds_alternative<StringMatrix>(rhs.data)) {
-                        for (const auto& s : std::get<StringMatrix>(rhs.data).rawData())
+                    else if (rhs.isObjType(ObjType::STRING_MATRIX)) {
+                        for (const auto& s : static_cast<ObjStringMatrix*>(rhs.asObj())->mat.rawData())
                             elements.push_back(Value(s));
                     }
-                    else if (std::holds_alternative<std::string>(rhs.data)) {
-                        for (char c : std::get<std::string>(rhs.data))
+                    else if (rhs.isString()) {
+                        for (char c : rhs.asString())
                             elements.push_back(Value(std::string(1, c)));
                     }
                     else {
@@ -1188,8 +1181,8 @@ namespace jc {
                 case OpCode::OP_THROW: {
                     Value errVal = pop();
                     std::string msg;
-                    if (std::holds_alternative<std::string>(errVal.data))
-                        msg = std::get<std::string>(errVal.data);
+                    if (errVal.isString())
+                        msg = errVal.asString();
                     else {
                         std::ostringstream oss; oss << errVal;
                         msg = oss.str();
@@ -1199,15 +1192,22 @@ namespace jc {
 
                 case OpCode::OP_BUILD_DICT: {
                     uint16_t count = readShort();
-                    Dict d;
+                    ObjDict* d = GcHeap::get().allocate<ObjDict>();
                     std::vector<std::pair<Value, Value>> pairs(count);
                     for (int j = count - 1; j >= 0; --j) {
                         Value val = pop();
                         Value key = pop();
                         pairs[j] = { key, val };
                     }
-                    for (auto& [k, v] : pairs)
-                        d.set(k, v);
+                    for (auto& [k, v] : pairs) {
+                        auto it = d->keyMap.find(k);
+                        if (it != d->keyMap.end()) {
+                            d->elements[it->second].second = v;
+                        } else {
+                            d->keyMap[k] = d->elements.size();
+                            d->elements.push_back({k, v});
+                        }
+                    }
                     push(Value(d));
                     break;
                 }
@@ -1220,80 +1220,80 @@ namespace jc {
                 case OpCode::OP_ITER_INIT: {
                     uint8_t destructFlag = readByte();
                     Value iterable = pop();
-                    List elements;
-                    if (std::holds_alternative<RealMatrix>(iterable.data)) {
-                        const auto& m = std::get<RealMatrix>(iterable.data);
+                    ObjList* elements = GcHeap::get().allocate<ObjList>();
+                    if (iterable.isObjType(ObjType::REAL_MATRIX)) {
+                        const auto& m = static_cast<ObjRealMatrix*>(iterable.asObj())->mat;
                         if (m.getRows() == 1) {
                             for (int j = 0; j < m.getCols(); ++j)
-                                elements.push_back(Value(m(0, j)));
+                                elements->vec.push_back(Value(m(0, j)));
                         }
                         else if (m.getCols() == 1) {
                             for (int ii = 0; ii < m.getRows(); ++ii)
-                                elements.push_back(Value(m(ii, 0)));
+                                elements->vec.push_back(Value(m(ii, 0)));
                         }
                         else {
                             for (int ii = 0; ii < m.getRows(); ++ii)
-                                elements.push_back(Value(m.getRow(ii)));
+                                elements->vec.push_back(Value(m.getRow(ii)));
                         }
                     }
-                    else if (std::holds_alternative<StringMatrix>(iterable.data)) {
-                        const auto& m = std::get<StringMatrix>(iterable.data);
+                    else if (iterable.isObjType(ObjType::STRING_MATRIX)) {
+                        const auto& m = static_cast<ObjStringMatrix*>(iterable.asObj())->mat;
                         if (m.getRows() == 1) {
                             for (int j = 0; j < m.getCols(); ++j)
-                                elements.push_back(Value(m(0, j)));
+                                elements->vec.push_back(Value(m(0, j)));
                         }
                         else if (m.getCols() == 1) {
                             for (int ii = 0; ii < m.getRows(); ++ii)
-                                elements.push_back(Value(m(ii, 0)));
+                                elements->vec.push_back(Value(m(ii, 0)));
                         }
                         else {
                             for (int ii = 0; ii < m.getRows(); ++ii)
-                                elements.push_back(Value(m.getRow(ii)));
+                                elements->vec.push_back(Value(m.getRow(ii)));
                         }
                     }
-                    else if (std::holds_alternative<ComplexMatrix>(iterable.data)) {
-                        const auto& m = std::get<ComplexMatrix>(iterable.data);
+                    else if (iterable.isObjType(ObjType::COMPLEX_MATRIX)) {
+                        const auto& m = static_cast<ObjComplexMatrix*>(iterable.asObj())->mat;
                         if (m.getRows() == 1) {
                             for (int j = 0; j < m.getCols(); ++j)
-                                elements.push_back(Value(m(0, j)));
+                                elements->vec.push_back(Value(m(0, j)));
                         }
                         else if (m.getCols() == 1) {
                             for (int ii = 0; ii < m.getRows(); ++ii)
-                                elements.push_back(Value(m(ii, 0)));
+                                elements->vec.push_back(Value(m(ii, 0)));
                         }
                         else {
                             for (int ii = 0; ii < m.getRows(); ++ii)
-                                elements.push_back(Value(m.getRow(ii)));
+                                elements->vec.push_back(Value(m.getRow(ii)));
                         }
                     }
-                    else if (std::holds_alternative<List>(iterable.data)) {
-                        elements = std::get<List>(iterable.data);
+                    else if (iterable.isObjType(ObjType::LIST)) {
+                        elements->vec = static_cast<ObjList*>(iterable.asObj())->vec;
                     }
-                    else if (std::holds_alternative<std::string>(iterable.data)) {
-                        for (char c : std::get<std::string>(iterable.data))
-                            elements.push_back(Value(std::string(1, c)));
+                    else if (iterable.isString()) {
+                        for (char c : iterable.asString())
+                            elements->vec.push_back(Value(std::string(1, c)));
                     }
-                    else if (std::holds_alternative<Dict>(iterable.data)) {
-                        const auto& d = std::get<Dict>(iterable.data);
+                    else if (iterable.isObjType(ObjType::DICT)) {
+                        const auto* d = static_cast<ObjDict*>(iterable.asObj());
                         if (destructFlag) {
-                            for (const auto& [key, val] : d.getEntries()) {
-                                List pair;
-                                pair.push_back(Value(key));
-                                pair.push_back(val);
-                                pair.freeze();
-                                elements.push_back(Value(pair));
+                            for (const auto& [key, val] : d->elements) {
+                                ObjList* pair = GcHeap::get().allocate<ObjList>();
+                                pair->vec.push_back(key);
+                                pair->vec.push_back(val);
+                                pair->is_frozen = true;
+                                elements->vec.push_back(Value(pair));
                             }
                         }
                         else {
-                            for (const auto& [key, val] : d.getEntries()) {
-                                elements.push_back(Value(key));
+                            for (const auto& [key, val] : d->elements) {
+                                elements->vec.push_back(key);
                             }
                         }
                     }
-                    else if (std::holds_alternative<Set>(iterable.data)) {
-                        const auto& s = std::get<Set>(iterable.data);
-                        for (const auto& val : s.raw()) {
-                            elements.push_back(val);
+                    else if (iterable.isObjType(ObjType::SET)) {
+                        const auto* s = static_cast<ObjSet*>(iterable.asObj());
+                        for (const auto& val : s->elements) {
+                            elements->vec.push_back(val);
                         }
                     }
                     else {
@@ -1307,13 +1307,13 @@ namespace jc {
                 case OpCode::OP_ITER_NEXT: {
                     uint16_t offset = readShort();
                     double idx = peek(0).asDouble();
-                    const auto& elems = std::get<List>(peek(1).data);
+                    const auto& elems = static_cast<ObjList*>(peek(1).asObj())->vec;
                     int i = static_cast<int>(idx);
                     if (i >= static_cast<int>(elems.size())) {
                         frame().ip += offset;
                     }
                     else {
-                        Value elem = elems.raw()[i];
+                        Value elem = elems[i];
                         stack[stack.size() - 1] = Value(idx + 1);
                         push(elem);
                     }
@@ -1352,7 +1352,7 @@ namespace jc {
 
                 case OpCode::OP_FORMAT_STRING: {
                     uint16_t specIdx = readShort();
-                    std::string spec = std::get<std::string>(currentChunk().constants[specIdx].data);
+                    std::string spec = currentChunk().constants[specIdx].asString();
                     Value val = pop();
 
                     char align = '\0';
@@ -1396,7 +1396,7 @@ namespace jc {
                 }
 
                 case OpCode::OP_LIST_INIT: {
-                    push(Value(List()));
+                    push(Value(GcHeap::get().allocate<ObjList>()));
                     break;
                 }
 
@@ -1404,8 +1404,8 @@ namespace jc {
                     uint16_t depth = readShort();
                     Value elem = pop();
                     int listIdx = static_cast<int>(stack.size()) - 1 - static_cast<int>(depth);
-                    if (listIdx >= 0 && std::holds_alternative<List>(stack[listIdx].data)) {
-                        std::get<List>(stack[listIdx].data).push_back(elem);
+                    if (listIdx >= 0 && stack[listIdx].isObjType(ObjType::LIST)) {
+                        static_cast<ObjList*>(stack[listIdx].asObj())->vec.push_back(elem);
                     }
                     else {
                         throw std::runtime_error("VM Error: LIST_APPEND target not found at depth " +
@@ -1414,11 +1414,145 @@ namespace jc {
                     break;
                 }
 
+                case OpCode::OP_LIST_COMP_END: {
+                    Value arg = pop();
+                    if (!arg.isObjType(ObjType::LIST)) {
+                        push(arg);
+                        break;
+                    }
+                    auto l = static_cast<ObjList*>(arg.asObj());
+                    if (l->vec.empty()) {
+                        push(Value(RealMatrix(1, 0)));
+                        break;
+                    }
+                    
+                    bool hasComplex = false;
+                    bool hasString = false;
+                    bool hasOther = false;
+                    bool hasSubMatrix = false;
+
+                    auto canBeMatrixElement = [](const Value& v) -> bool {
+                        return v.isNumber() ||
+                            v.isObjType(ObjType::BIGINT) ||
+                            v.isObjType(ObjType::FRACTION) ||
+                            v.isObjType(ObjType::BASENUM) ||
+                            v.isObjType(ObjType::COMPLEX) ||
+                            v.isString() ||
+                            v.isObjType(ObjType::REAL_MATRIX) ||
+                            v.isObjType(ObjType::COMPLEX_MATRIX) ||
+                            v.isObjType(ObjType::STRING_MATRIX);
+                    };
+
+                    for (const auto& v : l->vec) {
+                        if (v.isObjType(ObjType::COMPLEX) || v.isObjType(ObjType::COMPLEX_MATRIX)) hasComplex = true;
+                        if (v.isString() || v.isObjType(ObjType::STRING_MATRIX)) hasString = true;
+                        if (v.isObjType(ObjType::REAL_MATRIX) || v.isObjType(ObjType::COMPLEX_MATRIX) || v.isObjType(ObjType::STRING_MATRIX)) hasSubMatrix = true;
+                        if (!canBeMatrixElement(v)) hasOther = true;
+                    }
+
+                    if (hasOther) {
+                        push(arg); // 保持为 List
+                        break;
+                    }
+
+                    int total = static_cast<int>(l->vec.size());
+
+                    if (hasSubMatrix) {
+                        auto extractCell = [&](Value& cell) {
+                            if (!cell.isObjType(ObjType::REAL_MATRIX) &&
+                                !cell.isObjType(ObjType::COMPLEX_MATRIX) &&
+                                !cell.isObjType(ObjType::STRING_MATRIX)) {
+                                if (hasString) {
+                                    std::ostringstream oss; oss << cell;
+                                    cell = Value(StringMatrix(1, 1, { oss.str() }));
+                                }
+                                else if (hasComplex) {
+                                    cell = Value(ComplexMatrix(1, 1, { cell.asComplex() }));
+                                }
+                                else {
+                                    cell = Value(RealMatrix(1, 1, { cell.asDouble() }));
+                                }
+                            }
+                            if (hasString) {
+                                if (cell.isObjType(ObjType::REAL_MATRIX)) {
+                                    const auto& m = static_cast<ObjRealMatrix*>(cell.asObj())->mat;
+                                    std::vector<std::string> flat;
+                                    for (int i = 0; i < m.getRows(); ++i)
+                                        for (int j = 0; j < m.getCols(); ++j) {
+                                            std::ostringstream oss; oss << Value(m(i, j));
+                                            flat.push_back(oss.str());
+                                        }
+                                    cell = Value(StringMatrix(m.getRows(), m.getCols(), flat));
+                                }
+                                else if (cell.isObjType(ObjType::COMPLEX_MATRIX)) {
+                                    const auto& m = static_cast<ObjComplexMatrix*>(cell.asObj())->mat;
+                                    std::vector<std::string> flat;
+                                    for (int i = 0; i < m.getRows(); ++i)
+                                        for (int j = 0; j < m.getCols(); ++j) {
+                                            std::ostringstream oss; oss << Value(m(i, j));
+                                            flat.push_back(oss.str());
+                                        }
+                                    cell = Value(StringMatrix(m.getRows(), m.getCols(), flat));
+                                }
+                            }
+                            else if (hasComplex && cell.isObjType(ObjType::REAL_MATRIX)) {
+                                cell = Value(cell.asComplexMatrix());
+                            }
+                        };
+
+                        try {
+                            Value rowResult = Value::none();
+                            for (int j = 0; j < total; ++j) {
+                                Value cell = l->vec[j];
+                                extractCell(cell);
+                                if (rowResult.isNone()) {
+                                    rowResult = cell;
+                                }
+                                else {
+                                    if (hasString)
+                                        rowResult = Value(static_cast<ObjStringMatrix*>(rowResult.asObj())->mat
+                                            .integR(static_cast<ObjStringMatrix*>(cell.asObj())->mat));
+                                    else if (hasComplex)
+                                        rowResult = Value(static_cast<ObjComplexMatrix*>(rowResult.asObj())->mat
+                                            .integR(static_cast<ObjComplexMatrix*>(cell.asObj())->mat));
+                                    else
+                                        rowResult = Value(static_cast<ObjRealMatrix*>(rowResult.asObj())->mat
+                                            .integR(static_cast<ObjRealMatrix*>(cell.asObj())->mat));
+                                }
+                            }
+                            push(rowResult);
+                        }
+                        catch (...) {
+                            throw std::runtime_error("VM Error: Dimension mismatch during list comprehension matrix concatenation.");
+                        }
+                    }
+                    else if (hasString) {
+                        std::vector<std::string> flat(total);
+                        for (int ii = 0; ii < total; ++ii) {
+                            const Value& v = l->vec[ii];
+                            if (v.isString()) flat[ii] = v.asString();
+                            else { std::ostringstream oss; oss << v; flat[ii] = oss.str(); }
+                        }
+                        push(Value(StringMatrix(1, total, flat)));
+                    }
+                    else if (hasComplex) {
+                        std::vector<Complex> flat(total);
+                        for (int ii = 0; ii < total; ++ii) flat[ii] = l->vec[ii].asComplex();
+                        push(Value(ComplexMatrix(1, total, flat)));
+                    }
+                    else {
+                        std::vector<double> flat(total);
+                        for (int ii = 0; ii < total; ++ii) flat[ii] = l->vec[ii].asDouble();
+                        push(Value(RealMatrix(1, total, flat)));
+                    }
+                    break;
+                }
+
                 case OpCode::OP_IMPORT: {
                     Value pathVal = pop();
-                    if (!std::holds_alternative<std::string>(pathVal.data))
+                    if (!pathVal.isString())
                         throw std::runtime_error("VM Error: import requires a string path.");
-                    std::string name = std::get<std::string>(pathVal.data);
+                    std::string name = pathVal.asString();
 
                     if (importedModules.count(name)) {
                         push(Value::none());
@@ -1457,8 +1591,8 @@ namespace jc {
 
                 case OpCode::OP_CLASS: {
                     uint16_t nameIdx = readShort();
-                    std::string name = std::get<std::string>(currentChunk().constants[nameIdx].data);
-                    auto cls = std::make_shared<ClassDefinition>();
+                    std::string name = currentChunk().constants[nameIdx].asString();
+                    auto cls = GcHeap::get().allocate<ObjClass>();
                     cls->name = name;
                     push(Value(cls));
                     break;
@@ -1466,24 +1600,24 @@ namespace jc {
 
                 case OpCode::OP_METHOD: {
                     uint16_t nameIdx = readShort();
-                    std::string methodName = std::get<std::string>(currentChunk().constants[nameIdx].data);
+                    std::string methodName = currentChunk().constants[nameIdx].asString();
                     Value closureVal = pop();
                     Value& classVal = peek(0);
 
-                    if (!std::holds_alternative<std::shared_ptr<ClassDefinition>>(classVal.data))
+                    if (!classVal.isClass())
                         throw std::runtime_error("VM Error: OP_METHOD requires a class on stack.");
 
-                    auto cls = std::get<std::shared_ptr<ClassDefinition>>(classVal.data);
+                    auto cls = static_cast<ObjClass*>(classVal.asObj());
 
-                    if (std::holds_alternative<std::shared_ptr<FunctionClosure>>(closureVal.data)) {
-                        auto fc = std::get<std::shared_ptr<FunctionClosure>>(closureVal.data);
+                    if (closureVal.isFunctionClosure()) {
+                        auto fc = closureVal.asFunction();
                         cls->methods[methodName] = fc;
                         break;
                     }
 
-                    if (std::holds_alternative<std::string>(closureVal.data)) {
-                        const std::string& tag = std::get<std::string>(closureVal.data);
-                        auto fc = std::make_shared<FunctionClosure>(
+                    if (closureVal.isString()) {
+                        const std::string& tag = closureVal.asString();
+                        auto fc = GcHeap::get().allocate<ObjClosure>(
                             std::vector<std::string>{},
                             std::vector<bool>{},
                             methodName,
@@ -1501,11 +1635,10 @@ namespace jc {
                 case OpCode::OP_INHERIT: {
                     Value superClass = pop();
                     Value& subClass = peek(0);
-                    if (!std::holds_alternative<std::shared_ptr<ClassDefinition>>(superClass.data) ||
-                        !std::holds_alternative<std::shared_ptr<ClassDefinition>>(subClass.data))
+                    if (!superClass.isClass() || !subClass.isClass())
                         throw std::runtime_error("VM Error: Inheritance requires two classes.");
-                    auto sub = std::get<std::shared_ptr<ClassDefinition>>(subClass.data);
-                    auto sup = std::get<std::shared_ptr<ClassDefinition>>(superClass.data);
+                    auto sub = static_cast<ObjClass*>(subClass.asObj());
+                    auto sup = static_cast<ObjClass*>(superClass.asObj());
                     sub->parent = sup;
                     for (auto& [name, method] : sup->methods) {
                         if (sub->methods.find(name) == sub->methods.end())
@@ -1517,22 +1650,24 @@ namespace jc {
 
                 case OpCode::OP_GET_PROPERTY: {
                     uint16_t nameIdx = readShort();
-                    std::string field = std::get<std::string>(currentChunk().constants[nameIdx].data);
+                    std::string field = currentChunk().constants[nameIdx].asString();
                     Value obj = pop();
 
-                    if (std::holds_alternative<std::shared_ptr<Instance>>(obj.data)) {
-                        auto inst = std::get<std::shared_ptr<Instance>>(obj.data);
+                    if (obj.isInstance()) {
+                        auto inst = obj.asInstance();
 
                         // 1. 字段查找 — 不变
-                        auto* fval = inst->fields.get(Value(field));
-                        if (fval) {
-                            push(*fval);
-                            break;
+                        if (inst->fields) {
+                            auto it = inst->fields->keyMap.find(Value(field));
+                            if (it != inst->fields->keyMap.end()) {
+                                push(inst->fields->elements[it->second].second);
+                                break;
+                            }
                         }
 
                         // 2. 方法查找
-                        std::shared_ptr<FunctionClosure> rawMethod;
-                        std::shared_ptr<ClassDefinition> ownerClass;
+                        ObjClosure* rawMethod = nullptr;
+                        ObjClass* ownerClass = nullptr;
                         auto c = inst->classDef;
                         while (c) {
                             auto it = c->methods.find(field);
@@ -1546,7 +1681,7 @@ namespace jc {
                         if (!c) throw std::runtime_error("VM Error: No field/method '" + field + "'.");
 
                         // ★ FIX: 创建绑定方法闭包，携带 receiver 和所属类
-                        auto bound = std::make_shared<FunctionClosure>(
+                        auto bound = GcHeap::get().allocate<ObjClosure>(
                             std::vector<std::string>{}, std::vector<bool>{},
                             field, nullptr
                         );
@@ -1601,11 +1736,11 @@ namespace jc {
 
                         push(Value(bound));
                     }
-                    else if (std::holds_alternative<Dict>(obj.data)) {
-                        const auto& d = std::get<Dict>(obj.data);
-                        const auto* v = d.get(Value(field));
-                        if (!v) throw std::runtime_error("VM Error: Key '" + field + "' not found.");
-                        push(*v);
+                    else if (obj.isObjType(ObjType::DICT)) {
+                        auto d = static_cast<ObjDict*>(obj.asObj());
+                        auto it = d->keyMap.find(Value(field));
+                        if (it == d->keyMap.end()) throw std::runtime_error("VM Error: Key '" + field + "' not found.");
+                        push(d->elements[it->second].second);
                     }
                     else {
                         throw std::runtime_error("VM Error: Cannot access property on this type.");
@@ -1615,18 +1750,34 @@ namespace jc {
 
                 case OpCode::OP_SET_PROPERTY: {
                     uint16_t nameIdx = readShort();
-                    std::string field = std::get<std::string>(currentChunk().constants[nameIdx].data);
+                    std::string field = currentChunk().constants[nameIdx].asString();
                     Value val = pop();
                     Value obj = pop();
 
-                    if (std::holds_alternative<std::shared_ptr<Instance>>(obj.data)) {
-                        auto inst = std::get<std::shared_ptr<Instance>>(obj.data);
-                        inst->fields.set(Value(field), val);
+                    if (obj.isInstance()) {
+                        auto inst = obj.asInstance();
+                        if (!inst->fields) inst->fields = GcHeap::get().allocate<ObjDict>();
+                        Value key(field);
+                        auto it = inst->fields->keyMap.find(key);
+                        if (it != inst->fields->keyMap.end()) {
+                            inst->fields->elements[it->second].second = val;
+                        } else {
+                            inst->fields->keyMap[key] = inst->fields->elements.size();
+                            inst->fields->elements.push_back({key, val});
+                        }
                         push(val);
                         push(obj);
                     }
-                    else if (std::holds_alternative<Dict>(obj.data)) {
-                        std::get<Dict>(obj.data).set(Value(field), val);
+                    else if (obj.isObjType(ObjType::DICT)) {
+                        auto d = static_cast<ObjDict*>(obj.asObj());
+                        Value key(field);
+                        auto it = d->keyMap.find(key);
+                        if (it != d->keyMap.end()) {
+                            d->elements[it->second].second = val;
+                        } else {
+                            d->keyMap[key] = d->elements.size();
+                            d->elements.push_back({key, val});
+                        }
                         push(val);
                         push(obj);
                     }
@@ -1817,12 +1968,14 @@ namespace jc {
 // ★ 垃圾回收器实现 (Mark-and-Sweep Garbage Collector)
 // =================================================================
 
-    void VM::markClosure(const FunctionClosure& cl,
+    void VM::markClosure(const ObjClosure* cl,
         std::unordered_set<const void*>& marked)
     {
-        if (!cl.capturedEnv.has_value()) return;
+        if (!cl) return;
+        const_cast<ObjClosure*>(cl)->isMarked = true;
+        if (!cl->capturedEnv.has_value()) return;
         try {
-            auto env = std::any_cast<std::shared_ptr<std::vector<std::shared_ptr<UpVal>>>>(cl.capturedEnv);
+            auto env = std::any_cast<std::shared_ptr<std::vector<std::shared_ptr<UpVal>>>>(cl->capturedEnv);
             if (!env) return;
             for (const auto& uv : *env) {
                 if (uv && uv->location) {
@@ -1833,16 +1986,17 @@ namespace jc {
         catch (...) {}
     }
 
-    void VM::markClassDef(const std::shared_ptr<ClassDefinition>& cls,
+    void VM::markClassDef(const ObjClass* cls,
         std::unordered_set<const void*>& marked)
     {
         if (!cls) return;
-        const void* id = cls.get();
+        const void* id = cls;
         if (marked.count(id)) return;    // 防止继承链递归循环
         marked.insert(id);
+        const_cast<ObjClass*>(cls)->isMarked = true;
 
         for (const auto& [name, method] : cls->methods) {
-            if (method) markClosure(*method, marked);
+            if (method) markClosure(method, marked);
         }
         markClassDef(cls->parent, marked);
     }
@@ -1850,88 +2004,49 @@ namespace jc {
     void VM::markValue(const Value& val,
         std::unordered_set<const void*>& marked)
     {
-        // ── List ──
-        if (auto* p = std::get_if<List>(&val.data)) {
-            const void* id = p->id();
-            if (!id || marked.count(id)) return;
-            marked.insert(id);
-            for (const auto& elem : p->raw()) {
-                try { markValue(elem, marked); }
-                catch (...) {}
-            }
-            return;
-        }
+        if (!val.isObj()) return;
+        Obj* obj = val.asObj();
+        if (marked.count(obj)) return;
+        marked.insert(obj);
+        obj->isMarked = true;
 
-        // ── Dict ──
-        if (auto* p = std::get_if<Dict>(&val.data)) {
-            const void* id = p->id();
-            if (!id || marked.count(id)) return;
-            marked.insert(id);
-            for (const auto& [key, anyVal] : p->getEntries()) {
-                try { markValue(key, marked); markValue(anyVal, marked); }
-                catch (...) {}
+        switch (obj->type) {
+            case ObjType::LIST: {
+                for (const auto& elem : static_cast<ObjList*>(obj)->vec) markValue(elem, marked);
+                break;
             }
-            return;
-        }
-
-        // ── Set ──
-        if (auto* p = std::get_if<Set>(&val.data)) {
-            const void* id = p->id();
-            if (!id || marked.count(id)) return;
-            marked.insert(id);
-            for (const auto& elem : p->raw()) {
-                try { markValue(elem, marked); }
-                catch (...) {}
+            case ObjType::DICT: {
+                for (const auto& [key, v] : static_cast<ObjDict*>(obj)->elements) {
+                    markValue(key, marked); markValue(v, marked);
+                }
+                break;
             }
-            return;
-        }
-
-        // ── Instance ──
-        if (auto* p = std::get_if<std::shared_ptr<Instance>>(&val.data)) {
-            const void* id = p->get();
-            if (!id || marked.count(id)) return;
-            marked.insert(id);
-            marked.insert((*p)->fields.id());
-            for (const auto& [key, anyVal] : (*p)->fields.getEntries()) {
-                try { markValue(key, marked); markValue(anyVal, marked); }
-                catch (...) {}
+            case ObjType::SET: {
+                for (const auto& elem : static_cast<ObjSet*>(obj)->elements) markValue(elem, marked);
+                break;
             }
-            markClassDef((*p)->classDef, marked);
-            return;
-        }
-
-               // ── FunctionClosure ──
-        if (auto* p = std::get_if<std::shared_ptr<FunctionClosure>>(&val.data)) {
-            if (*p) {
-                // ★ FIX: 闭包递归阻断锁！防止函数自己调用自己产生的死循环！
-                const void* id = p->get();
-                if (marked.count(id)) return;
-                marked.insert(id);
-                markClosure(**p, marked);
+            case ObjType::INSTANCE: {
+                auto inst = static_cast<ObjInstance*>(obj);
+                if (inst->fields) markValue(Value(inst->fields), marked);
+                if (inst->classDef) markValue(Value(inst->classDef), marked);
+                break;
             }
-            return;
-        }
-
-        // ── ClassDefinition ──
-        if (auto* p = std::get_if<std::shared_ptr<ClassDefinition>>(&val.data)) {
-            markClassDef(*p, marked);
-            return;
-        }
-        
-        // ── SuperProxy ──
-        if (auto* p = std::get_if<SuperProxyPtr>(&val.data)) {
-            if (*p) {
-                // ★ FIX: 代理阻断锁
-                const void* id = p->get();
-                if (marked.count(id)) return;
-                marked.insert(id);
-                markValue(Value((*p)->instance), marked);
-                markClassDef((*p)->parentClass, marked);
+            case ObjType::CLOSURE: {
+                markClosure(static_cast<ObjClosure*>(obj), marked);
+                break;
             }
-            return;
+            case ObjType::CLASS: {
+                markClassDef(static_cast<ObjClass*>(obj), marked);
+                break;
+            }
+            case ObjType::SUPER_PROXY: {
+                auto sp = static_cast<ObjSuper*>(obj);
+                if (sp->instance) markValue(Value(sp->instance), marked);
+                if (sp->parentClass) markValue(Value(sp->parentClass), marked);
+                break;
+            }
+            default: break;
         }
-
-        // 所有其他类型 (double, BigInt, string, Matrix 等) 都是叶子节点，无需追踪
     }
 
     void VM::collectGarbage() {
@@ -1969,7 +2084,7 @@ namespace jc {
         for (const auto& val : helpers::nativeClassStack) markValue(val, marked);
 
         // ═══ Phase 2: SWEEP ═══
-        GcHeap::get().sweep(marked);
+        GcHeap::get().sweep();
     }
 
     int VM::runGC() {
@@ -1993,7 +2108,7 @@ namespace jc {
         for (const auto& val : helpers::nativeSelfStack) markValue(val, marked);
         for (const auto& val : helpers::nativeClassStack) markValue(val, marked);
 
-        return GcHeap::get().sweep(marked);
+        return GcHeap::get().sweep();
     }
 
     void VM::execCall(uint8_t argc) {
@@ -2001,8 +2116,8 @@ namespace jc {
         pendingRefWritebacks.clear();
 
         // ======== [1] 字符串动态调用 (晚绑定) ========
-        if (std::holds_alternative<std::string>(callee.data)) {
-            const std::string& tag = std::get<std::string>(callee.data);
+        if (callee.isString()) {
+            const std::string& tag = callee.asString();
             if (tag.size() >= 5 && tag.substr(0, 5) == "__fn:") {
                 int fnIdx = std::stoi(tag.substr(5));
                 auto& fn = compiledFunctions[fnIdx];
@@ -2063,13 +2178,13 @@ namespace jc {
         } // 结束 if (holds_string)
 
         // ======== [2] 类实例化 ========
-        if (std::holds_alternative<std::shared_ptr<ClassDefinition>>(callee.data)) {
-            auto cls = std::get<std::shared_ptr<ClassDefinition>>(callee.data);
-            auto instance = std::make_shared<Instance>();
+        if (callee.isClass()) {
+            auto cls = static_cast<ObjClass*>(callee.asObj());
+            auto instance = GcHeap::get().allocate<ObjInstance>();
             instance->classDef = cls;
 
-            std::shared_ptr<FunctionClosure> initMethod;
-            std::shared_ptr<ClassDefinition> initOwner;
+            ObjClosure* initMethod = nullptr;
+            ObjClass* initOwner = nullptr;
             auto c = cls;
             while (c) {
                 auto it = c->methods.find("init");
@@ -2149,8 +2264,8 @@ namespace jc {
         } // 结束 if (holds_class)
 
         // ======== [3] 闭包执行 ========
-        if (std::holds_alternative<std::shared_ptr<FunctionClosure>>(callee.data)) {
-            auto closure = std::get<std::shared_ptr<FunctionClosure>>(callee.data);
+        if (callee.isFunctionClosure()) {
+            auto closure = callee.asFunction();
 
             if (closure->isBytecode()) {
                 auto& fnDef = compiledFunctions[closure->compiledFnIndex];
@@ -2161,7 +2276,7 @@ namespace jc {
                         throw std::runtime_error("VM Error: '" + fnDef->name + "' requires at least " + std::to_string(fnDef->arity) + " arguments.");
                     }
 
-                    List restList;
+                    ObjList* restList = GcHeap::get().allocate<ObjList>();
                     if (static_cast<int>(argc) > fixedMax) {
                         int restCount = static_cast<int>(argc) - fixedMax;
                         std::vector<Value> tempValues(restCount);
@@ -2169,7 +2284,7 @@ namespace jc {
                             tempValues[restCount - 1 - j] = pop();
                         }
                         for (int j = 0; j < restCount; j++) {
-                            restList.push_back(tempValues[j]);
+                            restList->vec.push_back(tempValues[j]);
                         }
                         argc = static_cast<uint8_t>(fixedMax);
                     }
@@ -2232,8 +2347,8 @@ namespace jc {
         } // 结束 if (holds_function)
 
         // ======== [4] String Tag fallback ========
-        if (std::holds_alternative<std::string>(callee.data)) {
-            const std::string& tag = std::get<std::string>(callee.data);
+        if (callee.isString()) {
+            const std::string& tag = callee.asString();
 
             if (tag.size() >= 5 && tag.substr(0, 5) == "__fn:") {
                 int fnIdx = std::stoi(tag.substr(5));
@@ -2245,7 +2360,7 @@ namespace jc {
                         throw std::runtime_error("VM Error: '" + fn->name + "' requires at least " + std::to_string(fn->arity) + " arguments.");
                     }
 
-                    List restList;
+                    ObjList* restList = GcHeap::get().allocate<ObjList>();
                     if (static_cast<int>(argc) > fixedMax) {
                         int restCount = static_cast<int>(argc) - fixedMax;
                         std::vector<Value> tempValues(restCount);
@@ -2253,7 +2368,7 @@ namespace jc {
                             tempValues[restCount - 1 - j] = pop();
                         }
                         for (int j = 0; j < restCount; j++) {
-                            restList.push_back(tempValues[j]);
+                            restList->vec.push_back(tempValues[j]);
                         }
                         argc = static_cast<uint8_t>(fixedMax);
                     }
@@ -2296,8 +2411,8 @@ namespace jc {
             for (int j = argc - 1; j >= 0; --j) args[j] = pop();
             Value calleeVal = pop();
             std::string desc;
-            if (std::holds_alternative<std::string>(calleeVal.data))
-                desc = std::get<std::string>(calleeVal.data);
+            if (calleeVal.isString())
+                desc = calleeVal.asString();
             else {
                 std::ostringstream oss; oss << calleeVal;
                 desc = oss.str();
@@ -2311,23 +2426,24 @@ namespace jc {
             Value idx = pop();
             Value obj = pop();
 
-            if (std::holds_alternative<Dict>(obj.data)) {
-                const auto* entry = std::get<Dict>(obj.data).get(idx);
-                if (!entry) {
+            if (obj.isObjType(ObjType::DICT)) {
+                auto dict = static_cast<ObjDict*>(obj.asObj());
+                auto it = dict->keyMap.find(idx);
+                if (it == dict->keyMap.end()) {
                     std::string keyStr;
-                    if (std::holds_alternative<std::string>(idx.data)) keyStr = std::get<std::string>(idx.data);
+                    if (idx.isString()) keyStr = idx.asString();
                     else { std::ostringstream oss; oss << idx; keyStr = oss.str(); }
                     throw std::runtime_error("VM Error: Key '" + keyStr + "' not found.");
                 }
-                push(*entry);
+                push(dict->elements[it->second].second);
                 return;
             }
 
             // ── Instance (__getitem__) ──
-            if (std::holds_alternative<std::shared_ptr<Instance>>(obj.data)) {
-                auto inst = std::get<std::shared_ptr<Instance>>(obj.data);
+            if (obj.isInstance()) {
+                auto inst = obj.asInstance();
                 auto c = inst->classDef;
-                std::shared_ptr<FunctionClosure> getitemMethod;
+                ObjClosure* getitemMethod = nullptr;
                 while (c) {
                     auto it = c->methods.find("__getitem__");
                     if (it != c->methods.end()) {
@@ -2386,11 +2502,11 @@ namespace jc {
             // ==========================================================
             // ★ 高级容器阻断防线 (放在 Instance 检查下面！)
             // ==========================================================
-            if (!std::holds_alternative<RealMatrix>(obj.data) &&
-                !std::holds_alternative<ComplexMatrix>(obj.data) &&
-                !std::holds_alternative<StringMatrix>(obj.data) &&
-                !std::holds_alternative<List>(obj.data) &&
-                !std::holds_alternative<std::string>(obj.data)) {
+            if (!obj.isObjType(ObjType::REAL_MATRIX) &&
+                !obj.isObjType(ObjType::COMPLEX_MATRIX) &&
+                !obj.isObjType(ObjType::STRING_MATRIX) &&
+                !obj.isObjType(ObjType::LIST) &&
+                !obj.isString()) {
                 throw std::runtime_error("TypeError: Cannot index into a value of type '" + getTypeName(obj) + "'.");
             }
 
@@ -2402,8 +2518,8 @@ namespace jc {
                 throw std::runtime_error("TypeError: Array or List index must be a number, got '" + getTypeName(idx) + "'.");
             }
 
-            if (std::holds_alternative<RealMatrix>(obj.data)) {
-                const auto& m = std::get<RealMatrix>(obj.data);
+            if (obj.isObjType(ObjType::REAL_MATRIX)) {
+                const auto& m = static_cast<ObjRealMatrix*>(obj.asObj())->mat;
                 if (m.getRows() == 1) {
                     if (i < 0) i = m.getCols() + i;
                     push(Value(m(0, i)));
@@ -2417,8 +2533,8 @@ namespace jc {
                     push(Value(m.getRow(i)));
                 }
             }
-            else if (std::holds_alternative<ComplexMatrix>(obj.data)) {
-                const auto& m = std::get<ComplexMatrix>(obj.data);
+            else if (obj.isObjType(ObjType::COMPLEX_MATRIX)) {
+                const auto& m = static_cast<ObjComplexMatrix*>(obj.asObj())->mat;
                 if (m.getRows() == 1) {
                     if (i < 0) i = m.getCols() + i;
                     push(Value(m(0, i)));
@@ -2432,8 +2548,8 @@ namespace jc {
                     push(Value(m.getRow(i)));
                 }
             }
-            else if (std::holds_alternative<StringMatrix>(obj.data)) {
-                const auto& m = std::get<StringMatrix>(obj.data);
+            else if (obj.isObjType(ObjType::STRING_MATRIX)) {
+                const auto& m = static_cast<ObjStringMatrix*>(obj.asObj())->mat;
                 if (m.getRows() == 1) {
                     if (i < 0) i = m.getCols() + i;
                     push(Value(m(0, i)));
@@ -2447,11 +2563,15 @@ namespace jc {
                     push(Value(m.getRow(i)));
                 }
             }
-            else if (std::holds_alternative<List>(obj.data)) {
-                push(std::get<List>(obj.data).at(i));
+            else if (obj.isObjType(ObjType::LIST)) {
+                auto list = static_cast<ObjList*>(obj.asObj());
+                int n = static_cast<int>(list->vec.size());
+                if (i < 0) i = n + i;
+                if (i < 0 || i >= n) throw std::out_of_range("List Error: Index out of bounds.");
+                push(list->vec[i]);
             }
-            else if (std::holds_alternative<std::string>(obj.data)) {
-                const auto& s = std::get<std::string>(obj.data);
+            else if (obj.isString()) {
+                const auto& s = obj.asString();
                 if (i < 0) i = static_cast<int>(s.size()) + i;
                 if (i < 0 || i >= static_cast<int>(s.size()))
                     throw std::runtime_error("VM Error: String index out of bounds.");
@@ -2465,20 +2585,20 @@ namespace jc {
             int r = static_cast<int>(std::round(row.asDouble()));
             int c = static_cast<int>(std::round(col.asDouble()));
 
-            if (std::holds_alternative<RealMatrix>(obj.data)) {
-                const auto& m = std::get<RealMatrix>(obj.data);
+            if (obj.isObjType(ObjType::REAL_MATRIX)) {
+                const auto& m = static_cast<ObjRealMatrix*>(obj.asObj())->mat;
                 if (r < 0) r = m.getRows() + r;
                 if (c < 0) c = m.getCols() + c;
                 push(Value(m(r, c)));
             }
-            else if (std::holds_alternative<ComplexMatrix>(obj.data)) {
-                const auto& m = std::get<ComplexMatrix>(obj.data);
+            else if (obj.isObjType(ObjType::COMPLEX_MATRIX)) {
+                const auto& m = static_cast<ObjComplexMatrix*>(obj.asObj())->mat;
                 if (r < 0) r = m.getRows() + r;
                 if (c < 0) c = m.getCols() + c;
                 push(Value(m(r, c)));
             }
-            else if (std::holds_alternative<StringMatrix>(obj.data)) {
-                const auto& m = std::get<StringMatrix>(obj.data);
+            else if (obj.isObjType(ObjType::STRING_MATRIX)) {
+                const auto& m = static_cast<ObjStringMatrix*>(obj.asObj())->mat;
                 if (r < 0) r = m.getRows() + r;
                 if (c < 0) c = m.getCols() + c;
                 push(Value(m(r, c)));
@@ -2499,16 +2619,23 @@ namespace jc {
             Value idx = pop();
             Value obj = pop();
 
-            if (std::holds_alternative<Dict>(obj.data)) {
-                std::get<Dict>(obj.data).set(idx, val);
+            if (obj.isObjType(ObjType::DICT)) {
+                auto d = static_cast<ObjDict*>(obj.asObj());
+                auto it = d->keyMap.find(idx);
+                if (it != d->keyMap.end()) {
+                    d->elements[it->second].second = val;
+                } else {
+                    d->keyMap[idx] = d->elements.size();
+                    d->elements.push_back({idx, val});
+                }
                 push(val); push(obj); return;
             }
 
             // ── Instance (__setitem__) ──
-            if (std::holds_alternative<std::shared_ptr<Instance>>(obj.data)) {
-                auto inst = std::get<std::shared_ptr<Instance>>(obj.data);
+            if (obj.isInstance()) {
+                auto inst = obj.asInstance();
                 auto c = inst->classDef;
-                std::shared_ptr<FunctionClosure> setitemMethod;
+                ObjClosure* setitemMethod = nullptr;
                 while (c) {
                     auto it = c->methods.find("__setitem__");
                     if (it != c->methods.end()) {
@@ -2552,11 +2679,11 @@ namespace jc {
             // ==========================================================
             // ★ 高级容器阻断防线 (放在 Instance 检查下面！)
             // ==========================================================
-            if (!std::holds_alternative<RealMatrix>(obj.data) &&
-                !std::holds_alternative<ComplexMatrix>(obj.data) &&
-                !std::holds_alternative<StringMatrix>(obj.data) &&
-                !std::holds_alternative<List>(obj.data) &&
-                !std::holds_alternative<std::string>(obj.data)) {
+            if (!obj.isObjType(ObjType::REAL_MATRIX) &&
+                !obj.isObjType(ObjType::COMPLEX_MATRIX) &&
+                !obj.isObjType(ObjType::STRING_MATRIX) &&
+                !obj.isObjType(ObjType::LIST) &&
+                !obj.isString()) {
                 throw std::runtime_error("TypeError: Cannot index into a value of type '" + getTypeName(obj) + "'.");
             }
 
@@ -2568,9 +2695,10 @@ namespace jc {
                 throw std::runtime_error("TypeError: Array or List index must be a number, got '" + getTypeName(idx) + "'.");
             }
 
-            if (std::holds_alternative<RealMatrix>(obj.data)) {
-                auto& m = std::get<RealMatrix>(obj.data);
-                if (std::holds_alternative<Complex>(val.data) || std::holds_alternative<ComplexMatrix>(val.data)) {
+            if (obj.isObjType(ObjType::REAL_MATRIX)) {
+                if (obj.asObj()->refCount > 2) obj = Value(RealMatrix(static_cast<ObjRealMatrix*>(obj.asObj())->mat));
+                auto& m = static_cast<ObjRealMatrix*>(obj.asObj())->mat;
+                if (val.isComplex() || val.isObjType(ObjType::COMPLEX_MATRIX)) {
                     ComplexMatrix cm = m.toComplexMatrix();
                     if (cm.getRows() == 1) {
                         if (i < 0) i = cm.getCols() + i;
@@ -2583,8 +2711,8 @@ namespace jc {
                     else {
                         if (i < 0) i = cm.getRows() + i;
                         if (i < 0 || i >= cm.getRows()) throw std::out_of_range("VM Error: Row index out of bounds.");
-                        if (std::holds_alternative<ComplexMatrix>(val.data)) {
-                            auto srcFlat = std::get<ComplexMatrix>(val.data).rawData();
+                        if (val.isObjType(ObjType::COMPLEX_MATRIX)) {
+                            auto srcFlat = static_cast<ObjComplexMatrix*>(val.asObj())->mat.rawData();
                             if (static_cast<int>(srcFlat.size()) != cm.getCols()) throw std::runtime_error("VM Error: Row assignment size mismatch.");
                             for (int j = 0; j < cm.getCols(); ++j) cm(i, j) = srcFlat[j];
                         }
@@ -2608,8 +2736,8 @@ namespace jc {
                         // 2D 矩阵整行赋值 / 广播
                         if (i < 0) i = m.getRows() + i;
                         if (i < 0 || i >= m.getRows()) throw std::out_of_range("VM Error: Row index out of bounds.");
-                        if (std::holds_alternative<RealMatrix>(val.data)) {
-                            const auto& src = std::get<RealMatrix>(val.data);
+                        if (val.isObjType(ObjType::REAL_MATRIX)) {
+                            const auto& src = static_cast<ObjRealMatrix*>(val.asObj())->mat;
                             auto srcFlat = src.rawData();
                             if (static_cast<int>(srcFlat.size()) != m.getCols())
                                 throw std::runtime_error("VM Error: Row assignment size mismatch.");
@@ -2622,8 +2750,9 @@ namespace jc {
                     }
                 }
             }
-            else if (std::holds_alternative<ComplexMatrix>(obj.data)) {
-                auto& m = std::get<ComplexMatrix>(obj.data);
+            else if (obj.isObjType(ObjType::COMPLEX_MATRIX)) {
+                if (obj.asObj()->refCount > 2) obj = Value(ComplexMatrix(static_cast<ObjComplexMatrix*>(obj.asObj())->mat));
+                auto& m = static_cast<ObjComplexMatrix*>(obj.asObj())->mat;
                 if (m.getRows() == 1) {
                     if (i < 0) i = m.getCols() + i;
                     m(0, i) = val.asComplex();
@@ -2635,13 +2764,13 @@ namespace jc {
                 else {
                     if (i < 0) i = m.getRows() + i;
                     if (i < 0 || i >= m.getRows()) throw std::out_of_range("VM Error: Row index out of bounds.");
-                    if (std::holds_alternative<ComplexMatrix>(val.data)) {
-                        auto srcFlat = std::get<ComplexMatrix>(val.data).rawData();
+                    if (val.isObjType(ObjType::COMPLEX_MATRIX)) {
+                        auto srcFlat = static_cast<ObjComplexMatrix*>(val.asObj())->mat.rawData();
                         if (static_cast<int>(srcFlat.size()) != m.getCols()) throw std::runtime_error("VM Error: Row assignment size mismatch.");
                         for (int j = 0; j < m.getCols(); ++j) m(i, j) = srcFlat[j];
                     }
-                    else if (std::holds_alternative<RealMatrix>(val.data)) {
-                        auto srcFlat = std::get<RealMatrix>(val.data).rawData();
+                    else if (val.isObjType(ObjType::REAL_MATRIX)) {
+                        auto srcFlat = static_cast<ObjRealMatrix*>(val.asObj())->mat.rawData();
                         if (static_cast<int>(srcFlat.size()) != m.getCols()) throw std::runtime_error("VM Error: Row assignment size mismatch.");
                         for (int j = 0; j < m.getCols(); ++j) m(i, j) = Complex(srcFlat[j], 0.0);
                     }
@@ -2651,56 +2780,61 @@ namespace jc {
                     }
                 }
             }
-            else if (std::holds_alternative<StringMatrix>(obj.data)) {
-                auto& m = std::get<StringMatrix>(obj.data);
+            else if (obj.isObjType(ObjType::STRING_MATRIX)) {
+                if (obj.asObj()->refCount > 2) obj = Value(StringMatrix(static_cast<ObjStringMatrix*>(obj.asObj())->mat));
+                auto& m = static_cast<ObjStringMatrix*>(obj.asObj())->mat;
                 if (m.getRows() == 1) {
                     if (i < 0) i = m.getCols() + i;
-                    if (std::holds_alternative<std::string>(val.data)) m(0, i) = std::get<std::string>(val.data);
+                    if (val.isString()) m(0, i) = val.asString();
                     else { std::ostringstream oss; oss << val; m(0, i) = oss.str(); }
                 }
                 else if (m.getCols() == 1) {
                     if (i < 0) i = m.getRows() + i;
-                    if (std::holds_alternative<std::string>(val.data)) m(i, 0) = std::get<std::string>(val.data);
+                    if (val.isString()) m(i, 0) = val.asString();
                     else { std::ostringstream oss; oss << val; m(i, 0) = oss.str(); }
                 }
                 else {
                     if (i < 0) i = m.getRows() + i;
                     if (i < 0 || i >= m.getRows()) throw std::out_of_range("VM Error: Row index out of bounds.");
-                    if (std::holds_alternative<StringMatrix>(val.data)) {
-                        auto srcFlat = std::get<StringMatrix>(val.data).rawData();
+                    if (val.isObjType(ObjType::STRING_MATRIX)) {
+                        auto srcFlat = static_cast<ObjStringMatrix*>(val.asObj())->mat.rawData();
                         if (static_cast<int>(srcFlat.size()) != m.getCols()) throw std::runtime_error("VM Error: Row assignment size mismatch.");
                         for (int j = 0; j < m.getCols(); ++j) m(i, j) = srcFlat[j];
                     }
-                    else if (std::holds_alternative<RealMatrix>(val.data)) {
-                        auto srcFlat = std::get<RealMatrix>(val.data).rawData();
+                    else if (val.isObjType(ObjType::REAL_MATRIX)) {
+                        auto srcFlat = static_cast<ObjRealMatrix*>(val.asObj())->mat.rawData();
                         if (static_cast<int>(srcFlat.size()) != m.getCols()) throw std::runtime_error("VM Error: Row assignment size mismatch.");
                         for (int j = 0; j < m.getCols(); ++j) { std::ostringstream oss; oss << Value(srcFlat[j]); m(i, j) = oss.str(); }
                     }
-                    else if (std::holds_alternative<ComplexMatrix>(val.data)) {
-                        auto srcFlat = std::get<ComplexMatrix>(val.data).rawData();
+                    else if (val.isObjType(ObjType::COMPLEX_MATRIX)) {
+                        auto srcFlat = static_cast<ObjComplexMatrix*>(val.asObj())->mat.rawData();
                         if (static_cast<int>(srcFlat.size()) != m.getCols()) throw std::runtime_error("VM Error: Row assignment size mismatch.");
                         for (int j = 0; j < m.getCols(); ++j) { std::ostringstream oss; oss << Value(srcFlat[j]); m(i, j) = oss.str(); }
                     }
                     else {
                         std::string s;
-                        if (std::holds_alternative<std::string>(val.data)) s = std::get<std::string>(val.data);
+                        if (val.isString()) s = val.asString();
                         else { std::ostringstream oss; oss << val; s = oss.str(); }
                         for (int j = 0; j < m.getCols(); ++j) m(i, j) = s;
                     }
                 }
             }
-            else if (std::holds_alternative<List>(obj.data)) {
-                std::get<List>(obj.data).set(i, val);
+            else if (obj.isObjType(ObjType::LIST)) {
+                auto list = static_cast<ObjList*>(obj.asObj());
+                int n = static_cast<int>(list->vec.size());
+                if (i < 0) i = n + i;
+                if (i < 0 || i >= n) throw std::out_of_range("List Error: Index out of bounds.");
+                list->vec[i] = val;
             }
-            else if (std::holds_alternative<std::string>(obj.data)) {
-                auto& s = std::get<std::string>(obj.data);
+            else if (obj.isString()) {
+                if (obj.asObj()->refCount > 2) obj = Value(static_cast<ObjString*>(obj.asObj())->str);
+                auto& s = static_cast<ObjString*>(obj.asObj())->str;
                 if (i < 0) i = static_cast<int>(s.size()) + i;
                 if (i < 0 || i >= static_cast<int>(s.size()))
                     throw std::runtime_error("VM Error: String index out of bounds.");
-                if (!std::holds_alternative<std::string>(val.data) ||
-                    std::get<std::string>(val.data).size() != 1)
+                if (!val.isString() || val.asString().size() != 1)
                     throw std::runtime_error("VM Error: String element assignment requires a single character.");
-                s[i] = std::get<std::string>(val.data)[0];
+                s[i] = val.asString()[0];
             }
             push(val);
             push(obj);
@@ -2712,33 +2846,36 @@ namespace jc {
             int r = static_cast<int>(std::round(row.asDouble()));
             int c = static_cast<int>(std::round(col.asDouble()));
 
-            if (std::holds_alternative<RealMatrix>(obj.data)) {
-                if (std::holds_alternative<Complex>(val.data)) {
-                    ComplexMatrix cm = std::get<RealMatrix>(obj.data).toComplexMatrix();
+            if (obj.isObjType(ObjType::REAL_MATRIX)) {
+                if (val.isComplex()) {
+                    ComplexMatrix cm = static_cast<ObjRealMatrix*>(obj.asObj())->mat.toComplexMatrix();
                     if (r < 0) r = cm.getRows() + r;
                     if (c < 0) c = cm.getCols() + c;
                     cm(r, c) = val.asComplex();
                     obj = Value(cm);
                 }
                 else {
-                    auto& m = std::get<RealMatrix>(obj.data);
+                    if (obj.asObj()->refCount > 2) obj = Value(RealMatrix(static_cast<ObjRealMatrix*>(obj.asObj())->mat));
+                    auto& m = static_cast<ObjRealMatrix*>(obj.asObj())->mat;
                     if (r < 0) r = m.getRows() + r;
                     if (c < 0) c = m.getCols() + c;
                     m(r, c) = val.asDouble();
                 }
             }
-            else if (std::holds_alternative<ComplexMatrix>(obj.data)) {
-                auto& m = std::get<ComplexMatrix>(obj.data);
+            else if (obj.isObjType(ObjType::COMPLEX_MATRIX)) {
+                if (obj.asObj()->refCount > 2) obj = Value(ComplexMatrix(static_cast<ObjComplexMatrix*>(obj.asObj())->mat));
+                auto& m = static_cast<ObjComplexMatrix*>(obj.asObj())->mat;
                 if (r < 0) r = m.getRows() + r;
                 if (c < 0) c = m.getCols() + c;
                 m(r, c) = val.asComplex();
             }
-            else if (std::holds_alternative<StringMatrix>(obj.data)) {
-                auto& m = std::get<StringMatrix>(obj.data);
+            else if (obj.isObjType(ObjType::STRING_MATRIX)) {
+                if (obj.asObj()->refCount > 2) obj = Value(StringMatrix(static_cast<ObjStringMatrix*>(obj.asObj())->mat));
+                auto& m = static_cast<ObjStringMatrix*>(obj.asObj())->mat;
                 if (r < 0) r = m.getRows() + r;
                 if (c < 0) c = m.getCols() + c;
-                if (std::holds_alternative<std::string>(val.data))
-                    m(r, c) = std::get<std::string>(val.data);
+                if (val.isString())
+                    m(r, c) = val.asString();
                 else {
                     std::ostringstream oss; oss << val;
                     m(r, c) = oss.str();
@@ -2811,8 +2948,8 @@ namespace jc {
             auto start = readOptionalInt();
             Value obj = pop();
 
-            if (std::holds_alternative<std::string>(obj.data)) {
-                const auto& s = std::get<std::string>(obj.data);
+            if (obj.isString()) {
+                const auto& s = obj.asString();
                 auto ids = buildSliceIndices(static_cast<int>(s.size()), start, end, step);
                 std::string result;
                 for (int id : ids) result += s[id];
@@ -2820,8 +2957,8 @@ namespace jc {
                 return;
             }
 
-            if (std::holds_alternative<RealMatrix>(obj.data)) {
-                const auto& m = std::get<RealMatrix>(obj.data);
+            if (obj.isObjType(ObjType::REAL_MATRIX)) {
+                const auto& m = static_cast<ObjRealMatrix*>(obj.asObj())->mat;
                 int n = (m.getRows() == 1) ? m.getCols() : m.getRows();
                 auto ids = buildSliceIndices(n, start, end, step);
                 std::vector<double> result;
@@ -2844,8 +2981,8 @@ namespace jc {
                 return;
             }
 
-            if (std::holds_alternative<ComplexMatrix>(obj.data)) {
-                const auto& m = std::get<ComplexMatrix>(obj.data);
+            if (obj.isObjType(ObjType::COMPLEX_MATRIX)) {
+                const auto& m = static_cast<ObjComplexMatrix*>(obj.asObj())->mat;
                 int n = (m.getRows() == 1) ? m.getCols() : m.getRows();
                 auto ids = buildSliceIndices(n, start, end, step);
                 if (m.getRows() == 1) {
@@ -2869,8 +3006,8 @@ namespace jc {
                 return;
             }
 
-            if (std::holds_alternative<StringMatrix>(obj.data)) {
-                const auto& m = std::get<StringMatrix>(obj.data);
+            if (obj.isObjType(ObjType::STRING_MATRIX)) {
+                const auto& m = static_cast<ObjStringMatrix*>(obj.asObj())->mat;
                 int n = (m.getRows() == 1) ? m.getCols() : m.getRows();
                 auto ids = buildSliceIndices(n, start, end, step);
                 if (m.getRows() == 1) {
@@ -2894,11 +3031,11 @@ namespace jc {
                 return;
             }
 
-            if (std::holds_alternative<List>(obj.data)) {
-                const auto& L = std::get<List>(obj.data);
+            if (obj.isObjType(ObjType::LIST)) {
+                const auto& L = static_cast<ObjList*>(obj.asObj())->vec;
                 auto ids = buildSliceIndices(static_cast<int>(L.size()), start, end, step);
-                List result;
-                for (int id : ids) result.push_back(L.raw()[id]);
+                ObjList* result = GcHeap::get().allocate<ObjList>();
+                for (int id : ids) result->vec.push_back(L[id]);
                 push(Value(result));
                 return;
             }
@@ -2928,14 +3065,14 @@ namespace jc {
                     static_cast<int>(cIds.size()), flat)));
                 };
 
-            if (std::holds_alternative<RealMatrix>(obj.data)) {
-                processMatSlice(std::get<RealMatrix>(obj.data));
+            if (obj.isObjType(ObjType::REAL_MATRIX)) {
+                processMatSlice(static_cast<ObjRealMatrix*>(obj.asObj())->mat);
             }
-            else if (std::holds_alternative<ComplexMatrix>(obj.data)) {
-                processMatSlice(std::get<ComplexMatrix>(obj.data));
+            else if (obj.isObjType(ObjType::COMPLEX_MATRIX)) {
+                processMatSlice(static_cast<ObjComplexMatrix*>(obj.asObj())->mat);
             }
-            else if (std::holds_alternative<StringMatrix>(obj.data)) {
-                processMatSlice(std::get<StringMatrix>(obj.data));
+            else if (obj.isObjType(ObjType::STRING_MATRIX)) {
+                processMatSlice(static_cast<ObjStringMatrix*>(obj.asObj())->mat);
             }
             else {
                 throw std::runtime_error("VM Error: 2D slicing requires a matrix.");
@@ -3008,14 +3145,13 @@ namespace jc {
             auto start = readOptionalInt();
             Value obj = pop();
 
-            if (std::holds_alternative<RealMatrix>(obj.data)) {
-                auto& m = std::get<RealMatrix>(obj.data);
+            if (obj.isObjType(ObjType::REAL_MATRIX)) {
+                if (obj.asObj()->refCount > 2) obj = Value(RealMatrix(static_cast<ObjRealMatrix*>(obj.asObj())->mat));
+                auto& m = static_cast<ObjRealMatrix*>(obj.asObj())->mat;
                 int n = (m.getRows() == 1) ? m.getCols() : m.getRows();
                 auto ids = buildSliceIndices(n, start, end, step);
 
-                if (std::holds_alternative<double>(val.data) ||
-                    std::holds_alternative<BigInt>(val.data) ||
-                    std::holds_alternative<Fraction>(val.data)) {
+                if (val.isNumber() || val.isObjType(ObjType::BIGINT) || val.isObjType(ObjType::FRACTION)) {
                     double v = val.asDouble();
                     if (m.getRows() == 1) {
                         for (int id : ids) m(0, id) = v;
@@ -3029,8 +3165,8 @@ namespace jc {
                             for (int j = 0; j < m.getCols(); ++j) m(id, j) = v;
                     }
                 }
-                else if (std::holds_alternative<RealMatrix>(val.data)) {
-                    const auto& src = std::get<RealMatrix>(val.data);
+                else if (val.isObjType(ObjType::REAL_MATRIX)) {
+                    const auto& src = static_cast<ObjRealMatrix*>(val.asObj())->mat;
                     auto srcFlat = src.rawData();
 
                     if (m.getRows() == 1 || m.getCols() == 1) {
@@ -3059,37 +3195,39 @@ namespace jc {
                     throw std::runtime_error("VM Error: Cannot assign this type to slice.");
                 }
             }
-            else if (std::holds_alternative<List>(obj.data)) {
-                auto& L = std::get<List>(obj.data);
-                auto ids = buildSliceIndices(static_cast<int>(L.size()), start, end, step);
-                if (std::holds_alternative<List>(val.data)) {
-                    const auto& srcL = std::get<List>(val.data);
+            else if (obj.isObjType(ObjType::LIST)) {
+                auto list = static_cast<ObjList*>(obj.asObj());
+                auto ids = buildSliceIndices(static_cast<int>(list->vec.size()), start, end, step);
+                if (val.isObjType(ObjType::LIST)) {
+                    const auto& srcL = static_cast<ObjList*>(val.asObj())->vec;
                     if (srcL.size() != ids.size())
                         throw std::runtime_error("VM Error: Slice assignment size mismatch.");
                     for (size_t k = 0; k < ids.size(); ++k)
-                        L.set(ids[k], srcL.raw()[k]);
+                        list->vec[ids[k]] = srcL[k];
                 }
                 else {
                     for (int id : ids)
-                        L.set(id, val);
+                        list->vec[id] = val;
                 }
             }
-            else if (std::holds_alternative<std::string>(obj.data)) {
-                auto& s = std::get<std::string>(obj.data);
+            else if (obj.isString()) {
+                if (obj.asObj()->refCount > 2) obj = Value(static_cast<ObjString*>(obj.asObj())->str);
+                auto& s = static_cast<ObjString*>(obj.asObj())->str;
                 auto ids = buildSliceIndices(static_cast<int>(s.size()), start, end, step);
-                if (!std::holds_alternative<std::string>(val.data))
+                if (!val.isString())
                     throw std::runtime_error("VM Error: String slice assignment requires a string.");
-                const auto& src = std::get<std::string>(val.data);
+                const auto& src = val.asString();
                 if (static_cast<int>(src.size()) != static_cast<int>(ids.size()))
                     throw std::runtime_error("VM Error: String slice assignment size mismatch.");
                 for (size_t k = 0; k < ids.size(); ++k) s[ids[k]] = src[k];
             }
-            else if (std::holds_alternative<ComplexMatrix>(obj.data)) {
-                auto& m = std::get<ComplexMatrix>(obj.data);
+            else if (obj.isObjType(ObjType::COMPLEX_MATRIX)) {
+                if (obj.asObj()->refCount > 2) obj = Value(ComplexMatrix(static_cast<ObjComplexMatrix*>(obj.asObj())->mat));
+                auto& m = static_cast<ObjComplexMatrix*>(obj.asObj())->mat;
                 int n = (m.getRows() == 1) ? m.getCols() : m.getRows();
                 auto ids = buildSliceIndices(n, start, end, step);
-                if (std::holds_alternative<ComplexMatrix>(val.data)) {
-                    auto srcFlat = std::get<ComplexMatrix>(val.data).rawData();
+                if (val.isObjType(ObjType::COMPLEX_MATRIX)) {
+                    auto srcFlat = static_cast<ObjComplexMatrix*>(val.asObj())->mat.rawData();
 
                     if (m.getRows() == 1 || m.getCols() == 1) {
                         if (static_cast<int>(srcFlat.size()) != static_cast<int>(ids.size()))
@@ -3125,12 +3263,13 @@ namespace jc {
                     }
                 }
             }
-            else if (std::holds_alternative<StringMatrix>(obj.data)) {
-                auto& m = std::get<StringMatrix>(obj.data);
+            else if (obj.isObjType(ObjType::STRING_MATRIX)) {
+                if (obj.asObj()->refCount > 2) obj = Value(StringMatrix(static_cast<ObjStringMatrix*>(obj.asObj())->mat));
+                auto& m = static_cast<ObjStringMatrix*>(obj.asObj())->mat;
                 int n = (m.getRows() == 1) ? m.getCols() : m.getRows();
                 auto ids = buildSliceIndices(n, start, end, step);
-                if (std::holds_alternative<StringMatrix>(val.data)) {
-                    auto srcFlat = std::get<StringMatrix>(val.data).rawData();
+                if (val.isObjType(ObjType::STRING_MATRIX)) {
+                    auto srcFlat = static_cast<ObjStringMatrix*>(val.asObj())->mat.rawData();
 
                     if (m.getRows() == 1 || m.getCols() == 1) {
                         if (static_cast<int>(srcFlat.size()) != static_cast<int>(ids.size()))
@@ -3154,7 +3293,7 @@ namespace jc {
                 }
                 else {
                     std::string sv;
-                    if (std::holds_alternative<std::string>(val.data)) sv = std::get<std::string>(val.data);
+                    if (val.isString()) sv = val.asString();
                     else { std::ostringstream oss; oss << val; sv = oss.str(); }
 
                     if (m.getRows() == 1) {
@@ -3194,23 +3333,23 @@ namespace jc {
                 using ElemType = std::decay_t<decltype(m(0, 0))>;
 
                 // 检测右值是否为一个矩阵
-                bool isRhsMat = std::holds_alternative<RealMatrix>(val.data) ||
-                    std::holds_alternative<ComplexMatrix>(val.data) ||
-                    std::holds_alternative<StringMatrix>(val.data);
+                bool isRhsMat = val.isObjType(ObjType::REAL_MATRIX) ||
+                    val.isObjType(ObjType::COMPLEX_MATRIX) ||
+                    val.isObjType(ObjType::STRING_MATRIX);
 
                 if (isRhsMat) {
                     int srcR = 0, srcC = 0;
-                    if (std::holds_alternative<RealMatrix>(val.data)) {
-                        srcR = std::get<RealMatrix>(val.data).getRows();
-                        srcC = std::get<RealMatrix>(val.data).getCols();
+                    if (val.isObjType(ObjType::REAL_MATRIX)) {
+                        srcR = static_cast<ObjRealMatrix*>(val.asObj())->mat.getRows();
+                        srcC = static_cast<ObjRealMatrix*>(val.asObj())->mat.getCols();
                     }
-                    else if (std::holds_alternative<ComplexMatrix>(val.data)) {
-                        srcR = std::get<ComplexMatrix>(val.data).getRows();
-                        srcC = std::get<ComplexMatrix>(val.data).getCols();
+                    else if (val.isObjType(ObjType::COMPLEX_MATRIX)) {
+                        srcR = static_cast<ObjComplexMatrix*>(val.asObj())->mat.getRows();
+                        srcC = static_cast<ObjComplexMatrix*>(val.asObj())->mat.getCols();
                     }
                     else {
-                        srcR = std::get<StringMatrix>(val.data).getRows();
-                        srcC = std::get<StringMatrix>(val.data).getCols();
+                        srcR = static_cast<ObjStringMatrix*>(val.asObj())->mat.getRows();
+                        srcC = static_cast<ObjStringMatrix*>(val.asObj())->mat.getCols();
                     }
 
                     if (srcR != dstR || srcC != dstC)
@@ -3219,27 +3358,27 @@ namespace jc {
                     for (int i = 0; i < dstR; ++i) {
                         for (int j = 0; j < dstC; ++j) {
                             if constexpr (std::is_same_v<ElemType, double>) {
-                                if (std::holds_alternative<RealMatrix>(val.data))
-                                    m(rIds[i], cIds[j]) = std::get<RealMatrix>(val.data)(i, j);
+                                if (val.isObjType(ObjType::REAL_MATRIX))
+                                    m(rIds[i], cIds[j]) = static_cast<ObjRealMatrix*>(val.asObj())->mat(i, j);
                                 else
                                     throw std::runtime_error("VM Error: Cannot assign complex/string matrix to real matrix slice.");
                             }
                             else if constexpr (std::is_same_v<ElemType, Complex>) {
-                                if (std::holds_alternative<ComplexMatrix>(val.data))
-                                    m(rIds[i], cIds[j]) = std::get<ComplexMatrix>(val.data)(i, j);
-                                else if (std::holds_alternative<RealMatrix>(val.data))
-                                    m(rIds[i], cIds[j]) = Complex(std::get<RealMatrix>(val.data)(i, j));
+                                if (val.isObjType(ObjType::COMPLEX_MATRIX))
+                                    m(rIds[i], cIds[j]) = static_cast<ObjComplexMatrix*>(val.asObj())->mat(i, j);
+                                else if (val.isObjType(ObjType::REAL_MATRIX))
+                                    m(rIds[i], cIds[j]) = Complex(static_cast<ObjRealMatrix*>(val.asObj())->mat(i, j));
                                 else
                                     throw std::runtime_error("VM Error: Cannot assign string matrix to complex matrix slice.");
                             }
                             else if constexpr (std::is_same_v<ElemType, std::string>) {
                                 std::ostringstream oss;
-                                if (std::holds_alternative<StringMatrix>(val.data))
-                                    oss << std::get<StringMatrix>(val.data)(i, j);
-                                else if (std::holds_alternative<ComplexMatrix>(val.data))
-                                    oss << Value(std::get<ComplexMatrix>(val.data)(i, j));
+                                if (val.isObjType(ObjType::STRING_MATRIX))
+                                    oss << static_cast<ObjStringMatrix*>(val.asObj())->mat(i, j);
+                                else if (val.isObjType(ObjType::COMPLEX_MATRIX))
+                                    oss << Value(static_cast<ObjComplexMatrix*>(val.asObj())->mat(i, j));
                                 else
-                                    oss << Value(std::get<RealMatrix>(val.data)(i, j));
+                                    oss << Value(static_cast<ObjRealMatrix*>(val.asObj())->mat(i, j));
                                 m(rIds[i], cIds[j]) = oss.str();
                             }
                         }
@@ -3255,8 +3394,8 @@ namespace jc {
                         scalarVal = val.asComplex();
                     }
                     else if constexpr (std::is_same_v<ElemType, std::string>) {
-                        if (std::holds_alternative<std::string>(val.data))
-                            scalarVal = std::get<std::string>(val.data);
+                        if (val.isString())
+                            scalarVal = val.asString();
                         else {
                             std::ostringstream oss; oss << val; scalarVal = oss.str();
                         }
@@ -3268,14 +3407,17 @@ namespace jc {
                 }
                 };
 
-            if (std::holds_alternative<RealMatrix>(obj.data)) {
-                processMatSliceSet(std::get<RealMatrix>(obj.data));
+            if (obj.isObjType(ObjType::REAL_MATRIX)) {
+                if (obj.asObj()->refCount > 2) obj = Value(RealMatrix(static_cast<ObjRealMatrix*>(obj.asObj())->mat));
+                processMatSliceSet(static_cast<ObjRealMatrix*>(obj.asObj())->mat);
             }
-            else if (std::holds_alternative<ComplexMatrix>(obj.data)) {
-                processMatSliceSet(std::get<ComplexMatrix>(obj.data));
+            else if (obj.isObjType(ObjType::COMPLEX_MATRIX)) {
+                if (obj.asObj()->refCount > 2) obj = Value(ComplexMatrix(static_cast<ObjComplexMatrix*>(obj.asObj())->mat));
+                processMatSliceSet(static_cast<ObjComplexMatrix*>(obj.asObj())->mat);
             }
-            else if (std::holds_alternative<StringMatrix>(obj.data)) {
-                processMatSliceSet(std::get<StringMatrix>(obj.data));
+            else if (obj.isObjType(ObjType::STRING_MATRIX)) {
+                if (obj.asObj()->refCount > 2) obj = Value(StringMatrix(static_cast<ObjStringMatrix*>(obj.asObj())->mat));
+                processMatSliceSet(static_cast<ObjStringMatrix*>(obj.asObj())->mat);
             }
             else {
                 throw std::runtime_error("VM Error: 2D slice assignment requires a matrix.");
@@ -3297,24 +3439,24 @@ namespace jc {
         bool hasOther = false;
 
         auto canBeMatrixElement = [](const Value& v) -> bool {
-            return std::holds_alternative<double>(v.data) ||
-                std::holds_alternative<BigInt>(v.data) ||
-                std::holds_alternative<Fraction>(v.data) ||
-                std::holds_alternative<BaseNum>(v.data) ||
-                std::holds_alternative<Complex>(v.data) ||
-                std::holds_alternative<std::string>(v.data) ||
-                std::holds_alternative<RealMatrix>(v.data) ||
-                std::holds_alternative<ComplexMatrix>(v.data) ||
-                std::holds_alternative<StringMatrix>(v.data);
+            return v.isNumber() ||
+                v.isObjType(ObjType::BIGINT) ||
+                v.isObjType(ObjType::FRACTION) ||
+                v.isObjType(ObjType::BASENUM) ||
+                v.isObjType(ObjType::COMPLEX) ||
+                v.isString() ||
+                v.isObjType(ObjType::REAL_MATRIX) ||
+                v.isObjType(ObjType::COMPLEX_MATRIX) ||
+                v.isObjType(ObjType::STRING_MATRIX);
             };
 
         for (int ii = 0; ii < total; ++ii) {
             const Value& v = stack[stack.size() - total + ii];
-            if (std::holds_alternative<Complex>(v.data) ||
-                std::holds_alternative<ComplexMatrix>(v.data))
+            if (v.isObjType(ObjType::COMPLEX) ||
+                v.isObjType(ObjType::COMPLEX_MATRIX))
                 hasComplex = true;
-            if (std::holds_alternative<std::string>(v.data) ||
-                std::holds_alternative<StringMatrix>(v.data))
+            if (v.isString() ||
+                v.isObjType(ObjType::STRING_MATRIX))
                 hasString = true;
             if (!canBeMatrixElement(v))
                 hasOther = true;
@@ -3324,19 +3466,19 @@ namespace jc {
 
         if (hasOther) {
             if (rows == 1) {
-                List L;
+                ObjList* L = GcHeap::get().allocate<ObjList>();
                 for (int ii = 0; ii < total; ++ii)
-                    L.push_back(stack[stack.size() - total + ii]);
+                    L->vec.push_back(stack[stack.size() - total + ii]);
                 result = Value(L);
             }
             else {
-                List outer;
+                ObjList* outer = GcHeap::get().allocate<ObjList>();
                 for (int i = 0; i < rows; ++i) {
-                    List inner;
+                    ObjList* inner = GcHeap::get().allocate<ObjList>();
                     for (int j = 0; j < cols; ++j)
-                        inner.push_back(stack[stack.size() - total + i * cols + j]);
-                    inner.freeze();
-                    outer.push_back(Value(inner));
+                        inner->vec.push_back(stack[stack.size() - total + i * cols + j]);
+                    inner->is_frozen = true;
+                    outer->vec.push_back(Value(inner));
                 }
                 result = Value(outer);
             }
@@ -3345,17 +3487,17 @@ namespace jc {
             bool hasSubMatrix = false;
             for (int ii = 0; ii < total; ++ii) {
                 const Value& v = stack[stack.size() - total + ii];
-                if (std::holds_alternative<RealMatrix>(v.data) ||
-                    std::holds_alternative<ComplexMatrix>(v.data) ||
-                    std::holds_alternative<StringMatrix>(v.data))
+                if (v.isObjType(ObjType::REAL_MATRIX) ||
+                    v.isObjType(ObjType::COMPLEX_MATRIX) ||
+                    v.isObjType(ObjType::STRING_MATRIX))
                     hasSubMatrix = true;
             }
 
             if (hasSubMatrix) {
                 auto extractCell = [&](Value& cell) {
-                    if (!std::holds_alternative<RealMatrix>(cell.data) &&
-                        !std::holds_alternative<ComplexMatrix>(cell.data) &&
-                        !std::holds_alternative<StringMatrix>(cell.data)) {
+                    if (!cell.isObjType(ObjType::REAL_MATRIX) &&
+                        !cell.isObjType(ObjType::COMPLEX_MATRIX) &&
+                        !cell.isObjType(ObjType::STRING_MATRIX)) {
                         if (hasString) {
                             std::ostringstream oss; oss << cell;
                             cell = Value(StringMatrix(1, 1, { oss.str() }));
@@ -3368,8 +3510,8 @@ namespace jc {
                         }
                     }
                     if (hasString) {
-                        if (std::holds_alternative<RealMatrix>(cell.data)) {
-                            const auto& m = std::get<RealMatrix>(cell.data);
+                        if (cell.isObjType(ObjType::REAL_MATRIX)) {
+                            const auto& m = static_cast<ObjRealMatrix*>(cell.asObj())->mat;
                             std::vector<std::string> flat;
                             for (int i = 0; i < m.getRows(); ++i)
                                 for (int j = 0; j < m.getCols(); ++j) {
@@ -3378,8 +3520,8 @@ namespace jc {
                                 }
                             cell = Value(StringMatrix(m.getRows(), m.getCols(), flat));
                         }
-                        else if (std::holds_alternative<ComplexMatrix>(cell.data)) {
-                            const auto& m = std::get<ComplexMatrix>(cell.data);
+                        else if (cell.isObjType(ObjType::COMPLEX_MATRIX)) {
+                            const auto& m = static_cast<ObjComplexMatrix*>(cell.asObj())->mat;
                             std::vector<std::string> flat;
                             for (int i = 0; i < m.getRows(); ++i)
                                 for (int j = 0; j < m.getCols(); ++j) {
@@ -3389,7 +3531,7 @@ namespace jc {
                             cell = Value(StringMatrix(m.getRows(), m.getCols(), flat));
                         }
                     }
-                    else if (hasComplex && std::holds_alternative<RealMatrix>(cell.data)) {
+                    else if (hasComplex && cell.isObjType(ObjType::REAL_MATRIX)) {
                         cell = Value(cell.asComplexMatrix());
                     }
                     };
@@ -3407,14 +3549,14 @@ namespace jc {
                             }
                             else {
                                 if (hasString)
-                                    rowResult = Value(std::get<StringMatrix>(rowResult.data)
-                                        .integR(std::get<StringMatrix>(cell.data)));
+                                    rowResult = Value(static_cast<ObjStringMatrix*>(rowResult.asObj())->mat
+                                        .integR(static_cast<ObjStringMatrix*>(cell.asObj())->mat));
                                 else if (hasComplex)
-                                    rowResult = Value(std::get<ComplexMatrix>(rowResult.data)
-                                        .integR(std::get<ComplexMatrix>(cell.data)));
+                                    rowResult = Value(static_cast<ObjComplexMatrix*>(rowResult.asObj())->mat
+                                        .integR(static_cast<ObjComplexMatrix*>(cell.asObj())->mat));
                                 else
-                                    rowResult = Value(std::get<RealMatrix>(rowResult.data)
-                                        .integR(std::get<RealMatrix>(cell.data)));
+                                    rowResult = Value(static_cast<ObjRealMatrix*>(rowResult.asObj())->mat
+                                        .integR(static_cast<ObjRealMatrix*>(cell.asObj())->mat));
                             }
                         }
                         if (matResult.isNone()) {
@@ -3422,14 +3564,14 @@ namespace jc {
                         }
                         else {
                             if (hasString)
-                                matResult = Value(std::get<StringMatrix>(matResult.data)
-                                    .integC(std::get<StringMatrix>(rowResult.data)));
+                                matResult = Value(static_cast<ObjStringMatrix*>(matResult.asObj())->mat
+                                    .integC(static_cast<ObjStringMatrix*>(rowResult.asObj())->mat));
                             else if (hasComplex)
-                                matResult = Value(std::get<ComplexMatrix>(matResult.data)
-                                    .integC(std::get<ComplexMatrix>(rowResult.data)));
+                                matResult = Value(static_cast<ObjComplexMatrix*>(matResult.asObj())->mat
+                                    .integC(static_cast<ObjComplexMatrix*>(rowResult.asObj())->mat));
                             else
-                                matResult = Value(std::get<RealMatrix>(matResult.data)
-                                    .integC(std::get<RealMatrix>(rowResult.data)));
+                                matResult = Value(static_cast<ObjRealMatrix*>(matResult.asObj())->mat
+                                    .integC(static_cast<ObjRealMatrix*>(rowResult.asObj())->mat));
                         }
                     }
                     result = matResult;
@@ -3443,8 +3585,8 @@ namespace jc {
                 std::vector<std::string> flat(total);
                 for (int ii = 0; ii < total; ++ii) {
                     const Value& v = stack[stack.size() - total + ii];
-                    if (std::holds_alternative<std::string>(v.data))
-                        flat[ii] = std::get<std::string>(v.data);
+                    if (v.isString())
+                        flat[ii] = v.asString();
                     else {
                         std::ostringstream oss; oss << v;
                         flat[ii] = oss.str();
@@ -3474,20 +3616,18 @@ namespace jc {
     void VM::execIn() {
         Value haystack = pop(), needle = pop();
 
-        if (std::holds_alternative<std::string>(needle.data) &&
-            std::holds_alternative<std::string>(haystack.data)) {
-            bool found = std::get<std::string>(haystack.data).find(
-                std::get<std::string>(needle.data)) != std::string::npos;
+        if (needle.isString() && haystack.isString()) {
+            bool found = haystack.asString().find(needle.asString()) != std::string::npos;
             push(Value(found ? 1.0 : 0.0));
             return;
         }
-        if (std::holds_alternative<std::string>(haystack.data)) {
+        if (haystack.isString()) {
             throw std::runtime_error(
                 "VM Error: 'in' on string requires a string on the left side.");
         }
 
-        if (std::holds_alternative<RealMatrix>(haystack.data)) {
-            const auto& m = std::get<RealMatrix>(haystack.data);
+        if (haystack.isObjType(ObjType::REAL_MATRIX)) {
+            const auto& m = static_cast<ObjRealMatrix*>(haystack.asObj())->mat;
             double target;
             try { target = needle.asDouble(); }
             catch (...) { push(Value(0.0)); return; }
@@ -3498,8 +3638,8 @@ namespace jc {
             return;
         }
 
-        if (std::holds_alternative<ComplexMatrix>(haystack.data)) {
-            const auto& m = std::get<ComplexMatrix>(haystack.data);
+        if (haystack.isObjType(ObjType::COMPLEX_MATRIX)) {
+            const auto& m = static_cast<ObjComplexMatrix*>(haystack.asObj())->mat;
             Complex target;
             try { target = needle.asComplex(); }
             catch (...) { push(Value(0.0)); return; }
@@ -3510,12 +3650,12 @@ namespace jc {
             return;
         }
 
-        if (std::holds_alternative<StringMatrix>(haystack.data)) {
-            if (!std::holds_alternative<std::string>(needle.data))
+        if (haystack.isObjType(ObjType::STRING_MATRIX)) {
+            if (!needle.isString())
                 throw std::runtime_error(
                     "VM Error: 'in' on StringMatrix requires a string needle.");
-            const auto& m = std::get<StringMatrix>(haystack.data);
-            const auto& target = std::get<std::string>(needle.data);
+            const auto& m = static_cast<ObjStringMatrix*>(haystack.asObj())->mat;
+            const auto& target = needle.asString();
             for (const auto& v : m.rawData()) {
                 if (v == target) { push(Value(1.0)); return; }
             }
@@ -3523,12 +3663,11 @@ namespace jc {
             return;
         }
 
-        if (std::holds_alternative<List>(haystack.data)) {
-            const auto& L = std::get<List>(haystack.data);
-            for (const auto& e : L.raw()) {
+        if (haystack.isObjType(ObjType::LIST)) {
+            const auto& L = static_cast<ObjList*>(haystack.asObj())->vec;
+            for (const auto& e : L) {
                 try {
-                    Value elem = e;
-                    if (Value::equals(needle, elem)) {
+                    if (Value::equals(needle, e)) {
                         push(Value(1.0));
                         return;
                     }
@@ -3539,20 +3678,22 @@ namespace jc {
             return;
         }
 
-        if (std::holds_alternative<Dict>(haystack.data)) {
-            push(Value(std::get<Dict>(haystack.data).has(needle) ? 1.0 : 0.0));
+        if (haystack.isObjType(ObjType::DICT)) {
+            auto d = static_cast<ObjDict*>(haystack.asObj());
+            push(Value(d->keyMap.find(needle) != d->keyMap.end() ? 1.0 : 0.0));
             return;
         }
 
-        if (std::holds_alternative<Set>(haystack.data)) {
-            push(Value(std::get<Set>(haystack.data).contains(needle) ? 1.0 : 0.0));
+        if (haystack.isObjType(ObjType::SET)) {
+            auto s = static_cast<ObjSet*>(haystack.asObj());
+            push(Value(s->keys.find(needle) != s->keys.end() ? 1.0 : 0.0));
             return;
         }
 
-        if (std::holds_alternative<std::shared_ptr<Instance>>(haystack.data)) {
+        if (haystack.isInstance()) {
             auto method = findDunder(haystack, "__contains__");
             if (method) {
-                push(Value(isTruthy(callDunder(haystack, "__contains__", { needle })) ? 1.0 : 0.0));
+                push(Value(callDunder(haystack, "__contains__", { needle }).truthy() ? 1.0 : 0.0));
                 return;
             }
         }
@@ -3619,21 +3760,22 @@ namespace jc {
     }
 
     void VM::execInvoke(uint16_t nameIdx, uint8_t argc) {
-        std::string methodName = std::get<std::string>(currentChunk().constants[nameIdx].data);
+        std::string methodName = currentChunk().constants[nameIdx].asString();
         Value obj = stack[stack.size() - 1 - argc];
 
-        std::shared_ptr<FunctionClosure> method;
-        std::shared_ptr<ClassDefinition> owningClass = nullptr;
+        ObjClosure* method = nullptr;
+        ObjClass* owningClass = nullptr;
 
         // ==============================================================
         // 1. 如果它是原生 Dict！我们要像对待对象一样去调用它内部的闭包
         // ==============================================================
-        if (std::holds_alternative<Dict>(obj.data)) {
-            const auto* v = std::get<Dict>(obj.data).get(Value(methodName));
-            if (v) {
-                Value fv = *v;
-                if (std::holds_alternative<std::shared_ptr<FunctionClosure>>(fv.data)) {
-                    method = std::get<std::shared_ptr<FunctionClosure>>(fv.data);
+        if (obj.isObjType(ObjType::DICT)) {
+            auto d = static_cast<ObjDict*>(obj.asObj());
+            auto it = d->keyMap.find(Value(methodName));
+            if (it != d->keyMap.end()) {
+                Value fv = d->elements[it->second].second;
+                if (fv.isFunctionClosure()) {
+                    method = fv.asFunction();
                 }
             }
             if (!method) {
@@ -3643,8 +3785,8 @@ namespace jc {
         // ==============================================================
         // 2. 经典面向对象 Instance 的方法查询（优先类模板，后查原型挂载）
         // ==============================================================
-        else if (std::holds_alternative<std::shared_ptr<Instance>>(obj.data)) {
-            auto inst = std::get<std::shared_ptr<Instance>>(obj.data);
+        else if (obj.isInstance()) {
+            auto inst = obj.asInstance();
             auto c = inst->classDef;
             while (c) {
                 auto it = c->methods.find(methodName);
@@ -3656,12 +3798,12 @@ namespace jc {
                 c = c->parent;
             }
 
-            if (!method) {
-                auto* fieldVal = inst->fields.get(methodName);
-                if (fieldVal) {
-                    Value fv = *fieldVal;
-                    if (std::holds_alternative<std::shared_ptr<FunctionClosure>>(fv.data)) {
-                        method = std::get<std::shared_ptr<FunctionClosure>>(fv.data);
+            if (!method && inst->fields) {
+                auto it = inst->fields->keyMap.find(Value(methodName));
+                if (it != inst->fields->keyMap.end()) {
+                    Value fv = inst->fields->elements[it->second].second;
+                    if (fv.isFunctionClosure()) {
+                        method = fv.asFunction();
                         owningClass = inst->classDef;
                     }
                 }
@@ -3693,12 +3835,12 @@ namespace jc {
                     throw std::runtime_error("VM Error: '" + fnDef->name + "' requires at least " + std::to_string(fnDef->arity) + " arguments.");
                 }
 
-                List restList;
+                ObjList* restList = GcHeap::get().allocate<ObjList>();
                 if (static_cast<int>(argc) > fixedMax) {
                     int restCount = static_cast<int>(argc) - fixedMax;
                     std::vector<Value> tempValues(restCount);
                     for (int j = 0; j < restCount; j++) tempValues[restCount - 1 - j] = pop();
-                    for (int j = 0; j < restCount; j++) restList.push_back(tempValues[j]);
+                    for (int j = 0; j < restCount; j++) restList->vec.push_back(tempValues[j]);
                     argc = static_cast<uint8_t>(fixedMax);
                 }
 
@@ -3754,23 +3896,23 @@ namespace jc {
     }
 
     void VM::execSuperInvoke(uint16_t nameIdx, uint8_t argc) {
-        std::string methodName = std::get<std::string>(currentChunk().constants[nameIdx].data);
+        std::string methodName = currentChunk().constants[nameIdx].asString();
         Value selfVal = stack[stack.size() - 1 - argc];
-        if (!std::holds_alternative<std::shared_ptr<Instance>>(selfVal.data))
+        if (!selfVal.isInstance())
             throw std::runtime_error("VM Error: 'super' requires an instance context.");
-        auto inst = std::get<std::shared_ptr<Instance>>(selfVal.data);
+        auto inst = selfVal.asInstance();
         // ★ FIX: 直接从当前函数的帧寄存器提取！
         Value classVal = frame().classContext;
-        if (!std::holds_alternative<std::shared_ptr<ClassDefinition>>(classVal.data))
+        if (!classVal.isClass())
             throw std::runtime_error("VM Error: 'super' requires class context (__class__).");
-        auto currentClass = std::get<std::shared_ptr<ClassDefinition>>(classVal.data);
+        auto currentClass = static_cast<ObjClass*>(classVal.asObj());
         auto parentClass = currentClass->parent;
         if (!parentClass)
             throw std::runtime_error("VM Error: Class '" + currentClass->name +
                 "' has no parent class.");
 
-        std::shared_ptr<FunctionClosure> method;
-        std::shared_ptr<ClassDefinition> owningClass;
+        ObjClosure* method = nullptr;
+        ObjClass* owningClass = nullptr;
         auto c = parentClass;
         while (c) {
             auto it = c->methods.find(methodName);
@@ -3803,7 +3945,7 @@ namespace jc {
                     throw std::runtime_error("VM Error: '" + fnDef->name + "' requires at least " + std::to_string(fnDef->arity) + " arguments.");
                 }
 
-                List restList;
+                ObjList* restList = GcHeap::get().allocate<ObjList>();
                 if (static_cast<int>(argc) > fixedMax) {
                     int restCount = static_cast<int>(argc) - fixedMax;
                     std::vector<Value> tempValues(restCount);
@@ -3811,7 +3953,7 @@ namespace jc {
                         tempValues[restCount - 1 - j] = pop();
                     }
                     for (int j = 0; j < restCount; j++) {
-                        restList.push_back(tempValues[j]);
+                        restList->vec.push_back(tempValues[j]);
                     }
                     argc = static_cast<uint8_t>(fixedMax);
                 }
@@ -3869,10 +4011,10 @@ namespace jc {
     }
 
     void VM::execAssertParamType(const Value& val, uint16_t typeIdx, uint16_t nameIdx) {
-        const std::string& expectedType = std::get<std::string>(currentChunk().constants[typeIdx].data);
+        const std::string& expectedType = currentChunk().constants[typeIdx].asString();
 
         if (!checkValueType(val, expectedType)) {
-            const std::string& paramName = std::get<std::string>(currentChunk().constants[nameIdx].data);
+            const std::string& paramName = currentChunk().constants[nameIdx].asString();
             throw std::runtime_error("TypeError: Parameter '" + paramName +
                 "' expected type '" + expectedType +
                 "', got '" + getTypeName(val) + "'.");
@@ -3880,7 +4022,7 @@ namespace jc {
     }
 
     void VM::execAssertReturnType(const Value& val, uint16_t typeIdx) {
-        const std::string& expectedType = std::get<std::string>(currentChunk().constants[typeIdx].data);
+        const std::string& expectedType = currentChunk().constants[typeIdx].asString();
 
         if (!checkValueType(val, expectedType)) {
             throw std::runtime_error("TypeError: Function '" + frame().function->name +

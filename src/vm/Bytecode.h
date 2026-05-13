@@ -109,6 +109,7 @@ namespace jc {
         // 列表推导式
         OP_LIST_INIT,       // 压入空 List
         OP_LIST_APPEND,     // 将栈顶值追加到栈中第 N 位置的 List
+        OP_LIST_COMP_END,   // ★ 新增：列表推导式结束，执行智能降维
 
         // 闭包上值
         OP_GET_UPVALUE,     // [idx:16bit]
@@ -196,6 +197,7 @@ namespace jc {
         case OpCode::OP_FORMAT_STRING: return "OP_FORMAT_STRING";
         case OpCode::OP_LIST_INIT: return "OP_LIST_INIT";
         case OpCode::OP_LIST_APPEND: return "OP_LIST_APPEND";
+        case OpCode::OP_LIST_COMP_END: return "OP_LIST_COMP_END";
         case OpCode::OP_GET_UPVALUE: return "OP_GET_UPVALUE";
         case OpCode::OP_SET_UPVALUE: return "OP_SET_UPVALUE";
         case OpCode::OP_CLASS: return "OP_CLASS";
@@ -332,7 +334,7 @@ namespace jc {
             case OpCode::OP_IN: case OpCode::OP_STRINGIFY: case OpCode::OP_TRY_END:
             case OpCode::OP_THROW: case OpCode::OP_LIST_INIT: case OpCode::OP_INHERIT:
             case OpCode::OP_IMPORT: case OpCode::OP_BIT_AND: case OpCode::OP_BIT_OR:
-            case OpCode::OP_GET_SELF:
+            case OpCode::OP_GET_SELF: case OpCode::OP_LIST_COMP_END:
                 std::cout << std::endl;
                 return offset + 1;
 
@@ -380,8 +382,8 @@ namespace jc {
                 uint16_t idx = read16(offset + 1);
                 std::cout << idx << " (";
                 if (idx < constants.size()) {
-                    if (std::holds_alternative<std::string>(constants[idx].data))
-                        std::cout << std::get<std::string>(constants[idx].data);
+                    if (constants[idx].isString())
+                        std::cout << constants[idx].asString();
                     else
                         std::cout << constants[idx];
                 }
@@ -435,8 +437,8 @@ namespace jc {
                 uint16_t idx = read16(offset + 1);
                 uint8_t argc = code[offset + 3];
                 std::cout << idx << " (";
-                if (idx < constants.size() && std::holds_alternative<std::string>(constants[idx].data))
-                    std::cout << std::get<std::string>(constants[idx].data);
+                if (idx < constants.size() && constants[idx].isString())
+                    std::cout << constants[idx].asString();
                 std::cout << ") " << static_cast<int>(argc) << " args" << std::endl;
                 return offset + 4;
             }
@@ -454,8 +456,8 @@ namespace jc {
                 uint16_t jump = read16(offset + 1);
                 uint16_t nameIdx = read16(offset + 3);
                 std::cout << "catch -> " << (offset + 5 + jump);
-                if (nameIdx < constants.size() && std::holds_alternative<std::string>(constants[nameIdx].data))
-                    std::cout << " (var: " << std::get<std::string>(constants[nameIdx].data) << ")";
+                if (nameIdx < constants.size() && constants[nameIdx].isString())
+                    std::cout << " (var: " << constants[nameIdx].asString() << ")";
                 std::cout << std::endl;
                 return offset + 5;
             }
