@@ -101,34 +101,72 @@ namespace jc {
             "', but returned '" + getTypeName(val) + "'.");
     }
 
+    static ObjClosure* findDunder(const Value& val, const std::string& name);
+
     bool VM::checkValueType(const Value& val, const std::string& typeStr) {
         if (typeStr == "any" || typeStr.empty()) return true;
 
-        if (typeStr == "int") {
-            if (val.isObjType(ObjType::BIGINT)) return true;
-            if (val.isInt32()) return true;
-            if (val.isDouble()) {
-                double d = val.asDoubleRaw();
-                return std::round(d) == d;
-            }
+        // 1. 精确类型 & 联合类型
+        if (typeStr == "int") return val.isInt32() || val.isObjType(ObjType::BIGINT);
+        if (typeStr == "float" || typeStr == "double" || typeStr == "real") return val.isDouble();
+        if (typeStr == "number") return val.isNumber() || val.isObjType(ObjType::BIGINT) || val.isObjType(ObjType::FRACTION) || val.isObjType(ObjType::BASENUM);
+        if (typeStr == "string") return val.isString();
+        if (typeStr == "bool") return val.isBool();
+        if (typeStr == "binary" || typeStr == "bool_like") {
+            if (val.isBool()) return true;
+            try {
+                double d = val.asDouble();
+                if (d == 0.0 || d == 1.0) return true;
+            } catch (...) {}
             return false;
         }
-        if (typeStr == "double" || typeStr == "float" || typeStr == "real" || typeStr == "number")
-            return val.isNumber();
-        if (typeStr == "string") return val.isString();
-        if (typeStr == "matrix") return val.isObjType(ObjType::REAL_MATRIX) || val.isObjType(ObjType::COMPLEX_MATRIX) || val.isObjType(ObjType::STRING_MATRIX);
+        if (typeStr == "none") return val.isNone();
         if (typeStr == "list") return val.isObjType(ObjType::LIST);
         if (typeStr == "dict") return val.isObjType(ObjType::DICT);
         if (typeStr == "set") return val.isObjType(ObjType::SET);
-        if (typeStr == "bool") return val.isBool();
-        if (typeStr == "func" || typeStr == "function")
-            return val.isFunctionClosure() || val.isString();
-        if (typeStr == "complex") return val.isComplex();
         if (typeStr == "fraction") return val.isObjType(ObjType::FRACTION);
+        if (typeStr == "complex") return val.isObjType(ObjType::COMPLEX);
+        if (typeStr == "basenum") return val.isObjType(ObjType::BASENUM);
+        if (typeStr == "symbolic" || typeStr == "symbol" || typeStr == "expr") return val.isObjType(ObjType::SYMBOLIC);
+        if (typeStr == "realmat") return val.isObjType(ObjType::REAL_MATRIX);
+        if (typeStr == "complexmat") return val.isObjType(ObjType::COMPLEX_MATRIX);
+        if (typeStr == "stringmat") return val.isObjType(ObjType::STRING_MATRIX);
+        if (typeStr == "matrix") return val.isObjType(ObjType::REAL_MATRIX) || val.isObjType(ObjType::COMPLEX_MATRIX) || val.isObjType(ObjType::STRING_MATRIX);
+        if (typeStr == "func" || typeStr == "function") return val.isFunctionClosure();
         if (typeStr == "class") return val.isClass();
         if (typeStr == "instance") return val.isInstance();
-        if (typeStr == "symbolic"|| typeStr == "symbol" || typeStr == "expr") return val.isSymbolic();
 
+        // 2. 鸭子类型 / 接口类型
+        if (typeStr == "iterable") {
+            if (val.isObjType(ObjType::LIST) || val.isObjType(ObjType::DICT) || val.isObjType(ObjType::SET) ||
+                val.isString() || val.isObjType(ObjType::REAL_MATRIX) || val.isObjType(ObjType::COMPLEX_MATRIX) ||
+                val.isObjType(ObjType::STRING_MATRIX)) return true;
+            if (val.isInstance()) return findDunder(val, "__iter__") || findDunder(val, "__next__");
+            return false;
+        }
+        if (typeStr == "callable") {
+            if (val.isFunctionClosure() || val.isClass() || val.isString()) return true;
+            if (val.isInstance()) return findDunder(val, "__call__") != nullptr;
+            return false;
+        }
+        if (typeStr == "indexable") {
+            if (val.isObjType(ObjType::LIST) || val.isObjType(ObjType::DICT) || val.isString() ||
+                val.isObjType(ObjType::REAL_MATRIX) || val.isObjType(ObjType::COMPLEX_MATRIX) ||
+                val.isObjType(ObjType::STRING_MATRIX)) return true;
+            if (val.isInstance()) return findDunder(val, "__getitem__") != nullptr;
+            return false;
+        }
+        if (typeStr == "hashable") return val.isHashable();
+        if (typeStr == "numeric") {
+            if (val.isNumber() || val.isObjType(ObjType::BIGINT) || val.isObjType(ObjType::FRACTION) ||
+                val.isObjType(ObjType::COMPLEX) || val.isObjType(ObjType::BASENUM)) return true;
+            if (val.isInstance()) {
+                return findDunder(val, "__add__") || findDunder(val, "__mul__") || findDunder(val, "__sub__") || findDunder(val, "__div__");
+            }
+            return false;
+        }
+
+        // 3. 面向对象标称类型
         if (val.isInstance()) {
             auto inst = val.asInstance();
             auto c = inst->classDef;
@@ -1296,6 +1334,16 @@ namespace jc {
                             elements->vec.push_back(val);
                         }
                     }
+                    else if (iterable.isInstance()) {
+                        auto method = findDunder(iterable, "__iter__");
+                        if (method) {
+                            Value iterObj = callDunder(iterable, "__iter__", {});
+                            push(iterObj);
+                            push(Value::none()); // 使用 none 作为自定义迭代器的索引标记
+                            break;
+                        }
+                        throw std::runtime_error("VM Error: Instance is not iterable (missing __iter__).");
+                    }
                     else {
                         throw std::runtime_error("VM Error: Cannot iterate over this type.");
                     }
@@ -1306,16 +1354,33 @@ namespace jc {
 
                 case OpCode::OP_ITER_NEXT: {
                     uint16_t offset = readShort();
-                    double idx = peek(0).asDouble();
-                    const auto& elems = static_cast<ObjList*>(peek(1).asObj())->vec;
-                    int i = static_cast<int>(idx);
-                    if (i >= static_cast<int>(elems.size())) {
-                        frame().ip += offset;
-                    }
-                    else {
-                        Value elem = elems[i];
-                        stack[stack.size() - 1] = Value(idx + 1);
-                        push(elem);
+                    Value idxVal = peek(0);
+                    
+                    if (idxVal.isNone()) {
+                        // 自定义迭代器分支
+                        Value iterObj = peek(1);
+                        auto method = findDunder(iterObj, "__next__");
+                        if (!method) throw std::runtime_error("VM Error: Iterator missing __next__ method.");
+                        
+                        Value nextVal = callDunder(iterObj, "__next__", {});
+                        if (nextVal.isNone()) {
+                            frame().ip += offset; // 迭代结束
+                        } else {
+                            push(nextVal);
+                        }
+                    } else {
+                        // 原生 List 迭代分支
+                        double idx = idxVal.asDouble();
+                        const auto& elems = static_cast<ObjList*>(peek(1).asObj())->vec;
+                        int i = static_cast<int>(idx);
+                        if (i >= static_cast<int>(elems.size())) {
+                            frame().ip += offset;
+                        }
+                        else {
+                            Value elem = elems[i];
+                            stack[stack.size() - 1] = Value(idx + 1);
+                            push(elem);
+                        }
                     }
                     break;
                 }
@@ -1678,7 +1743,14 @@ namespace jc {
                             }
                             c = c->parent;
                         }
-                        if (!c) throw std::runtime_error("VM Error: No field/method '" + field + "'.");
+                        if (!c) {
+                            auto getattrMethod = findDunder(obj, "__getattr__");
+                            if (getattrMethod) {
+                                push(callDunder(obj, "__getattr__", { Value(field) }));
+                                break;
+                            }
+                            throw std::runtime_error("VM Error: No field/method '" + field + "'.");
+                        }
 
                         // ★ FIX: 创建绑定方法闭包，携带 receiver 和所属类
                         auto bound = GcHeap::get().allocate<ObjClosure>(
@@ -1756,6 +1828,13 @@ namespace jc {
 
                     if (obj.isInstance()) {
                         auto inst = obj.asInstance();
+                        auto setattrMethod = findDunder(obj, "__setattr__");
+                        if (setattrMethod) {
+                            callDunder(obj, "__setattr__", { Value(field), val });
+                            push(val);
+                            push(obj);
+                            break;
+                        }
                         if (!inst->fields) inst->fields = GcHeap::get().allocate<ObjDict>();
                         Value key(field);
                         auto it = inst->fields->keyMap.find(key);
@@ -2405,6 +2484,90 @@ namespace jc {
                 return;
             }
         } // 结束 if (fallback string tag)
+
+        // ======== [5] 实例的 __call__ 魔术方法 ========
+        if (callee.isInstance()) {
+            auto inst = callee.asInstance();
+            ObjClosure* method = nullptr;
+            ObjClass* owningClass = nullptr;
+            auto c = inst->classDef;
+            while (c) {
+                auto it = c->methods.find("__call__");
+                if (it != c->methods.end()) {
+                    method = it->second;
+                    owningClass = c;
+                    break;
+                }
+                c = c->parent;
+            }
+
+            if (method) {
+                if (method->isBytecode()) {
+                    auto& fnDef = compiledFunctions[method->compiledFnIndex];
+                    if (fnDef->hasRestParam) {
+                        int fixedMax = fnDef->maxArity - 1;
+                        if (static_cast<int>(argc) < fnDef->arity) {
+                            throw std::runtime_error("VM Error: '" + fnDef->name + "' requires at least " + std::to_string(fnDef->arity) + " arguments.");
+                        }
+                        ObjList* restList = GcHeap::get().allocate<ObjList>();
+                        if (static_cast<int>(argc) > fixedMax) {
+                            int restCount = static_cast<int>(argc) - fixedMax;
+                            std::vector<Value> tempValues(restCount);
+                            for (int j = 0; j < restCount; j++) tempValues[restCount - 1 - j] = pop();
+                            for (int j = 0; j < restCount; j++) restList->vec.push_back(tempValues[j]);
+                            argc = static_cast<uint8_t>(fixedMax);
+                        }
+                        int padCount = fixedMax - static_cast<int>(argc);
+                        for (int j = 0; j < padCount; ++j) push(Value::none());
+                        push(Value(restList));
+                    } else {
+                        if (static_cast<int>(argc) < fnDef->arity || static_cast<int>(argc) > fnDef->maxArity)
+                            throw std::runtime_error("VM Error: '" + fnDef->name + "' expects " + std::to_string(fnDef->arity) + " to " + std::to_string(fnDef->maxArity) + " arguments, got " + std::to_string(argc) + ".");
+                        int padCount = fnDef->maxArity - static_cast<int>(argc);
+                        for (int j = 0; j < padCount; ++j) push(Value::none());
+                    }
+
+                    int reserveCount = fnDef->localCount - fnDef->maxArity;
+                    for (int j = 0; j < reserveCount; ++j) push(Value::none());
+
+                    CallFrame newFrame;
+                    newFrame.function = fnDef.get();
+                    newFrame.ip = 0;
+                    newFrame.stackBase = static_cast<int>(stack.size()) - fnDef->localCount;
+                    if (method->hasCaptures()) {
+                        newFrame.upvalues = std::any_cast<std::shared_ptr<std::vector<std::shared_ptr<UpVal>>>>(method->capturedEnv);
+                    }
+                    
+                    // ★ 核心：将实例自身作为 self 注入
+                    newFrame.selfContext = callee;
+                    newFrame.classContext = Value(owningClass);
+
+                    stack.erase(stack.begin() + newFrame.stackBase - 1);
+                    newFrame.stackBase--;
+                    frames.push_back(newFrame);
+                    return;
+                } else if (method->isNative()) {
+                    std::vector<Value> argsVec(argc);
+                    for (int j = argc - 1; j >= 0; --j) argsVec[j] = pop();
+                    pop(); // pop callee
+
+                    helpers::nativeSelfStack.push_back(callee);
+                    helpers::nativeClassStack.push_back(Value(owningClass));
+
+                    auto& fn = std::any_cast<NativeCallable&>(method->nativeFn);
+                    Value result;
+                    try { result = fn(argsVec); }
+                    catch (...) {
+                        helpers::nativeSelfStack.pop_back(); helpers::nativeClassStack.pop_back();
+                        throw;
+                    }
+                    helpers::nativeSelfStack.pop_back(); helpers::nativeClassStack.pop_back();
+
+                    push(result);
+                    return;
+                }
+            }
+        }
 
         {
             std::vector<Value> args(argc);

@@ -2336,9 +2336,16 @@
       "    Membership:",
       "      __contains__(x)   Called by:  x in obj",
       "",
-      "    Indexing:",
+      "    Indexing & Dynamic Attributes:",
       "      __getitem__(i)               Called by:  obj[i]",
       "      __setitem__(i, v)            Called by:  obj[i] = v",
+      "      __getattr__(key)             Called when accessing a non-existent field: obj.key",
+      "      __setattr__(key, val)        Called when assigning to any field: obj.key = val",
+      "",
+      "    Iteration & Callable:",
+      "      __iter__()                   Returns an iterator object (usually `self`) for `for-in` loops.",
+      "      __next__()                   Returns the next value in iteration, or `none` to stop.",
+      "      __call__(...)                Allows the instance to be called like a function: obj(args)",
       "",
       "    Conversion & Hashing hooks:",
       "      __str__()    → str(obj), print(obj), f\"{obj}\", format(\"{}\", obj)",
@@ -2492,12 +2499,20 @@
       "      process([1,2], \"fast\")",
       "      ✗ TypeError: Parameter 'scale' expected type 'double', got 'string'.",
       "",
-      "    Supported Base Types: ",
-      "      int, double (or float/real/number), string, list, dict, set, ",
-      "      matrix, complex, fraction, func, bool, any",
+      "    Supported Exact & Union Types: ",
+      "      int, float/double/real, number, string, bool, binary/bool_like, none,",
+      "      list, dict, set, fraction, complex, basenum, symbolic/sym/expr,",
+      "      realmat, complexmat, stringmat, matrix, func/function, class, instance, any",
+      "",
+      "    Duck Types / Interfaces (Behavioral Contracts):",
+      "      iterable    → Matches lists, dicts, sets, strings, matrices, or instances with __iter__/__next__",
+      "      callable    → Matches functions, classes, strings (late-binding), or instances with __call__",
+      "      indexable   → Matches lists, dicts, strings, matrices, or instances with __getitem__",
+      "      hashable    → Matches immutable types, frozen containers, or instances with __hash__",
+      "      numeric     → Matches numbers, BigInts, fractions, complex, basenum, or instances with math dunders",
       "    ",
       "    Class / OOP Types:",
-      "      Any capitalized type name is evaluated as a class instance constraint.",
+      "      Any custom type name is evaluated as a class instance constraint.",
       "      Inheritance is strictly respected (passing a subclass is valid).",
       "      Example: collide(a: RigidBody, b: RigidBody) -> bool = ...",
       "",
@@ -5970,6 +5985,31 @@
       "signature": "__hash__()",
       "desc": "Dunder method: Provides a hash value for Dict keys and Set elements. Must return a hashable type.",
       "examples": ["__hash__() = hash(self.id)"]
+    },
+    "__iter__": {
+      "signature": "__iter__()",
+      "desc": "Dunder method: Returns an iterator object for for-in loops. Usually returns self.",
+      "examples": ["__iter__() = { self.idx = 0; return self }"]
+    },
+    "__next__": {
+      "signature": "__next__()",
+      "desc": "Dunder method: Returns the next value in an iteration, or none to stop.",
+      "examples": ["__next__() = { if (self.idx >= len(self.data)) return none; return self.data[self.idx++] }"]
+    },
+    "__getattr__": {
+      "signature": "__getattr__(key)",
+      "desc": "Dunder method: Intercepts access to non-existent properties (obj.key).",
+      "examples": ["__getattr__(k) = self.data[k]"]
+    },
+    "__setattr__": {
+      "signature": "__setattr__(key, val)",
+      "desc": "Dunder method: Intercepts all property assignments (obj.key = val).",
+      "examples": ["__setattr__(k, v) = { self.data[k] = v }"]
+    },
+    "__call__": {
+      "signature": "__call__(...)",
+      "desc": "Dunder method: Allows an instance to be called like a function.",
+      "examples": ["__call__(x) = self.multiplier * x"]
     }
   },
   "keywords": {

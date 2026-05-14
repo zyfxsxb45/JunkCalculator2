@@ -556,6 +556,16 @@ namespace jc {
                 case ObjType::DICT: return !static_cast<ObjDict*>(obj)->elements.empty();
                 case ObjType::SET: return !static_cast<ObjSet*>(obj)->elements.empty();
                 case ObjType::SYMBOLIC: return !static_cast<ObjSym*>(obj)->sym.isZero();
+                case ObjType::INSTANCE: {
+                    auto inst = static_cast<ObjInstance*>(obj);
+                    auto [found, res] = invokeDunder(inst, "__bool__");
+                    if (found) {
+                        if (res.isBool()) return res.asBool();
+                        if (res.isNumber()) return res.asDouble() != 0.0;
+                        return res.truthy();
+                    }
+                    return true;
+                }
                 default: return true;
             }
         }
@@ -1658,6 +1668,16 @@ inline size_t ValueHasher::operator()(const Value& v) const {
         }
         case ObjType::BASENUM: return std::hash<std::string>{}(static_cast<ObjBaseNum*>(obj)->base.getValue().toString());
         case ObjType::SYMBOLIC: return std::hash<std::string>{}(static_cast<ObjSym*>(obj)->sym.toString());
+        case ObjType::INSTANCE: {
+            auto inst = static_cast<ObjInstance*>(obj);
+            auto [found, res] = invokeDunder(inst, "__hash__");
+            if (found) {
+                if (res.isNumber()) return std::hash<double>{}(res.asDouble());
+                if (res.isString()) return std::hash<std::string>{}(res.asString());
+                if (res.isBigInt()) return std::hash<std::string>{}(res.asBigInt().toString());
+            }
+            return std::hash<const void*>{}(obj);
+        }
         default: return std::hash<const void*>{}(obj);
     }
 }
