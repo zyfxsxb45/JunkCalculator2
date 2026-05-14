@@ -108,9 +108,12 @@ namespace jc {
 
         // 1. 精确类型 & 联合类型
         if (typeStr == "int") return val.isInt32() || val.isObjType(ObjType::BIGINT);
-        if (typeStr == "float" || typeStr == "double" || typeStr == "real") return val.isDouble();
-        if (typeStr == "number") return val.isNumber() || val.isObjType(ObjType::BIGINT) || val.isObjType(ObjType::FRACTION) || val.isObjType(ObjType::BASENUM);
-        if (typeStr == "string") return val.isString();
+        if (typeStr == "float" || typeStr == "double") return val.isDouble();
+        if (typeStr == "real") return val.isNumber() || val.isObjType(ObjType::BIGINT) || val.isObjType(ObjType::FRACTION) || val.isObjType(ObjType::BASENUM) || (val.isComplex() && val.asComplex().imag == 0.0);
+        if (typeStr == "number") return val.isNumber() || val.isObjType(ObjType::BIGINT) || val.isObjType(ObjType::FRACTION) || val.isObjType(ObjType::BASENUM) || val.isComplex();
+        if (typeStr == "whole") return val.isInt32() || val.isObjType(ObjType::BIGINT) || (val.isDouble() && std::isfinite(val.asDoubleRaw()) && val.asDoubleRaw() == std::floor(val.asDoubleRaw())) || (val.isObjType(ObjType::FRACTION) && static_cast<ObjFraction*>(val.asObj())->frac.getDen() == BigInt(1)) || (val.isComplex() && val.asComplex().imag == 0.0 && std::isfinite(val.asComplex().real) && val.asComplex().real == std::floor(val.asComplex().real));
+        if (typeStr == "exact") return val.isInt32() || val.isObjType(ObjType::BIGINT) || val.isObjType(ObjType::FRACTION) || val.isObjType(ObjType::BASENUM) || val.isObjType(ObjType::SYMBOLIC);
+        if (typeStr == "string" || typeStr == "str") return val.isString();
         if (typeStr == "bool") return val.isBool();
         if (typeStr == "binary" || typeStr == "bool_like") {
             if (val.isBool()) return true;

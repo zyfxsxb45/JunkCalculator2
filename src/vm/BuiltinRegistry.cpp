@@ -1888,6 +1888,8 @@ void BuiltinRegistry::registerStringFunctions() {
         if (args[0].isString()) return args[0];
         std::ostringstream oss; oss << args[0]; return Value(oss.str());
         });
+    builtins["string"] = builtins["str"]; builtinArity["string"] = builtinArity["str"];
+
     reg("len", { 1 }, [](const std::vector<Value>& args) -> Value {
         // ★ Dunder 钩子: __len__
         if (args[0].isInstance()) {
@@ -3686,20 +3688,30 @@ void BuiltinRegistry::registerTypeChecks() {
         }
         if (args[0].isObjType(ObjType::FRACTION))
             return Value(static_cast<ObjFraction*>(args[0].asObj())->frac.getDen() == BigInt(1));
+        if (args[0].isComplex()) {
+            const auto& c = args[0].asComplex();
+            return Value(c.imag == 0.0 && std::isfinite(c.real) && c.real == std::floor(c.real));
+        }
         return Value(false);
         });
 
     reg("isfloat", { 1 }, [](const std::vector<Value>& args) -> Value {
         return Value(args[0].isDouble());
         });
+    builtins["isdouble"] = builtins["isfloat"]; builtinArity["isdouble"] = builtinArity["isfloat"];
 
     reg("isnumeric", { 1 }, [](const std::vector<Value>& args) -> Value {
-        return Value(args[0].isNumber() ||
-            args[0].isBigInt() ||
-            args[0].isObjType(ObjType::FRACTION) ||
-            args[0].isComplex() ||
-            args[0].isObjType(ObjType::BASENUM));
+        const Value& val = args[0];
+        if (val.isNumber() || val.isBigInt() || val.isObjType(ObjType::FRACTION) ||
+            val.isComplex() || val.isObjType(ObjType::BASENUM)) return Value(true);
+        if (val.isInstance()) {
+            auto inst = val.asInstance();
+            return Value(invokeDunder(inst, "__add__").first || invokeDunder(inst, "__mul__").first ||
+                         invokeDunder(inst, "__sub__").first || invokeDunder(inst, "__div__").first);
+        }
+        return Value(false);
         });
+    builtins["isnumber"] = builtins["isnumeric"]; builtinArity["isnumber"] = builtinArity["isnumeric"];
 
     reg("iscomplex", { 1 }, [](const std::vector<Value>& args) -> Value {
         if (args[0].isComplex()) return Value(true);
@@ -3724,6 +3736,19 @@ void BuiltinRegistry::registerTypeChecks() {
 
     reg("isbase", { 1 }, [](const std::vector<Value>& args) -> Value {
         return Value(args[0].isObjType(ObjType::BASENUM));
+        });
+
+    reg("isexact", { 1 }, [](const std::vector<Value>& args) -> Value {
+        return Value(args[0].isInt32() || args[0].isBigInt() || args[0].isObjType(ObjType::FRACTION) || args[0].isObjType(ObjType::BASENUM) || args[0].isObjType(ObjType::SYMBOLIC));
+        });
+
+    reg("isbinary", { 1 }, [](const std::vector<Value>& args) -> Value {
+        if (args[0].isBool()) return Value(true);
+        try {
+            double d = args[0].asDouble();
+            if (d == 0.0 || d == 1.0) return Value(true);
+        } catch (...) {}
+        return Value(false);
         });
 
     // ═══ 容器类型谓词 ═══
@@ -3780,11 +3805,44 @@ void BuiltinRegistry::registerTypeChecks() {
         return Value(args[0].isObjType(ObjType::DICT));
         });
 
+    reg("isiterable", { 1 }, [](const std::vector<Value>& args) -> Value {
+        const Value& val = args[0];
+        if (val.isObjType(ObjType::LIST) || val.isObjType(ObjType::DICT) || val.isObjType(ObjType::SET) ||
+            val.isString() || val.isObjType(ObjType::REAL_MATRIX) || val.isObjType(ObjType::COMPLEX_MATRIX) ||
+            val.isObjType(ObjType::STRING_MATRIX)) return Value(true);
+        if (val.isInstance()) {
+            auto inst = val.asInstance();
+            return Value(invokeDunder(inst, "__iter__").first || invokeDunder(inst, "__next__").first);
+        }
+        return Value(false);
+        });
+
+    reg("iscallable", { 1 }, [](const std::vector<Value>& args) -> Value {
+        const Value& val = args[0];
+        if (val.isFunctionClosure() || val.isClass() || val.isString()) return Value(true);
+        if (val.isInstance()) return Value(invokeDunder(val.asInstance(), "__call__").first);
+        return Value(false);
+        });
+
+    reg("isindexable", { 1 }, [](const std::vector<Value>& args) -> Value {
+        const Value& val = args[0];
+        if (val.isObjType(ObjType::LIST) || val.isObjType(ObjType::DICT) || val.isString() ||
+            val.isObjType(ObjType::REAL_MATRIX) || val.isObjType(ObjType::COMPLEX_MATRIX) ||
+            val.isObjType(ObjType::STRING_MATRIX)) return Value(true);
+        if (val.isInstance()) return Value(invokeDunder(val.asInstance(), "__getitem__").first);
+        return Value(false);
+        });
+
+    reg("ishashable", { 1 }, [](const std::vector<Value>& args) -> Value {
+        return Value(args[0].isHashable());
+        });
+
     // ═══ 字符串谓词 ═══
 
     reg("isstring", { 1 }, [](const std::vector<Value>& args) -> Value {
         return Value(args[0].isString());
         });
+    builtins["isstr"] = builtins["isstring"]; builtinArity["isstr"] = builtinArity["isstring"];
 
     reg("isalpha", { 1 }, [](const std::vector<Value>& args) -> Value {
         if (!args[0].isString()) return Value(false);
@@ -3867,6 +3925,7 @@ void BuiltinRegistry::registerTypeChecks() {
     reg("isfunction", { 1 }, [](const std::vector<Value>& args) -> Value {
         return Value(args[0].isFunctionClosure());
         });
+    builtins["isfunc"] = builtins["isfunction"]; builtinArity["isfunc"] = builtinArity["isfunction"];
 
     reg("isclass", { 1 }, [](const std::vector<Value>& args) -> Value {
         return Value(args[0].isClass());
@@ -3875,6 +3934,9 @@ void BuiltinRegistry::registerTypeChecks() {
     reg("issym", { 1 }, [](const std::vector<Value>& args) -> Value {
         return Value(args[0].isSymbolic());
         });
+    builtins["issymbolic"] = builtins["issym"]; builtinArity["issymbolic"] = builtinArity["issym"];
+    builtins["issymbol"] = builtins["issym"]; builtinArity["issymbol"] = builtinArity["issym"];
+    builtins["isexpr"] = builtins["issym"]; builtinArity["isexpr"] = builtinArity["issym"];
 
     reg("isnan", { 1 }, [](const std::vector<Value>& args) -> Value {
         if (args[0].isDouble())

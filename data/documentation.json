@@ -2501,7 +2501,7 @@
       "      ✗ TypeError: Parameter 'scale' expected type 'double', got 'string'.",
       "",
       "    Supported Exact & Union Types: ",
-      "      int, float/double/real, number, string, bool, binary/bool_like, none,",
+      "      int, whole, float/double, real, number, exact, string/str, bool, binary/bool_like, none,",
       "      list, dict, set, fraction, complex, basenum, symbolic/sym/expr,",
       "      realmat, complexmat, stringmat, matrix, func/function, class, instance, any",
       "",
@@ -2523,16 +2523,17 @@
       "    isint(x)            Integer type specifically? (int, or Fraction ",
       "                        with denominator = 1)",
       "    iswhole(x)          Whole number? (int, integer-valued double, ",
-      "                        or Fraction with denominator = 1)",
-      "    isfloat(x)          double type specifically?",
+      "                        Fraction with den=1, or Complex with imag=0)",
+      "    isfloat(x)          double type specifically? (alias: isdouble)",
       "    isnumeric(x)        Any numeric type? (double, int, Fraction, ",
-      "                        Complex, BaseNum)",
-      "    isbase(x)           BaseNum type specifically?",
+      "                        Complex, BaseNum, or Instance with math dunders)",
+      "    isexact(x)          Any exact numeric type? (int, Fraction, BaseNum, SymExpr)",
       "    iscomplex(x)        Complex type specifically?",
       "    isreal(x)           Real number? (double, int, Fraction, BaseNum,",
-      "                        or Complex with imaginary part ≈ 0)",
+      "                        or Complex with imaginary part == 0)",
       "    isfrac(x)           Fraction type specifically?",
       "    isbase(x)           BaseNum type specifically?",
+      "    isbinary(x)         Boolean or 0.0/1.0?",
       "",
       "    Examples:",
       "      isint(42)           → true  (int literal)",
@@ -2544,7 +2545,7 @@
       "      isreal(3+4i)        → false",
       "      isnumeric(\"hello\")  → false",
       "",
-      "  Container Type Checks",
+      "  Container & Duck Type Checks",
       "  ──────────────────────",
       "    ismatrix(x)         Any matrix? (Real, Complex, or String)",
       "    isrealmat(x)        RealMatrix specifically?",
@@ -2554,6 +2555,10 @@
       "    issquare(x)         Square matrix (N×N)?",
       "    islist(x)           List type?",
       "    isdict(x)           Dict type?",
+      "    isiterable(x)       Supports for-in loop? (has __iter__ or __next__)",
+      "    iscallable(x)       Can be called like a function? (has __call__)",
+      "    isindexable(x)      Supports bracket indexing? (has __getitem__)",
+      "    ishashable(x)       Can be used as a Dict key or Set element?",
       "",
       "    Examples:",
       "      ismatrix([1,2;3,4])       → true",
@@ -2566,7 +2571,7 @@
       "",
       "  String Predicates",
       "  ──────────────────────",
-      "    isstring(x)         Is x a String type?",
+      "    isstring(x)         Is x a String type? (alias: isstr)",
       "    isalpha(s)          All characters alphabetic? (\"abc\" → true)",
       "    isdigit(s)          All characters digits? (\"123\" → true)",
       "    isalnum(s)          All characters alphanumeric? (\"abc123\" → true)",
@@ -2585,7 +2590,7 @@
       "  Special Type Checks",
       "  ──────────────────────",
       "    isnone(x)           Is x the none value?",
-      "    isfunction(x)       Is x a function or closure?",
+      "    isfunction(x)       Is x a function or closure? (alias: isfunc)",
       "    isclass(x)          Is x a class definition?",
       "    isinstance(x)       Is x an instance of any class? (1 arg)",
       "    isinstance(x, C)    Is x an instance of class C or its subclass? (2 args)",
@@ -4102,6 +4107,7 @@
     "str": {
       "signature": "str(x)",
       "desc": "Converts any value to a string representation. Calls __str__ on instances if available.",
+      "aliases": ["string"],
       "examples": [
         "str(42)",
         "str([1, 2])"
@@ -5145,17 +5151,19 @@
     },
     "iswhole": {
       "signature": "iswhole(x)",
-      "desc": "Returns true if x is a whole number (int, integer-valued double, or Fraction with den=1).",
+      "desc": "Returns true if x is a whole number (int, integer-valued double, Fraction with den=1, or Complex with imag=0).",
       "examples": ["iswhole(3.0)"]
     },
     "isfloat": {
       "signature": "isfloat(x)",
       "desc": "Returns true if x is a double.",
+      "aliases": ["isdouble"],
       "examples": ["isfloat(3.14)"]
     },
     "isnumeric": {
       "signature": "isnumeric(x)",
-      "desc": "Returns true if x is any numeric type.",
+      "desc": "Returns true if x is any numeric type (including instances with math dunders).",
+      "aliases": ["isnumber"],
       "examples": ["isnumeric(1+2i)"]
     },
     "iscomplex": {
@@ -5177,6 +5185,16 @@
       "signature": "isbase(x)",
       "desc": "Returns true if x is specifically a BaseNum type.",
       "examples": ["isbase(base(255, 16))"]
+    },
+    "isexact": {
+      "signature": "isexact(x)",
+      "desc": "Returns true if x is an exact numeric type (int, Fraction, BaseNum, SymExpr).",
+      "examples": ["isexact(frac(1, 2))"]
+    },
+    "isbinary": {
+      "signature": "isbinary(x)",
+      "desc": "Returns true if x is a boolean or 0.0/1.0.",
+      "examples": ["isbinary(1.0)"]
     },
     "ismatrix": {
       "signature": "ismatrix(x)",
@@ -5218,9 +5236,30 @@
       "desc": "Returns true if x is a Dict.",
       "examples": ["isdict({a: 1})"]
     },
+    "isiterable": {
+      "signature": "isiterable(x)",
+      "desc": "Returns true if x supports for-in loops (has __iter__ or __next__).",
+      "examples": ["isiterable([1, 2])"]
+    },
+    "iscallable": {
+      "signature": "iscallable(x)",
+      "desc": "Returns true if x can be called like a function (has __call__).",
+      "examples": ["iscallable(sin)"]
+    },
+    "isindexable": {
+      "signature": "isindexable(x)",
+      "desc": "Returns true if x supports bracket indexing (has __getitem__).",
+      "examples": ["isindexable([1, 2])"]
+    },
+    "ishashable": {
+      "signature": "ishashable(x)",
+      "desc": "Returns true if x can be used as a Dict key or Set element.",
+      "examples": ["ishashable(\"key\")"]
+    },
     "isstring": {
       "signature": "isstring(x)",
       "desc": "Returns true if x is a String.",
+      "aliases": ["isstr"],
       "examples": ["isstring(\"hello\")"]
     },
     "isalpha": {
@@ -5266,6 +5305,7 @@
     "isfunction": {
       "signature": "isfunction(x)",
       "desc": "Returns true if x is a function or closure.",
+      "aliases": ["isfunc"],
       "examples": ["isfunction(sin)"]
     },
     "isclass": {
@@ -5276,6 +5316,7 @@
     "issym": {
       "signature": "issym(x)",
       "desc": "Returns true if x is a Symbolic Expression.",
+      "aliases": ["issymbolic", "issymbol", "isexpr"],
       "examples": ["issym(sym(\"x\"))"]
     },
     "isnan": {
