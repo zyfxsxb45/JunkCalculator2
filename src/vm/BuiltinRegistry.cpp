@@ -1223,12 +1223,69 @@ void BuiltinRegistry::registerBase() {
     reg("changeBase", { 2 }, [](const std::vector<Value>& args) -> Value { return Value(BaseNum(args[0].asBigInt(), static_cast<int>(std::round(args[1].asDouble())))); });
     reg("data", { 1 }, [](const std::vector<Value>& args) -> Value { return Value(args[0].asBigInt()); });
 
-    auto extractBin = [](const Value& v) -> BaseNum { if (v.isObjType(ObjType::BASENUM) && static_cast<ObjBaseNum*>(v.asObj())->base.getRadix() == 2) return static_cast<ObjBaseNum*>(v.asObj())->base; return BaseNum(v.asBigInt(), 2); };
-    reg("bitand", { 2 }, [extractBin](const std::vector<Value>& args) -> Value { return Value(extractBin(args[0]).bitAnd(extractBin(args[1]))); });
-    reg("bitor", { 2 }, [extractBin](const std::vector<Value>& args) -> Value { return Value(extractBin(args[0]).bitOr(extractBin(args[1]))); });
-    reg("bitxor", { 2 }, [extractBin](const std::vector<Value>& args) -> Value { return Value(extractBin(args[0]).bitXor(extractBin(args[1]))); });
-    reg("bitnot", { 1, 2 }, [extractBin](const std::vector<Value>& args) -> Value { if (args.size() == 1) return Value(extractBin(args[0]).bitNot()); int width = static_cast<int>(std::round(args[1].asDouble())); if (width <= 0) throw std::runtime_error("Math Error: Bit width must be positive."); return Value(extractBin(args[0]).bitNot(width)); });
-    reg("bitshift", { 2 }, [extractBin](const std::vector<Value>& args) -> Value { int shift = static_cast<int>(std::round(args[1].asDouble())); return shift > 0 ? Value(extractBin(args[0]).shiftLeft(shift)) : Value(extractBin(args[0]).shiftRight(-shift)); });
+    auto bitwiseOp = [](const Value& a, const Value& b, auto baseOp, auto int32Op) -> Value {
+        if (a.isObjType(ObjType::BASENUM) && b.isObjType(ObjType::BASENUM)) return Value(baseOp(static_cast<ObjBaseNum*>(a.asObj())->base, static_cast<ObjBaseNum*>(b.asObj())->base));
+        if (a.isObjType(ObjType::BASENUM)) return Value(baseOp(static_cast<ObjBaseNum*>(a.asObj())->base, BaseNum(b.asBigInt(), static_cast<ObjBaseNum*>(a.asObj())->base.getRadix())));
+        if (b.isObjType(ObjType::BASENUM)) return Value(baseOp(BaseNum(a.asBigInt(), static_cast<ObjBaseNum*>(b.asObj())->base.getRadix()), static_cast<ObjBaseNum*>(b.asObj())->base));
+        if (a.isInt32() && b.isInt32()) return Value::fromInt32(int32Op(a.asInt32(), b.asInt32()));
+        return Value(baseOp(BaseNum(a.asBigInt(), 2), BaseNum(b.asBigInt(), 2)).getValue());
+    };
+
+    reg("bitand", { 2 }, [bitwiseOp](const std::vector<Value>& args) -> Value { 
+        return bitwiseOp(args[0], args[1], [](const BaseNum& x, const BaseNum& y){ return x.bitAnd(y); }, [](int32_t x, int32_t y){ return x & y; }); 
+    });
+    reg("bitor", { 2 }, [bitwiseOp](const std::vector<Value>& args) -> Value { 
+        return bitwiseOp(args[0], args[1], [](const BaseNum& x, const BaseNum& y){ return x.bitOr(y); }, [](int32_t x, int32_t y){ return x | y; }); 
+    });
+    reg("bitxor", { 2 }, [bitwiseOp](const std::vector<Value>& args) -> Value { 
+        return bitwiseOp(args[0], args[1], [](const BaseNum& x, const BaseNum& y){ return x.bitXor(y); }, [](int32_t x, int32_t y){ return x ^ y; }); 
+    });
+    
+    reg("bitnot", { 1, 2 }, [](const std::vector<Value>& args) -> Value { 
+        int width = -1;
+        if (args.size() == 2) {
+            width = static_cast<int>(std::round(args[1].asDouble()));
+            if (width <= 0) throw std::runtime_error("Math Error: Bit width must be positive.");
+        }
+        const Value& a = args[0];
+        if (width > 0) {
+            if (a.isObjType(ObjType::BASENUM)) {
+                auto& base = static_cast<ObjBaseNum*>(a.asObj())->base;
+                return Value(base.bitNot(width));
+            }
+            BaseNum base(a.asBigInt(), 2);
+            return Value(base.bitNot(width).getValue());
+        } else {
+            if (a.isInt32()) return Value::fromInt32(~a.asInt32());
+            if (a.isObjType(ObjType::BASENUM)) {
+                auto& base = static_cast<ObjBaseNum*>(a.asObj())->base;
+                return Value(BaseNum(-base.getValue() - BigInt(1), base.getRadix()));
+            }
+            return Value(-a.asBigInt() - BigInt(1));
+        }
+    });
+    
+    reg("bitshift", { 2 }, [](const std::vector<Value>& args) -> Value { 
+        int shift = static_cast<int>(std::round(args[1].asDouble())); 
+        const Value& a = args[0];
+        if (a.isObjType(ObjType::BASENUM)) {
+            auto& base = static_cast<ObjBaseNum*>(a.asObj())->base;
+            return Value(shift > 0 ? base.shiftLeft(shift) : base.shiftRight(-shift));
+        }
+        if (a.isInt32()) {
+            int32_t v = a.asInt32();
+            if (shift > 0) {
+                if (shift >= 32) return Value::fromInt32(0);
+                return Value::fromInt32(v << shift);
+            } else {
+                int rshift = -shift;
+                if (rshift >= 32) return Value::fromInt32(v < 0 ? -1 : 0);
+                return Value::fromInt32(v >> rshift);
+            }
+        }
+        BaseNum base(a.asBigInt(), 2);
+        return Value((shift > 0 ? base.shiftLeft(shift) : base.shiftRight(-shift)).getValue());
+    });
 }
 
 // =================================================================

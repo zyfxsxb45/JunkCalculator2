@@ -779,6 +779,16 @@ namespace jc {
             return "unknown";
         }
 
+        Value operator~() const {
+            if (isInt32()) return Value::fromInt32(~asInt32());
+            if (isObjType(ObjType::BASENUM)) {
+                auto& base = static_cast<ObjBaseNum*>(asObj())->base;
+                return Value(BaseNum(-base.getValue() - BigInt(1), base.getRadix()));
+            }
+            if (isBigInt()) return Value(-asBigInt() - BigInt(1));
+            throw std::runtime_error("Type Error: Bitwise NOT '~' not supported for this type.");
+        }
+
         Value operator-() const {
             if (isInt32()) {
                 int32_t v = asInt32();
@@ -1330,6 +1340,15 @@ namespace jc {
             if (lhs.isObjType(ObjType::BASENUM) && rhs.isObjType(ObjType::BASENUM)) return Value(static_cast<ObjBaseNum*>(lhs.asObj())->base.bitAnd(static_cast<ObjBaseNum*>(rhs.asObj())->base));
             if (lhs.isObjType(ObjType::BASENUM)) return Value(static_cast<ObjBaseNum*>(lhs.asObj())->base.bitAnd(BaseNum(rhs.asBigInt(), static_cast<ObjBaseNum*>(lhs.asObj())->base.getRadix())));
             if (rhs.isObjType(ObjType::BASENUM)) return Value(BaseNum(lhs.asBigInt(), static_cast<ObjBaseNum*>(rhs.asObj())->base.getRadix()).bitAnd(static_cast<ObjBaseNum*>(rhs.asObj())->base));
+            
+            if (lhs.isInt32() && rhs.isInt32()) return Value::fromInt32(lhs.asInt32() & rhs.asInt32());
+            
+            bool lhsIsInt = lhs.isInt32() || lhs.isBigInt();
+            bool rhsIsInt = rhs.isInt32() || rhs.isBigInt();
+            if (lhsIsInt && rhsIsInt) {
+                BigInt res = BaseNum(lhs.asBigInt(), 2).bitAnd(BaseNum(rhs.asBigInt(), 2)).getValue();
+                return Value(res);
+            }
             throw std::runtime_error("Type Error: Bitwise/Set AND '&' not supported for these types.");
         }
 
@@ -1350,6 +1369,15 @@ namespace jc {
             if (lhs.isObjType(ObjType::BASENUM) && rhs.isObjType(ObjType::BASENUM)) return Value(static_cast<ObjBaseNum*>(lhs.asObj())->base.bitOr(static_cast<ObjBaseNum*>(rhs.asObj())->base));
             if (lhs.isObjType(ObjType::BASENUM)) return Value(static_cast<ObjBaseNum*>(lhs.asObj())->base.bitOr(BaseNum(rhs.asBigInt(), static_cast<ObjBaseNum*>(lhs.asObj())->base.getRadix())));
             if (rhs.isObjType(ObjType::BASENUM)) return Value(BaseNum(lhs.asBigInt(), static_cast<ObjBaseNum*>(rhs.asObj())->base.getRadix()).bitOr(static_cast<ObjBaseNum*>(rhs.asObj())->base));
+            
+            if (lhs.isInt32() && rhs.isInt32()) return Value::fromInt32(lhs.asInt32() | rhs.asInt32());
+            
+            bool lhsIsInt = lhs.isInt32() || lhs.isBigInt();
+            bool rhsIsInt = rhs.isInt32() || rhs.isBigInt();
+            if (lhsIsInt && rhsIsInt) {
+                BigInt res = BaseNum(lhs.asBigInt(), 2).bitOr(BaseNum(rhs.asBigInt(), 2)).getValue();
+                return Value(res);
+            }
             throw std::runtime_error("Type Error: Bitwise/Set OR '|' not supported for these types.");
         }
 

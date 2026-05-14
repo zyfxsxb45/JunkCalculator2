@@ -503,7 +503,7 @@ namespace jc {
     }
 
     std::unique_ptr<Expr> Parser::unary() {
-        if (match({ TokenType::PLUS, TokenType::MINUS, TokenType::BANG , TokenType::ELLIPSIS })) {  // ★ 加 BANG
+        if (match({ TokenType::PLUS, TokenType::MINUS, TokenType::BANG , TokenType::TILDE, TokenType::ELLIPSIS })) {  // ★ 加 BANG, TILDE
             Token op = previous();
             auto right = unary();
             return std::make_unique<Unary>(op, std::move(right));

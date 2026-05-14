@@ -177,6 +177,7 @@
       "  ──────────────────────",
       "    |                   Set Union / Base-2 Bitwise OR",
       "    &                   Set Intersection / Base-2 Bitwise AND",
+      "    ~                   Base-2 Bitwise NOT (prefix unary)",
       "    ",
       "    * Note: To prevent syntax ambiguity and precedence issues with polynomials, ",
       "      the caret (^) is STRICTLY reserved for exponentiation. ",
@@ -1182,16 +1183,16 @@
       "    If one operand is base 10 (or a plain integer), the result inherits the ",
       "    BaseNum's radix. Two different non-10 bases cannot be mixed.",
       "",
-      "  Bitwise Operations (Base-2 Exclusive)",
+      "  Bitwise Operations",
       "  ──────────────────────",
-      "    BaseNums automatically support native bitwise operators when radix = 2.",
-      "    (Wrap your inputs using `base(x, 2)` before passing them here).",
+      "    Bitwise operators preserve the input type (int32, BigInt, or BaseNum).",
       "    a & b                AND (Native operator)",
       "    a | b                OR  (Native operator)",
+      "    ~a                   NOT (Returns -a - 1)",
       "    a &= b               Compound AND assignment",
       "    a |= b               Compound OR assignment",
       "    bitxor(a, b)         XOR (Function only, since `^` is used for math power)",
-      "    bitnot(a, w)         NOT (auto-aligns to bytes, or explicitly w-bits)",
+      "    bitnot(a, w)         NOT (Returns -a - 1 if w omitted, else w-bit inversion)",
       "    bitshift(a, n)       Logical Shift: Left (n > 0) / Right (n < 0)",
       ""
     ],
@@ -3926,8 +3927,9 @@
     },
     "bitnot": {
       "signature": "bitnot(a, [w])",
-      "desc": "Returns the bitwise NOT of a number. Auto-aligns to bytes, or explicitly w-bits.",
+      "desc": "Returns the bitwise NOT of a number. If w is omitted, returns -a - 1. Otherwise, performs w-bit inversion.",
       "examples": [
+        "bitnot(5)",
         "bitnot(base(0, 2), 8)"
       ]
     },

@@ -56,7 +56,7 @@ namespace jc {
             // 逻辑
         case TokenType::AND_AND: case TokenType::OR_OR:
         case TokenType::BIT_AND: case TokenType::BIT_OR:
-        case TokenType::BANG: // ★
+        case TokenType::BANG: case TokenType::TILDE: // ★
             // 管道与箭头
         case TokenType::PIPE: case TokenType::ARROW: case TokenType::RIGHT_ARROW:
             // 标点
@@ -118,6 +118,7 @@ namespace jc {
             break;
         case '{': addToken(TokenType::LBRACE); break;    // ★ 新增
         case '}': addToken(TokenType::RBRACE); break;    // ★ 新增
+        case '~': addToken(TokenType::TILDE); break;     // ★ 新增
         case ',': addToken(TokenType::COMMA); break;
         case ';': addToken(TokenType::SEMICOLON); break;
         case '?': addToken(TokenType::QUESTION); break;    // ★

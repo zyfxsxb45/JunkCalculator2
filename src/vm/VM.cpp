@@ -558,6 +558,13 @@ namespace jc {
                     break;
                 }
                 case OpCode::OP_NOT: { push(Value(!pop().truthy())); break; }
+                case OpCode::OP_BIT_NOT: {
+                    Value a = pop();
+                    auto d = findDunder(a, "__bitnot__");
+                    if (d) { push(callDunder(a, "__bitnot__", {})); break; }
+                    push(~a);
+                    break;
+                }
 
                 case OpCode::OP_BIT_AND: {
                     Value b = pop(), a = pop();

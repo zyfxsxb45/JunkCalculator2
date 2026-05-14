@@ -446,6 +446,7 @@ namespace jc {
         switch (expr->op.type) {
         case TokenType::MINUS: emit(OpCode::OP_NEGATE, expr->op.line); break;
         case TokenType::BANG:  emit(OpCode::OP_NOT, expr->op.line); break;
+        case TokenType::TILDE: emit(OpCode::OP_BIT_NOT, expr->op.line); break;
         case TokenType::PLUS:  break;
         default: throw std::runtime_error("Compiler Error: Unknown unary operator.");
         }

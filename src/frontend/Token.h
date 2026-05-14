@@ -61,6 +61,7 @@ namespace jc {
         AND_AND,        // &&
         OR_OR,          // ||
         BANG,           // !  (单独的，不是 !=)
+        TILDE,          // ~  (★ 新增)
         BIT_AND,        // &  (★ 新增)
         BIT_OR,         // |  (★ 新增)
 
@@ -111,6 +112,7 @@ namespace jc {
         case TokenType::AND_AND:       return "AND_AND(&&)";    // ★
         case TokenType::OR_OR:         return "OR_OR(||)";      // ★
         case TokenType::BANG:          return "BANG(!)";         // ★
+        case TokenType::TILDE:         return "TILDE(~)";        // ★
         case TokenType::BIT_AND:       return "BIT_AND(&)";
         case TokenType::BIT_OR:        return "BIT_OR(|)";
         case TokenType::GREATER:       return "GREATER(>)";
