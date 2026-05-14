@@ -1246,9 +1246,25 @@ namespace jc {
                     ObjNamespace* ns = GcHeap::get().allocate<ObjNamespace>();
                     ns->name = nsName;
                     for (int j = 0; j < count; ++j) {
-                        Value val = pop();
-                        Value key = pop();
-                        ns->fields[key.asString()] = val;
+                        bool isConst = pop().truthy();
+                        int slot = static_cast<int>(pop().asDouble());
+                        std::string key = pop().asString();
+                        
+                        int captureIdx = frame().stackBase + slot;
+                        std::shared_ptr<UpVal> upval = nullptr;
+                        for (auto& openUv : openUpvalues) {
+                            if (openUv->stackIndex == captureIdx) {
+                                upval = openUv;
+                                break;
+                            }
+                        }
+                        if (!upval) {
+                            upval = std::make_shared<UpVal>();
+                            upval->location = &stack[captureIdx];
+                            upval->stackIndex = captureIdx;
+                            openUpvalues.push_back(upval);
+                        }
+                        ns->fields[key] = { upval, isConst };
                     }
                     push(Value(ns));
                     break;
@@ -1844,7 +1860,7 @@ namespace jc {
                         auto ns = static_cast<ObjNamespace*>(obj.asObj());
                         auto it = ns->fields.find(field);
                         if (it == ns->fields.end()) throw std::runtime_error("VM Error: Field '" + field + "' not found in namespace '" + ns->name + "'.");
-                        push(it->second);
+                        push(*(it->second.upval->location));
                     }
                     else {
                         throw std::runtime_error("VM Error: Cannot access property on this type.");
@@ -1894,7 +1910,16 @@ namespace jc {
                     }
                     else if (obj.isObjType(ObjType::NAMESPACE)) {
                         auto ns = static_cast<ObjNamespace*>(obj.asObj());
-                        ns->fields[field] = val;
+                        auto it = ns->fields.find(field);
+                        if (it != ns->fields.end()) {
+                            if (it->second.isConst) throw std::runtime_error("Runtime Error: Cannot modify const property '" + field + "' in namespace '" + ns->name + "'.");
+                            *(it->second.upval->location) = val;
+                        } else {
+                            auto uv = std::make_shared<UpVal>();
+                            uv->closed = val;
+                            uv->location = &uv->closed;
+                            ns->fields[field] = { uv, false };
+                        }
                         push(val);
                         push(obj);
                     }
@@ -2164,7 +2189,11 @@ namespace jc {
             }
             case ObjType::NAMESPACE: {
                 auto ns = static_cast<ObjNamespace*>(obj);
-                for (const auto& [k, v] : ns->fields) markValue(v, marked);
+                for (const auto& [k, field] : ns->fields) {
+                    if (field.upval && field.upval->location) {
+                        markValue(*(field.upval->location), marked);
+                    }
+                }
                 break;
             }
             default: break;
@@ -4004,7 +4033,7 @@ namespace jc {
             auto ns = static_cast<ObjNamespace*>(obj.asObj());
             auto it = ns->fields.find(methodName);
             if (it != ns->fields.end()) {
-                Value fv = it->second;
+                Value fv = *(it->second.upval->location);
                 if (fv.isFunctionClosure()) {
                     method = fv.asFunction();
                 } else {

@@ -534,12 +534,6 @@ namespace jc {
     // ═══════════════════════════════════════════
     // 调用帧 (Call Frame)
     // ═══════════════════════════════════════════
-    struct UpVal {
-        Value* location = nullptr;
-        Value closed = Value::none();
-        int stackIndex = -1;
-    };
-
     struct CallFrame {
         const CompiledFunction* function = nullptr;
         int ip = 0;

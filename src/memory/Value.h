@@ -84,6 +84,8 @@ namespace jc {
     struct ObjSuper;
     struct ObjSym;
     struct ObjNamespace;
+    struct UpVal;
+    struct NamespaceField;
 
     // =======================================================
     // Obj 派生类定义
@@ -157,11 +159,6 @@ namespace jc {
     struct ObjSym : public Obj {
         SymExpr sym;
         ObjSym(SymExpr s) : sym(std::move(s)) { type = ObjType::SYMBOLIC; }
-    };
-    struct ObjNamespace : public Obj {
-        std::string name;
-        std::unordered_map<std::string, Value> fields;
-        ObjNamespace() { type = ObjType::NAMESPACE; }
     };
 
     template<typename> struct always_false : std::false_type {};
@@ -1391,106 +1388,7 @@ namespace jc {
             throw std::runtime_error("Type Error: Bitwise/Set OR '|' not supported for these types.");
         }
 
-        std::string toJC2Expression() const {
-            static thread_local std::vector<const void*> visited;
-            if (isNone()) return "none()";
-            if (isBool()) return asBool() ? "true" : "false";
-            if (isInt32()) return std::to_string(asInt32());
-            if (isDouble()) {
-                std::ostringstream oss;
-                oss << std::setprecision(16) << asDoubleRaw();
-                return oss.str();
-            }
-            Obj* obj = asObj();
-            switch (obj->type) {
-                case ObjType::STRING: return "\"" + static_cast<ObjString*>(obj)->str + "\"";
-                case ObjType::BIGINT: return static_cast<ObjBigInt*>(obj)->num.toString();
-                case ObjType::FRACTION: return static_cast<ObjFraction*>(obj)->frac.toString();
-                case ObjType::BASENUM: return "base(" + static_cast<ObjBaseNum*>(obj)->base.getValue().toString() + ", " + std::to_string(static_cast<ObjBaseNum*>(obj)->base.getRadix()) + ")";
-                case ObjType::COMPLEX: {
-                    std::ostringstream oss;
-                    oss << "(" << std::setprecision(16) << static_cast<ObjComplex*>(obj)->comp.real << ") + (" << static_cast<ObjComplex*>(obj)->comp.imag << ")*i";
-                    return oss.str();
-                }
-                case ObjType::REAL_MATRIX: {
-                    const auto& mat = static_cast<ObjRealMatrix*>(obj)->mat;
-                    std::string res = "[";
-                    for (int i = 0; i < mat.getRows(); ++i) {
-                        for (int j = 0; j < mat.getCols(); ++j) {
-                            res += Value(mat(i, j)).toJC2Expression();
-                            if (j < mat.getCols() - 1) res += ", ";
-                        }
-                        if (i < mat.getRows() - 1) res += "; ";
-                    }
-                    return res + "]";
-                }
-                case ObjType::COMPLEX_MATRIX: {
-                    const auto& mat = static_cast<ObjComplexMatrix*>(obj)->mat;
-                    std::string res = "[";
-                    for (int i = 0; i < mat.getRows(); ++i) {
-                        for (int j = 0; j < mat.getCols(); ++j) {
-                            res += Value(mat(i, j)).toJC2Expression();
-                            if (j < mat.getCols() - 1) res += ", ";
-                        }
-                        if (i < mat.getRows() - 1) res += "; ";
-                    }
-                    return res + "]";
-                }
-                case ObjType::STRING_MATRIX: {
-                    const auto& mat = static_cast<ObjStringMatrix*>(obj)->mat;
-                    std::string res = "strmat(" + std::to_string(mat.getRows()) + ", " + std::to_string(mat.getCols());
-                    for (int i = 0; i < mat.getRows(); ++i)
-                        for (int j = 0; j < mat.getCols(); ++j)
-                            res += ", \"" + mat(i, j) + "\"";
-                    return res + ")";
-                }
-                case ObjType::CLOSURE: return "\"<function>\"";
-                case ObjType::CLASS: return "\"<class " + static_cast<ObjClass*>(obj)->name + ">\"";
-                case ObjType::INSTANCE: {
-                    auto inst = static_cast<ObjInstance*>(obj);
-                    return "\"<" + (inst->classDef ? inst->classDef->name : "unknown") + " instance>\"";
-                }
-                case ObjType::SUPER_PROXY: return "\"<super>\"";
-                case ObjType::SYMBOLIC: return "sym(\" " + static_cast<ObjSym*>(obj)->sym.toString() + "\")";
-                case ObjType::NAMESPACE: return "\"<namespace " + static_cast<ObjNamespace*>(obj)->name + ">\"";
-                case ObjType::LIST: {
-                    ObjList* list = static_cast<ObjList*>(obj);
-                    RecursionGuard guard(visited, list);
-                    if (guard.isCycle) return "list()";
-                    std::string res = "list(";
-                    for (size_t i = 0; i < list->vec.size(); ++i) {
-                        try { res += list->vec[i].toJC2Expression(); } catch (...) { res += "0"; }
-                        if (i < list->vec.size() - 1) res += ", ";
-                    }
-                    return res + ")";
-                }
-                case ObjType::DICT: {
-                    ObjDict* dict = static_cast<ObjDict*>(obj);
-                    RecursionGuard guard(visited, dict);
-                    if (guard.isCycle) return "dict()";
-                    std::string res = "dict(";
-                    for (size_t i = 0; i < dict->elements.size(); ++i) {
-                        try { res += dict->elements[i].first.toJC2Expression(); } catch (...) { res += "0"; }
-                        res += ", ";
-                        try { res += dict->elements[i].second.toJC2Expression(); } catch (...) { res += "0"; }
-                        if (i < dict->elements.size() - 1) res += ", ";
-                    }
-                    return res + ")";
-                }
-                case ObjType::SET: {
-                    ObjSet* set = static_cast<ObjSet*>(obj);
-                    RecursionGuard guard(visited, set);
-                    if (guard.isCycle) return "Set()";
-                    std::string res = "Set(";
-                    for (size_t i = 0; i < set->elements.size(); ++i) {
-                        try { res += set->elements[i].toJC2Expression(); } catch (...) { res += "0"; }
-                        if (i < set->elements.size() - 1) res += ", ";
-                    }
-                    return res + ")";
-                }
-            }
-            return "none()";
-        }
+        std::string toJC2Expression() const;
 
         std::string toString() const {
             if (isString()) return static_cast<ObjString*>(asObj())->str;
@@ -1499,6 +1397,124 @@ namespace jc {
             return oss.str();
         }
     }; // class Value
+
+    struct UpVal {
+        Value* location = nullptr;
+        Value closed;
+        int stackIndex = -1;
+    };
+
+    struct NamespaceField {
+        std::shared_ptr<UpVal> upval;
+        bool isConst;
+    };
+
+    struct ObjNamespace : public Obj {
+        std::string name;
+        std::unordered_map<std::string, NamespaceField> fields;
+        ObjNamespace() { type = ObjType::NAMESPACE; }
+    };
+
+    inline std::string Value::toJC2Expression() const {
+        static thread_local std::vector<const void*> visited;
+        if (isNone()) return "none()";
+        if (isBool()) return asBool() ? "true" : "false";
+        if (isInt32()) return std::to_string(asInt32());
+        if (isDouble()) {
+            std::ostringstream oss;
+            oss << std::setprecision(16) << asDoubleRaw();
+            return oss.str();
+        }
+        Obj* obj = asObj();
+        switch (obj->type) {
+            case ObjType::STRING: return "\"" + static_cast<ObjString*>(obj)->str + "\"";
+            case ObjType::BIGINT: return static_cast<ObjBigInt*>(obj)->num.toString();
+            case ObjType::FRACTION: return static_cast<ObjFraction*>(obj)->frac.toString();
+            case ObjType::BASENUM: return "base(" + static_cast<ObjBaseNum*>(obj)->base.getValue().toString() + ", " + std::to_string(static_cast<ObjBaseNum*>(obj)->base.getRadix()) + ")";
+            case ObjType::COMPLEX: {
+                std::ostringstream oss;
+                oss << "(" << std::setprecision(16) << static_cast<ObjComplex*>(obj)->comp.real << ") + (" << static_cast<ObjComplex*>(obj)->comp.imag << ")*i";
+                return oss.str();
+            }
+            case ObjType::REAL_MATRIX: {
+                const auto& mat = static_cast<ObjRealMatrix*>(obj)->mat;
+                std::string res = "[";
+                for (int i = 0; i < mat.getRows(); ++i) {
+                    for (int j = 0; j < mat.getCols(); ++j) {
+                        res += Value(mat(i, j)).toJC2Expression();
+                        if (j < mat.getCols() - 1) res += ", ";
+                    }
+                    if (i < mat.getRows() - 1) res += "; ";
+                }
+                return res + "]";
+            }
+            case ObjType::COMPLEX_MATRIX: {
+                const auto& mat = static_cast<ObjComplexMatrix*>(obj)->mat;
+                std::string res = "[";
+                for (int i = 0; i < mat.getRows(); ++i) {
+                    for (int j = 0; j < mat.getCols(); ++j) {
+                        res += Value(mat(i, j)).toJC2Expression();
+                        if (j < mat.getCols() - 1) res += ", ";
+                    }
+                    if (i < mat.getRows() - 1) res += "; ";
+                }
+                return res + "]";
+            }
+            case ObjType::STRING_MATRIX: {
+                const auto& mat = static_cast<ObjStringMatrix*>(obj)->mat;
+                std::string res = "strmat(" + std::to_string(mat.getRows()) + ", " + std::to_string(mat.getCols());
+                for (int i = 0; i < mat.getRows(); ++i)
+                    for (int j = 0; j < mat.getCols(); ++j)
+                        res += ", \"" + mat(i, j) + "\"";
+                return res + ")";
+            }
+            case ObjType::CLOSURE: return "\"<function>\"";
+            case ObjType::CLASS: return "\"<class " + static_cast<ObjClass*>(obj)->name + ">\"";
+            case ObjType::INSTANCE: {
+                auto inst = static_cast<ObjInstance*>(obj);
+                return "\"<" + (inst->classDef ? inst->classDef->name : "unknown") + " instance>\"";
+            }
+            case ObjType::SUPER_PROXY: return "\"<super>\"";
+            case ObjType::SYMBOLIC: return "sym(\" " + static_cast<ObjSym*>(obj)->sym.toString() + "\")";
+            case ObjType::NAMESPACE: return "\"<namespace " + static_cast<ObjNamespace*>(obj)->name + ">\"";
+            case ObjType::LIST: {
+                ObjList* list = static_cast<ObjList*>(obj);
+                RecursionGuard guard(visited, list);
+                if (guard.isCycle) return "list()";
+                std::string res = "list(";
+                for (size_t i = 0; i < list->vec.size(); ++i) {
+                    try { res += list->vec[i].toJC2Expression(); } catch (...) { res += "0"; }
+                    if (i < list->vec.size() - 1) res += ", ";
+                }
+                return res + ")";
+            }
+            case ObjType::DICT: {
+                ObjDict* dict = static_cast<ObjDict*>(obj);
+                RecursionGuard guard(visited, dict);
+                if (guard.isCycle) return "dict()";
+                std::string res = "dict(";
+                for (size_t i = 0; i < dict->elements.size(); ++i) {
+                    try { res += dict->elements[i].first.toJC2Expression(); } catch (...) { res += "0"; }
+                    res += ", ";
+                    try { res += dict->elements[i].second.toJC2Expression(); } catch (...) { res += "0"; }
+                    if (i < dict->elements.size() - 1) res += ", ";
+                }
+                return res + ")";
+            }
+            case ObjType::SET: {
+                ObjSet* set = static_cast<ObjSet*>(obj);
+                RecursionGuard guard(visited, set);
+                if (guard.isCycle) return "Set()";
+                std::string res = "Set(";
+                for (size_t i = 0; i < set->elements.size(); ++i) {
+                    try { res += set->elements[i].toJC2Expression(); } catch (...) { res += "0"; }
+                    if (i < set->elements.size() - 1) res += ", ";
+                }
+                return res + ")";
+            }
+        }
+        return "none()";
+    }
 
     inline Value ldivide(const Value& lhs, const Value& rhs) {
         if (lhs.isObjType(ObjType::REAL_MATRIX) || lhs.isObjType(ObjType::COMPLEX_MATRIX)) {

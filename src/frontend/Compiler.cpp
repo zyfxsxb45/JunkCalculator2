@@ -1684,8 +1684,11 @@ namespace jc {
                 emit16(keyIdx, lastLine);
 
                 int slot = resolveLocal(local.name);
-                emit(OpCode::OP_GET_LOCAL, lastLine);
-                emit16(static_cast<uint16_t>(slot), lastLine);
+                chunk()->emitConstant(Value(static_cast<double>(slot)), lastLine);
+
+                bool isConst = current().constNames.count(local.name) > 0;
+                chunk()->emitConstant(Value(isConst ? 1.0 : 0.0), lastLine);
+
                 count++;
             }
         }

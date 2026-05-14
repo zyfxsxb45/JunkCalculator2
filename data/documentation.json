@@ -1424,11 +1424,11 @@
       "  ──────────────────────",
       "    namespace Math {",
       "        local seed = 12345         // Private variable (not exported)",
-      "        PI = 3.14                  // Public member",
+      "        const PI = 3.14            // Public constant member",
       "        add(a, b) = a + b          // Public method",
       "    }",
       "    ",
-      "    Namespaces are syntactic sugar for an IIFE that returns a Namespace object.",
+      "    Namespaces group related functions and variables into a single object.",
       "    You can access members via the dot operator: Math.PI, Math.add(1, 2).",
       "    Because they are objects, methods inside can even use `self` to access",
       "    other members of the same namespace!",
@@ -1436,6 +1436,12 @@
       "    ★ Private Members: Any variable declared with the `local` keyword inside",
       "      a namespace is strictly block-scoped and will NOT be exported. This is",
       "      perfect for hiding internal state or helper functions.",
+      "      ",
+      "    ★ True Singleton:",
+      "      Namespaces act as true singletons. Modifying a variable internally",
+      "      (e.g., `self.PI = 2` or `ref PI = 2`) or externally (`Math.PI = 2`)",
+      "      updates the exact same state. Exported `const` variables remain",
+      "      strictly immutable everywhere.",
       "",
       "  Top Level (REPL)",
       "  ──────────────────────",
@@ -1600,6 +1606,10 @@
       "    const G = 9.81       Immutable — modification throws an error",
       "    G = 10               ✗ Error: Cannot modify const variable 'G'",
       "    delete G             ✓ Permitted: force-remove any variable, including const",
+      "",
+      "    Constants can be declared at the top level (global) or inside functions",
+      "    and namespaces (local). Local constants are exported by namespaces just",
+      "    like normal variables.",
       "",
       "    All variables (including const and system constants like PI) can be ",
       "    deleted with `delete`. Use `resetConst()` or factory functions like",
@@ -6265,13 +6275,16 @@
       "signature": "namespace Name { ... }",
       "desc": [
         "Creates a namespace to group related functions and variables.",
-        "Under the hood, it compiles into an Immediately Invoked Function Expression (IIFE)",
-        "that returns a Namespace object containing all its public variables.",
         "You can access its members using the dot operator (e.g., Name.member).",
-        "Variables declared with `local` are private and will not be exported."
+        "Variables declared with `local` are private and will not be exported.",
+        "",
+        "★ True Singleton:",
+        "Namespaces share state perfectly. Modifying a variable internally",
+        "via `ref` or `self`, or externally via `Namespace.var` updates the",
+        "exact same state. Exported `const` variables remain strictly immutable."
       ],
       "examples": [
-        "namespace Math { local seed = 1; PI = 3.14; add(a, b) = a + b }",
+        "namespace Math { local seed = 1; const PI = 3.14; add(a, b) = a + b }",
         "print(Math.PI)",
         "Math.add(1, 2)"
       ]
@@ -6424,6 +6437,7 @@
       "desc": [
         "Declares an immutable constant. Any attempt to reassign the variable",
         "will throw a runtime error. Can still be removed with `delete`.",
+        "Constants declared inside functions or namespaces are locally scoped.",
         "See also: /help scope"
       ],
       "examples": [
