@@ -138,6 +138,7 @@ namespace jc {
         if (typeStr == "func" || typeStr == "function") return val.isFunctionClosure();
         if (typeStr == "class") return val.isClass();
         if (typeStr == "instance") return val.isInstance();
+        if (typeStr == "namespace") return val.isObjType(ObjType::NAMESPACE);
 
         // 2. 鸭子类型 / 接口类型
         if (typeStr == "iterable") {
@@ -1238,6 +1239,21 @@ namespace jc {
                     throw ErrorSignal(msg);
                 } 
 
+                case OpCode::OP_BUILD_NAMESPACE: {
+                    uint16_t nameIdx = readShort();
+                    uint16_t count = readShort();
+                    std::string nsName = currentChunk().constants[nameIdx].asString();
+                    ObjNamespace* ns = GcHeap::get().allocate<ObjNamespace>();
+                    ns->name = nsName;
+                    for (int j = 0; j < count; ++j) {
+                        Value val = pop();
+                        Value key = pop();
+                        ns->fields[key.asString()] = val;
+                    }
+                    push(Value(ns));
+                    break;
+                }
+
                 case OpCode::OP_BUILD_DICT: {
                     uint16_t count = readShort();
                     ObjDict* d = GcHeap::get().allocate<ObjDict>();
@@ -1824,6 +1840,12 @@ namespace jc {
                         if (it == d->keyMap.end()) throw std::runtime_error("VM Error: Key '" + field + "' not found.");
                         push(d->elements[it->second].second);
                     }
+                    else if (obj.isObjType(ObjType::NAMESPACE)) {
+                        auto ns = static_cast<ObjNamespace*>(obj.asObj());
+                        auto it = ns->fields.find(field);
+                        if (it == ns->fields.end()) throw std::runtime_error("VM Error: Field '" + field + "' not found in namespace '" + ns->name + "'.");
+                        push(it->second);
+                    }
                     else {
                         throw std::runtime_error("VM Error: Cannot access property on this type.");
                     }
@@ -1867,6 +1889,12 @@ namespace jc {
                             d->keyMap[key] = d->elements.size();
                             d->elements.push_back({key, val});
                         }
+                        push(val);
+                        push(obj);
+                    }
+                    else if (obj.isObjType(ObjType::NAMESPACE)) {
+                        auto ns = static_cast<ObjNamespace*>(obj.asObj());
+                        ns->fields[field] = val;
                         push(val);
                         push(obj);
                     }
@@ -2134,6 +2162,11 @@ namespace jc {
                 if (sp->parentClass) markValue(Value(sp->parentClass), marked);
                 break;
             }
+            case ObjType::NAMESPACE: {
+                auto ns = static_cast<ObjNamespace*>(obj);
+                for (const auto& [k, v] : ns->fields) markValue(v, marked);
+                break;
+            }
             default: break;
         }
     }
@@ -2212,13 +2245,15 @@ namespace jc {
                 auto& fn = compiledFunctions[fnIdx];
                 if (static_cast<int>(argc) < fn->arity || static_cast<int>(argc) > fn->maxArity)
                     throw std::runtime_error("VM Error: '" + fn->name + "' expects args mismatch.");
+                
+                stack.erase(stack.end() - 1 - argc); // ★ FIX: 先安全移除 callee
+                
                 int padCount = fn->maxArity - static_cast<int>(argc);
                 for (int j = 0; j < padCount; ++j) push(Value::none());
                 int reserveCount = fn->localCount - fn->maxArity;
                 for (int j = 0; j < reserveCount; ++j) push(Value::none());
                 CallFrame newFrame; newFrame.function = fn.get(); newFrame.ip = 0;
                 newFrame.stackBase = static_cast<int>(stack.size()) - fn->localCount;
-                stack.erase(stack.begin() + newFrame.stackBase - 1); newFrame.stackBase--;
                 frames.push_back(newFrame); return;
             }
             if (tag.size() >= 10 && tag.substr(0, 10) == "__builtin:") {
@@ -2293,6 +2328,9 @@ namespace jc {
                     newFrame.classContext = Value(initOwner);
 
                     auto& fnDef = compiledFunctions[initMethod->compiledFnIndex];
+                    
+                    stack.erase(stack.end() - 1 - argc); // ★ FIX: 先安全移除 callee
+
                     int padCount = fnDef->maxArity - static_cast<int>(argc);
                     for (int j = 0; j < padCount; ++j) push(Value::none());
                     int reserveCount = fnDef->localCount - fnDef->maxArity;
@@ -2305,8 +2343,6 @@ namespace jc {
                         newFrame.upvalues = std::any_cast<std::shared_ptr<std::vector<std::shared_ptr<UpVal>>>>(
                             initMethod->capturedEnv);
                     }
-                    stack.erase(stack.begin() + newFrame.stackBase - 1);
-                    newFrame.stackBase--;
                     frames.push_back(newFrame);
                     return;
                 }
@@ -2359,6 +2395,8 @@ namespace jc {
             if (closure->isBytecode()) {
                 auto& fnDef = compiledFunctions[closure->compiledFnIndex];
 
+                stack.erase(stack.end() - 1 - argc); // ★ FIX: 先安全移除 callee
+
                 if (fnDef->hasRestParam) {
                     int fixedMax = fnDef->maxArity - 1;
                     if (static_cast<int>(argc) < fnDef->arity) {
@@ -2405,9 +2443,6 @@ namespace jc {
                 newFrame.selfContext = closure->boundSelf;
                 newFrame.classContext = closure->boundClass;
 
-                stack.erase(stack.begin() + newFrame.stackBase - 1);
-                newFrame.stackBase--;
-
                 frames.push_back(newFrame);
                 return;
             }
@@ -2442,6 +2477,8 @@ namespace jc {
             if (tag.size() >= 5 && tag.substr(0, 5) == "__fn:") {
                 int fnIdx = std::stoi(tag.substr(5));
                 auto& fn = compiledFunctions[fnIdx];
+
+                stack.erase(stack.end() - 1 - argc); // ★ FIX: 先安全移除 callee
 
                 if (fn->hasRestParam) {
                     int fixedMax = fn->maxArity - 1;
@@ -2478,7 +2515,6 @@ namespace jc {
 
                 CallFrame newFrame; newFrame.function = fn.get(); newFrame.ip = 0;
                 newFrame.stackBase = static_cast<int>(stack.size()) - fn->localCount;
-                stack.erase(stack.begin() + newFrame.stackBase - 1); newFrame.stackBase--;
                 frames.push_back(newFrame); return;
             }
 
@@ -2514,6 +2550,9 @@ namespace jc {
             if (method) {
                 if (method->isBytecode()) {
                     auto& fnDef = compiledFunctions[method->compiledFnIndex];
+                    
+                    stack.erase(stack.end() - 1 - argc); // ★ FIX: 先安全移除 callee
+
                     if (fnDef->hasRestParam) {
                         int fixedMax = fnDef->maxArity - 1;
                         if (static_cast<int>(argc) < fnDef->arity) {
@@ -2552,8 +2591,6 @@ namespace jc {
                     newFrame.selfContext = callee;
                     newFrame.classContext = Value(owningClass);
 
-                    stack.erase(stack.begin() + newFrame.stackBase - 1);
-                    newFrame.stackBase--;
                     frames.push_back(newFrame);
                     return;
                 } else if (method->isNative()) {
@@ -3961,6 +3998,26 @@ namespace jc {
             }
         }
         // ==============================================================
+        // 1.5 如果它是 Namespace！
+        // ==============================================================
+        else if (obj.isObjType(ObjType::NAMESPACE)) {
+            auto ns = static_cast<ObjNamespace*>(obj.asObj());
+            auto it = ns->fields.find(methodName);
+            if (it != ns->fields.end()) {
+                Value fv = it->second;
+                if (fv.isFunctionClosure()) {
+                    method = fv.asFunction();
+                } else {
+                    stack[stack.size() - 1 - argc] = fv;
+                    execCall(argc);
+                    return;
+                }
+            }
+            if (!method) {
+                throw std::runtime_error("VM Error: No callable field '" + methodName + "' in namespace '" + ns->name + "'.");
+            }
+        }
+        // ==============================================================
         // 2. 经典面向对象 Instance 的方法查询（优先类模板，后查原型挂载）
         // ==============================================================
         else if (obj.isInstance()) {
@@ -4012,6 +4069,8 @@ namespace jc {
             newFrame.classContext = owningClass ? Value(owningClass) : Value::none();
             auto& fnDef = compiledFunctions[method->compiledFnIndex];
 
+            stack.erase(stack.end() - 1 - argc); // ★ FIX: 先安全移除 obj
+
             if (fnDef->hasRestParam) {
                 int fixedMax = fnDef->maxArity - 1;
                 if (static_cast<int>(argc) < fnDef->arity) {
@@ -4047,8 +4106,6 @@ namespace jc {
                 newFrame.upvalues = std::any_cast<std::shared_ptr<std::vector<std::shared_ptr<UpVal>>>>(
                     method->capturedEnv);
             }
-            stack.erase(stack.begin() + newFrame.stackBase - 1);
-            newFrame.stackBase--;
             frames.push_back(newFrame);
             return;
         }
@@ -4119,6 +4176,8 @@ namespace jc {
 
             auto& fnDef = compiledFunctions[method->compiledFnIndex];
 
+            stack.erase(stack.end() - 1 - argc); // ★ FIX: 先安全移除 selfVal
+
             // =============================================================
             // ★ 核心变长参数打包引擎 (OOP SuperInvoke 端)
             // =============================================================
@@ -4162,8 +4221,6 @@ namespace jc {
                 newFrame.upvalues = std::any_cast<std::shared_ptr<std::vector<std::shared_ptr<UpVal>>>>(
                     method->capturedEnv);
             }
-            stack.erase(stack.begin() + newFrame.stackBase - 1);
-            newFrame.stackBase--;
             frames.push_back(newFrame);
             return;
         }

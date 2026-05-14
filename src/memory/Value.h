@@ -83,6 +83,7 @@ namespace jc {
     struct ObjInstance;
     struct ObjSuper;
     struct ObjSym;
+    struct ObjNamespace;
 
     // =======================================================
     // Obj 派生类定义
@@ -156,6 +157,11 @@ namespace jc {
     struct ObjSym : public Obj {
         SymExpr sym;
         ObjSym(SymExpr s) : sym(std::move(s)) { type = ObjType::SYMBOLIC; }
+    };
+    struct ObjNamespace : public Obj {
+        std::string name;
+        std::unordered_map<std::string, Value> fields;
+        ObjNamespace() { type = ObjType::NAMESPACE; }
     };
 
     template<typename> struct always_false : std::false_type {};
@@ -526,6 +532,7 @@ namespace jc {
                     return false;
                 }
                 case ObjType::SUPER_PROXY:
+                case ObjType::NAMESPACE:
                     return false;
             }
             return false;
@@ -556,6 +563,7 @@ namespace jc {
                 case ObjType::DICT: return !static_cast<ObjDict*>(obj)->elements.empty();
                 case ObjType::SET: return !static_cast<ObjSet*>(obj)->elements.empty();
                 case ObjType::SYMBOLIC: return !static_cast<ObjSym*>(obj)->sym.isZero();
+                case ObjType::NAMESPACE: return true;
                 case ObjType::INSTANCE: {
                     auto inst = static_cast<ObjInstance*>(obj);
                     auto [found, res] = invokeDunder(inst, "__bool__");
@@ -673,6 +681,7 @@ namespace jc {
                     }
                     case ObjType::CLOSURE:
                     case ObjType::CLASS:
+                    case ObjType::NAMESPACE:
                         return false; // Pointer equality already checked
                     case ObjType::SUPER_PROXY: {
                         auto sp1 = static_cast<ObjSuper*>(lobj);
@@ -775,6 +784,7 @@ namespace jc {
                 }
                 case ObjType::SUPER_PROXY: return "super";
                 case ObjType::SYMBOLIC: return "symbolic";
+                case ObjType::NAMESPACE: return "namespace";
             }
             return "unknown";
         }
@@ -1442,6 +1452,7 @@ namespace jc {
                 }
                 case ObjType::SUPER_PROXY: return "\"<super>\"";
                 case ObjType::SYMBOLIC: return "sym(\" " + static_cast<ObjSym*>(obj)->sym.toString() + "\")";
+                case ObjType::NAMESPACE: return "\"<namespace " + static_cast<ObjNamespace*>(obj)->name + ">\"";
                 case ObjType::LIST: {
                     ObjList* list = static_cast<ObjList*>(obj);
                     RecursionGuard guard(visited, list);
@@ -1604,6 +1615,7 @@ inline std::ostream& operator<<(std::ostream& os, const Value& val) {
         case ObjType::CLOSURE: os << static_cast<ObjClosure*>(obj)->toString(); break;
         case ObjType::CLASS: os << "<class " << static_cast<ObjClass*>(obj)->name << ">"; break;
         case ObjType::SUPER_PROXY: os << "<super>"; break;
+        case ObjType::NAMESPACE: os << "<namespace " << static_cast<ObjNamespace*>(obj)->name << ">"; break;
         case ObjType::LIST: {
             ObjList* list = static_cast<ObjList*>(obj);
             RecursionGuard guard(visited, list);
@@ -1706,6 +1718,7 @@ inline size_t ValueHasher::operator()(const Value& v) const {
             }
             return std::hash<const void*>{}(obj);
         }
+        case ObjType::NAMESPACE: return std::hash<const void*>{}(obj);
         default: return std::hash<const void*>{}(obj);
     }
 }

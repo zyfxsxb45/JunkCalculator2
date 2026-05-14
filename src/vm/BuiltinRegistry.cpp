@@ -102,6 +102,9 @@ namespace jc {
             if (sym->sym.ptr) oss << sym->sym.ptr->getSignature();
             else oss << "null";
         }
+        else if (v.isObjType(ObjType::NAMESPACE)) {
+            oss << static_cast<ObjNamespace*>(v.asObj())->name;
+        }
         else {
             oss << v;
         }
@@ -3929,6 +3932,10 @@ void BuiltinRegistry::registerTypeChecks() {
 
     reg("isclass", { 1 }, [](const std::vector<Value>& args) -> Value {
         return Value(args[0].isClass());
+        });
+
+    reg("isnamespace", { 1 }, [](const std::vector<Value>& args) -> Value {
+        return Value(args[0].isObjType(ObjType::NAMESPACE));
         });
 
     reg("issym", { 1 }, [](const std::vector<Value>& args) -> Value {

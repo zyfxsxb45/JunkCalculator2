@@ -1428,9 +1428,9 @@
       "        add(a, b) = a + b          // Public method",
       "    }",
       "    ",
-      "    Namespaces are syntactic sugar for an IIFE that returns a Dict.",
+      "    Namespaces are syntactic sugar for an IIFE that returns a Namespace object.",
       "    You can access members via the dot operator: Math.PI, Math.add(1, 2).",
-      "    Because they are Dicts, methods inside can even use `self` to access",
+      "    Because they are objects, methods inside can even use `self` to access",
       "    other members of the same namespace!",
       "    ",
       "    ★ Private Members: Any variable declared with the `local` keyword inside",
@@ -2520,7 +2520,7 @@
       "    Supported Exact & Union Types: ",
       "      int, whole, float/double, real, number, exact, string/str, bool, binary/bool_like, none,",
       "      list, dict, set, fraction, complex, basenum, symbolic/sym/expr,",
-      "      realmat, complexmat, stringmat, matrix, func/function, class, instance, any",
+      "      realmat, complexmat, stringmat, matrix, func/function, class, instance, namespace, any",
       "",
       "    Duck Types / Interfaces (Behavioral Contracts):",
       "      iterable    → Matches lists, dicts, sets, strings, matrices, or instances with __iter__/__next__",
@@ -2609,6 +2609,7 @@
       "    isnone(x)           Is x the none value?",
       "    isfunction(x)       Is x a function or closure? (alias: isfunc)",
       "    isclass(x)          Is x a class definition?",
+      "    isnamespace(x)      Is x a namespace?",
       "    isinstance(x)       Is x an instance of any class? (1 arg)",
       "    isinstance(x, C)    Is x an instance of class C or its subclass? (2 args)",
       "    issym(x)            Is x a Symbolic Expression (SymExpr)?",
@@ -5330,6 +5331,11 @@
       "desc": "Returns true if x is a class definition.",
       "examples": ["isclass(Point)"]
     },
+    "isnamespace": {
+      "signature": "isnamespace(x)",
+      "desc": "Returns true if x is a namespace.",
+      "examples": ["isnamespace(Math)"]
+    },
     "issym": {
       "signature": "issym(x)",
       "desc": "Returns true if x is a Symbolic Expression.",
@@ -6260,7 +6266,7 @@
       "desc": [
         "Creates a namespace to group related functions and variables.",
         "Under the hood, it compiles into an Immediately Invoked Function Expression (IIFE)",
-        "that returns a Dictionary of all its public variables.",
+        "that returns a Namespace object containing all its public variables.",
         "You can access its members using the dot operator (e.g., Name.member).",
         "Variables declared with `local` are private and will not be exported."
       ],

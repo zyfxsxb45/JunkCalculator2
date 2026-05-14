@@ -336,6 +336,10 @@ namespace jc {
         lastLine = expr->name.line;
         const std::string& name = expr->name.lexeme;
 
+        if (current().constNames.count(name) > 0) {
+            throw std::runtime_error("Compiler Error: Cannot modify const variable '" + name + "'.");
+        }
+
         // ★ Pre-register ref/state BEFORE compiling RHS so variable reads resolve to upvalue
         if (expr->isLocal) {
             if (current().stateNames.count(name) > 0 || current().refNames.count(name) > 0) throw std::runtime_error("Compiler Error: Cannot declare variable as both 'local' and 'ref'/'state'.");
@@ -878,6 +882,10 @@ namespace jc {
         if (auto* var = dynamic_cast<Variable*>(expr->target.get())) {
             const std::string& name = var->name.lexeme;
             
+            if (current().constNames.count(name) > 0) {
+                throw std::runtime_error("Compiler Error: Cannot modify const variable '" + name + "'.");
+            }
+
             if (stateStack.size() == 1) {
                 knownGlobals.insert(name);
             }
@@ -983,6 +991,7 @@ namespace jc {
             for (int j = n - 1; j >= 0; --j) {
                 const std::string& name = expr->destructNames[j].lexeme;
                 if (name == "_") { emit(OpCode::OP_POP, lastLine); continue; }
+                if (current().constNames.count(name) > 0) throw std::runtime_error("Compiler Error: Cannot modify const variable '" + name + "'.");
                 
                 if (stateStack.size() == 1) knownGlobals.insert(name);
 
@@ -1012,6 +1021,7 @@ namespace jc {
         }
         else {
             const std::string& varName = expr->varName.lexeme;
+            if (current().constNames.count(varName) > 0) throw std::runtime_error("Compiler Error: Cannot modify const variable '" + varName + "'.");
             
             if (stateStack.size() == 1) knownGlobals.insert(varName);
 
@@ -1319,6 +1329,9 @@ namespace jc {
 
         for (int i = n - 1; i >= 0; --i) {
             const std::string& name = expr->targets[i].name.lexeme;
+            if (current().constNames.count(name) > 0) {
+                throw std::runtime_error("Compiler Error: Cannot modify const variable '" + name + "'.");
+            }
             bool isRef = expr->targets[i].isRef;
             bool isState = expr->targets[i].isState;
             bool isLocal = expr->targets[i].isLocal;
@@ -1458,6 +1471,10 @@ namespace jc {
         chunk()->code[offsetSlot] = static_cast<uint8_t>((relOffset >> 8) & 0xFF);
         chunk()->code[offsetSlot + 1] = static_cast<uint8_t>(relOffset & 0xFF);
 
+        if (current().constNames.count(expr->catchName.lexeme) > 0) {
+            throw std::runtime_error("Compiler Error: Cannot modify const variable '" + expr->catchName.lexeme + "'.");
+        }
+
         if (stateStack.size() == 1) knownGlobals.insert(expr->catchName.lexeme);
 
         int slot = resolveLocal(expr->catchName.lexeme);
@@ -1558,13 +1575,27 @@ namespace jc {
         compileNode(expr->value.get());
         const std::string& name = expr->name.lexeme;
 
-        if (stateStack.size() == 1) knownGlobals.insert(name);
-
-        // Const is inherently global/outermost scope definition behavior in VM. 
-        // We emit DEFINE_GLOBAL directly.
-        uint16_t idx = identifierConstant(name);
-        emit(OpCode::OP_DEFINE_GLOBAL, lastLine);
-        emit16(idx, lastLine);
+        if (stateStack.size() == 1) {
+            knownGlobals.insert(name);
+            uint16_t idx = identifierConstant(name);
+            emit(OpCode::OP_DEFINE_GLOBAL, lastLine);
+            emit16(idx, lastLine);
+        } else {
+            current().constNames.insert(name);
+            int slot = resolveLocal(name);
+            if (slot == -1 && current().refNames.count(name) == 0 && current().stateNames.count(name) == 0) {
+                addLocal(name, 0); // Auto-local
+                slot = resolveLocal(name);
+            }
+            if (slot != -1) {
+                emit(OpCode::OP_SET_LOCAL, lastLine);
+                emit16(static_cast<uint16_t>(slot), lastLine);
+            } else {
+                uint16_t idx = identifierConstant(name);
+                emit(OpCode::OP_DEFINE_GLOBAL, lastLine);
+                emit16(idx, lastLine);
+            }
+        }
         return {};
     }
 
@@ -1659,7 +1690,9 @@ namespace jc {
             }
         }
 
-        emit(OpCode::OP_BUILD_DICT, lastLine);
+        uint16_t nsNameIdx = identifierConstant(expr->name.lexeme);
+        emit(OpCode::OP_BUILD_NAMESPACE, lastLine);
+        emit16(nsNameIdx, lastLine);
         emit16(static_cast<uint16_t>(count), lastLine);
         emit(OpCode::OP_RETURN, lastLine);
 
@@ -1920,6 +1953,9 @@ namespace jc {
         for (auto& target : expr->targets) {
             const std::string& fieldName = target.key;
             const std::string& varName = target.name.lexeme;
+            if (current().constNames.count(varName) > 0) {
+                throw std::runtime_error("Compiler Error: Cannot modify const variable '" + varName + "'.");
+            }
             bool isRef = target.isRef;
             bool isState = target.isState;
             bool isLocal = target.isLocal;
