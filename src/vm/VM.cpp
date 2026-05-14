@@ -3949,6 +3949,11 @@ namespace jc {
                 Value fv = d->elements[it->second].second;
                 if (fv.isFunctionClosure()) {
                     method = fv.asFunction();
+                } else {
+                    // ★ 如果是类、实例或其他可调用对象，直接替换栈底的 obj，转交 execCall 处理！
+                    stack[stack.size() - 1 - argc] = fv;
+                    execCall(argc);
+                    return;
                 }
             }
             if (!method) {
@@ -3978,6 +3983,11 @@ namespace jc {
                     if (fv.isFunctionClosure()) {
                         method = fv.asFunction();
                         owningClass = inst->classDef;
+                    } else {
+                        // ★ 如果实例字段里存的是类或其他可调用对象
+                        stack[stack.size() - 1 - argc] = fv;
+                        execCall(argc);
+                        return;
                     }
                 }
             }

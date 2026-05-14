@@ -110,6 +110,7 @@ namespace jc {
         std::any visitImportExpr(ImportExpr*) override;
         std::any visitSwitchExpr(SwitchExpr*) override;
         std::any visitClassDefExpr(ClassDefExpr*) override;
+        std::any visitNamespaceDecl(NamespaceDecl*) override;
         std::any visitDotAccess(DotAccess*) override;
         std::any visitDotAssign(DotAssign*) override;
         std::any visitMethodCallExpr(MethodCallExpr*) override;

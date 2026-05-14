@@ -29,6 +29,7 @@ namespace jc {
         {"case",     TokenType::CASE},         // ★
         {"default",  TokenType::DEFAULT},      // ★
         {"class",    TokenType::CLASS},
+        {"namespace",TokenType::NAMESPACE},
         {"super",    TokenType::SUPER},
         {"self",     TokenType::SELF},
         {"true",     TokenType::TRUE_KW},

@@ -900,7 +900,8 @@ namespace jc {
                 t == TokenType::IMPORT || t == TokenType::SWITCH ||  // ★
                 t == TokenType::CASE || t == TokenType::DEFAULT ||
                 t == TokenType::SUPER || t == TokenType::CLASS || t == TokenType::SELF ||
-                t == TokenType::TRUE_KW || t == TokenType::FALSE_KW || t == TokenType::NONE_KW;
+                t == TokenType::TRUE_KW || t == TokenType::FALSE_KW || t == TokenType::NONE_KW ||
+                t == TokenType::NAMESPACE; // ★ 新增
             };
         if (isKeyword(peek().type) && current + 1 < static_cast<int>(tokens.size())
             && tokens[current + 1].type == TokenType::ASSIGN) {
@@ -926,6 +927,7 @@ namespace jc {
         if (match({ TokenType::SUPER }))    return std::make_unique<SuperExpr>();
         if (match({ TokenType::SELF }))     return std::make_unique<SelfExpr>();
         if (match({ TokenType::CLASS }))    return classDefExpr();
+        if (match({ TokenType::NAMESPACE })) return namespaceExpr();
         if (match({ TokenType::IF }))       return ifExpr();
         if (match({ TokenType::WHILE }))    return whileExpr();
         if (match({ TokenType::FOR }))      return forExpr();
@@ -1254,6 +1256,20 @@ namespace jc {
         consume(TokenType::RBRACE, "Parser Error: Expect '}' to close switch body.");
 
         return std::make_unique<SwitchExpr>(std::move(subject), std::move(cases), std::move(defaultBody));
+    }
+
+    std::unique_ptr<Expr> Parser::namespaceExpr() {
+        Token name = consume(TokenType::IDENTIFIER, "Parser Error: Expect namespace name.");
+        consume(TokenType::LBRACE, "Parser Error: Expect '{' after namespace name.");
+        std::vector<std::unique_ptr<Expr>> stmts;
+        while (!check(TokenType::RBRACE) && !isAtEnd()) {
+            while (match({ TokenType::SEMICOLON, TokenType::NEWLINE })) {}
+            if (check(TokenType::RBRACE)) break;
+            stmts.push_back(expression());
+            while (match({ TokenType::SEMICOLON, TokenType::NEWLINE })) {}
+        }
+        consume(TokenType::RBRACE, "Parser Error: Expect '}' after namespace body.");
+        return std::make_unique<NamespaceDecl>(name, std::make_unique<Block>(std::move(stmts)));
     }
 
     std::unique_ptr<Expr> Parser::classDefExpr() {

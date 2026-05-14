@@ -51,6 +51,7 @@ namespace jc {
         CASE,                // ★
         DEFAULT,             // ★
         CLASS,
+        NAMESPACE,           // ★ 新增
         SUPER,
         SELF,                // ★ 新增
         TRUE_KW,             // ★ 新增
@@ -132,6 +133,7 @@ namespace jc {
         case TokenType::DOT:           return "DOT(.)";
         case TokenType::ELLIPSIS:      return "ELLIPSIS(...)";
         case TokenType::CLASS:         return "CLASS";
+        case TokenType::NAMESPACE:     return "NAMESPACE";
         case TokenType::SUPER:         return "SUPER";
         case TokenType::SELF:          return "SELF";
         case TokenType::TRUE_KW:       return "TRUE";

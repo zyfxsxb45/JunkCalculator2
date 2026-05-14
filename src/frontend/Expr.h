@@ -42,6 +42,7 @@ namespace jc {
     struct ImportExpr;
     struct SwitchExpr;       // ★
     struct ClassDefExpr;       // ★
+    struct NamespaceDecl;      // ★ 新增
     struct DotAccess;          // ★
     struct DotAssign;          // ★
     struct MethodCallExpr;     // ★
@@ -89,6 +90,7 @@ namespace jc {
         virtual std::any visitImportExpr(ImportExpr* expr) = 0;      // ★
         virtual std::any visitSwitchExpr(SwitchExpr* expr) = 0;      // ★
         virtual std::any visitClassDefExpr(ClassDefExpr* expr) = 0;     // ★
+        virtual std::any visitNamespaceDecl(NamespaceDecl* expr) = 0;   // ★ 新增
         virtual std::any visitDotAccess(DotAccess* expr) = 0;           // ★
         virtual std::any visitDotAssign(DotAssign* expr) = 0;           // ★
         virtual std::any visitMethodCallExpr(MethodCallExpr* expr) = 0; // ★
@@ -425,6 +427,15 @@ namespace jc {
             defaultBody(std::move(defaultBody)) {
         }
         std::any accept(ExprVisitor& visitor) override { return visitor.visitSwitchExpr(this); }
+    };
+
+    struct NamespaceDecl : public Expr {
+        Token name;
+        std::unique_ptr<Expr> body;
+        NamespaceDecl(Token name, std::unique_ptr<Expr> body)
+            : name(std::move(name)), body(std::move(body)) {
+        }
+        std::any accept(ExprVisitor& visitor) override { return visitor.visitNamespaceDecl(this); }
     };
 
     struct ClassDefExpr : public Expr {

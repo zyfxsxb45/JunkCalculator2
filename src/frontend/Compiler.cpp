@@ -1624,6 +1624,87 @@ namespace jc {
         return {};
     }
 
+    std::any Compiler::visitNamespaceDecl(NamespaceDecl* expr) {
+        auto fn = std::make_shared<CompiledFunction>();
+        fn->name = "<namespace " + expr->name.lexeme + ">";
+        fn->maxArity = 0;
+        fn->arity = 0;
+        fn->hasRestParam = false;
+
+        compiledFunctions.push_back(fn);
+        int thisFnIndex = functionIndexOffset + static_cast<int>(compiledFunctions.size()) - 1;
+
+        initCompiler(fn.get());
+        beginScope(); // depth 1
+
+        auto block = static_cast<Block*>(expr->body.get());
+        for (size_t i = 0; i < block->statements.size(); ++i) {
+            compileNode(block->statements[i].get());
+            emit(OpCode::OP_POP, lastLine);
+        }
+
+        int count = 0;
+        for (auto& local : current().locals) {
+            // 仅导出在命名空间中定义的 auto-local 变量 (depth == 0)
+            // depth == 1 的 local 变量将作为私有变量被丢弃，不会被导出！
+            if (local.depth == 0 && !local.name.empty() && local.name[0] != '<') {
+                uint16_t keyIdx = identifierConstant(local.name);
+                emit(OpCode::OP_CONSTANT, lastLine);
+                emit16(keyIdx, lastLine);
+
+                int slot = resolveLocal(local.name);
+                emit(OpCode::OP_GET_LOCAL, lastLine);
+                emit16(static_cast<uint16_t>(slot), lastLine);
+                count++;
+            }
+        }
+
+        emit(OpCode::OP_BUILD_DICT, lastLine);
+        emit16(static_cast<uint16_t>(count), lastLine);
+        emit(OpCode::OP_RETURN, lastLine);
+
+        fn->localCount = current().maxLocals;
+        endScope();
+        stateStack.pop_back();
+
+        uint16_t fnIdx = makeConstant(Value(static_cast<double>(thisFnIndex)));
+        emit(OpCode::OP_CLOSURE, lastLine);
+        emit16(fnIdx, lastLine);
+
+        emit(OpCode::OP_CALL, lastLine);
+        emit(0, lastLine);
+
+        const std::string& name = expr->name.lexeme;
+        if (stateStack.size() == 1) knownGlobals.insert(name);
+
+        int slot = resolveLocal(name);
+        if (stateStack.size() > 1 && slot == -1 && current().refNames.count(name) == 0 && current().stateNames.count(name) == 0) {
+            addLocal(name, 0);
+            slot = resolveLocal(name);
+        }
+
+        if (slot != -1) {
+            emit(OpCode::OP_SET_LOCAL, lastLine);
+            emit16(static_cast<uint16_t>(slot), lastLine);
+        } else {
+            int upvalue = resolveUpvalue(name);
+            if (upvalue != -1) {
+                emit(OpCode::OP_SET_UPVALUE, lastLine);
+                emit16(static_cast<uint16_t>(upvalue), lastLine);
+            } else {
+                uint16_t nameIdx = identifierConstant(name);
+                if (current().refNames.count(name) > 0) {
+                    emit(OpCode::OP_SET_GLOBAL_REF, lastLine);
+                } else {
+                    emit(OpCode::OP_SET_GLOBAL, lastLine);
+                }
+                emit16(nameIdx, lastLine);
+            }
+        }
+
+        return {};
+    }
+
     std::any Compiler::visitClassDefExpr(ClassDefExpr* expr) {
         lastLine = expr->name.line;
         const std::string& className = expr->name.lexeme;

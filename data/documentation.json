@@ -75,7 +75,7 @@
       "  Language Keywords (type \"/help <keyword>\")",
       "  ────────────────────────────────────────────────────────────────────",
       "    if  else  while  for  in  break  continue  return  switch  case",
-      "    class  extends  super  self  ref  state  const  delete",
+      "    class  extends  super  self  namespace  ref  state  const  delete",
       "    try  catch  throw  import  true  false  none",
       "",
       "  Native Modules (require `import` before use)",
@@ -1419,6 +1419,23 @@
       "    local    | Block {}    | Destroyed on block end | Strict Block Isolation",
       "    ref      | Outer/Global| Tied to outer variable | Mutates outer directly",
       "    state    | Closure     | Persistent across calls| Private State Machine",
+      "",
+      "  Namespaces",
+      "  ──────────────────────",
+      "    namespace Math {",
+      "        local seed = 12345         // Private variable (not exported)",
+      "        PI = 3.14                  // Public member",
+      "        add(a, b) = a + b          // Public method",
+      "    }",
+      "    ",
+      "    Namespaces are syntactic sugar for an IIFE that returns a Dict.",
+      "    You can access members via the dot operator: Math.PI, Math.add(1, 2).",
+      "    Because they are Dicts, methods inside can even use `self` to access",
+      "    other members of the same namespace!",
+      "    ",
+      "    ★ Private Members: Any variable declared with the `local` keyword inside",
+      "      a namespace is strictly block-scoped and will NOT be exported. This is",
+      "      perfect for hiding internal state or helper functions.",
       "",
       "  Top Level (REPL)",
       "  ──────────────────────",
@@ -6236,6 +6253,21 @@
         "default:",
         "    print(\"unknown\")",
         "    0"
+      ]
+    },
+    "namespace": {
+      "signature": "namespace Name { ... }",
+      "desc": [
+        "Creates a namespace to group related functions and variables.",
+        "Under the hood, it compiles into an Immediately Invoked Function Expression (IIFE)",
+        "that returns a Dictionary of all its public variables.",
+        "You can access its members using the dot operator (e.g., Name.member).",
+        "Variables declared with `local` are private and will not be exported."
+      ],
+      "examples": [
+        "namespace Math { local seed = 1; PI = 3.14; add(a, b) = a + b }",
+        "print(Math.PI)",
+        "Math.add(1, 2)"
       ]
     },
     "class": {
