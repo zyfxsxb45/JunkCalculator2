@@ -3973,7 +3973,6 @@ void BuiltinRegistry::registerSystemShell() {
         auto ast = parser.parse();
         
         jc::Compiler compiler;
-        // ★ 借用当前 VM 的 compiledFunctions 列表，保证内部闭包索引正确
         compiler.setCompiledFunctions(VM::activeVM->getCompiledFunctions());
         compiler.setFunctionIndexOffset(0);
         
@@ -3987,7 +3986,6 @@ void BuiltinRegistry::registerSystemShell() {
         mainFn->maxArity = 0;
         mainFn->localCount = compiler.getTopLevelLocalCount();
         
-        // ★ 将编译出的所有函数（包括主函数）注入 VM
         auto fns = compiler.getCompiledFunctions();
         fns.push_back(mainFn);
         int mainFnIdx = static_cast<int>(fns.size()) - 1;
@@ -4031,13 +4029,13 @@ void BuiltinRegistry::registerSystemShell() {
         mainFn->chunk = std::move(chunk);
         mainFn->arity = 0;
         mainFn->maxArity = 0;
-        mainFn->localCount = compiler.getCompiledFunctions().empty() ? 0 : compiler.getCompiledFunctions().back()->localCount;
+        mainFn->localCount = compiler.getTopLevelLocalCount();
         
         auto fns = compiler.getCompiledFunctions();
         fns.push_back(mainFn);
         int mainFnIdx = static_cast<int>(fns.size()) - 1;
         VM::activeVM->setCompiledFunctions(fns);
-        
+
         // ★ 核心：使用原生闭包代理，保护相对路径上下文！
         std::string scriptDir = std::filesystem::path(resolved).parent_path().string();
         VM* vm = VM::activeVM;

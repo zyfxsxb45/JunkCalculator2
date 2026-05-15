@@ -113,7 +113,6 @@ void printHelpTopic(const std::string& topic) {
 
 // 核心 VM 实例和全局上下文
 jc::VM vm;
-std::vector<std::shared_ptr<jc::CompiledFunction>> allFunctions;
 bool g_showDisasm = false;  // ★ 新增：字节码反汇编开关
 bool g_autoDebug = false;
 bool g_profile = false;
@@ -125,40 +124,38 @@ jc::Value evalCode(const std::string& code, const std::string& sourceFile, bool 
     auto tokens = lexer.tokenize();
     jc::Parser parser(tokens, sourceFile);                   // ★
     auto ast = parser.parse();
+    
     jc::Compiler compiler;
-    compiler.setFunctionIndexOffset(static_cast<int>(allFunctions.size()));
+    // ★ 核心修复：每次编译前，从 VM 获取最新、最权威的函数列表！
+    auto currentFns = vm.getCompiledFunctions();
+    compiler.setCompiledFunctions(currentFns);
+    compiler.setFunctionIndexOffset(0);
+    
     jc::Chunk chunk = compiler.compile(ast.get(), sourceFile); // ★
 
     if (g_showDisasm) {
         chunk.disassemble(isFile ? "Script Chunk" : "REPL Chunk");
     }
 
-    auto& newFns = compiler.getCompiledFunctions();
-    int rootLocalCount = 0;
-    if (!newFns.empty()) {
-        rootLocalCount = newFns[0]->localCount;
-    }
-    // ★ 不再强制 localCount = 8
-
-    for (auto& fn : newFns) allFunctions.push_back(fn);
-    vm.setCompiledFunctions(allFunctions);
-
     auto evalFn = std::make_shared<jc::CompiledFunction>();
     evalFn->name = isFile ? "<script>" : "<eval>";
     evalFn->arity = 0;
     evalFn->maxArity = 0;
-    evalFn->localCount = rootLocalCount;
+    evalFn->localCount = compiler.getTopLevelLocalCount();
     evalFn->chunk = chunk;
     evalFn->sourceFile = sourceFile;
 
-    int evalIdx = static_cast<int>(allFunctions.size());
+    auto fns = compiler.getCompiledFunctions();
+    fns.push_back(evalFn);
+    int evalIdx = static_cast<int>(fns.size()) - 1;
+    
+    vm.setCompiledFunctions(fns);
+
     if (g_autoDebug) {
         if (jc::VM::activeVM) {
             jc::VM::activeVM->triggerDebugger(); // ★ 一进虚拟机立刻触发下一行暂停！
         }
     }
-    allFunctions.push_back(evalFn);
-    vm.setCompiledFunctions(allFunctions);
 
     return vm.callVMFunction(evalIdx, {});
 }

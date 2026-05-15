@@ -183,6 +183,7 @@ namespace jc {
         const std::vector<std::shared_ptr<CompiledFunction>>& getCompiledFunctions() const {
             return compiledFunctions;
         }
+
         Value callVMFunction(int fnIdx, const std::vector<Value>& args,
             std::shared_ptr<std::vector<std::shared_ptr<UpVal>>> upvalues = nullptr,
             Value boundSelf = Value::none(), Value boundClass = Value::none());
