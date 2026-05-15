@@ -1264,7 +1264,7 @@ namespace jc {
                     inst->is_hashable_cached = true;
                     return true;
                 }
-                return true; // 普通实例按指针哈希，永远可哈希 (不缓存，以防未来被 freeze)
+                return false; // 未冻结的普通实例不可哈希（防止冻结后哈希算法突变导致字典损坏）
             }
         }
         return false;
