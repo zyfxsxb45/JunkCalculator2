@@ -336,27 +336,39 @@ namespace jc {
     void VM::registerBuiltin(const std::string& name, NativeCallable fn, std::set<int> arity) {
         nativeBuiltins[name] = fn;
         builtinArity[name] = arity;
+    }
 
-        auto closure = GcHeap::get().allocate<ObjClosure>(
-            std::vector<std::string>{},
-            std::vector<bool>{},
-            name,
-            nullptr
-        );
-        closure->nativeFn = std::make_any<NativeCallable>(fn);
-
-        if (!arity.empty()) {
-            int maxA = *arity.rbegin();
-            int minA = *arity.begin();
-            for (int j = 0; j < maxA; ++j) {
-                closure->paramNames.push_back("_" + std::to_string(j));
-                closure->isRef.push_back(false);
-            }
-            for (int j = minA; j < maxA; ++j) {
-                closure->defaultValues.push_back(Value::none());
-            }
+    Value VM::getBuiltinClosure(const std::string& name) {
+        auto it = builtinClosures.find(name);
+        if (it != builtinClosures.end()) {
+            return it->second;
         }
-        builtinClosures[name] = Value(closure);
+        auto nit = nativeBuiltins.find(name);
+        if (nit != nativeBuiltins.end()) {
+            auto closure = GcHeap::get().allocate<ObjClosure>(
+                std::vector<std::string>{},
+                std::vector<bool>{},
+                name,
+                nullptr
+            );
+            closure->nativeFn = std::make_any<NativeCallable>(nit->second);
+            auto ait = builtinArity.find(name);
+            if (ait != builtinArity.end() && !ait->second.empty()) {
+                int maxA = *ait->second.rbegin();
+                int minA = *ait->second.begin();
+                for (int j = 0; j < maxA; ++j) {
+                    closure->paramNames.push_back("_" + std::to_string(j));
+                    closure->isRef.push_back(false);
+                }
+                for (int j = minA; j < maxA; ++j) {
+                    closure->defaultValues.push_back(Value::none());
+                }
+            }
+            Value val(closure);
+            builtinClosures[name] = val;
+            return val;
+        }
+        return Value::none();
     }
 
     void VM::setGlobal(const std::string& name, const Value& val) {
@@ -722,9 +734,9 @@ namespace jc {
                         push(it->second);
                     }
                     else {
-                        auto bit = builtinClosures.find(name);
-                        if (bit != builtinClosures.end()) {
-                            push(bit->second);
+                        Value builtinVal = getBuiltinClosure(name);
+                        if (!builtinVal.isNone()) {
+                            push(builtinVal);
                         }
                         else {
                             throw std::runtime_error("VM Error: Undefined variable '" + name + "'.");
@@ -1721,7 +1733,7 @@ namespace jc {
                         for (const auto& kv : nativeBuiltins) {
                             if (!oldNatives.count(kv.first)) {
                                 auto uv = std::make_shared<UpVal>();
-                                uv->closed = builtinClosures[kv.first];
+                                uv->closed = getBuiltinClosure(kv.first);
                                 uv->location = &uv->closed;
                                 ns->fields[kv.first] = { uv, true };
                             }
@@ -2567,6 +2579,27 @@ namespace jc {
                 return;
             }
             else if (closure->isNative()) {
+                // ★ 修复：检查原生闭包的参数数量，防止 C++ 越界崩溃
+                auto ait = builtinArity.find(closure->name);
+                if (ait != builtinArity.end() && !ait->second.empty()) {
+                    if (ait->second.find(argc) == ait->second.end()) {
+                        std::string expected;
+                        for (auto aIt = ait->second.begin(); aIt != ait->second.end(); ++aIt) {
+                            if (aIt != ait->second.begin()) expected += " or ";
+                            expected += std::to_string(*aIt);
+                        }
+                        throw std::runtime_error("Runtime Error: Function '" + closure->name + 
+                            "' expects " + expected + " arguments, got " + std::to_string(argc) + ".");
+                    }
+                } else if (closure->maxArgs() > 0 && !closure->hasRestParam) {
+                    if (static_cast<int>(argc) < closure->minArgs() || static_cast<int>(argc) > closure->maxArgs()) {
+                        throw std::runtime_error("Runtime Error: Function '" + closure->name + 
+                            "' expects " + std::to_string(closure->minArgs()) + " to " + 
+                            std::to_string(closure->maxArgs()) + " arguments, got " + 
+                            std::to_string(argc) + ".");
+                    }
+                }
+
                 std::vector<Value> args(argc);
                 for (int j = argc - 1; j >= 0; --j) args[j] = pop();
                 pop();
@@ -4317,6 +4350,16 @@ namespace jc {
                 throw std::runtime_error("VM Error: Invalid string tag in method.");
             }
 
+            // ★ 修复：检查原生方法的参数数量
+            if (method->maxArgs() > 0 && !method->hasRestParam) {
+                if (static_cast<int>(argc) < method->minArgs() || static_cast<int>(argc) > method->maxArgs()) {
+                    throw std::runtime_error("Runtime Error: Method '" + methodName + 
+                        "' expects " + std::to_string(method->minArgs()) + " to " + 
+                        std::to_string(method->maxArgs()) + " arguments, got " + 
+                        std::to_string(argc) + ".");
+                }
+            }
+
             // ★ C++ 原生函数直接进隔离池
             helpers::nativeSelfStack.push_back(obj);
             helpers::nativeClassStack.push_back(owningClass ? Value(owningClass) : Value::none());
@@ -4433,6 +4476,16 @@ namespace jc {
             return;
         }
         else if (method->isNative()) {
+            // ★ 修复：检查原生方法的参数数量
+            if (method->maxArgs() > 0 && !method->hasRestParam) {
+                if (static_cast<int>(argc) < method->minArgs() || static_cast<int>(argc) > method->maxArgs()) {
+                    throw std::runtime_error("Runtime Error: Super method '" + methodName + 
+                        "' expects " + std::to_string(method->minArgs()) + " to " + 
+                        std::to_string(method->maxArgs()) + " arguments, got " + 
+                        std::to_string(argc) + ".");
+                }
+            }
+
             // ★ 压入原生方法隔离池
             helpers::nativeSelfStack.push_back(Value(inst));
             helpers::nativeClassStack.push_back(Value(owningClass));

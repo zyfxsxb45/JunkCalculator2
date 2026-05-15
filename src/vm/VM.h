@@ -172,6 +172,7 @@ namespace jc {
         ~VM();
 
         void registerBuiltin(const std::string& name, NativeCallable fn, std::set<int> arity);
+        Value getBuiltinClosure(const std::string& name);
         void setGlobal(const std::string& name, const Value& val);
         inline static VM* activeVM = nullptr;
         static std::any makeNativeFn(NativeCallable fn);

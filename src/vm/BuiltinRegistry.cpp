@@ -1047,8 +1047,8 @@ void BuiltinRegistry::registerMatrixOps() {
         if (args[0].isObjType(ObjType::STRING_MATRIX)) return Value(static_cast<double>(static_cast<ObjStringMatrix*>(args[0].asObj())->mat.getCols()));
         throw std::runtime_error("Type Error: col() requires a matrix.");
     });
-    builtins["rows"] = builtins["row"]; builtinArity["rows"] = builtinArity["row"];
-    builtins["cols"] = builtins["col"]; builtinArity["cols"] = builtinArity["col"];
+    reg("rows", builtinArity["row"], builtins["row"]);
+    reg("cols", builtinArity["col"], builtins["col"]);
 
     // --- 元素/行列访问 ---
     reg("getElement", { 3 }, [](const std::vector<Value>& args) -> Value { int r = static_cast<int>(std::round(args[1].asDouble())), c = static_cast<int>(std::round(args[2].asDouble())); if (args[0].isObjType(ObjType::REAL_MATRIX)) return Value(static_cast<ObjRealMatrix*>(args[0].asObj())->mat(r, c)); if (args[0].isObjType(ObjType::COMPLEX_MATRIX)) return Value(static_cast<ObjComplexMatrix*>(args[0].asObj())->mat(r, c)); if (args[0].isObjType(ObjType::STRING_MATRIX)) return Value(static_cast<ObjStringMatrix*>(args[0].asObj())->mat(r, c)); throw std::runtime_error("Type Error: getElement() requires a matrix."); });
@@ -1415,7 +1415,7 @@ void BuiltinRegistry::registerRandom() {
 // =================================================================
 void BuiltinRegistry::registerSystemUtils() {
     reg("buildIndex", { 0 }, [](const std::vector<Value>&) -> Value { BigInt::buildFileIndex(); return Value::none(); });
-    builtins["loadPrimes"] = builtins["buildIndex"]; builtinArity["loadPrimes"] = builtinArity["buildIndex"];
+    reg("loadPrimes", builtinArity["buildIndex"], builtins["buildIndex"]);
     reg("mountPrimes", { 1 }, [](const std::vector<Value>& args) -> Value { if (!args[0].isString()) throw std::runtime_error("Runtime Error: mountPrimes(\"path\") expects a string."); BigInt::setPrimeFilePath(args[0].asString()); return Value::none(); });
     reg("sysinfo", { 0 }, [](const std::vector<Value>&) -> Value { std::cout << "--- Junk Calculator System Info ---\n" << "Prime DB: " << (BigInt::getPrimeFilePath().empty() ? "(Dynamic Computation)" : BigInt::getPrimeFilePath()) << "\n" << "Indexed:  " << BigInt::totalPrimesInFile << " primes\n"; if (BigInt::totalPrimesInFile > 0) std::cout << "Max:      " << BigInt::largestPrimeInFile << "\n"; std::cout << "-----------------------------------" << std::endl; return Value::none(); });
     reg("gc", { 0, 1 }, [](const std::vector<Value>& args) -> Value {
@@ -1693,7 +1693,7 @@ void BuiltinRegistry::registerControlFlow() {
         }
         std::cout << std::endl; return Value::none();
         });
-    builtins["println"] = builtins["print"]; builtinArity["println"] = builtinArity["print"];
+    reg("println", builtinArity["print"], builtins["print"]);
     reg("bool", { 1 }, [](const std::vector<Value>& args) -> Value {
         // ★ Dunder 钩子: __bool__
         if (args[0].isInstance()) {
@@ -1887,7 +1887,7 @@ void BuiltinRegistry::registerStringFunctions() {
         if (args[0].isString()) return args[0];
         std::ostringstream oss; oss << args[0]; return Value(oss.str());
         });
-    builtins["string"] = builtins["str"]; builtinArity["string"] = builtinArity["str"];
+    reg("string", builtinArity["str"], builtins["str"]);
 
     reg("len", { 1 }, [](const std::vector<Value>& args) -> Value {
         // ★ Dunder 钩子: __len__
@@ -1906,8 +1906,8 @@ void BuiltinRegistry::registerStringFunctions() {
         if (args[0].isObjType(ObjType::SET)) return Value(static_cast<double>(static_cast<ObjSet*>(args[0].asObj())->elements.size()));
         throw std::runtime_error("Type Error: len() expects a string, vector, matrix, dict, or list.");
         });
-    builtins["length"] = builtins["len"]; builtinArity["length"] = builtinArity["len"];
-    builtins["size"] = builtins["len"]; builtinArity["size"] = builtinArity["len"];
+    reg("length", builtinArity["len"], builtins["len"]);
+    reg("size", builtinArity["len"], builtins["len"]);
 
     reg("eval", { 1 }, [](const std::vector<Value>& args) -> Value {
         if (!args[0].isString())
@@ -2085,7 +2085,7 @@ void BuiltinRegistry::registerArrayFunctions() {
         }
         return expectContainer("push");
         });
-    builtins["append"] = builtins["push"]; builtinArity["append"] = builtinArity["push"];
+    reg("append", builtinArity["push"], builtins["push"]);
 
     reg("prepend", { 2 }, [expectContainer](const std::vector<Value>& args) -> Value {
         if (args[0].isObjType(ObjType::LIST)) {
@@ -2569,7 +2569,7 @@ void BuiltinRegistry::registerDictFunctions() {
         return Value(L);
         });
     // ★ 设定属性拾取别名！完美融合 Instance
-    builtins["getFields"] = builtins["keys"]; builtinArity["getFields"] = builtinArity["keys"];
+    reg("getFields", builtinArity["keys"], builtins["keys"]);
 
     reg("values", { 1 }, [](const std::vector<Value>& args) -> Value {
         ObjDict* d = helpers::getDictMap(args[0], "values");
@@ -2583,8 +2583,8 @@ void BuiltinRegistry::registerDictFunctions() {
         return Value(d->keyMap.find(args[1]) != d->keyMap.end());
         });
     // ★ 设定查询别名
-    builtins["hasField"] = builtins["hasKey"]; builtinArity["hasField"] = builtinArity["hasKey"];
-    builtins["has"] = builtins["hasKey"]; builtinArity["has"] = builtinArity["hasKey"];
+    reg("hasField", builtinArity["hasKey"], builtins["hasKey"]);
+    reg("has", builtinArity["hasKey"], builtins["hasKey"]);
 
     reg("removeKey", { 2 }, [](const std::vector<Value>& args) -> Value {
         ObjDict* d = helpers::getDictMap(args[0], "removeKey");
@@ -3747,8 +3747,7 @@ void BuiltinRegistry::registerSystemShell() {
         return Value::none();
         });
     // 做个兼容别名
-    builtins["debugger"] = builtins["breakpoint"];
-    builtinArity["debugger"] = builtinArity["breakpoint"];
+    reg("debugger", builtinArity["breakpoint"], builtins["breakpoint"]);
 }
 
 // =================================================================
@@ -3787,7 +3786,7 @@ void BuiltinRegistry::registerTypeChecks() {
     reg("isfloat", { 1 }, [](const std::vector<Value>& args) -> Value {
         return Value(args[0].isDouble());
         });
-    builtins["isdouble"] = builtins["isfloat"]; builtinArity["isdouble"] = builtinArity["isfloat"];
+    reg("isdouble", builtinArity["isfloat"], builtins["isfloat"]);
 
     reg("isnumeric", { 1 }, [](const std::vector<Value>& args) -> Value {
         const Value& val = args[0];
@@ -3800,7 +3799,7 @@ void BuiltinRegistry::registerTypeChecks() {
         }
         return Value(false);
         });
-    builtins["isnumber"] = builtins["isnumeric"]; builtinArity["isnumber"] = builtinArity["isnumeric"];
+    reg("isnumber", builtinArity["isnumeric"], builtins["isnumeric"]);
 
     reg("iscomplex", { 1 }, [](const std::vector<Value>& args) -> Value {
         if (args[0].isComplex()) return Value(true);
@@ -3931,7 +3930,7 @@ void BuiltinRegistry::registerTypeChecks() {
     reg("isstring", { 1 }, [](const std::vector<Value>& args) -> Value {
         return Value(args[0].isString());
         });
-    builtins["isstr"] = builtins["isstring"]; builtinArity["isstr"] = builtinArity["isstring"];
+    reg("isstr", builtinArity["isstring"], builtins["isstring"]);
 
     reg("isalpha", { 1 }, [](const std::vector<Value>& args) -> Value {
         if (!args[0].isString()) return Value(false);
@@ -4014,7 +4013,7 @@ void BuiltinRegistry::registerTypeChecks() {
     reg("isfunction", { 1 }, [](const std::vector<Value>& args) -> Value {
         return Value(args[0].isFunctionClosure());
         });
-    builtins["isfunc"] = builtins["isfunction"]; builtinArity["isfunc"] = builtinArity["isfunction"];
+    reg("isfunc", builtinArity["isfunction"], builtins["isfunction"]);
 
     reg("isclass", { 1 }, [](const std::vector<Value>& args) -> Value {
         return Value(args[0].isClass());
@@ -4027,9 +4026,9 @@ void BuiltinRegistry::registerTypeChecks() {
     reg("issym", { 1 }, [](const std::vector<Value>& args) -> Value {
         return Value(args[0].isSymbolic());
         });
-    builtins["issymbolic"] = builtins["issym"]; builtinArity["issymbolic"] = builtinArity["issym"];
-    builtins["issymbol"] = builtins["issym"]; builtinArity["issymbol"] = builtinArity["issym"];
-    builtins["isexpr"] = builtins["issym"]; builtinArity["isexpr"] = builtinArity["issym"];
+    reg("issymbolic", builtinArity["issym"], builtins["issym"]);
+    reg("issymbol", builtinArity["issym"], builtins["issym"]);
+    reg("isexpr", builtinArity["issym"], builtins["issym"]);
 
     reg("isnan", { 1 }, [](const std::vector<Value>& args) -> Value {
         if (args[0].isDouble())
