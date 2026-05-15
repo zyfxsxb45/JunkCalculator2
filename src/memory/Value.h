@@ -1545,11 +1545,8 @@ namespace jc {
         int minArgs() const {
             int count = static_cast<int>(paramNames.size());
             if (hasRestParam && count > 0) count--;
-            for (int i = count - 1; i >= 0; --i) {
-                if (i < static_cast<int>(defaultValues.size()) && !defaultValues[i].isNone()) count--;
-                else break;
-            }
-            return count;
+            count -= static_cast<int>(defaultValues.size());
+            return count < 0 ? 0 : count;
         }
         int maxArgs() const { return static_cast<int>(paramNames.size()); }
         bool acceptsArgCount(int n) const { return n >= minArgs() && (hasRestParam || n <= maxArgs()); }

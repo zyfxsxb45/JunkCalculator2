@@ -150,7 +150,7 @@
       "    // comment                     everything after // is ignored",
       "    resetConst()                   restore PI, E, i, I",
       "    debugInteg(\"on\")               enable integration debug trace",
-      "    pi()  e()  i()  none()         constant factory functions (always available)",
+      "    pi()  e()  i()                 constant factory functions (always available)",
       "    isint(x)  isstring(x)          type predicates (see: /help typecheck)",
       "    delete x                       remove any variable (including const)",
       "    data |> sort |> unique         pipe operator (left-to-right)",
@@ -376,7 +376,6 @@
       "      pi()              → 3.14159265358979…",
       "      e()               → 2.71828182845904…",
       "      i()               → imaginary unit (0+1i)",
-      "      none()            → none value",
       "",
       "    Tip: Prefer the literal suffix 3i / 4i over the variable i, because",
       "    the variable can be overwritten (e.g., by a for loop). The suffix is",
@@ -1248,7 +1247,6 @@
       "      pi()    → 3.14159265358979…",
       "      e()     → 2.71828182845904…",
       "      i()     → imaginary unit (0+1i)",
-      "      none()  → none value (falsy, used to represent \"no value\")",
       "",
       "  Prime Engine (Paged Streaming I/O)",
       "  ──────────────────────",
@@ -2688,7 +2686,7 @@
       "    List                         →  array",
       "    Dict                         →  object",
       "    RealMatrix (1D / 2D)         →  array / array of arrays",
-      "    none()                       →  null",
+      "    none                         →  null",
       "    Complex / Special types      →  \"<unserializable_type>\" (Fallback)",
       "",
       "  Type Mapping (JSON → JC2)",
@@ -2699,7 +2697,7 @@
       "    array                        →  List",
       "    object                       →  Dict",
       "    true / false                 →  true / false",
-      "    null                         →  none()",
+      "    null                         →  none",
       "",
       "  Examples",
       "  ──────────────────────",
@@ -3087,13 +3085,6 @@
       "desc": "Returns the imaginary unit (0 + 1i).",
       "examples": [
         "z = 3 + 4 * i()"
-      ]
-    },
-    "none": {
-      "signature": "none()",
-      "desc": "Returns the 'none' value, representing the absence of a value.",
-      "examples": [
-        "x = none()"
       ]
     },
     "complex": {
@@ -5339,7 +5330,7 @@
     "isnone": {
       "signature": "isnone(x)",
       "desc": "Returns true if x is the none value.",
-      "examples": ["isnone(none())"]
+      "examples": ["isnone(none)"]
     },
     "isfunction": {
       "signature": "isfunction(x)",
@@ -6554,7 +6545,6 @@
         "Represents the absence of a value. Evaluates as falsy.",
         "Functions without an explicit `return` return `none`.",
         "It is a language keyword and cannot be overwritten or deleted.",
-        "Factory function `none()` always returns a fresh none value.",
         "See also: /help basic"
       ],
       "examples": [
