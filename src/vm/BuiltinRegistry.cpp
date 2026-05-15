@@ -37,7 +37,7 @@ namespace jc {
     // =================================================================
     // 跨模块 Dunder 调用桥梁
     // =================================================================
-    std::pair<bool, Value> invokeDunder(ObjInstance* inst, const std::string& methodName, const std::vector<Value>& args) {
+    std::pair<bool, Value> invokeDunder(ObjInstance* inst, const char* methodName, const std::vector<Value>& args) {
         return helpers::tryCallDunder(inst, methodName, args);
     }
 

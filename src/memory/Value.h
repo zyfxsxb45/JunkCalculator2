@@ -126,18 +126,21 @@ namespace jc {
         std::vector<Value> vec;
         bool is_frozen = false;
         ObjList() { type = ObjType::LIST; }
+        void clear() override { vec.clear(); }
     };
     struct ObjDict : public Obj {
         std::vector<std::pair<Value, Value>> elements;
         std::unordered_map<Value, size_t, ValueHasher, ValueEqual> keyMap;
         bool is_frozen = false;
         ObjDict() { type = ObjType::DICT; }
+        void clear() override { elements.clear(); keyMap.clear(); }
     };
     struct ObjSet : public Obj {
         std::vector<Value> elements;
         std::unordered_set<Value, ValueHasher, ValueEqual> keys;
         bool is_frozen = false;
         ObjSet() { type = ObjType::SET; }
+        void clear() override { elements.clear(); keys.clear(); }
     };
     struct ObjClass : public Obj {
         std::string name;
@@ -150,6 +153,7 @@ namespace jc {
         ObjDict* fields = nullptr;
         std::any nativeData;
         ObjInstance() { type = ObjType::INSTANCE; }
+        void clear() override { nativeData.reset(); }
     };
     struct ObjSuper : public Obj {
         ObjInstance* instance = nullptr;
@@ -163,7 +167,7 @@ namespace jc {
 
     template<typename> struct always_false : std::false_type {};
 
-    std::pair<bool, Value> invokeDunder(ObjInstance* inst, const std::string& methodName, const std::vector<Value>& args = {});
+    std::pair<bool, Value> invokeDunder(ObjInstance* inst, const char* methodName, const std::vector<Value>& args = {});
 
     class Value {
     public:
@@ -402,7 +406,7 @@ namespace jc {
 
         bool isFunctionClosure() const { return isObjType(ObjType::CLOSURE); }
         bool isString() const { return isObjType(ObjType::STRING); }
-        std::string asString() const {
+        const std::string& asString() const {
             if (isString()) return static_cast<ObjString*>(asObj())->str;
             throw std::runtime_error("Type Error: Expected a string.");
         }
@@ -1413,6 +1417,7 @@ namespace jc {
         std::string name;
         std::unordered_map<std::string, NamespaceField> fields;
         ObjNamespace() { type = ObjType::NAMESPACE; }
+        void clear() override { fields.clear(); }
     };
 
     inline std::string Value::toJC2Expression() const {
@@ -1566,6 +1571,14 @@ namespace jc {
             rawBody(std::move(rawBody)), body(std::move(body)),
             capturedEnv(std::move(capturedEnv)), hasRestParam(hasRestParam) {
             type = ObjType::CLOSURE;
+        }
+
+        void clear() override {
+            boundSelf = Value();
+            boundClass = Value();
+            defaultValues.clear();
+            capturedEnv.reset();
+            nativeFn.reset();
         }
 
         std::string toString() const {

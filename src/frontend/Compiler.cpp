@@ -123,7 +123,6 @@ namespace jc {
             emit16(fieldIdx, lastLine);
 
             emit(OpCode::OP_POP, lastLine);
-            emit(OpCode::OP_POP, lastLine);
             current().locals.pop_back();
             return;
         }
@@ -1892,7 +1891,6 @@ namespace jc {
         emit(OpCode::OP_SET_PROPERTY, lastLine);
         emit16(nameIdx, lastLine);
         
-        emit(OpCode::OP_POP, lastLine);
         return {};
     }
 

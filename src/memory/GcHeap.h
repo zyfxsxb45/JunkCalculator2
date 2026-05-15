@@ -24,6 +24,7 @@ namespace jc {
         uint32_t refCount = 0; // ★ 新增引用计数，用于 COW
         Obj* next;
         virtual ~Obj() = default;
+        virtual void clear() {} // ★ 新增：在真正 delete 前清理内部引用的 Value，防止循环引用导致的 Use-After-Free
     };
 
     class GcHeap {
@@ -50,17 +51,30 @@ namespace jc {
         int sweep() {
             Obj** object = &objects_;
             int freed = 0;
+            std::vector<Obj*> garbage;
+
             while (*object != nullptr) {
                 if (!(*object)->isMarked) {
                     Obj* unreached = *object;
                     *object = unreached->next;
-                    delete unreached;
+                    garbage.push_back(unreached);
                     freed++;
                 } else {
                     (*object)->isMarked = false;
                     object = &(*object)->next;
                 }
             }
+
+            // ★ 核心修复：先统一触发 clear() 断开所有 Value 引用，防止 A->B->A 循环引用时，
+            // A 被 delete 后，B 的析构函数再去减 A 的 refCount 导致 Use-After-Free 崩溃！
+            for (Obj* unreached : garbage) {
+                unreached->clear();
+            }
+
+            for (Obj* unreached : garbage) {
+                delete unreached;
+            }
+
             allocsSinceGc_ = 0;
             gcThreshold_ = std::max(static_cast<size_t>(256), trackedCount() * 2);
             return freed;

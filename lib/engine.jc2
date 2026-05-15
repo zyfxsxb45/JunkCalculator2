@@ -44,8 +44,8 @@ class GameEngine {
                 
                 if (ev.type == "keydown")   self.onKeyDown(ev.key)
                 if (ev.type == "keyup")     self.onKeyUp(ev.key)
-                if (ev.type == "mousedown") self.onMouseDown(ev.x, ev.y, ev.button)
-                if (ev.type == "mouseup")   self.onMouseUp(ev.x, ev.y, ev.button)
+                if (ev.type == "mousedown") self.onMouseDown(ev.x, ev.y, int(ev.button))
+                if (ev.type == "mouseup")   self.onMouseUp(ev.x, ev.y, int(ev.button))
                 if (ev.type == "mousemove") self.onMouseMove(ev.x, ev.y)
                 if (ev.type == "close")     self.quit()
             }

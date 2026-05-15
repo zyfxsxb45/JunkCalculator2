@@ -33,8 +33,8 @@ namespace jc {
         const Chunk& currentChunk() { return frame().function->chunk; }
 
         std::vector<Value> stack;
-        std::vector<Value> tempRoots;
-        friend struct TempRootGuard;
+        Value* stackTop = nullptr;
+        Value* stackLimit = nullptr;
         static constexpr int MAX_STACK = 65536;
 
         std::unordered_map<std::string, Value> globals;
@@ -46,30 +46,44 @@ namespace jc {
 
         // 栈操作 (Inline 优化)
         inline void push(const Value& val) {
-            if (static_cast<int>(stack.size()) >= MAX_STACK)
+            if (stackTop >= stackLimit)
                 throw std::runtime_error("VM Error: Stack overflow.");
-            stack.push_back(val);
+            *stackTop++ = val;
         }
         inline Value pop() {
-            if (stack.empty()) throw std::runtime_error("VM Error: Stack underflow.");
-            Value val = std::move(stack.back());
-            stack.pop_back();
+            stackTop--;
+            Value val = std::move(*stackTop);
             return val;
         }
         inline Value& peek(int distance = 0) {
-            return stack[stack.size() - 1 - distance];
+            return *(stackTop - 1 - distance);
         }
-
-        // 读取指令流（从当前帧）(Inline 优化)
-        inline uint8_t readByte() {
-            return currentChunk().code[frame().ip++];
+        
+        inline size_t getStackSize() const {
+            return static_cast<size_t>(stackTop - stack.data());
         }
-        inline uint16_t readShort() {
-            uint8_t hi = readByte();
-            uint8_t lo = readByte();
-            return static_cast<uint16_t>((hi << 8) | lo);
+        inline void setStackSize(size_t newSize) {
+            while (getStackSize() > newSize) {
+                pop();
+            }
+            stackTop = stack.data() + newSize;
         }
-        inline OpCode readOp() { return static_cast<OpCode>(readByte()); }
+        inline void eraseStack(int indexFromTop) {
+            Value* target = stackTop - 1 - indexFromTop;
+            for (Value* p = target; p < stackTop - 1; ++p) {
+                *p = std::move(*(p + 1));
+            }
+            stackTop--;
+            *stackTop = Value::none();
+        }
+        inline void insertStack(int indexFromTop, const Value& val) {
+            Value* target = stackTop - 1 - indexFromTop;
+            for (Value* p = stackTop; p > target; --p) {
+                *p = std::move(*(p - 1));
+            }
+            *target = val;
+            stackTop++;
+        }
 
         inline static bool isTruthy(const Value& val) { return val.truthy(); }
 
@@ -94,7 +108,7 @@ namespace jc {
         // ==============================================================
         bool handleExceptionUnwind(std::string& msg);
         std::string buildStackTrace(const std::string& errorMsg);
-        Value callDunder(const Value& obj, const std::string& name,
+        Value callDunder(const Value& obj, const char* name,
             const std::vector<Value>& args);
 
         // ★ 类型检查冷路径：让繁重的字符串操作离开核心循环
@@ -132,10 +146,10 @@ namespace jc {
         // 当一次完整的脚本执行完，打印报告
            // ═══ 垃圾回收器 (Mark-and-Sweep GC) ═══
         void collectGarbage();
-        void markValue(const Value& val, std::unordered_set<const void*>& marked);
-        void markClosure(const ObjClosure* cl, std::unordered_set<const void*>& marked);
-        void markClassDef(const ObjClass* cls,
-            std::unordered_set<const void*>& marked);
+        void markValue(const Value& val);
+        void markObject(Obj* obj);
+        void traceReferences();
+        std::vector<Obj*> grayStack;
         int gcInstructionCounter_ = 0;
 
         void execCall(uint8_t argc);

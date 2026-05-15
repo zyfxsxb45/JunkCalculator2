@@ -25,7 +25,7 @@ namespace jc {
 
             // 回复当时的变量栈大小
             closeUpvalues(handler.stackSize);
-            stack.resize(handler.stackSize);
+            setStackSize(handler.stackSize);
 
             // 向前兼容清洗（万一由内部某处带上了 [Line，强行剥离保证纯净赋给 e 变量）
             if (msg.find("[Line ") == 0) {
@@ -101,7 +101,7 @@ namespace jc {
             "', but returned '" + getTypeName(val) + "'.");
     }
 
-    static ObjClosure* findDunder(const Value& val, const std::string& name);
+    static ObjClosure* findDunder(const Value& val, const char* name);
 
     bool VM::checkValueType(const Value& val, const std::string& typeStr) {
         if (typeStr == "any" || typeStr.empty()) return true;
@@ -183,26 +183,27 @@ namespace jc {
     }
 
     static ObjClosure* findDunder(
-        const Value& val, const std::string& name)
+        const Value& val, const char* name)
     {
         if (!val.isInstance())
             return nullptr;
         auto inst = val.asInstance();
         auto c = inst->classDef;
+        std::string sname(name);
         while (c) {
-            auto it = c->methods.find(name);
+            auto it = c->methods.find(sname);
             if (it != c->methods.end()) return it->second;
             c = c->parent;
         }
         return nullptr;
     }
 
-    Value VM::callDunder(const Value& obj, const std::string& name,
+    Value VM::callDunder(const Value& obj, const char* name,
         const std::vector<Value>& args)
     {
         auto inst = obj.asInstance();
         auto method = findDunder(obj, name);
-        if (!method) throw std::runtime_error("VM Error: No callable dunder '" + name + "'.");
+        if (!method) throw std::runtime_error(std::string("VM Error: No callable dunder '") + name + "'.");
 
         if (method->isNative() && !method->isBytecode()) {
             helpers::nativeSelfStack.push_back(Value(inst));
@@ -227,7 +228,7 @@ namespace jc {
             return callVMFunction(method->compiledFnIndex, args, captures, Value(inst), Value(inst->classDef));
         }
         else {
-            throw std::runtime_error("VM Error: No callable dunder '" + name + "'.");
+            throw std::runtime_error(std::string("VM Error: No callable dunder '") + name + "'.");
         }
     }
 
@@ -245,7 +246,9 @@ namespace jc {
 
     VM::VM() {
         activeVM = this;
-        stack.reserve(MAX_STACK); // ★ 保证栈指针绝对稳定，支撑 Upvalue 机制
+        stack.resize(MAX_STACK + 1024); // ★ 预分配全部空间
+        stackTop = stack.data();
+        stackLimit = stack.data() + MAX_STACK;
 
         // ★ 核心重定向器：C++ 层索要 "self" 时，直接打劫当前虚拟机的寄存器！
         helpers::getGlobalCallback = [this](const std::string& name) -> Value {
@@ -307,7 +310,7 @@ namespace jc {
         mainFn->name = "<script>";
         mainFn->chunk = c;
         closeUpvalues(0);
-        stack.clear();
+        setStackSize(0);
         frames.clear();
         exceptionHandlers.clear();
         CallFrame mainFrame;
@@ -372,7 +375,7 @@ namespace jc {
         CallFrame newFrame;
         newFrame.function = fn.get();
         newFrame.ip = 0;
-        newFrame.stackBase = static_cast<int>(stack.size()) - fn->localCount;
+        newFrame.stackBase = static_cast<int>(getStackSize()) - fn->localCount;
         newFrame.upvalues = upvalues;
         // ★ 清爽下发！寄存器已就位：
         newFrame.selfContext = boundSelf;
@@ -394,7 +397,7 @@ namespace jc {
             pendingRefWritebacks = savedRefWritebacks;
             frames.resize(boundary);
             closeUpvalues(newFrame.stackBase);
-            stack.resize(newFrame.stackBase);
+            setStackSize(newFrame.stackBase);
             throw;
         }
         catch (...) {
@@ -402,7 +405,7 @@ namespace jc {
             pendingRefWritebacks = savedRefWritebacks;
             frames.resize(boundary);
             closeUpvalues(newFrame.stackBase);
-            stack.resize(newFrame.stackBase);
+            setStackSize(newFrame.stackBase);
             throw;
         }
         if (profileMode) {
@@ -441,6 +444,9 @@ namespace jc {
         currentTargetFrameDepth = targetFrameDepth;
 
         while (true) {
+            CallFrame* currentFrame = &frames.back();
+            const Chunk* chunk = &currentFrame->function->chunk;
+            const std::vector<uint8_t>* code = &chunk->code;
             
             // ═══ GC 自动触发探针与中断探针 ═══
             if (++gcInstructionCounter_ >= 2048) {
@@ -467,16 +473,16 @@ namespace jc {
                 }
             }
 
-            if (frame().ip >= static_cast<int>(currentChunk().code.size())) {
-                return stack.empty() ? Value::none() : pop();
+            if (currentFrame->ip >= static_cast<int>(code->size())) {
+                return getStackSize() == 0 ? Value::none() : pop();
             }
             
             OpCode op;
             try {
-                op = readOp();
+                op = static_cast<OpCode>((*code)[currentFrame->ip++]);
             }
             catch (...) {
-                return stack.empty() ? Value::none() : pop();
+                return getStackSize() == 0 ? Value::none() : pop();
             }
 			// =======================================================
 			// ★ Profiler 探针: 记录微观指令 (Instruction Tick)
@@ -484,13 +490,21 @@ namespace jc {
 			if (profileMode) {
 				opCounts[op]++;
 			}
+
+            auto readByte = [&]() -> uint8_t { return (*code)[currentFrame->ip++]; };
+            auto readShort = [&]() -> uint16_t {
+                uint8_t hi = (*code)[currentFrame->ip++];
+                uint8_t lo = (*code)[currentFrame->ip++];
+                return static_cast<uint16_t>((hi << 8) | lo);
+            };
+
             try {
 
                 switch (op) {
 
                 case OpCode::OP_CONSTANT: {
                     uint16_t idx = readShort();
-                    push(currentChunk().constants[idx]);
+                    push(chunk->constants[idx]);
                     break;
                 }
                 case OpCode::OP_NONE:  push(Value::none()); break;
@@ -499,183 +513,122 @@ namespace jc {
                 case OpCode::OP_POP:   pop(); break;
 
                 case OpCode::OP_GET_SELF: {
-                    if (frame().selfContext.isNone()) throw std::runtime_error("VM Error: 'self' accessed outside of context.");
-                    push(frame().selfContext);
+                    if (currentFrame->selfContext.isNone()) throw std::runtime_error("VM Error: 'self' accessed outside of context.");
+                    push(currentFrame->selfContext);
                     break;
                 }
 
                 case OpCode::OP_ADD: {
-                    Value b = peek(0), a = peek(1);
-                    auto d = findDunder(a, "__add__");
-                    if (d) { pop(); pop(); push(callDunder(a, "__add__", { b })); break; }
-                    d = findDunder(b, "__radd__");
-                    if (d) { pop(); pop(); push(callDunder(b, "__radd__", { a })); break; }
-                    Value res = a + b; pop(); pop(); push(res);
-                    break;
+                    Value& b = peek(0); Value& a = peek(1);
+                    if (a.isInstance() && findDunder(a, "__add__")) { Value res = callDunder(a, "__add__", { b }); pop(); peek(0) = res; break; }
+                    if (b.isInstance() && findDunder(b, "__radd__")) { Value res = callDunder(b, "__radd__", { a }); pop(); peek(0) = res; break; }
+                    Value res = a + b; pop(); peek(0) = res; break;
                 }
                 case OpCode::OP_SUBTRACT: {
-                    Value b = peek(0), a = peek(1);
-                    auto d = findDunder(a, "__sub__");
-                    if (d) { pop(); pop(); push(callDunder(a, "__sub__", { b })); break; }
-                    d = findDunder(b, "__rsub__");
-                    if (d) { pop(); pop(); push(callDunder(b, "__rsub__", { a })); break; }
-                    Value res = a - b; pop(); pop(); push(res);
-                    break;
+                    Value& b = peek(0); Value& a = peek(1);
+                    if (a.isInstance() && findDunder(a, "__sub__")) { Value res = callDunder(a, "__sub__", { b }); pop(); peek(0) = res; break; }
+                    if (b.isInstance() && findDunder(b, "__rsub__")) { Value res = callDunder(b, "__rsub__", { a }); pop(); peek(0) = res; break; }
+                    Value res = a - b; pop(); peek(0) = res; break;
                 }
                 case OpCode::OP_MULTIPLY: {
-                    Value b = peek(0), a = peek(1);
-                    auto d = findDunder(a, "__mul__");
-                    if (d) { pop(); pop(); push(callDunder(a, "__mul__", { b })); break; }
-                    d = findDunder(b, "__rmul__");
-                    if (d) { pop(); pop(); push(callDunder(b, "__rmul__", { a })); break; }
-                    Value res = a * b; pop(); pop(); push(res);
-                    break;
+                    Value& b = peek(0); Value& a = peek(1);
+                    if (a.isInstance() && findDunder(a, "__mul__")) { Value res = callDunder(a, "__mul__", { b }); pop(); peek(0) = res; break; }
+                    if (b.isInstance() && findDunder(b, "__rmul__")) { Value res = callDunder(b, "__rmul__", { a }); pop(); peek(0) = res; break; }
+                    Value res = a * b; pop(); peek(0) = res; break;
                 }
                 case OpCode::OP_DIVIDE: {
-                    Value b = peek(0), a = peek(1);
-                    auto d = findDunder(a, "__div__");
-                    if (d) { pop(); pop(); push(callDunder(a, "__div__", { b })); break; }
-                    d = findDunder(b, "__rdiv__");
-                    if (d) { pop(); pop(); push(callDunder(b, "__rdiv__", { a })); break; }
-                    Value res = a / b; pop(); pop(); push(res);
-                    break;
+                    Value& b = peek(0); Value& a = peek(1);
+                    if (a.isInstance() && findDunder(a, "__div__")) { Value res = callDunder(a, "__div__", { b }); pop(); peek(0) = res; break; }
+                    if (b.isInstance() && findDunder(b, "__rdiv__")) { Value res = callDunder(b, "__rdiv__", { a }); pop(); peek(0) = res; break; }
+                    Value res = a / b; pop(); peek(0) = res; break;
                 }
                 case OpCode::OP_MODULO: {
-                    Value b = peek(0), a = peek(1);
-                    auto d = findDunder(a, "__mod__");
-                    if (d) { pop(); pop(); push(callDunder(a, "__mod__", { b })); break; }
-                    d = findDunder(b, "__rmod__");
-                    if (d) { pop(); pop(); push(callDunder(b, "__rmod__", { a })); break; }
-                    Value res = a % b; pop(); pop(); push(res);
-                    break;
+                    Value& b = peek(0); Value& a = peek(1);
+                    if (a.isInstance() && findDunder(a, "__mod__")) { Value res = callDunder(a, "__mod__", { b }); pop(); peek(0) = res; break; }
+                    if (b.isInstance() && findDunder(b, "__rmod__")) { Value res = callDunder(b, "__rmod__", { a }); pop(); peek(0) = res; break; }
+                    Value res = a % b; pop(); peek(0) = res; break;
                 }
                 case OpCode::OP_POWER: {
-                    Value b = peek(0), a = peek(1);
-                    auto d = findDunder(a, "__pow__");
-                    if (d) { pop(); pop(); push(callDunder(a, "__pow__", { b })); break; }
-                    d = findDunder(b, "__rpow__");
-                    if (d) { pop(); pop(); push(callDunder(b, "__rpow__", { a })); break; }
-                    Value res = a ^ b; pop(); pop(); push(res);
-                    break;
+                    Value& b = peek(0); Value& a = peek(1);
+                    if (a.isInstance() && findDunder(a, "__pow__")) { Value res = callDunder(a, "__pow__", { b }); pop(); peek(0) = res; break; }
+                    if (b.isInstance() && findDunder(b, "__rpow__")) { Value res = callDunder(b, "__rpow__", { a }); pop(); peek(0) = res; break; }
+                    Value res = a ^ b; pop(); peek(0) = res; break;
                 }
                 case OpCode::OP_NEGATE: {
-                    Value a = peek(0);
-                    auto d = findDunder(a, "__neg__");
-                    if (d) { pop(); push(callDunder(a, "__neg__", {})); break; }
-                    Value res = -a; pop(); push(res);
-                    break;
+                    Value& a = peek(0);
+                    if (a.isInstance() && findDunder(a, "__neg__")) { Value res = callDunder(a, "__neg__", {}); peek(0) = res; break; }
+                    Value res = -a; peek(0) = res; break;
                 }
-                case OpCode::OP_NOT: { push(Value(!pop().truthy())); break; }
+                case OpCode::OP_NOT: { 
+                    Value res = Value(!peek(0).truthy()); peek(0) = res; break; 
+                }
                 case OpCode::OP_BIT_NOT: {
-                    Value a = peek(0);
-                    auto d = findDunder(a, "__bitnot__");
-                    if (d) { pop(); push(callDunder(a, "__bitnot__", {})); break; }
-                    Value res = ~a; pop(); push(res);
-                    break;
+                    Value& a = peek(0);
+                    if (a.isInstance() && findDunder(a, "__bitnot__")) { Value res = callDunder(a, "__bitnot__", {}); peek(0) = res; break; }
+                    Value res = ~a; peek(0) = res; break;
                 }
 
                 case OpCode::OP_BIT_AND: {
-                    Value b = peek(0), a = peek(1);
-                    auto d = findDunder(a, "__bitand__");
-                    if (d) { pop(); pop(); push(callDunder(a, "__bitand__", { b })); break; }
-                    Value res = a & b; pop(); pop(); push(res);
-                    break;
+                    Value& b = peek(0); Value& a = peek(1);
+                    if (a.isInstance() && findDunder(a, "__bitand__")) { Value res = callDunder(a, "__bitand__", { b }); pop(); peek(0) = res; break; }
+                    Value res = a & b; pop(); peek(0) = res; break;
                 }
                 case OpCode::OP_BIT_OR: {
-                    Value b = peek(0), a = peek(1);
-                    auto d = findDunder(a, "__bitor__");
-                    if (d) { pop(); pop(); push(callDunder(a, "__bitor__", { b })); break; }
-                    Value res = a | b; pop(); pop(); push(res);
-                    break;
+                    Value& b = peek(0); Value& a = peek(1);
+                    if (a.isInstance() && findDunder(a, "__bitor__")) { Value res = callDunder(a, "__bitor__", { b }); pop(); peek(0) = res; break; }
+                    Value res = a | b; pop(); peek(0) = res; break;
                 }
 
                 case OpCode::OP_EQUAL: {
-                    Value b = peek(0), a = peek(1);
-                    auto d = findDunder(a, "__eq__");
-                    if (d) { pop(); pop(); push(Value(callDunder(a, "__eq__", { b }).truthy())); break; }
-                    Value res = Value(Value::equals(a, b)); pop(); pop(); push(res);
-                    break;
+                    Value& b = peek(0); Value& a = peek(1);
+                    if (a.isInstance() && findDunder(a, "__eq__")) { Value res = Value(callDunder(a, "__eq__", { b }).truthy()); pop(); peek(0) = res; break; }
+                    Value res = Value(Value::equals(a, b)); pop(); peek(0) = res; break;
                 }
                 case OpCode::OP_NOT_EQUAL: {
-                    Value b = peek(0), a = peek(1);
-                    auto d = findDunder(a, "__neq__");
-                    if (d) { pop(); pop(); push(Value(callDunder(a, "__neq__", { b }).truthy())); break; }
-                    d = findDunder(a, "__eq__");
-                    if (d) { pop(); pop(); push(Value(!callDunder(a, "__eq__", { b }).truthy())); break; }
-                    Value res = Value(!Value::equals(a, b)); pop(); pop(); push(res);
-                    break;
+                    Value& b = peek(0); Value& a = peek(1);
+                    if (a.isInstance() && findDunder(a, "__neq__")) { Value res = Value(callDunder(a, "__neq__", { b }).truthy()); pop(); peek(0) = res; break; }
+                    if (a.isInstance() && findDunder(a, "__eq__")) { Value res = Value(!callDunder(a, "__eq__", { b }).truthy()); pop(); peek(0) = res; break; }
+                    Value res = Value(!Value::equals(a, b)); pop(); peek(0) = res; break;
                 }
                 case OpCode::OP_LESS: {
-                    Value b = peek(0), a = peek(1);
-                    auto d = findDunder(a, "__lt__");
-                    if (d) { pop(); pop(); push(Value(callDunder(a, "__lt__", { b }).truthy())); break; }
+                    Value& b = peek(0); Value& a = peek(1);
+                    if (a.isInstance() && findDunder(a, "__lt__")) { Value res = Value(callDunder(a, "__lt__", { b }).truthy()); pop(); peek(0) = res; break; }
                     Value res;
-                    if ((a.isBigInt() || a.isInt32()) && (b.isBigInt() || b.isInt32()))
-                        res = Value(a.asBigInt() < b.asBigInt());
-                    else if (a.isObjType(ObjType::FRACTION) && b.isObjType(ObjType::FRACTION))
-                        res = Value(static_cast<ObjFraction*>(a.asObj())->frac < static_cast<ObjFraction*>(b.asObj())->frac);
-                    else if (a.isString() && b.isString())
-                        res = Value(a.asString() < b.asString());
-                    else {
-                        double da = a.asDouble(), db = b.asDouble();
-                        res = Value(da < db);
-                    }
-                    pop(); pop(); push(res);
-                    break;
+                    if ((a.isBigInt() || a.isInt32()) && (b.isBigInt() || b.isInt32())) res = Value(a.asBigInt() < b.asBigInt());
+                    else if (a.isObjType(ObjType::FRACTION) && b.isObjType(ObjType::FRACTION)) res = Value(static_cast<ObjFraction*>(a.asObj())->frac < static_cast<ObjFraction*>(b.asObj())->frac);
+                    else if (a.isString() && b.isString()) res = Value(a.asString() < b.asString());
+                    else { double da = a.asDouble(), db = b.asDouble(); res = Value(da < db); }
+                    pop(); peek(0) = res; break;
                 }
                 case OpCode::OP_LESS_EQUAL: {
-                    Value b = peek(0), a = peek(1);
-                    auto d = findDunder(a, "__le__");
-                    if (d) { pop(); pop(); push(Value(callDunder(a, "__le__", { b }).truthy())); break; }
+                    Value& b = peek(0); Value& a = peek(1);
+                    if (a.isInstance() && findDunder(a, "__le__")) { Value res = Value(callDunder(a, "__le__", { b }).truthy()); pop(); peek(0) = res; break; }
                     Value res;
-                    if ((a.isBigInt() || a.isInt32()) && (b.isBigInt() || b.isInt32()))
-                        res = Value(a.asBigInt() <= b.asBigInt());
-                    else if (a.isObjType(ObjType::FRACTION) && b.isObjType(ObjType::FRACTION))
-                        res = Value(static_cast<ObjFraction*>(a.asObj())->frac <= static_cast<ObjFraction*>(b.asObj())->frac);
-                    else if (a.isString() && b.isString())
-                        res = Value(a.asString() <= b.asString());
-                    else {
-                        double da = a.asDouble(), db = b.asDouble();
-                        res = Value(da <= db);
-                    }
-                    pop(); pop(); push(res);
-                    break;
+                    if ((a.isBigInt() || a.isInt32()) && (b.isBigInt() || b.isInt32())) res = Value(a.asBigInt() <= b.asBigInt());
+                    else if (a.isObjType(ObjType::FRACTION) && b.isObjType(ObjType::FRACTION)) res = Value(static_cast<ObjFraction*>(a.asObj())->frac <= static_cast<ObjFraction*>(b.asObj())->frac);
+                    else if (a.isString() && b.isString()) res = Value(a.asString() <= b.asString());
+                    else { double da = a.asDouble(), db = b.asDouble(); res = Value(da <= db); }
+                    pop(); peek(0) = res; break;
                 }
                 case OpCode::OP_GREATER: {
-                    Value b = peek(0), a = peek(1);
-                    auto d = findDunder(a, "__gt__");
-                    if (d) { pop(); pop(); push(Value(callDunder(a, "__gt__", { b }).truthy())); break; }
+                    Value& b = peek(0); Value& a = peek(1);
+                    if (a.isInstance() && findDunder(a, "__gt__")) { Value res = Value(callDunder(a, "__gt__", { b }).truthy()); pop(); peek(0) = res; break; }
                     Value res;
-                    if ((a.isBigInt() || a.isInt32()) && (b.isBigInt() || b.isInt32()))
-                        res = Value(a.asBigInt() > b.asBigInt());
-                    else if (a.isObjType(ObjType::FRACTION) && b.isObjType(ObjType::FRACTION))
-                        res = Value(static_cast<ObjFraction*>(a.asObj())->frac > static_cast<ObjFraction*>(b.asObj())->frac);
-                    else if (a.isString() && b.isString())
-                        res = Value(a.asString() > b.asString());
-                    else {
-                        double da = a.asDouble(), db = b.asDouble();
-                        res = Value(da > db);
-                    }
-                    pop(); pop(); push(res);
-                    break;
+                    if ((a.isBigInt() || a.isInt32()) && (b.isBigInt() || b.isInt32())) res = Value(a.asBigInt() > b.asBigInt());
+                    else if (a.isObjType(ObjType::FRACTION) && b.isObjType(ObjType::FRACTION)) res = Value(static_cast<ObjFraction*>(a.asObj())->frac > static_cast<ObjFraction*>(b.asObj())->frac);
+                    else if (a.isString() && b.isString()) res = Value(a.asString() > b.asString());
+                    else { double da = a.asDouble(), db = b.asDouble(); res = Value(da > db); }
+                    pop(); peek(0) = res; break;
                 }
                 case OpCode::OP_GREATER_EQUAL: {
-                    Value b = peek(0), a = peek(1);
-                    auto d = findDunder(a, "__ge__");
-                    if (d) { pop(); pop(); push(Value(callDunder(a, "__ge__", { b }).truthy())); break; }
+                    Value& b = peek(0); Value& a = peek(1);
+                    if (a.isInstance() && findDunder(a, "__ge__")) { Value res = Value(callDunder(a, "__ge__", { b }).truthy()); pop(); peek(0) = res; break; }
                     Value res;
-                    if ((a.isBigInt() || a.isInt32()) && (b.isBigInt() || b.isInt32()))
-                        res = Value(a.asBigInt() >= b.asBigInt());
-                    else if (a.isObjType(ObjType::FRACTION) && b.isObjType(ObjType::FRACTION))
-                        res = Value(static_cast<ObjFraction*>(a.asObj())->frac >= static_cast<ObjFraction*>(b.asObj())->frac);
-                    else if (a.isString() && b.isString())
-                        res = Value(a.asString() >= b.asString());
-                    else {
-                        double da = a.asDouble(), db = b.asDouble();
-                        res = Value(da >= db);
-                    }
-                    pop(); pop(); push(res);
-                    break;
+                    if ((a.isBigInt() || a.isInt32()) && (b.isBigInt() || b.isInt32())) res = Value(a.asBigInt() >= b.asBigInt());
+                    else if (a.isObjType(ObjType::FRACTION) && b.isObjType(ObjType::FRACTION)) res = Value(static_cast<ObjFraction*>(a.asObj())->frac >= static_cast<ObjFraction*>(b.asObj())->frac);
+                    else if (a.isString() && b.isString()) res = Value(a.asString() >= b.asString());
+                    else { double da = a.asDouble(), db = b.asDouble(); res = Value(da >= db); }
+                    pop(); peek(0) = res; break;
                 }
 
                 case OpCode::OP_ASSERT_PARAM_TYPE: {
@@ -694,12 +647,12 @@ namespace jc {
 
                 case OpCode::OP_GET_GLOBAL: {
                     uint16_t idx = readShort();
-                    std::string name = currentChunk().constants[idx].asString();
+                    const std::string& name = chunk->constants[idx].asString();
 
                     // ★ 虚拟机级别拦截：遇到 '__class__'，直接去它该在的物理寄存器里拿！
                     if (name == "__class__") {
-                        if (frame().classContext.isNone()) throw std::runtime_error("VM Error: '__class__' accessed outside of context.");
-                        push(frame().classContext);
+                        if (currentFrame->classContext.isNone()) throw std::runtime_error("VM Error: '__class__' accessed outside of context.");
+                        push(currentFrame->classContext);
                         break;
                     }
 
@@ -741,7 +694,7 @@ namespace jc {
                 case OpCode::OP_SET_GLOBAL:
                 case OpCode::OP_SET_GLOBAL_REF: {
                     uint16_t idx = readShort();
-                    std::string name = currentChunk().constants[idx].asString();
+                    const std::string& name = chunk->constants[idx].asString();
 
                     // ★ 关键字保护：绝不许改写上下文关键字 !
                     if (name == "__class__")
@@ -788,7 +741,7 @@ namespace jc {
                 }
                 case OpCode::OP_DEFINE_GLOBAL: {
                     uint16_t idx = readShort();
-                    std::string name = currentChunk().constants[idx].asString();
+                    const std::string& name = chunk->constants[idx].asString();
                     globals[name] = peek(0);
                     constGlobals.insert(name);
                     break;
@@ -796,35 +749,35 @@ namespace jc {
 
                 case OpCode::OP_GET_LOCAL: {
                     uint16_t slot = readShort();
-                    push(stack[frame().stackBase + slot]);
+                    push(stack[currentFrame->stackBase + slot]);
                     break;
                 }
                 case OpCode::OP_SET_LOCAL: {
                     uint16_t slot = readShort();
-                    stack[frame().stackBase + slot] = peek(0);
+                    stack[currentFrame->stackBase + slot] = peek(0);
                     break;
                 }
 
                 case OpCode::OP_JUMP: {
                     uint16_t offset = readShort();
-                    frame().ip += offset;
+                    currentFrame->ip += offset;
                     break;
                 }
                 case OpCode::OP_JUMP_IF_FALSE: {
                     uint16_t offset = readShort();
-                    if (!peek(0).truthy()) frame().ip += offset;
+                    if (!peek(0).truthy()) currentFrame->ip += offset;
                     break;
                 }
                 case OpCode::OP_LOOP: {
                     uint16_t offset = readShort();
-                    frame().ip -= offset;
+                    currentFrame->ip -= offset;
                     break;
                 }
 
                 case OpCode::OP_CLOSURE: {
                     uint16_t fnConstIdx = readShort();
                     int idx = static_cast<int>(std::round(
-                        currentChunk().constants[fnConstIdx].asDouble()));
+                        chunk->constants[fnConstIdx].asDouble()));
                     if (idx < 0 || idx >= static_cast<int>(compiledFunctions.size()))
                         throw std::runtime_error("VM Error: Invalid function index.");
 
@@ -837,7 +790,7 @@ namespace jc {
                             if (uv.isRef) {
                                 // ★ 按引用捕获 (Open Upvalue)
                                 if (uv.isLocal) {
-                                    int captureIdx = frame().stackBase + uv.index;
+                                    int captureIdx = currentFrame->stackBase + uv.index;
                                     std::shared_ptr<UpVal> upval = nullptr;
                                     for (auto& openUv : openUpvalues) {
                                         if (openUv->stackIndex == captureIdx) {
@@ -854,8 +807,8 @@ namespace jc {
                                     captures->push_back(upval);
                                 }
                                 else {
-                                    if (frame().upvalues && uv.index < static_cast<int>(frame().upvalues->size()))
-                                        captures->push_back((*frame().upvalues)[uv.index]);
+                                    if (currentFrame->upvalues && uv.index < static_cast<int>(currentFrame->upvalues->size()))
+                                        captures->push_back((*currentFrame->upvalues)[uv.index]);
                                     else {
                                         auto dummy = std::make_shared<UpVal>();
                                         dummy->closed = Value::none();
@@ -871,11 +824,11 @@ namespace jc {
                                     if (it != globals.end()) dummy->closed = it->second;
                                     else dummy->closed = Value::none();
                                 } else if (uv.isLocal) {
-                                    int captureIdx = frame().stackBase + uv.index;
+                                    int captureIdx = currentFrame->stackBase + uv.index;
                                     dummy->closed = stack[captureIdx];
                                 } else {
-                                    if (frame().upvalues && uv.index < static_cast<int>(frame().upvalues->size()))
-                                        dummy->closed = *((*frame().upvalues)[uv.index]->location);
+                                    if (currentFrame->upvalues && uv.index < static_cast<int>(currentFrame->upvalues->size()))
+                                        dummy->closed = *((*currentFrame->upvalues)[uv.index]->location);
                                     else
                                         dummy->closed = Value::none();
                                 }
@@ -902,8 +855,8 @@ namespace jc {
                     auto capturedUpvalues = captures;
                     VM* vm = this;
 
-                    Value currentSelf = frame().selfContext;
-                    Value currentClass = frame().classContext;
+                    Value currentSelf = currentFrame->selfContext;
+                    Value currentClass = currentFrame->classContext;
                     closure->nativeFn = std::make_any<NativeCallable>(
                         [vm, capturedFnIdx, capturedUpvalues, currentSelf, currentClass](const std::vector<Value>& args) -> Value {
                             // ★ 智能窃取：如果有 Dunder 方法等触发的原生调用，优先使用隔离栈里的运行态 Target
@@ -958,8 +911,8 @@ namespace jc {
 
                     // ★ 必须保留这个标志供 C++ 层 API 重用识别
                     closure->hasRestParam = fn->hasRestParam;
-                    closure->boundSelf = frame().selfContext;
-                    closure->boundClass = frame().classContext;
+                    closure->boundSelf = currentFrame->selfContext;
+                    closure->boundClass = currentFrame->classContext;
                     push(Value(closure));
                     break;
                 }
@@ -972,19 +925,19 @@ namespace jc {
 
                 case OpCode::OP_GET_UPVALUE: {
                     uint16_t idx = readShort();
-                    if (!frame().upvalues || idx >= frame().upvalues->size())
+                    if (!currentFrame->upvalues || idx >= currentFrame->upvalues->size())
                         throw std::runtime_error("VM Error: Invalid upvalue index " +
                             std::to_string(idx) + ".");
-                    push(*((*frame().upvalues)[idx]->location));
+                    push(*((*currentFrame->upvalues)[idx]->location));
                     break;
                 }
 
                 case OpCode::OP_SET_UPVALUE: {
                     uint16_t idx = readShort();
-                    if (!frame().upvalues || idx >= frame().upvalues->size())
+                    if (!currentFrame->upvalues || idx >= currentFrame->upvalues->size())
                         throw std::runtime_error("VM Error: Invalid upvalue index " +
                             std::to_string(idx) + ".");
-                    *((*frame().upvalues)[idx]->location) = peek(0);
+                    *((*currentFrame->upvalues)[idx]->location) = peek(0);
                     break;
                 }
 
@@ -997,7 +950,7 @@ namespace jc {
 
                 case OpCode::OP_GET_SUPER: {
                     uint16_t nameIdx = readShort();
-                    std::string field = currentChunk().constants[nameIdx].asString();
+                    const std::string& field = chunk->constants[nameIdx].asString();
 
                     Value selfVal = pop();
 
@@ -1006,7 +959,7 @@ namespace jc {
 
                     auto inst = selfVal.asInstance();
 
-                    Value classVal = frame().classContext;
+                    Value classVal = currentFrame->classContext;
                     if (!classVal.isClass())
                         throw std::runtime_error("VM Error: 'super' requires class context.");
 
@@ -1079,15 +1032,15 @@ namespace jc {
                             break;
                         }
                         case 2: {
-                            int localIdx = frame().stackBase + sourceRef;
-                            if (localIdx < static_cast<int>(stack.size()))
+                            int localIdx = currentFrame->stackBase + sourceRef;
+                            if (localIdx < static_cast<int>(getStackSize()))
                                 stack[localIdx] = modifiedVal;
                             break;
                         }
                         case 3: {
-                            if (frame().upvalues &&
-                                sourceRef < frame().upvalues->size())
-                                *((*frame().upvalues)[sourceRef]->location) = modifiedVal;
+                            if (currentFrame->upvalues &&
+                                sourceRef < currentFrame->upvalues->size())
+                                *((*currentFrame->upvalues)[sourceRef]->location) = modifiedVal;
                             break;
                         }
                         }
@@ -1193,8 +1146,8 @@ namespace jc {
 
                     ExceptionHandler handler;
                     handler.frameIndex = static_cast<int>(frames.size()) - 1;
-                    handler.ip = frame().ip + catchRelOffset;
-                    handler.stackSize = static_cast<int>(stack.size());
+                    handler.ip = currentFrame->ip + catchRelOffset;
+                    handler.stackSize = static_cast<int>(getStackSize());
                     exceptionHandlers.push_back(handler);
                     break;
                 }
@@ -1220,7 +1173,7 @@ namespace jc {
                 case OpCode::OP_BUILD_NAMESPACE: {
                     uint16_t nameIdx = readShort();
                     uint16_t count = readShort();
-                    std::string nsName = currentChunk().constants[nameIdx].asString();
+                    std::string nsName = chunk->constants[nameIdx].asString();
                     ObjNamespace* ns = GcHeap::get().allocate<ObjNamespace>();
                     ns->name = nsName;
                     for (int j = 0; j < count; ++j) {
@@ -1228,7 +1181,7 @@ namespace jc {
                         int slot = static_cast<int>(pop().asDouble());
                         std::string key = pop().asString();
                         
-                        int captureIdx = frame().stackBase + slot;
+                        int captureIdx = currentFrame->stackBase + slot;
                         std::shared_ptr<UpVal> upval = nullptr;
                         for (auto& openUv : openUpvalues) {
                             if (openUv->stackIndex == captureIdx) {
@@ -1384,7 +1337,7 @@ namespace jc {
                         
                         Value nextVal = callDunder(iterObj, "__next__", {});
                         if (nextVal.isNone()) {
-                            frame().ip += offset; // 迭代结束
+                            currentFrame->ip += offset; // 迭代结束
                         } else {
                             push(nextVal);
                         }
@@ -1394,11 +1347,11 @@ namespace jc {
                         const auto& elems = static_cast<ObjList*>(peek(1).asObj())->vec;
                         int i = static_cast<int>(idx);
                         if (i >= static_cast<int>(elems.size())) {
-                            frame().ip += offset;
+                            currentFrame->ip += offset;
                         }
                         else {
                             Value elem = elems[i];
-                            stack[stack.size() - 1] = Value(idx + 1);
+                            stack[getStackSize() - 1] = Value(idx + 1);
                             push(elem);
                         }
                     }
@@ -1437,7 +1390,7 @@ namespace jc {
 
                 case OpCode::OP_FORMAT_STRING: {
                     uint16_t specIdx = readShort();
-                    std::string spec = currentChunk().constants[specIdx].asString();
+                    const std::string& spec = chunk->constants[specIdx].asString();
                     Value val = pop();
 
                     char align = '\0';
@@ -1488,7 +1441,7 @@ namespace jc {
                 case OpCode::OP_LIST_APPEND: {
                     uint16_t depth = readShort();
                     Value elem = pop();
-                    int listIdx = static_cast<int>(stack.size()) - 1 - static_cast<int>(depth);
+                    int listIdx = static_cast<int>(getStackSize()) - 1 - static_cast<int>(depth);
                     if (listIdx >= 0 && stack[listIdx].isObjType(ObjType::LIST)) {
                         static_cast<ObjList*>(stack[listIdx].asObj())->vec.push_back(elem);
                     }
@@ -1634,7 +1587,7 @@ namespace jc {
                 }
 
                 case OpCode::OP_IMPORT: {
-                    Value pathVal = peek(0); // ★ 延迟 pop
+                    Value pathVal = pop();
                     if (!pathVal.isString())
                         throw std::runtime_error("VM Error: import requires a string path.");
                     std::string name = pathVal.asString();
@@ -1642,13 +1595,11 @@ namespace jc {
 
                     if (loadedModules.count(name)) {
                         globals[baseName] = loadedModules[name];
-                        pop();
                         push(loadedModules[name]);
                         break;
                     }
 
                     ObjNamespace* ns = GcHeap::get().allocate<ObjNamespace>();
-                    push(Value(ns)); // ★ 保护 ns
                     ns->name = name;
 
                     auto& modules = getNativeModules();
@@ -1754,8 +1705,6 @@ namespace jc {
                         }
                     }
 
-                    pop(); // 移除 ns
-                    pop(); // 移除 pathVal
                     loadedModules[name] = Value(ns);
                     globals[baseName] = Value(ns);
                     push(Value(ns));
@@ -1764,7 +1713,7 @@ namespace jc {
 
                 case OpCode::OP_CLASS: {
                     uint16_t nameIdx = readShort();
-                    std::string name = currentChunk().constants[nameIdx].asString();
+                    const std::string& name = chunk->constants[nameIdx].asString();
                     auto cls = GcHeap::get().allocate<ObjClass>();
                     cls->name = name;
                     push(Value(cls));
@@ -1773,7 +1722,7 @@ namespace jc {
 
                 case OpCode::OP_METHOD: {
                     uint16_t nameIdx = readShort();
-                    std::string methodName = currentChunk().constants[nameIdx].asString();
+                    const std::string& methodName = chunk->constants[nameIdx].asString();
                     Value closureVal = pop();
                     Value& classVal = peek(0);
 
@@ -1823,8 +1772,8 @@ namespace jc {
 
                 case OpCode::OP_GET_PROPERTY: {
                     uint16_t nameIdx = readShort();
-                    std::string field = currentChunk().constants[nameIdx].asString();
-                    Value obj = peek(0); // ★ 延迟 pop，保护 obj
+                    const std::string& field = chunk->constants[nameIdx].asString();
+                    Value obj = pop();
                     bool found = false;
                     Value result;
 
@@ -1967,16 +1916,15 @@ namespace jc {
                         if (obj.isObjType(ObjType::NAMESPACE)) throw std::runtime_error("VM Error: Field '" + field + "' not found in namespace.");
                         throw std::runtime_error("VM Error: Cannot access property '" + field + "' on this type.");
                     }
-                    pop(); // ★ 安全 pop
                     push(result);
                     break;
                 }
 
                 case OpCode::OP_SET_PROPERTY: {
                     uint16_t nameIdx = readShort();
-                    std::string field = currentChunk().constants[nameIdx].asString();
-                    Value val = peek(0); // ★ 延迟 pop
-                    Value obj = peek(1);
+                    const std::string& field = chunk->constants[nameIdx].asString();
+                    Value val = pop();
+                    Value obj = pop();
 
                     if (obj.isInstance()) {
                         auto inst = obj.asInstance();
@@ -1984,7 +1932,6 @@ namespace jc {
                         if (setattrMethod) {
                             callDunder(obj, "__setattr__", { Value(field), val });
                             push(val);
-                            push(obj);
                             break;
                         }
                         if (!inst->fields) inst->fields = GcHeap::get().allocate<ObjDict>();
@@ -1997,7 +1944,6 @@ namespace jc {
                             inst->fields->elements.push_back({key, val});
                         }
                         push(val);
-                        push(obj);
                     }
                     else if (obj.isObjType(ObjType::DICT)) {
                         auto d = static_cast<ObjDict*>(obj.asObj());
@@ -2010,7 +1956,6 @@ namespace jc {
                             d->elements.push_back({key, val});
                         }
                         push(val);
-                        push(obj);
                     }
                     else if (obj.isObjType(ObjType::NAMESPACE)) {
                         auto ns = static_cast<ObjNamespace*>(obj.asObj());
@@ -2025,7 +1970,6 @@ namespace jc {
                             ns->fields[field] = { uv, false };
                         }
                         push(val);
-                        push(obj);
                     }
                     else {
                         throw std::runtime_error("VM Error: Cannot set property on this type.");
@@ -2105,9 +2049,9 @@ namespace jc {
                 break; // 走一步（即步入下一个不同的行号）
             }
             else if (cmd == "stack") {
-                std::cout << "--- VM Stack (" << stack.size() << " elements) ---\n";
+                std::cout << "--- VM Stack (" << getStackSize() << " elements) ---\n";
                 // 打印栈内容（即局部变量与中间计算状态）
-                for (size_t i = 0; i < stack.size(); i++) {
+                for (size_t i = 0; i < getStackSize(); i++) {
                     std::cout << " [" << i << "]  " << stack[i];
                     if (static_cast<int>(i) == frame().stackBase) std::cout << "  <-- Frame Base";
                     std::cout << "\n";
@@ -2214,180 +2158,169 @@ namespace jc {
 // ★ 垃圾回收器实现 (Mark-and-Sweep Garbage Collector)
 // =================================================================
 
-    void VM::markClosure(const ObjClosure* cl,
-        std::unordered_set<const void*>& marked)
-    {
-        if (!cl) return;
-        const_cast<ObjClosure*>(cl)->isMarked = true;
-        
-        markValue(cl->boundSelf, marked);
-        markValue(cl->boundClass, marked);
-
-        if (!cl->capturedEnv.has_value()) return;
-        try {
-            auto env = std::any_cast<std::shared_ptr<std::vector<std::shared_ptr<UpVal>>>>(cl->capturedEnv);
-            if (!env) return;
-            for (const auto& uv : *env) {
-                if (uv && uv->location) {
-                    markValue(*(uv->location), marked);
-                }
-            }
-        }
-        catch (...) {}
-    }
-
-    void VM::markClassDef(const ObjClass* cls,
-        std::unordered_set<const void*>& marked)
-    {
-        if (!cls) return;
-        const void* id = cls;
-        if (marked.count(id)) return;    // 防止继承链递归循环
-        marked.insert(id);
-        const_cast<ObjClass*>(cls)->isMarked = true;
-
-        for (const auto& [name, method] : cls->methods) {
-            if (method) markClosure(method, marked);
-        }
-        markClassDef(cls->parent, marked);
-    }
-
-    void VM::markValue(const Value& val,
-        std::unordered_set<const void*>& marked)
-    {
+    void VM::markValue(const Value& val) {
         if (!val.isObj()) return;
-        Obj* obj = val.asObj();
-        if (marked.count(obj)) return;
-        marked.insert(obj);
-        obj->isMarked = true;
+        markObject(val.asObj());
+    }
 
-        switch (obj->type) {
-            case ObjType::LIST: {
-                for (const auto& elem : static_cast<ObjList*>(obj)->vec) markValue(elem, marked);
-                break;
-            }
-            case ObjType::DICT: {
-                for (const auto& [key, v] : static_cast<ObjDict*>(obj)->elements) {
-                    markValue(key, marked); markValue(v, marked);
+    void VM::markObject(Obj* obj) {
+        if (obj == nullptr || obj->isMarked) return;
+        obj->isMarked = true;
+        grayStack.push_back(obj);
+    }
+
+    void VM::traceReferences() {
+        while (!grayStack.empty()) {
+            Obj* obj = grayStack.back();
+            grayStack.pop_back();
+
+            switch (obj->type) {
+                case ObjType::LIST: {
+                    for (const auto& elem : static_cast<ObjList*>(obj)->vec) markValue(elem);
+                    break;
                 }
-                break;
-            }
-            case ObjType::SET: {
-                for (const auto& elem : static_cast<ObjSet*>(obj)->elements) markValue(elem, marked);
-                break;
-            }
-            case ObjType::INSTANCE: {
-                auto inst = static_cast<ObjInstance*>(obj);
-                if (inst->fields) markValue(Value(inst->fields), marked);
-                if (inst->classDef) markValue(Value(inst->classDef), marked);
-                break;
-            }
-            case ObjType::CLOSURE: {
-                markClosure(static_cast<ObjClosure*>(obj), marked);
-                break;
-            }
-            case ObjType::CLASS: {
-                markClassDef(static_cast<ObjClass*>(obj), marked);
-                break;
-            }
-            case ObjType::SUPER_PROXY: {
-                auto sp = static_cast<ObjSuper*>(obj);
-                if (sp->instance) markValue(Value(sp->instance), marked);
-                if (sp->parentClass) markValue(Value(sp->parentClass), marked);
-                break;
-            }
-            case ObjType::NAMESPACE: {
-                auto ns = static_cast<ObjNamespace*>(obj);
-                for (const auto& [k, field] : ns->fields) {
-                    if (field.upval && field.upval->location) {
-                        markValue(*(field.upval->location), marked);
+                case ObjType::DICT: {
+                    for (const auto& [key, v] : static_cast<ObjDict*>(obj)->elements) {
+                        markValue(key); markValue(v);
                     }
+                    break;
                 }
-                break;
+                case ObjType::SET: {
+                    for (const auto& elem : static_cast<ObjSet*>(obj)->elements) markValue(elem);
+                    break;
+                }
+                case ObjType::INSTANCE: {
+                    auto inst = static_cast<ObjInstance*>(obj);
+                    if (inst->fields) markObject(inst->fields);
+                    if (inst->classDef) markObject(inst->classDef);
+                    break;
+                }
+                case ObjType::CLOSURE: {
+                    auto cl = static_cast<ObjClosure*>(obj);
+                    markValue(cl->boundSelf);
+                    markValue(cl->boundClass);
+                    if (cl->capturedEnv.has_value()) {
+                        try {
+                            auto env = std::any_cast<std::shared_ptr<std::vector<std::shared_ptr<UpVal>>>>(cl->capturedEnv);
+                            if (env) {
+                                for (const auto& uv : *env) {
+                                    if (uv && uv->location) markValue(*(uv->location));
+                                }
+                            }
+                        } catch (...) {}
+                    }
+                    break;
+                }
+                case ObjType::CLASS: {
+                    auto cls = static_cast<ObjClass*>(obj);
+                    for (const auto& [name, method] : cls->methods) {
+                        if (method) markObject(method);
+                    }
+                    if (cls->parent) markObject(cls->parent);
+                    break;
+                }
+                case ObjType::SUPER_PROXY: {
+                    auto sp = static_cast<ObjSuper*>(obj);
+                    if (sp->instance) markObject(sp->instance);
+                    if (sp->parentClass) markObject(sp->parentClass);
+                    break;
+                }
+                case ObjType::NAMESPACE: {
+                    auto ns = static_cast<ObjNamespace*>(obj);
+                    for (const auto& [k, field] : ns->fields) {
+                        if (field.upval && field.upval->location) {
+                            markValue(*(field.upval->location));
+                        }
+                    }
+                    break;
+                }
+                default: break;
             }
-            default: break;
         }
     }
 
     void VM::collectGarbage() {
         // ═══ Phase 1: MARK ═══
-        std::unordered_set<const void*> marked;
 
         // 根集合 1: 全局变量
         for (const auto& [name, val] : globals)
-            markValue(val, marked);
+            markValue(val);
 
         // 根集合 1.5: 已加载的模块缓存
         for (const auto& [name, val] : loadedModules)
-            markValue(val, marked);
+            markValue(val);
 
         // 根集合 2: 虚拟机求值栈
-        for (const auto& val : stack)
-            markValue(val, marked);
+        for (Value* p = stack.data(); p < stackTop; ++p)
+            markValue(*p);
 
         // 根集合 3: 所有调用帧的闭包上值，以及存活帧的上下文引擎！
         for (const auto& f : frames) {
             if (f.upvalues) {
                 for (const auto& uv : *f.upvalues) {
-                    if (uv && uv->location) markValue(*(uv->location), marked);
+                    if (uv && uv->location) markValue(*(uv->location));
                 }
             }
             // ★ 世纪补漏：必须追踪目前存活函数的上下文环境！
-            markValue(f.selfContext, marked);
-            markValue(f.classContext, marked);
+            markValue(f.selfContext);
+            markValue(f.classContext);
             
             // ★ 终极补漏：主脚本的常量池不在 compiledFunctions 中，必须通过活跃帧扫描！
             if (f.function) {
                 for (const auto& c : f.function->chunk.constants)
-                    markValue(c, marked);
+                    markValue(c);
             }
         }
 
         // 根集合 4: 常量池 (编译后的函数里缓存的字面量)
         for (const auto& fn : compiledFunctions) {
             for (const auto& c : fn->chunk.constants)
-                markValue(c, marked);
+                markValue(c);
         }
 
         // 根集合 5: C++ 层当前正在执行跨界调用的原生对象栈！
-        for (const auto& val : helpers::nativeSelfStack) markValue(val, marked);
-        for (const auto& val : helpers::nativeClassStack) markValue(val, marked);
+        for (const auto& val : helpers::nativeSelfStack) markValue(val);
+        for (const auto& val : helpers::nativeClassStack) markValue(val);
+
+        traceReferences();
 
         // ═══ Phase 2: SWEEP ═══
         GcHeap::get().sweep();
     }
 
     int VM::runGC() {
-        std::unordered_set<const void*> marked;
-        for (const auto& [name, val] : globals)  markValue(val, marked);
-        for (const auto& [name, val] : loadedModules) markValue(val, marked);
-        for (const auto& val : stack)            markValue(val, marked);
+        for (const auto& [name, val] : globals)  markValue(val);
+        for (const auto& [name, val] : loadedModules) markValue(val);
+        for (Value* p = stack.data(); p < stackTop; ++p) markValue(*p);
         for (const auto& f : frames) {
             if (f.upvalues) {
                 for (const auto& uv : *f.upvalues) {
-                    if (uv && uv->location) markValue(*(uv->location), marked);
+                    if (uv && uv->location) markValue(*(uv->location));
                 }
             }
             // ★ 防止手动 gc() 触发对象丢失
-            markValue(f.selfContext, marked);
-            markValue(f.classContext, marked);
+            markValue(f.selfContext);
+            markValue(f.classContext);
             
             if (f.function) {
                 for (const auto& c : f.function->chunk.constants)
-                    markValue(c, marked);
+                    markValue(c);
             }
         }
         for (const auto& fn : compiledFunctions)
-            for (const auto& c : fn->chunk.constants) markValue(c, marked);
+            for (const auto& c : fn->chunk.constants) markValue(c);
 
         // ★ C++ 原生堆栈手动同步
-        for (const auto& val : helpers::nativeSelfStack) markValue(val, marked);
-        for (const auto& val : helpers::nativeClassStack) markValue(val, marked);
+        for (const auto& val : helpers::nativeSelfStack) markValue(val);
+        for (const auto& val : helpers::nativeClassStack) markValue(val);
+
+        traceReferences();
 
         return GcHeap::get().sweep();
     }
 
     void VM::execCall(uint8_t argc) {
-        Value callee = stack[stack.size() - 1 - argc];
+        Value callee = stack[getStackSize() - 1 - argc];
         pendingRefWritebacks.clear();
 
         // ======== [1] 字符串动态调用 (晚绑定) ========
@@ -2399,14 +2332,14 @@ namespace jc {
                 if (static_cast<int>(argc) < fn->arity || static_cast<int>(argc) > fn->maxArity)
                     throw std::runtime_error("VM Error: '" + fn->name + "' expects args mismatch.");
                 
-                stack.erase(stack.end() - 1 - argc); // ★ FIX: 先安全移除 callee
+                eraseStack(argc); // ★ FIX: 先安全移除 callee
                 
                 int padCount = fn->maxArity - static_cast<int>(argc);
                 for (int j = 0; j < padCount; ++j) push(Value::none());
                 int reserveCount = fn->localCount - fn->maxArity;
                 for (int j = 0; j < reserveCount; ++j) push(Value::none());
                 CallFrame newFrame; newFrame.function = fn.get(); newFrame.ip = 0;
-                newFrame.stackBase = static_cast<int>(stack.size()) - fn->localCount;
+                newFrame.stackBase = static_cast<int>(getStackSize()) - fn->localCount;
                 frames.push_back(newFrame); return;
             }
             if (tag.size() >= 10 && tag.substr(0, 10) == "__builtin:") {
@@ -2438,7 +2371,7 @@ namespace jc {
             auto it = globals.find(tag);
             if (it != globals.end()) {
                 callee = it->second;
-                stack[stack.size() - 1 - argc] = callee;
+                stack[getStackSize() - 1 - argc] = callee;
             }
             else {
                 if (nIt != nativeBuiltins.end()) {
@@ -2483,7 +2416,7 @@ namespace jc {
 
                     auto& fnDef = compiledFunctions[initMethod->compiledFnIndex];
                     
-                    stack.erase(stack.end() - 1 - argc); // ★ FIX: 先安全移除 callee
+                    eraseStack(argc); // ★ FIX: 先安全移除 callee
 
                     int padCount = fnDef->maxArity - static_cast<int>(argc);
                     for (int j = 0; j < padCount; ++j) push(Value::none());
@@ -2492,7 +2425,7 @@ namespace jc {
 
                     newFrame.function = fnDef.get();
                     newFrame.ip = 0;
-                    newFrame.stackBase = static_cast<int>(stack.size()) - fnDef->localCount;
+                    newFrame.stackBase = static_cast<int>(getStackSize()) - fnDef->localCount;
                     if (initMethod->hasCaptures()) {
                         newFrame.upvalues = std::any_cast<std::shared_ptr<std::vector<std::shared_ptr<UpVal>>>>(
                             initMethod->capturedEnv);
@@ -2549,7 +2482,7 @@ namespace jc {
             if (closure->isBytecode()) {
                 auto& fnDef = compiledFunctions[closure->compiledFnIndex];
 
-                stack.erase(stack.end() - 1 - argc); // ★ FIX: 先安全移除 callee
+                eraseStack(argc); // ★ FIX: 先安全移除 callee
 
                 if (fnDef->hasRestParam) {
                     int fixedMax = fnDef->maxArity - 1;
@@ -2587,7 +2520,7 @@ namespace jc {
                 CallFrame newFrame;
                 newFrame.function = fnDef.get();
                 newFrame.ip = 0;
-                newFrame.stackBase = static_cast<int>(stack.size()) - fnDef->localCount;
+                newFrame.stackBase = static_cast<int>(getStackSize()) - fnDef->localCount;
 
                 if (closure->hasCaptures()) {
                     newFrame.upvalues = std::any_cast<std::shared_ptr<std::vector<std::shared_ptr<UpVal>>>>(closure->capturedEnv);
@@ -2632,7 +2565,7 @@ namespace jc {
                 int fnIdx = std::stoi(tag.substr(5));
                 auto& fn = compiledFunctions[fnIdx];
 
-                stack.erase(stack.end() - 1 - argc); // ★ FIX: 先安全移除 callee
+                eraseStack(argc); // ★ FIX: 先安全移除 callee
 
                 if (fn->hasRestParam) {
                     int fixedMax = fn->maxArity - 1;
@@ -2668,7 +2601,7 @@ namespace jc {
                 for (int j = 0; j < reserveCount; ++j) push(Value::none());
 
                 CallFrame newFrame; newFrame.function = fn.get(); newFrame.ip = 0;
-                newFrame.stackBase = static_cast<int>(stack.size()) - fn->localCount;
+                newFrame.stackBase = static_cast<int>(getStackSize()) - fn->localCount;
                 frames.push_back(newFrame); return;
             }
 
@@ -2705,7 +2638,7 @@ namespace jc {
                 if (method->isBytecode()) {
                     auto& fnDef = compiledFunctions[method->compiledFnIndex];
                     
-                    stack.erase(stack.end() - 1 - argc); // ★ FIX: 先安全移除 callee
+                    eraseStack(argc); // ★ FIX: 先安全移除 callee
 
                     if (fnDef->hasRestParam) {
                         int fixedMax = fnDef->maxArity - 1;
@@ -2736,7 +2669,7 @@ namespace jc {
                     CallFrame newFrame;
                     newFrame.function = fnDef.get();
                     newFrame.ip = 0;
-                    newFrame.stackBase = static_cast<int>(stack.size()) - fnDef->localCount;
+                    newFrame.stackBase = static_cast<int>(getStackSize()) - fnDef->localCount;
                     if (method->hasCaptures()) {
                         newFrame.upvalues = std::any_cast<std::shared_ptr<std::vector<std::shared_ptr<UpVal>>>>(method->capturedEnv);
                     }
@@ -2828,7 +2761,7 @@ namespace jc {
                         CallFrame newFrame;
                         newFrame.function = fnDef.get();
                         newFrame.ip = 0;
-                        newFrame.stackBase = static_cast<int>(stack.size()) - fnDef->localCount;
+                        newFrame.stackBase = static_cast<int>(getStackSize()) - fnDef->localCount;
 
                         if (getitemMethod->hasCaptures()) {
                             newFrame.upvalues = std::any_cast<std::shared_ptr<std::vector<std::shared_ptr<UpVal>>>>(getitemMethod->capturedEnv);
@@ -3060,10 +2993,8 @@ namespace jc {
             }
 
             if (obj.isObjType(ObjType::REAL_MATRIX)) {
-                if (obj.asObj()->refCount > 2) obj = Value(RealMatrix(static_cast<ObjRealMatrix*>(obj.asObj())->mat));
-                auto& m = static_cast<ObjRealMatrix*>(obj.asObj())->mat;
                 if (val.isComplex() || val.isObjType(ObjType::COMPLEX_MATRIX)) {
-                    ComplexMatrix cm = m.toComplexMatrix();
+                    ComplexMatrix cm = static_cast<ObjRealMatrix*>(obj.asObj())->mat.toComplexMatrix();
                     if (cm.getRows() == 1) {
                         if (i < 0) i = cm.getCols() + i;
                         cm(0, i) = val.asComplex();
@@ -3088,6 +3019,8 @@ namespace jc {
                     obj = Value(cm);
                 }
                 else {
+                    if (obj.asObj()->refCount > 2) obj = Value(RealMatrix(static_cast<ObjRealMatrix*>(obj.asObj())->mat));
+                    auto& m = static_cast<ObjRealMatrix*>(obj.asObj())->mat;
                     if (m.getRows() == 1) {
                         if (i < 0) i = m.getCols() + i;
                         m(0, i) = val.asDouble();
@@ -3815,7 +3748,7 @@ namespace jc {
             };
 
         for (int ii = 0; ii < total; ++ii) {
-            const Value& v = stack[stack.size() - total + ii];
+            const Value& v = stack[getStackSize() - total + ii];
             if (v.isObjType(ObjType::COMPLEX) ||
                 v.isObjType(ObjType::COMPLEX_MATRIX))
                 hasComplex = true;
@@ -3832,27 +3765,25 @@ namespace jc {
             if (rows == 1) {
                 ObjList* L = GcHeap::get().allocate<ObjList>();
                 for (int ii = 0; ii < total; ++ii)
-                    L->vec.push_back(stack[stack.size() - total + ii]);
+                    L->vec.push_back(stack[getStackSize() - total + ii]);
                 result = Value(L);
             }
             else {
                 ObjList* outer = GcHeap::get().allocate<ObjList>();
-                push(Value(outer)); // ★ 保护 outer
                 for (int i = 0; i < rows; ++i) {
                     ObjList* inner = GcHeap::get().allocate<ObjList>();
                     for (int j = 0; j < cols; ++j)
-                        inner->vec.push_back(stack[stack.size() - 1 - total + i * cols + j]);
+                        inner->vec.push_back(stack[getStackSize() - total + i * cols + j]);
                     inner->is_frozen = true;
                     outer->vec.push_back(Value(inner));
                 }
                 result = Value(outer);
-                pop(); // ★ 移除 outer
             }
         }
         else {
             bool hasSubMatrix = false;
             for (int ii = 0; ii < total; ++ii) {
-                const Value& v = stack[stack.size() - total + ii];
+                const Value& v = stack[getStackSize() - total + ii];
                 if (v.isObjType(ObjType::REAL_MATRIX) ||
                     v.isObjType(ObjType::COMPLEX_MATRIX) ||
                     v.isObjType(ObjType::STRING_MATRIX))
@@ -3908,7 +3839,7 @@ namespace jc {
                     for (int i = 0; i < rows; ++i) {
                         Value rowResult = Value::none();
                         for (int j = 0; j < cols; ++j) {
-                            Value cell = stack[stack.size() - total + idx++];
+                            Value cell = stack[getStackSize() - total + idx++];
                             extractCell(cell);
                             if (rowResult.isNone()) {
                                 rowResult = cell;
@@ -3950,7 +3881,7 @@ namespace jc {
             else if (hasString) {
                 std::vector<std::string> flat(total);
                 for (int ii = 0; ii < total; ++ii) {
-                    const Value& v = stack[stack.size() - total + ii];
+                    const Value& v = stack[getStackSize() - total + ii];
                     if (v.isString())
                         flat[ii] = v.asString();
                     else {
@@ -3963,13 +3894,13 @@ namespace jc {
             else if (hasComplex) {
                 std::vector<Complex> flat(total);
                 for (int ii = 0; ii < total; ++ii)
-                    flat[ii] = stack[stack.size() - total + ii].asComplex();
+                    flat[ii] = stack[getStackSize() - total + ii].asComplex();
                 result = Value(ComplexMatrix(rows, cols, flat));
             }
             else {
                 std::vector<double> flat(total);
                 for (int ii = 0; ii < total; ++ii)
-                    flat[ii] = stack[stack.size() - total + ii].asDouble();
+                    flat[ii] = stack[getStackSize() - total + ii].asDouble();
                 result = Value(RealMatrix(rows, cols, flat));
             }
         }
@@ -3980,7 +3911,8 @@ namespace jc {
     }
 
     void VM::execIn() {
-        Value haystack = pop(), needle = pop();
+        Value haystack = pop();
+        Value needle = pop();
 
         if (needle.isString() && haystack.isString()) {
             bool found = haystack.asString().find(needle.asString()) != std::string::npos;
@@ -4084,7 +4016,7 @@ namespace jc {
             for (int i = 0; i < static_cast<int>(refFlags.size()); ++i) {
                 if (refFlags[i]) {
                     int localIdx = base + i;
-                    if (localIdx < static_cast<int>(stack.size())) {
+                    if (localIdx < static_cast<int>(getStackSize())) {
                         pendingRefWritebacks.push_back({ i, stack[localIdx] });
                     }
                 }
@@ -4102,18 +4034,18 @@ namespace jc {
         if (static_cast<int>(frames.size()) <= currentTargetFrameDepth) {
             if (currentTargetFrameDepth == 0) {
                 closeUpvalues(0);
-                stack.clear();
+                setStackSize(0);
             }
             else {
                 closeUpvalues(base);
-                stack.resize(base);
+                setStackSize(base);
             }
             shouldExit = true;  // 通知 run() 退出
             return result;
         }
 
         closeUpvalues(base);
-        stack.resize(base);
+        setStackSize(base);
 
         // ★ 唯独构造函数返回时做个特判：如果你调用了 init()，VM 会默默返回正在创建的对象
         if (fnName == "init") {
@@ -4126,8 +4058,8 @@ namespace jc {
     }
 
     void VM::execInvoke(uint16_t nameIdx, uint8_t argc) {
-        std::string methodName = currentChunk().constants[nameIdx].asString();
-        Value obj = stack[stack.size() - 1 - argc];
+        const std::string& methodName = frame().function->chunk.constants[nameIdx].asString();
+        Value obj = stack[getStackSize() - 1 - argc];
 
         ObjClosure* method = nullptr;
         ObjClass* owningClass = nullptr;
@@ -4144,7 +4076,7 @@ namespace jc {
                     method = fv.asFunction();
                 } else {
                     // ★ 如果是类、实例或其他可调用对象，直接替换栈底的 obj，转交 execCall 处理！
-                    stack[stack.size() - 1 - argc] = fv;
+                    stack[getStackSize() - 1 - argc] = fv;
                     execCall(argc);
                     return;
                 }
@@ -4161,7 +4093,7 @@ namespace jc {
                 if (fv.isFunctionClosure()) {
                     method = fv.asFunction();
                 } else {
-                    stack[stack.size() - 1 - argc] = fv;
+                    stack[getStackSize() - 1 - argc] = fv;
                     execCall(argc);
                     return;
                 }
@@ -4192,7 +4124,7 @@ namespace jc {
                         owningClass = inst->classDef;
                     } else {
                         // ★ 如果实例字段里存的是类或其他可调用对象
-                        stack[stack.size() - 1 - argc] = fv;
+                        stack[getStackSize() - 1 - argc] = fv;
                         execCall(argc);
                         return;
                     }
@@ -4225,7 +4157,8 @@ namespace jc {
             }
             auto gIt = globals.find(methodName);
             if (gIt != globals.end() && gIt->second.isFunctionClosure()) {
-                stack.insert(stack.end() - 1 - argc, gIt->second);
+                if (static_cast<int>(getStackSize()) >= MAX_STACK) throw std::runtime_error("VM Error: Stack overflow.");
+                insertStack(argc, gIt->second);
                 execCall(argc + 1);
                 return;
             }
@@ -4247,7 +4180,7 @@ namespace jc {
             newFrame.classContext = owningClass ? Value(owningClass) : Value::none();
             auto& fnDef = compiledFunctions[method->compiledFnIndex];
 
-            stack.erase(stack.end() - 1 - argc); // ★ FIX: 先安全移除 obj
+            eraseStack(argc); // ★ FIX: 先安全移除 obj
 
             if (fnDef->hasRestParam) {
                 int fixedMax = fnDef->maxArity - 1;
@@ -4279,7 +4212,7 @@ namespace jc {
             for (int j = 0; j < reserveCount; ++j) push(Value::none());
             newFrame.function = fnDef.get();
             newFrame.ip = 0;
-            newFrame.stackBase = static_cast<int>(stack.size()) - fnDef->localCount;
+            newFrame.stackBase = static_cast<int>(getStackSize()) - fnDef->localCount;
             if (method->hasCaptures()) {
                 newFrame.upvalues = std::any_cast<std::shared_ptr<std::vector<std::shared_ptr<UpVal>>>>(
                     method->capturedEnv);
@@ -4288,6 +4221,64 @@ namespace jc {
             return;
         }
         else if (method->isNative()) {
+            // ★ 修复：检查 nativeFn 是否为晚绑定字符串标签
+            if (method->nativeFn.type() == typeid(std::string)) {
+                const std::string& tag = std::any_cast<std::string>(method->nativeFn);
+                if (tag.size() >= 5 && tag.substr(0, 5) == "__fn:") {
+                    int fnIdx = std::stoi(tag.substr(5));
+                    auto& fnDef = compiledFunctions[fnIdx];
+
+                    eraseStack(argc); // 移除 obj
+
+                    if (fnDef->hasRestParam) {
+                        int fixedMax = fnDef->maxArity - 1;
+                        if (static_cast<int>(argc) < fnDef->arity) {
+                            throw std::runtime_error("VM Error: '" + fnDef->name + "' requires at least " + std::to_string(fnDef->arity) + " arguments.");
+                        }
+                        ObjList* restList = GcHeap::get().allocate<ObjList>();
+                        if (static_cast<int>(argc) > fixedMax) {
+                            int restCount = static_cast<int>(argc) - fixedMax;
+                            std::vector<Value> tempValues(restCount);
+                            for (int j = 0; j < restCount; j++) tempValues[restCount - 1 - j] = pop();
+                            for (int j = 0; j < restCount; j++) restList->vec.push_back(tempValues[j]);
+                            argc = static_cast<uint8_t>(fixedMax);
+                        }
+                        int padCount = fixedMax - static_cast<int>(argc);
+                        for (int j = 0; j < padCount; ++j) push(Value::none());
+                        push(Value(restList));
+                    }
+                    else {
+                        if (static_cast<int>(argc) < fnDef->arity || static_cast<int>(argc) > fnDef->maxArity)
+                            throw std::runtime_error("VM Error: '" + fnDef->name + "' expects " + std::to_string(fnDef->arity) + " to " + std::to_string(fnDef->maxArity) + " arguments, got " + std::to_string(argc) + ".");
+                        int padCount = fnDef->maxArity - static_cast<int>(argc);
+                        for (int j = 0; j < padCount; ++j) push(Value::none());
+                    }
+
+                    int reserveCount = fnDef->localCount - fnDef->maxArity;
+                    for (int j = 0; j < reserveCount; ++j) push(Value::none());
+
+                    CallFrame newFrame;
+                    newFrame.function = fnDef.get();
+                    newFrame.ip = 0;
+                    newFrame.stackBase = static_cast<int>(getStackSize()) - fnDef->localCount;
+                    newFrame.selfContext = obj;
+                    newFrame.classContext = owningClass ? Value(owningClass) : Value::none();
+                    frames.push_back(newFrame);
+                    return;
+                }
+                if (tag.size() >= 10 && tag.substr(0, 10) == "__builtin:") {
+                    std::string fnName = tag.substr(10);
+                    std::vector<Value> argsVec(argc);
+                    for (int j = argc - 1; j >= 0; --j) argsVec[j] = pop();
+                    pop(); // pop obj
+                    auto nit = nativeBuiltins.find(fnName);
+                    if (nit == nativeBuiltins.end()) throw std::runtime_error("VM Error: Unknown builtin '" + fnName + "'.");
+                    push(nit->second(argsVec));
+                    return;
+                }
+                throw std::runtime_error("VM Error: Invalid string tag in method.");
+            }
+
             // ★ C++ 原生函数直接进隔离池
             helpers::nativeSelfStack.push_back(obj);
             helpers::nativeClassStack.push_back(owningClass ? Value(owningClass) : Value::none());
@@ -4314,8 +4305,8 @@ namespace jc {
     }
 
     void VM::execSuperInvoke(uint16_t nameIdx, uint8_t argc) {
-        std::string methodName = currentChunk().constants[nameIdx].asString();
-        Value selfVal = stack[stack.size() - 1 - argc];
+        const std::string& methodName = frame().function->chunk.constants[nameIdx].asString();
+        Value selfVal = stack[getStackSize() - 1 - argc];
         if (!selfVal.isInstance())
             throw std::runtime_error("VM Error: 'super' requires an instance context.");
         auto inst = selfVal.asInstance();
@@ -4354,7 +4345,7 @@ namespace jc {
 
             auto& fnDef = compiledFunctions[method->compiledFnIndex];
 
-            stack.erase(stack.end() - 1 - argc); // ★ FIX: 先安全移除 selfVal
+            eraseStack(argc); // ★ FIX: 先安全移除 selfVal
 
             // =============================================================
             // ★ 核心变长参数打包引擎 (OOP SuperInvoke 端)
@@ -4394,7 +4385,7 @@ namespace jc {
 
             newFrame.function = fnDef.get();
             newFrame.ip = 0;
-            newFrame.stackBase = static_cast<int>(stack.size()) - fnDef->localCount;
+            newFrame.stackBase = static_cast<int>(getStackSize()) - fnDef->localCount;
             if (method->hasCaptures()) {
                 newFrame.upvalues = std::any_cast<std::shared_ptr<std::vector<std::shared_ptr<UpVal>>>>(
                     method->capturedEnv);
@@ -4429,10 +4420,10 @@ namespace jc {
     }
 
     void VM::execAssertParamType(const Value& val, uint16_t typeIdx, uint16_t nameIdx) {
-        const std::string& expectedType = currentChunk().constants[typeIdx].asString();
+        const std::string& expectedType = frame().function->chunk.constants[typeIdx].asString();
 
         if (!checkValueType(val, expectedType)) {
-            const std::string& paramName = currentChunk().constants[nameIdx].asString();
+            const std::string& paramName = frame().function->chunk.constants[nameIdx].asString();
             throw std::runtime_error("TypeError: Parameter '" + paramName +
                 "' expected type '" + expectedType +
                 "', got '" + getTypeName(val) + "'.");
@@ -4440,7 +4431,7 @@ namespace jc {
     }
 
     void VM::execAssertReturnType(const Value& val, uint16_t typeIdx) {
-        const std::string& expectedType = currentChunk().constants[typeIdx].asString();
+        const std::string& expectedType = frame().function->chunk.constants[typeIdx].asString();
 
         if (!checkValueType(val, expectedType)) {
             throw std::runtime_error("TypeError: Function '" + frame().function->name +
