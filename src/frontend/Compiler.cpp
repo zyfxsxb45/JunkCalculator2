@@ -271,7 +271,9 @@ namespace jc {
         mainFn->name = "<script>";
         mainFn->sourceFile = sourceFile; // ★ 打上文件烙印
 
-        compiledFunctions.push_back(mainFn);
+        // ★ 核心修复：不要把顶层 <script> 函数塞进 compiledFunctions！
+        // 否则 REPL 每敲一行代码，它的 AST、字节码和常量池（包含变量名的 ObjString）
+        // 就会被永久驻留在内存中，导致 GC 追踪的对象数量无限增长。
         initCompiler(mainFn.get());
         compileNode(ast);
         emit(OpCode::OP_RETURN, lastLine);
