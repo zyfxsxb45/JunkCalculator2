@@ -288,6 +288,10 @@ namespace jc {
             }, { 1 });
     }
 
+    std::any VM::makeNativeFn(NativeCallable fn) {
+        return std::make_any<NativeCallable>(std::move(fn));
+    }
+
     void VM::registerBuiltin(const std::string& name, NativeCallable fn, std::set<int> arity) {
         nativeBuiltins[name] = std::move(fn);
         builtinArity[name] = std::move(arity);
@@ -501,168 +505,176 @@ namespace jc {
                 }
 
                 case OpCode::OP_ADD: {
-                    Value b = pop(), a = pop();
+                    Value b = peek(0), a = peek(1);
                     auto d = findDunder(a, "__add__");
-                    if (d) { push(callDunder(a, "__add__", { b })); break; }
+                    if (d) { pop(); pop(); push(callDunder(a, "__add__", { b })); break; }
                     d = findDunder(b, "__radd__");
-                    if (d) { push(callDunder(b, "__radd__", { a })); break; }
-                    push(a + b);
+                    if (d) { pop(); pop(); push(callDunder(b, "__radd__", { a })); break; }
+                    Value res = a + b; pop(); pop(); push(res);
                     break;
                 }
                 case OpCode::OP_SUBTRACT: {
-                    Value b = pop(), a = pop();
+                    Value b = peek(0), a = peek(1);
                     auto d = findDunder(a, "__sub__");
-                    if (d) { push(callDunder(a, "__sub__", { b })); break; }
+                    if (d) { pop(); pop(); push(callDunder(a, "__sub__", { b })); break; }
                     d = findDunder(b, "__rsub__");
-                    if (d) { push(callDunder(b, "__rsub__", { a })); break; }
-                    push(a - b);
+                    if (d) { pop(); pop(); push(callDunder(b, "__rsub__", { a })); break; }
+                    Value res = a - b; pop(); pop(); push(res);
                     break;
                 }
                 case OpCode::OP_MULTIPLY: {
-                    Value b = pop(), a = pop();
+                    Value b = peek(0), a = peek(1);
                     auto d = findDunder(a, "__mul__");
-                    if (d) { push(callDunder(a, "__mul__", { b })); break; }
+                    if (d) { pop(); pop(); push(callDunder(a, "__mul__", { b })); break; }
                     d = findDunder(b, "__rmul__");
-                    if (d) { push(callDunder(b, "__rmul__", { a })); break; }
-                    push(a * b);
+                    if (d) { pop(); pop(); push(callDunder(b, "__rmul__", { a })); break; }
+                    Value res = a * b; pop(); pop(); push(res);
                     break;
                 }
                 case OpCode::OP_DIVIDE: {
-                    Value b = pop(), a = pop();
+                    Value b = peek(0), a = peek(1);
                     auto d = findDunder(a, "__div__");
-                    if (d) { push(callDunder(a, "__div__", { b })); break; }
+                    if (d) { pop(); pop(); push(callDunder(a, "__div__", { b })); break; }
                     d = findDunder(b, "__rdiv__");
-                    if (d) { push(callDunder(b, "__rdiv__", { a })); break; }
-                    push(a / b);
+                    if (d) { pop(); pop(); push(callDunder(b, "__rdiv__", { a })); break; }
+                    Value res = a / b; pop(); pop(); push(res);
                     break;
                 }
                 case OpCode::OP_MODULO: {
-                    Value b = pop(), a = pop();
+                    Value b = peek(0), a = peek(1);
                     auto d = findDunder(a, "__mod__");
-                    if (d) { push(callDunder(a, "__mod__", { b })); break; }
+                    if (d) { pop(); pop(); push(callDunder(a, "__mod__", { b })); break; }
                     d = findDunder(b, "__rmod__");
-                    if (d) { push(callDunder(b, "__rmod__", { a })); break; }
-                    push(a % b);
+                    if (d) { pop(); pop(); push(callDunder(b, "__rmod__", { a })); break; }
+                    Value res = a % b; pop(); pop(); push(res);
                     break;
                 }
                 case OpCode::OP_POWER: {
-                    Value b = pop(), a = pop();
+                    Value b = peek(0), a = peek(1);
                     auto d = findDunder(a, "__pow__");
-                    if (d) { push(callDunder(a, "__pow__", { b })); break; }
+                    if (d) { pop(); pop(); push(callDunder(a, "__pow__", { b })); break; }
                     d = findDunder(b, "__rpow__");
-                    if (d) { push(callDunder(b, "__rpow__", { a })); break; }
-                    push(a ^ b);
+                    if (d) { pop(); pop(); push(callDunder(b, "__rpow__", { a })); break; }
+                    Value res = a ^ b; pop(); pop(); push(res);
                     break;
                 }
                 case OpCode::OP_NEGATE: {
-                    Value a = pop();
+                    Value a = peek(0);
                     auto d = findDunder(a, "__neg__");
-                    if (d) { push(callDunder(a, "__neg__", {})); break; }
-                    push(-a);
+                    if (d) { pop(); push(callDunder(a, "__neg__", {})); break; }
+                    Value res = -a; pop(); push(res);
                     break;
                 }
                 case OpCode::OP_NOT: { push(Value(!pop().truthy())); break; }
                 case OpCode::OP_BIT_NOT: {
-                    Value a = pop();
+                    Value a = peek(0);
                     auto d = findDunder(a, "__bitnot__");
-                    if (d) { push(callDunder(a, "__bitnot__", {})); break; }
-                    push(~a);
+                    if (d) { pop(); push(callDunder(a, "__bitnot__", {})); break; }
+                    Value res = ~a; pop(); push(res);
                     break;
                 }
 
                 case OpCode::OP_BIT_AND: {
-                    Value b = pop(), a = pop();
+                    Value b = peek(0), a = peek(1);
                     auto d = findDunder(a, "__bitand__");
-                    if (d) { push(callDunder(a, "__bitand__", { b })); break; }
-                    push(a & b);
+                    if (d) { pop(); pop(); push(callDunder(a, "__bitand__", { b })); break; }
+                    Value res = a & b; pop(); pop(); push(res);
                     break;
                 }
                 case OpCode::OP_BIT_OR: {
-                    Value b = pop(), a = pop();
+                    Value b = peek(0), a = peek(1);
                     auto d = findDunder(a, "__bitor__");
-                    if (d) { push(callDunder(a, "__bitor__", { b })); break; }
-                    push(a | b);
+                    if (d) { pop(); pop(); push(callDunder(a, "__bitor__", { b })); break; }
+                    Value res = a | b; pop(); pop(); push(res);
                     break;
                 }
 
                 case OpCode::OP_EQUAL: {
-                    Value b = pop(), a = pop();
+                    Value b = peek(0), a = peek(1);
                     auto d = findDunder(a, "__eq__");
-                    if (d) { push(Value(callDunder(a, "__eq__", { b }).truthy())); break; }
-                    push(Value(Value::equals(a, b)));
+                    if (d) { pop(); pop(); push(Value(callDunder(a, "__eq__", { b }).truthy())); break; }
+                    Value res = Value(Value::equals(a, b)); pop(); pop(); push(res);
                     break;
                 }
                 case OpCode::OP_NOT_EQUAL: {
-                    Value b = pop(), a = pop();
+                    Value b = peek(0), a = peek(1);
                     auto d = findDunder(a, "__neq__");
-                    if (d) { push(Value(callDunder(a, "__neq__", { b }).truthy())); break; }
+                    if (d) { pop(); pop(); push(Value(callDunder(a, "__neq__", { b }).truthy())); break; }
                     d = findDunder(a, "__eq__");
-                    if (d) { push(Value(!callDunder(a, "__eq__", { b }).truthy())); break; }
-                    push(Value(!Value::equals(a, b)));
+                    if (d) { pop(); pop(); push(Value(!callDunder(a, "__eq__", { b }).truthy())); break; }
+                    Value res = Value(!Value::equals(a, b)); pop(); pop(); push(res);
                     break;
                 }
                 case OpCode::OP_LESS: {
-                    Value b = pop(), a = pop();
+                    Value b = peek(0), a = peek(1);
                     auto d = findDunder(a, "__lt__");
-                    if (d) { push(Value(callDunder(a, "__lt__", { b }).truthy())); break; }
+                    if (d) { pop(); pop(); push(Value(callDunder(a, "__lt__", { b }).truthy())); break; }
+                    Value res;
                     if ((a.isBigInt() || a.isInt32()) && (b.isBigInt() || b.isInt32()))
-                        push(Value(a.asBigInt() < b.asBigInt()));
+                        res = Value(a.asBigInt() < b.asBigInt());
                     else if (a.isObjType(ObjType::FRACTION) && b.isObjType(ObjType::FRACTION))
-                        push(Value(static_cast<ObjFraction*>(a.asObj())->frac < static_cast<ObjFraction*>(b.asObj())->frac));
+                        res = Value(static_cast<ObjFraction*>(a.asObj())->frac < static_cast<ObjFraction*>(b.asObj())->frac);
                     else if (a.isString() && b.isString())
-                        push(Value(a.asString() < b.asString()));
+                        res = Value(a.asString() < b.asString());
                     else {
                         double da = a.asDouble(), db = b.asDouble();
-                        push(Value(da < db));
+                        res = Value(da < db);
                     }
+                    pop(); pop(); push(res);
                     break;
                 }
                 case OpCode::OP_LESS_EQUAL: {
-                    Value b = pop(), a = pop();
+                    Value b = peek(0), a = peek(1);
                     auto d = findDunder(a, "__le__");
-                    if (d) { push(Value(callDunder(a, "__le__", { b }).truthy())); break; }
+                    if (d) { pop(); pop(); push(Value(callDunder(a, "__le__", { b }).truthy())); break; }
+                    Value res;
                     if ((a.isBigInt() || a.isInt32()) && (b.isBigInt() || b.isInt32()))
-                        push(Value(a.asBigInt() <= b.asBigInt()));
+                        res = Value(a.asBigInt() <= b.asBigInt());
                     else if (a.isObjType(ObjType::FRACTION) && b.isObjType(ObjType::FRACTION))
-                        push(Value(static_cast<ObjFraction*>(a.asObj())->frac <= static_cast<ObjFraction*>(b.asObj())->frac));
+                        res = Value(static_cast<ObjFraction*>(a.asObj())->frac <= static_cast<ObjFraction*>(b.asObj())->frac);
                     else if (a.isString() && b.isString())
-                        push(Value(a.asString() <= b.asString()));
+                        res = Value(a.asString() <= b.asString());
                     else {
                         double da = a.asDouble(), db = b.asDouble();
-                        push(Value(da <= db));
+                        res = Value(da <= db);
                     }
+                    pop(); pop(); push(res);
                     break;
                 }
                 case OpCode::OP_GREATER: {
-                    Value b = pop(), a = pop();
+                    Value b = peek(0), a = peek(1);
                     auto d = findDunder(a, "__gt__");
-                    if (d) { push(Value(callDunder(a, "__gt__", { b }).truthy())); break; }
+                    if (d) { pop(); pop(); push(Value(callDunder(a, "__gt__", { b }).truthy())); break; }
+                    Value res;
                     if ((a.isBigInt() || a.isInt32()) && (b.isBigInt() || b.isInt32()))
-                        push(Value(a.asBigInt() > b.asBigInt()));
+                        res = Value(a.asBigInt() > b.asBigInt());
                     else if (a.isObjType(ObjType::FRACTION) && b.isObjType(ObjType::FRACTION))
-                        push(Value(static_cast<ObjFraction*>(a.asObj())->frac > static_cast<ObjFraction*>(b.asObj())->frac));
+                        res = Value(static_cast<ObjFraction*>(a.asObj())->frac > static_cast<ObjFraction*>(b.asObj())->frac);
                     else if (a.isString() && b.isString())
-                        push(Value(a.asString() > b.asString()));
+                        res = Value(a.asString() > b.asString());
                     else {
                         double da = a.asDouble(), db = b.asDouble();
-                        push(Value(da > db));
+                        res = Value(da > db);
                     }
+                    pop(); pop(); push(res);
                     break;
                 }
                 case OpCode::OP_GREATER_EQUAL: {
-                    Value b = pop(), a = pop();
+                    Value b = peek(0), a = peek(1);
                     auto d = findDunder(a, "__ge__");
-                    if (d) { push(Value(callDunder(a, "__ge__", { b }).truthy())); break; }
+                    if (d) { pop(); pop(); push(Value(callDunder(a, "__ge__", { b }).truthy())); break; }
+                    Value res;
                     if ((a.isBigInt() || a.isInt32()) && (b.isBigInt() || b.isInt32()))
-                        push(Value(a.asBigInt() >= b.asBigInt()));
+                        res = Value(a.asBigInt() >= b.asBigInt());
                     else if (a.isObjType(ObjType::FRACTION) && b.isObjType(ObjType::FRACTION))
-                        push(Value(static_cast<ObjFraction*>(a.asObj())->frac >= static_cast<ObjFraction*>(b.asObj())->frac));
+                        res = Value(static_cast<ObjFraction*>(a.asObj())->frac >= static_cast<ObjFraction*>(b.asObj())->frac);
                     else if (a.isString() && b.isString())
-                        push(Value(a.asString() >= b.asString()));
+                        res = Value(a.asString() >= b.asString());
                     else {
                         double da = a.asDouble(), db = b.asDouble();
-                        push(Value(da >= db));
+                        res = Value(da >= db);
                     }
+                    pop(); pop(); push(res);
                     break;
                 }
 
@@ -1029,46 +1041,12 @@ namespace jc {
                     bound->defaultValues = rawMethod->defaultValues;
                     bound->hasRestParam = rawMethod->hasRestParam;
 
-                    VM* vm = this;
-                    auto capturedInst = inst;
-                    auto capturedOwner = ownerClass;
-                    auto capturedMethod = rawMethod;
-                    auto capturedField = field;
-
-                    bound->nativeFn = std::make_any<NativeCallable>(
-                        [vm, capturedInst, capturedOwner, capturedMethod, capturedField]
-                        (const std::vector<Value>& args) -> Value
-                        {
-                            Value result;
-                            if (capturedMethod->isBytecode()) {
-                                std::shared_ptr<std::vector<std::shared_ptr<UpVal>>> captures = nullptr;
-                                if (capturedMethod->hasCaptures())
-                                    captures = std::any_cast<std::shared_ptr<std::vector<std::shared_ptr<UpVal>>>>(
-                                        capturedMethod->capturedEnv);
-                                // 安全通道进针
-                                result = vm->callVMFunction(
-                                    capturedMethod->compiledFnIndex, args, captures, Value(capturedInst), Value(capturedOwner)
-                                );
-                            }
-                            else if (capturedMethod->isNative()) {
-                                helpers::nativeSelfStack.push_back(Value(capturedInst));
-                                helpers::nativeClassStack.push_back(Value(capturedOwner));
-                                try {
-                                    auto& fn = std::any_cast<NativeCallable&>(capturedMethod->nativeFn);
-                                    result = fn(args);
-                                }
-                                catch (...) {
-                                    helpers::nativeSelfStack.pop_back(); helpers::nativeClassStack.pop_back();
-                                    throw;
-                                }
-                                helpers::nativeSelfStack.pop_back(); helpers::nativeClassStack.pop_back();
-                            }
-                            else {
-                                throw std::runtime_error("VM Error: Parent method '" + capturedField + "' has no callable implementation.");
-                            }
-                            return result;
-                        }
-                    );
+                    bound->compiledFnIndex = rawMethod->compiledFnIndex;
+                    bound->capturedEnv = rawMethod->capturedEnv;
+                    bound->nativeFn = rawMethod->nativeFn;
+                    
+                    bound->boundSelf = Value(inst);
+                    bound->boundClass = Value(ownerClass);
 
                     push(Value(bound));
                     break;
@@ -1656,43 +1634,131 @@ namespace jc {
                 }
 
                 case OpCode::OP_IMPORT: {
-                    Value pathVal = pop();
+                    Value pathVal = peek(0); // ★ 延迟 pop
                     if (!pathVal.isString())
                         throw std::runtime_error("VM Error: import requires a string path.");
                     std::string name = pathVal.asString();
+                    std::string baseName = std::filesystem::path(name).stem().string();
 
-                    if (importedModules.count(name)) {
-                        push(Value::none());
+                    if (loadedModules.count(name)) {
+                        globals[baseName] = loadedModules[name];
+                        pop();
+                        push(loadedModules[name]);
                         break;
                     }
+
+                    ObjNamespace* ns = GcHeap::get().allocate<ObjNamespace>();
+                    push(Value(ns)); // ★ 保护 ns
+                    ns->name = name;
 
                     auto& modules = getNativeModules();
                     auto it = modules.find(name);
                     if (it != modules.end()) {
-                        it->second.loader(globals, nativeBuiltins, builtinArity);
+                        // ★ 原生模块：使用临时字典，完全隔离，不污染全局！
+                        std::unordered_map<std::string, Value> tempGlobals;
+                        std::unordered_map<std::string, NativeCallable> tempNatives;
+                        std::unordered_map<std::string, std::set<int>> tempArity;
+
+                        it->second.loader(tempGlobals, tempNatives, tempArity);
                         importedModules.insert(name);
                         std::cout << "[System] Native module '" << name << "' loaded." << std::endl;
-                        push(Value::none());
-                        break;
+
+                        for (const auto& kv : tempGlobals) {
+                            auto uv = std::make_shared<UpVal>();
+                            uv->closed = kv.second;
+                            uv->location = &uv->closed;
+                            ns->fields[kv.first] = { uv, true };
+                        }
+
+                        for (const auto& kv : tempNatives) {
+                            auto closure = GcHeap::get().allocate<ObjClosure>(
+                                std::vector<std::string>{}, std::vector<bool>{}, kv.first, nullptr
+                            );
+                            closure->nativeFn = std::make_any<NativeCallable>(kv.second);
+                            
+                            auto ait = tempArity.find(kv.first);
+                            if (ait != tempArity.end() && !ait->second.empty()) {
+                                int maxA = *ait->second.rbegin();
+                                int minA = *ait->second.begin();
+                                for (int j = 0; j < maxA; ++j) {
+                                    closure->paramNames.push_back("_" + std::to_string(j));
+                                    closure->isRef.push_back(false);
+                                }
+                                for (int j = minA; j < maxA; ++j) {
+                                    closure->defaultValues.push_back(Value::none());
+                                }
+                            }
+
+                            auto uv = std::make_shared<UpVal>();
+                            uv->closed = Value(closure);
+                            uv->location = &uv->closed;
+                            ns->fields[kv.first] = { uv, true };
+                        }
+                    } else {
+                        // ★ 脚本模块：依然使用 diff 机制
+                        std::unordered_set<std::string> oldGlobals;
+                        for (const auto& kv : globals) oldGlobals.insert(kv.first);
+                        std::unordered_set<std::string> oldNatives;
+                        for (const auto& kv : nativeBuiltins) oldNatives.insert(kv.first);
+
+                        std::string resolved = helpers::safeResolvePath(name);
+                        if (!std::filesystem::exists(resolved)) {
+                            resolved = helpers::safeResolvePath(name + ".jc2");
+                        }
+
+                        if (!std::filesystem::exists(resolved)) {
+                            throw std::runtime_error("VM Error: Cannot find module '" + name + "'.");
+                        }
+
+                        importedModules.insert(name);
+
+                        if (helpers::runFileCallback) {
+                            helpers::runFileCallback(resolved);
+                        }
+
+                        for (const auto& kv : globals) {
+                            if (!oldGlobals.count(kv.first)) {
+                                auto uv = std::make_shared<UpVal>();
+                                uv->closed = kv.second;
+                                uv->location = &uv->closed;
+                                bool isConst = constGlobals.count(kv.first) > 0;
+                                ns->fields[kv.first] = { uv, isConst };
+                            }
+                        }
+
+                        for (const auto& kv : nativeBuiltins) {
+                            if (!oldNatives.count(kv.first)) {
+                                auto closure = GcHeap::get().allocate<ObjClosure>(
+                                    std::vector<std::string>{}, std::vector<bool>{}, kv.first, nullptr
+                                );
+                                closure->nativeFn = std::make_any<NativeCallable>(kv.second);
+                                
+                                auto ait = builtinArity.find(kv.first);
+                                if (ait != builtinArity.end() && !ait->second.empty()) {
+                                    int maxA = *ait->second.rbegin();
+                                    int minA = *ait->second.begin();
+                                    for (int j = 0; j < maxA; ++j) {
+                                        closure->paramNames.push_back("_" + std::to_string(j));
+                                        closure->isRef.push_back(false);
+                                    }
+                                    for (int j = minA; j < maxA; ++j) {
+                                        closure->defaultValues.push_back(Value::none());
+                                    }
+                                }
+
+                                auto uv = std::make_shared<UpVal>();
+                                uv->closed = Value(closure);
+                                uv->location = &uv->closed;
+                                ns->fields[kv.first] = { uv, true };
+                            }
+                        }
                     }
 
-                    // ★ 非原生模块，委托给 main.cpp 进行强健逐行加载
-                    std::string resolved = helpers::safeResolvePath(name);
-                    if (!std::filesystem::exists(resolved)) {
-                        resolved = helpers::safeResolvePath(name + ".jc2");
-                    }
-
-                    if (!std::filesystem::exists(resolved)) {
-                        throw std::runtime_error("VM Error: Cannot find module '" + name + "'.");
-                    }
-
-                    importedModules.insert(name);
-
-                    if (helpers::runFileCallback) {
-                        helpers::runFileCallback(resolved);
-                    }
-
-                    push(Value::none());
+                    pop(); // 移除 ns
+                    pop(); // 移除 pathVal
+                    loadedModules[name] = Value(ns);
+                    globals[baseName] = Value(ns);
+                    push(Value(ns));
                     break;
                 }
 
@@ -1758,121 +1824,159 @@ namespace jc {
                 case OpCode::OP_GET_PROPERTY: {
                     uint16_t nameIdx = readShort();
                     std::string field = currentChunk().constants[nameIdx].asString();
-                    Value obj = pop();
+                    Value obj = peek(0); // ★ 延迟 pop，保护 obj
+                    bool found = false;
+                    Value result;
 
                     if (obj.isInstance()) {
                         auto inst = obj.asInstance();
 
-                        // 1. 字段查找 — 不变
+                        // 1. 字段查找
                         if (inst->fields) {
                             auto it = inst->fields->keyMap.find(Value(field));
                             if (it != inst->fields->keyMap.end()) {
-                                push(inst->fields->elements[it->second].second);
-                                break;
+                                result = inst->fields->elements[it->second].second;
+                                found = true;
                             }
                         }
 
                         // 2. 方法查找
-                        ObjClosure* rawMethod = nullptr;
-                        ObjClass* ownerClass = nullptr;
-                        auto c = inst->classDef;
-                        while (c) {
-                            auto it = c->methods.find(field);
-                            if (it != c->methods.end()) {
-                                rawMethod = it->second;
-                                ownerClass = c;
-                                break;
+                        if (!found) {
+                            ObjClosure* rawMethod = nullptr;
+                            ObjClass* ownerClass = nullptr;
+                            auto c = inst->classDef;
+                            while (c) {
+                                auto it = c->methods.find(field);
+                                if (it != c->methods.end()) {
+                                    rawMethod = it->second;
+                                    ownerClass = c;
+                                    break;
+                                }
+                                c = c->parent;
                             }
-                            c = c->parent;
+                            if (rawMethod) {
+                                auto bound = GcHeap::get().allocate<ObjClosure>(
+                                    std::vector<std::string>{}, std::vector<bool>{},
+                                    field, nullptr
+                                );
+                                bound->paramNames = rawMethod->paramNames;
+                                bound->isRef = rawMethod->isRef;
+                                bound->defaultValues = rawMethod->defaultValues;
+                                bound->hasRestParam = rawMethod->hasRestParam;
+                                
+                                bound->compiledFnIndex = rawMethod->compiledFnIndex;
+                                bound->capturedEnv = rawMethod->capturedEnv;
+                                bound->nativeFn = rawMethod->nativeFn;
+                                
+                                bound->boundSelf = Value(inst);
+                                bound->boundClass = Value(ownerClass);
+
+                                result = Value(bound);
+                                found = true;
+                            } else {
+                                auto getattrMethod = findDunder(obj, "__getattr__");
+                                if (getattrMethod) {
+                                    result = callDunder(obj, "__getattr__", { Value(field) });
+                                    found = true;
+                                }
+                            }
                         }
-                        if (!c) {
-                            auto getattrMethod = findDunder(obj, "__getattr__");
-                            if (getattrMethod) {
-                                push(callDunder(obj, "__getattr__", { Value(field) }));
-                                break;
-                            }
-                            throw std::runtime_error("VM Error: No field/method '" + field + "'.");
-                        }
-
-                        // ★ FIX: 创建绑定方法闭包，携带 receiver 和所属类
-                        auto bound = GcHeap::get().allocate<ObjClosure>(
-                            std::vector<std::string>{}, std::vector<bool>{},
-                            field, nullptr
-                        );
-
-                        // 复制元数据（参数名、默认值、变长标志）供 execCall 进行参数校验
-                        bound->paramNames = rawMethod->paramNames;
-                        bound->isRef = rawMethod->isRef;
-                        bound->defaultValues = rawMethod->defaultValues;
-                        bound->hasRestParam = rawMethod->hasRestParam;
-
-                        VM* vm = this;
-                        auto capturedInst = inst;
-                        auto capturedOwner = ownerClass;
-                        auto capturedMethod = rawMethod;
-                        auto capturedField = field;
-
-                        bound->nativeFn = std::make_any<NativeCallable>(
-                            [vm, capturedInst, capturedOwner, capturedMethod, capturedField]
-                            (const std::vector<Value>& args) -> Value
-                            {
-                                Value result;
-                                if (capturedMethod->isBytecode()) {
-                                    std::shared_ptr<std::vector<std::shared_ptr<UpVal>>> captures = nullptr;
-                                    if (capturedMethod->hasCaptures())
-                                        captures = std::any_cast<std::shared_ptr<std::vector<std::shared_ptr<UpVal>>>>(
-                                            capturedMethod->capturedEnv);
-                                    // ★ 神迹：直接通过参数通道安全喂入 selfContext!
-                                    result = vm->callVMFunction(
-                                        capturedMethod->compiledFnIndex, args, captures, Value(capturedInst), Value(capturedOwner)
-                                    );
-                                }
-                                else if (capturedMethod->isNative()) {
-                                    // ★ Native 函数也是进入隔离堆栈
-                                    helpers::nativeSelfStack.push_back(Value(capturedInst));
-                                    helpers::nativeClassStack.push_back(Value(capturedOwner));
-                                    try {
-                                        auto& fn = std::any_cast<NativeCallable&>(capturedMethod->nativeFn);
-                                        result = fn(args);
-                                    }
-                                    catch (...) {
-                                        helpers::nativeSelfStack.pop_back(); helpers::nativeClassStack.pop_back();
-                                        throw;
-                                    }
-                                    helpers::nativeSelfStack.pop_back(); helpers::nativeClassStack.pop_back();
-                                }
-                                else {
-                                    throw std::runtime_error("VM Error: Method '" + capturedField + "' has no callable implementation.");
-                                }
-                                return result;
-                            }
-                        );
-
-                        push(Value(bound));
                     }
                     else if (obj.isObjType(ObjType::DICT)) {
                         auto d = static_cast<ObjDict*>(obj.asObj());
                         auto it = d->keyMap.find(Value(field));
-                        if (it == d->keyMap.end()) throw std::runtime_error("VM Error: Key '" + field + "' not found.");
-                        push(d->elements[it->second].second);
+                        if (it != d->keyMap.end()) {
+                            result = d->elements[it->second].second;
+                            found = true;
+                        }
                     }
                     else if (obj.isObjType(ObjType::NAMESPACE)) {
                         auto ns = static_cast<ObjNamespace*>(obj.asObj());
                         auto it = ns->fields.find(field);
-                        if (it == ns->fields.end()) throw std::runtime_error("VM Error: Field '" + field + "' not found in namespace '" + ns->name + "'.");
-                        push(*(it->second.upval->location));
+                        if (it != ns->fields.end()) {
+                            result = *(it->second.upval->location);
+                            found = true;
+                        }
                     }
-                    else {
-                        throw std::runtime_error("VM Error: Cannot access property on this type.");
+
+                    if (!found) {
+                        // ★ UFCS Fallback: 允许内置类型像对象一样调用全局函数
+                        auto nIt = nativeBuiltins.find(field);
+                        if (nIt != nativeBuiltins.end()) {
+                            auto bound = GcHeap::get().allocate<ObjClosure>(
+                                std::vector<std::string>{}, std::vector<bool>{}, field, nullptr
+                            );
+                            bound->boundSelf = obj;
+                            NativeCallable nativeFn = nIt->second;
+                            
+                            auto ait = builtinArity.find(field);
+                            std::set<int> allowedArities;
+                            if (ait != builtinArity.end()) allowedArities = ait->second;
+
+                            bound->nativeFn = std::make_any<NativeCallable>(
+                                [nativeFn, allowedArities, field](const std::vector<Value>& args) -> Value {
+                                    Value capturedObj = helpers::nativeSelfStack.back();
+                                    int totalArgs = static_cast<int>(args.size()) + 1;
+                                    if (!allowedArities.empty() && allowedArities.find(totalArgs) == allowedArities.end()) {
+                                        std::string expected;
+                                        for (auto aIt = allowedArities.begin(); aIt != allowedArities.end(); ++aIt) {
+                                            if (aIt != allowedArities.begin()) expected += " or ";
+                                            expected += std::to_string(*aIt - 1);
+                                        }
+                                        throw std::runtime_error("Runtime Error: Method '" + field + "' expects " + expected + " arguments, got " + std::to_string(args.size()) + ".");
+                                    }
+                                    std::vector<Value> fullArgs;
+                                    fullArgs.reserve(totalArgs);
+                                    fullArgs.push_back(capturedObj);
+                                    fullArgs.insert(fullArgs.end(), args.begin(), args.end());
+                                    return nativeFn(fullArgs);
+                                }
+                            );
+                            result = Value(bound);
+                            found = true;
+                        } else {
+                            auto gIt = globals.find(field);
+                            if (gIt != globals.end() && gIt->second.isFunctionClosure()) {
+                                auto bound = GcHeap::get().allocate<ObjClosure>(
+                                    std::vector<std::string>{}, std::vector<bool>{}, field, nullptr
+                                );
+                                bound->boundSelf = obj;
+                                ObjClosure* targetFn = gIt->second.asFunction();
+                                
+                                bound->nativeFn = std::make_any<NativeCallable>(
+                                    [](const std::vector<Value>& args) -> Value {
+                                        Value capturedObj = helpers::nativeSelfStack.back();
+                                        ObjClosure* fn = helpers::nativeClassStack.back().asFunction();
+                                        std::vector<Value> fullArgs;
+                                        fullArgs.reserve(args.size() + 1);
+                                        fullArgs.push_back(capturedObj);
+                                        fullArgs.insert(fullArgs.end(), args.begin(), args.end());
+                                        return helpers::safeCallFunction(fn, fullArgs);
+                                    }
+                                );
+                                bound->boundClass = Value(targetFn); // 借用 boundClass 传递 targetFn 以防被 GC 回收
+                                result = Value(bound);
+                                found = true;
+                            }
+                        }
                     }
+
+                    if (!found) {
+                        if (obj.isInstance()) throw std::runtime_error("VM Error: No field/method '" + field + "'.");
+                        if (obj.isObjType(ObjType::DICT)) throw std::runtime_error("VM Error: Key '" + field + "' not found.");
+                        if (obj.isObjType(ObjType::NAMESPACE)) throw std::runtime_error("VM Error: Field '" + field + "' not found in namespace.");
+                        throw std::runtime_error("VM Error: Cannot access property '" + field + "' on this type.");
+                    }
+                    pop(); // ★ 安全 pop
+                    push(result);
                     break;
                 }
 
                 case OpCode::OP_SET_PROPERTY: {
                     uint16_t nameIdx = readShort();
                     std::string field = currentChunk().constants[nameIdx].asString();
-                    Value val = pop();
-                    Value obj = pop();
+                    Value val = peek(0); // ★ 延迟 pop
+                    Value obj = peek(1);
 
                     if (obj.isInstance()) {
                         auto inst = obj.asInstance();
@@ -2115,6 +2219,10 @@ namespace jc {
     {
         if (!cl) return;
         const_cast<ObjClosure*>(cl)->isMarked = true;
+        
+        markValue(cl->boundSelf, marked);
+        markValue(cl->boundClass, marked);
+
         if (!cl->capturedEnv.has_value()) return;
         try {
             auto env = std::any_cast<std::shared_ptr<std::vector<std::shared_ptr<UpVal>>>>(cl->capturedEnv);
@@ -2208,6 +2316,10 @@ namespace jc {
         for (const auto& [name, val] : globals)
             markValue(val, marked);
 
+        // 根集合 1.5: 已加载的模块缓存
+        for (const auto& [name, val] : loadedModules)
+            markValue(val, marked);
+
         // 根集合 2: 虚拟机求值栈
         for (const auto& val : stack)
             markValue(val, marked);
@@ -2222,6 +2334,12 @@ namespace jc {
             // ★ 世纪补漏：必须追踪目前存活函数的上下文环境！
             markValue(f.selfContext, marked);
             markValue(f.classContext, marked);
+            
+            // ★ 终极补漏：主脚本的常量池不在 compiledFunctions 中，必须通过活跃帧扫描！
+            if (f.function) {
+                for (const auto& c : f.function->chunk.constants)
+                    markValue(c, marked);
+            }
         }
 
         // 根集合 4: 常量池 (编译后的函数里缓存的字面量)
@@ -2241,6 +2359,7 @@ namespace jc {
     int VM::runGC() {
         std::unordered_set<const void*> marked;
         for (const auto& [name, val] : globals)  markValue(val, marked);
+        for (const auto& [name, val] : loadedModules) markValue(val, marked);
         for (const auto& val : stack)            markValue(val, marked);
         for (const auto& f : frames) {
             if (f.upvalues) {
@@ -2251,6 +2370,11 @@ namespace jc {
             // ★ 防止手动 gc() 触发对象丢失
             markValue(f.selfContext, marked);
             markValue(f.classContext, marked);
+            
+            if (f.function) {
+                for (const auto& c : f.function->chunk.constants)
+                    markValue(c, marked);
+            }
         }
         for (const auto& fn : compiledFunctions)
             for (const auto& c : fn->chunk.constants) markValue(c, marked);
@@ -2288,7 +2412,8 @@ namespace jc {
             if (tag.size() >= 10 && tag.substr(0, 10) == "__builtin:") {
                 std::string fnName = tag.substr(10); std::vector<Value> args(argc);
                 for (int j = argc - 1; j >= 0; --j) args[j] = pop();
-                pop(); push(nativeBuiltins.find(fnName)->second(args)); return;
+                pop(); 
+                push(nativeBuiltins.find(fnName)->second(args)); return;
             }
             auto nIt = nativeBuiltins.find(tag);
             if (nIt != nativeBuiltins.end()) {
@@ -3712,14 +3837,16 @@ namespace jc {
             }
             else {
                 ObjList* outer = GcHeap::get().allocate<ObjList>();
+                push(Value(outer)); // ★ 保护 outer
                 for (int i = 0; i < rows; ++i) {
                     ObjList* inner = GcHeap::get().allocate<ObjList>();
                     for (int j = 0; j < cols; ++j)
-                        inner->vec.push_back(stack[stack.size() - total + i * cols + j]);
+                        inner->vec.push_back(stack[stack.size() - 1 - total + i * cols + j]);
                     inner->is_frozen = true;
                     outer->vec.push_back(Value(inner));
                 }
                 result = Value(outer);
+                pop(); // ★ 移除 outer
             }
         }
         else {
@@ -4022,9 +4149,6 @@ namespace jc {
                     return;
                 }
             }
-            if (!method) {
-                throw std::runtime_error("VM Error: No callable field '" + methodName + "' in Dict.");
-            }
         }
         // ==============================================================
         // 1.5 如果它是 Namespace！
@@ -4041,9 +4165,6 @@ namespace jc {
                     execCall(argc);
                     return;
                 }
-            }
-            if (!method) {
-                throw std::runtime_error("VM Error: No callable field '" + methodName + "' in namespace '" + ns->name + "'.");
             }
         }
         // ==============================================================
@@ -4077,14 +4198,42 @@ namespace jc {
                     }
                 }
             }
-
-            if (!method) {
-                throw std::runtime_error("VM Error: No method '" + methodName +
-                    "' on instances of class '" + inst->classDef->name + "'.");
-            }
         }
-        else {
-            throw std::runtime_error("VM Error: Cannot invoke method on this type.");
+
+        // ==============================================================
+        // ★ UFCS Fallback: 允许内置类型像对象一样调用全局函数
+        // ==============================================================
+        if (!method) {
+            auto nIt = nativeBuiltins.find(methodName);
+            if (nIt != nativeBuiltins.end()) {
+                auto ait = builtinArity.find(methodName);
+                int totalArgs = argc + 1;
+                if (ait != builtinArity.end() && !ait->second.empty() && ait->second.find(totalArgs) == ait->second.end()) {
+                    std::string expected;
+                    for (auto aIt = ait->second.begin(); aIt != ait->second.end(); ++aIt) {
+                        if (aIt != ait->second.begin()) expected += " or ";
+                        expected += std::to_string(*aIt - 1);
+                    }
+                    throw std::runtime_error("Runtime Error: Method '" + methodName + "' expects " + expected + " arguments, got " + std::to_string(argc) + ".");
+                }
+
+                std::vector<Value> argsVec(totalArgs);
+                for (int j = argc - 1; j >= 0; --j) argsVec[j + 1] = pop();
+                argsVec[0] = pop(); // obj
+                push(nIt->second(argsVec));
+                return;
+            }
+            auto gIt = globals.find(methodName);
+            if (gIt != globals.end() && gIt->second.isFunctionClosure()) {
+                stack.insert(stack.end() - 1 - argc, gIt->second);
+                execCall(argc + 1);
+                return;
+            }
+
+            if (obj.isInstance()) throw std::runtime_error("VM Error: No method '" + methodName + "' on instances of class '" + obj.asInstance()->classDef->name + "'.");
+            if (obj.isObjType(ObjType::DICT)) throw std::runtime_error("VM Error: No callable field '" + methodName + "' in Dict.");
+            if (obj.isObjType(ObjType::NAMESPACE)) throw std::runtime_error("VM Error: No callable field '" + methodName + "' in namespace.");
+            throw std::runtime_error("VM Error: Cannot invoke method '" + methodName + "' on this type.");
         }
 
         // ==============================================================

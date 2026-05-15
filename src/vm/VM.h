@@ -33,6 +33,8 @@ namespace jc {
         const Chunk& currentChunk() { return frame().function->chunk; }
 
         std::vector<Value> stack;
+        std::vector<Value> tempRoots;
+        friend struct TempRootGuard;
         static constexpr int MAX_STACK = 65536;
 
         std::unordered_map<std::string, Value> globals;
@@ -104,6 +106,7 @@ namespace jc {
 
         std::unordered_map<std::string, std::set<int>> builtinArity;  // ★ 新增
         std::unordered_set<std::string> importedModules;               // ★ 防重复导入
+        std::unordered_map<std::string, Value> loadedModules;          // ★ 缓存模块的 Namespace
 
         int currentLine();
 
@@ -154,6 +157,7 @@ namespace jc {
         void registerBuiltin(const std::string& name, NativeCallable fn, std::set<int> arity);
         void setGlobal(const std::string& name, const Value& val);
         inline static VM* activeVM = nullptr;
+        static std::any makeNativeFn(NativeCallable fn);
         // ★ 接受编译后的函数列表
         void setCompiledFunctions(const std::vector<std::shared_ptr<CompiledFunction>>& fns) {
             compiledFunctions = fns;  // ★ 拷贝，不移动
@@ -171,6 +175,7 @@ namespace jc {
             globals.clear();
             constGlobals.clear();
             importedModules.clear(); // ★ 核心修复：彻底粉碎模块导入的防环缓存！
+            loadedModules.clear();
             openUpvalues.clear();
             // ★ 贴心修复：清理全局变量后，自动把系统必不可少的基础常量重新注入环境
             globals["PI"] = Value(3.14159265358979323846);

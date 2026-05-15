@@ -1,6 +1,6 @@
-import "image"
-import "window"
-import "socket"
+import image
+import window
+import socket
 
 print("══════════════════════════════════════════════════")
 print("  JC2 Ultimate Sorting Visualizer (Bomb-Proof Edition)  ")
@@ -26,7 +26,7 @@ class VisualSorter {
         self.H = H
         self.bar_w = double(W) / N
         self.data = list()
-        self.im = img(W, H, "#111118")
+        self.im = image.img(W, H, "#111118")
         self.win = none()
         self.stream_sock = none()
         self.frame_count = 0
@@ -34,7 +34,7 @@ class VisualSorter {
     }
 
     shuffle() = {
-        self.data = [x for x in range(1, self.N + 1)] |> toList
+        self.data = [x for x in range(1, self.N + 1)].toList()
         for (i = self.N - 1; i > 0; i -= 1) {
             j = randint(0, i)
             tmp = self.data[i]; self.data[i] = self.data[j]; self.data[j] = tmp
@@ -43,7 +43,7 @@ class VisualSorter {
 
     connect(port) = {
         try {
-            self.stream_sock = net_tcp_connect("127.0.0.1", port)
+            self.stream_sock = socket.connect("127.0.0.1", port)
         } catch (e) {
             print(f"  [Warning] FFmpeg stream on port {port} not found. Skipping video export.")
             self.stream_sock = none()
@@ -52,7 +52,7 @@ class VisualSorter {
 
     disconnect() = {
         if (self.stream_sock != none()) {
-            net_close(self.stream_sock)
+            self.stream_sock.close()
             self.stream_sock = none()
         }
         try { deleteFile("stream_buffer.bmp") } catch(e) {}
@@ -74,8 +74,8 @@ class VisualSorter {
             // This guarantees the GUI remains 100% responsive even if the disk lags behind.
             try {
                 self.im.save("stream_buffer.bmp")
-                frame_bytes = imgReadBytes("stream_buffer.bmp")
-                net_send(self.stream_sock, frame_bytes)
+                frame_bytes = image.imgReadBytes("stream_buffer.bmp")
+                self.stream_sock.send(frame_bytes)
             } catch(e) {}
             self.frame_count += 1
         }
@@ -85,7 +85,7 @@ class VisualSorter {
     run(algo_func, name, port) = {
         self.shuffle()
         self.connect(port)
-        self.win = Window(f"JC2 Live: {name}", self.W, self.H)
+        self.win = window.Window(f"JC2 Live: {name}", self.W, self.H)
         self.frame_count = 0
 
         print(f"[{clock()::.3f}] > Started {name}...")
@@ -163,9 +163,9 @@ merge_sort(vis) = {
         n2 = r - m
         L = list(); R = list()
         
-        // ★ Functional Array API: push(List, val) instead of OOP L.push()
-        for (i = 0; i < n1; i += 1) { push(L, vis.data[l + i]) }
-        for (j = 0; j < n2; j += 1) { push(R, vis.data[m + 1 + j]) }
+        // ★ Functional Array API: L.push(val)
+        for (i = 0; i < n1; i += 1) { L.push(vis.data[l + i]) }
+        for (j = 0; j < n2; j += 1) { R.push(vis.data[m + 1 + j]) }
         
         i = 0; j = 0; k = l
         while (i < n1 && j < n2) {

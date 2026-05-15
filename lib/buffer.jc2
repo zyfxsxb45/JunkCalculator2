@@ -3,14 +3,14 @@
 // Object-Oriented Memory Driver (Powered by Native 'bytes' module)
 // ═══════════════════════════════════════════════════════════════
 
-import "bytes"
+import bytes
 
 // ─── Byte Buffer Object ───────────────────────────────────────
 
 class ByteBuffer {
     init(native_buf: any) = {
         self.buf = native_buf
-        self.size = b_len(native_buf)
+        self.size = native_buf.len()
         self.pos = 0
     }
 
@@ -27,71 +27,71 @@ class ByteBuffer {
     // ─── Chainable Writers (Auto-advancing cursor) ───
 
     writeStr(s: string) -> ByteBuffer = {
-        b_set(self.buf, self.pos, s, "str")
-        self.pos = self.pos + len(s)
+        self.buf.set(self.pos, s, "str")
+        self.pos = self.pos + s.len()
         return self
     }
 
     writeU8(v: int) -> ByteBuffer = { 
-        b_set(self.buf, self.pos, v, "u8")
+        self.buf.set(self.pos, v, "u8")
         self.pos = self.pos + 1
         return self 
     }
 
     writeI16(v: int) -> ByteBuffer = { 
-        b_set(self.buf, self.pos, v, "i16")
+        self.buf.set(self.pos, v, "i16")
         self.pos = self.pos + 2
         return self 
     }
 
     writeI32(v: int) -> ByteBuffer = { 
-        b_set(self.buf, self.pos, v, "i32")
+        self.buf.set(self.pos, v, "i32")
         self.pos = self.pos + 4
         return self 
     }
     
     writePcmArray(arr: any) -> ByteBuffer = {
-        b_write_arr(self.buf, self.pos, arr, "i16")
-        self.pos = self.pos + len(arr) * 2
+        self.buf.write_arr(self.pos, arr, "i16")
+        self.pos = self.pos + arr.len() * 2
         return self
     }
 
     // ─── Sequential Readers (Auto-advancing cursor) ───
 
     readStr(n: int) -> string = {
-        s = b_get(self.buf, self.pos, "str", n)
+        s = self.buf.get(self.pos, "str", n)
         self.pos = self.pos + n
         return s
     }
 
     readU8() -> int = { 
-        v = b_get(self.buf, self.pos, "u8")
+        v = self.buf.get(self.pos, "u8")
         self.pos = self.pos + 1
         return v 
     }
 
     readI16() -> int = { 
-        v = b_get(self.buf, self.pos, "i16")
+        v = self.buf.get(self.pos, "i16")
         self.pos = self.pos + 2
         return v 
     }
 
     readI32() -> int = { 
-        v = b_get(self.buf, self.pos, "i32")
+        v = self.buf.get(self.pos, "i32")
         self.pos = self.pos + 4
         return v 
     }
 
     // ─── I/O Operations ───
 
-    save(path: string) = writeFileBytes(path, self.buf)
+    save(path: string) = self.buf.writeFile(path)
 }
 
 // ─── Global Factory API (Singleton Class) ─────────────────────
 
 class BufferFactory {
-    alloc(size: int) -> ByteBuffer        = return ByteBuffer(b_alloc(size))
-    fromFile(path: string) -> ByteBuffer  = return ByteBuffer(readFileBytes(path))
+    alloc(size: int) -> ByteBuffer        = return ByteBuffer(bytes.alloc(size))
+    fromFile(path: string) -> ByteBuffer  = return ByteBuffer(bytes.readFile(path))
 }
 
 Buffer = BufferFactory()
@@ -102,7 +102,7 @@ if (isfunction(__register_help)) {
     __register_help("buffer", r"DOC(
 ═══ Binary Buffer (Standard Library) ═══
 
-  Requires: import "buffer"
+  Requires: import buffer
 
   A high-level, object-oriented API for manipulating raw binary memory. It 
   wraps the low-level C++ 'bytes' module to provide automatic layout management 
@@ -118,7 +118,7 @@ if (isfunction(__register_help)) {
     buf.tell()           Returns current cursor position.
     buf.seek(pos)        Moves cursor to the absolute byte offset `pos`.
     buf.skip(n)          Moves cursor forward by `n` bytes.
-    buf.isEnd()          Returns 1 if cursor reached the end.
+    buf.isEnd()          Returns true if cursor reached the end.
     buf.length()         Returns total buffer size.
 
   Chainable Writers (Cursor Auto-Advances)

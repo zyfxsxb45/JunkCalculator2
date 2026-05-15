@@ -3,6 +3,7 @@
 
 #include "Module.h"
 #include "../vm/BuiltinRegistry.h"
+#include "../vm/VM.h"
 #include <vector>
 #include <cstdint>
 #include <fstream>
@@ -45,16 +46,27 @@ namespace jc {
     JC2_MODULE(bytes) {
         jc::ModuleReg R(env, builtins, arity);
 
-        // 1. 创建空 Buffer: b_alloc(size)
-        R.reg("b_alloc", { 1 }, [](const std::vector<Value>& args) -> Value {
+        ObjClass* bytesClass = getBytesClass();
+        jc::Value bytesClassVal(bytesClass);
+
+        R.set("Bytes", bytesClassVal);
+
+        auto addBytesMethod = [&](const std::string& name, jc::NativeCallable fn) {
+            auto fc = GcHeap::get().allocate<ObjClosure>(std::vector<std::string>{}, std::vector<bool>{}, name, nullptr);
+            fc->nativeFn = jc::VM::makeNativeFn(fn);
+            bytesClass->methods[name] = fc;
+        };
+
+        // 1. 创建空 Buffer: alloc(size)
+        R.reg("alloc", { 1 }, [](const std::vector<Value>& args) -> Value {
             int size = static_cast<int>(std::round(args[0].asDouble()));
             if (size < 0) throw std::runtime_error("Math Error: buffer size cannot be negative.");
             return makeBytesInstance(std::vector<uint8_t>(size, 0));
             });
 
-        // 2. 将数组转为 Buffer: b_pack(array)
-        R.reg("b_pack", { 1 }, [](const std::vector<Value>& args) -> Value {
-            auto arr = helpers::toVecHelper(args[0], "b_pack");
+        // 2. 将数组转为 Buffer: pack(array)
+        R.reg("pack", { 1 }, [](const std::vector<Value>& args) -> Value {
+            auto arr = helpers::toVecHelper(args[0], "pack");
             std::vector<uint8_t> buf(arr.size());
             // 替换原有的 std::max/std::min 用法，确保类型一致（double/double）
             for (size_t i = 0; i < arr.size(); ++i) {
@@ -66,8 +78,8 @@ namespace jc {
             return makeBytesInstance(std::move(buf));
             });
 
-        // 3. 读文件到 Buffer: readFileBytes(path)
-        R.reg("readFileBytes", { 1 }, [](const std::vector<Value>& args) -> Value {
+        // 3. 读文件到 Buffer: readFile(path)
+        R.reg("readFile", { 1 }, [](const std::vector<Value>& args) -> Value {
             if (!args[0].isString()) throw std::runtime_error("Type Error: expects string path.");
             std::string path = helpers::safeResolvePath(args[0].asString());
             std::ifstream f(path, std::ios::binary | std::ios::ate);
@@ -81,24 +93,24 @@ namespace jc {
             throw std::runtime_error("IO Error: Failed to read file.");
             });
 
-        // 4. 写 Buffer 到文件: writeFileBytes(path, buffer)
-        R.reg("writeFileBytes", { 2 }, [](const std::vector<Value>& args) -> Value {
-            if (!args[0].isString()) throw std::runtime_error("Type Error: expects string path.");
+        // 4. 写 Buffer 到文件: writeFile(path)
+        addBytesMethod("writeFile", [](const std::vector<Value>& args) -> Value {
+            if (args.empty() || !args[0].isString()) throw std::runtime_error("Type Error: expects string path.");
             std::string path = helpers::safeResolvePath(args[0].asString());
-            auto buf = getBuf(args[1], "writeFileBytes");
+            auto buf = getBuf(jc::helpers::getGlobalCallback("self"), "writeFile");
             std::ofstream f(path, std::ios::binary);
             if (!f) throw std::runtime_error("IO Error: Cannot write to file '" + path + "'.");
             f.write(reinterpret_cast<const char*>(buf->data()), buf->size());
             return Value::none();
             });
 
-        // 5. 核心万能写入器: b_set(buf, offset, value, type)
+        // 5. 核心万能写入器: set(offset, value, type)
         // type可以为 "u8", "i16", "u32", "f32", "f64", "str"
-        R.reg("b_set", { 4 }, [](const std::vector<Value>& args) -> Value {
-            auto buf = getBuf(args[0], "b_set");
-            size_t offset = static_cast<size_t>(std::max(0.0, args[1].asDouble()));
-            if (!args[3].isString()) throw std::runtime_error("Type Error: type must be string.");
-            std::string type = args[3].asString();
+        addBytesMethod("set", [](const std::vector<Value>& args) -> Value {
+            auto buf = getBuf(jc::helpers::getGlobalCallback("self"), "set");
+            size_t offset = static_cast<size_t>(std::max(0.0, args[0].asDouble()));
+            if (!args[2].isString()) throw std::runtime_error("Type Error: type must be string.");
+            std::string type = args[2].asString();
 
             auto writeMem = [&](const void* data, size_t size) {
                 if (offset + size > buf->size()) throw std::runtime_error("Buffer Error: Write out of bounds.");
@@ -106,11 +118,11 @@ namespace jc {
                 };
 
             if (type == "str") {
-                std::string s = args[2].isString() ? args[2].asString() : args[2].toString();
+                std::string s = args[1].isString() ? args[1].asString() : args[1].toString();
                 writeMem(s.data(), s.size());
             }
             else {
-                double val = args[2].asDouble();
+                double val = args[1].asDouble();
                 if (type == "u8") { uint8_t  v = static_cast<uint8_t>(val);  writeMem(&v, 1); }
                 else if (type == "i8") { int8_t   v = static_cast<int8_t>(val);   writeMem(&v, 1); }
                 else if (type == "u16") { uint16_t v = static_cast<uint16_t>(val); writeMem(&v, 2); }
@@ -124,11 +136,11 @@ namespace jc {
             return Value::none();
             });
 
-        R.reg("b_write_arr", { 4 }, [](const std::vector<Value>& args) -> Value {
-            auto buf = getBuf(args[0], "b_write_arr");
-            size_t offset = static_cast<size_t>(std::max(0.0, args[1].asDouble()));
-            auto arr = helpers::toVecHelper(args[2], "b_write_arr"); // C++ 层瞬间提取 15 万个浮点数
-            std::string type = args[3].asString();
+        addBytesMethod("write_arr", [](const std::vector<Value>& args) -> Value {
+            auto buf = getBuf(jc::helpers::getGlobalCallback("self"), "write_arr");
+            size_t offset = static_cast<size_t>(std::max(0.0, args[0].asDouble()));
+            auto arr = helpers::toVecHelper(args[1], "write_arr"); // C++ 层瞬间提取 15 万个浮点数
+            std::string type = args[2].asString();
             if (type == "i16") {
                 if (offset + arr.size() * 2 > buf->size()) throw std::runtime_error("Buffer out of bounds.");
                 int16_t* ptr = reinterpret_cast<int16_t*>(buf->data() + offset);
@@ -148,12 +160,12 @@ namespace jc {
             return Value::none();
             });
 
-        // 6. 核心万能读取器: b_get(buf, offset, type) 或 b_get(buf, offset, "str", len)
-        R.reg("b_get", { 3, 4 }, [](const std::vector<Value>& args) -> Value {
-            auto buf = getBuf(args[0], "b_get");
-            size_t offset = static_cast<size_t>(std::max(0.0, args[1].asDouble()));
-            if (!args[2].isString()) throw std::runtime_error("Type Error: type must be string.");
-            std::string type = args[2].asString();
+        // 6. 核心万能读取器: get(offset, type) 或 get(offset, "str", len)
+        addBytesMethod("get", [](const std::vector<Value>& args) -> Value {
+            auto buf = getBuf(jc::helpers::getGlobalCallback("self"), "get");
+            size_t offset = static_cast<size_t>(std::max(0.0, args[0].asDouble()));
+            if (!args[1].isString()) throw std::runtime_error("Type Error: type must be string.");
+            std::string type = args[1].asString();
 
             auto readMem = [&](void* data, size_t size) {
                 if (offset + size > buf->size()) throw std::runtime_error("Buffer Error: Read out of bounds at offset " + std::to_string(offset));
@@ -161,13 +173,13 @@ namespace jc {
                 };
 
             if (type == "str") {
-                if (args.size() != 4) throw std::runtime_error("Buffer Error: String read requires length.");
-                size_t len = static_cast<size_t>(std::max(0.0, args[3].asDouble()));
+                if (args.size() != 3) throw std::runtime_error("Buffer Error: String read requires length.");
+                size_t len = static_cast<size_t>(std::max(0.0, args[2].asDouble()));
                 if (offset + len > buf->size()) throw std::runtime_error("Buffer Error: Read out of bounds.");
                 return Value(std::string(reinterpret_cast<char*>(buf->data() + offset), len));
             }
 
-            if (args.size() != 3) throw std::runtime_error("Buffer Error: Incorrect argument count.");
+            if (args.size() != 2) throw std::runtime_error("Buffer Error: Incorrect argument count.");
             if (type == "u8") { uint8_t  v; readMem(&v, 1); return Value(static_cast<double>(v)); }
             else if (type == "i8") { int8_t   v; readMem(&v, 1); return Value(static_cast<double>(v)); }
             else if (type == "u16") { uint16_t v; readMem(&v, 2); return Value(static_cast<double>(v)); }
@@ -179,8 +191,8 @@ namespace jc {
             else throw std::runtime_error("Buffer Error: Unknown format type '" + type + "'.");
             });
 
-        R.reg("b_len", { 1 }, [](const std::vector<Value>& args) -> Value {
-            return Value(static_cast<double>(getBuf(args[0], "b_size")->size()));
+        addBytesMethod("len", [](const std::vector<Value>&) -> Value {
+            return Value(static_cast<double>(getBuf(jc::helpers::getGlobalCallback("self"), "len")->size()));
             });
     }
 } // namespace jc

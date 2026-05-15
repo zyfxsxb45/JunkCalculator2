@@ -2,6 +2,8 @@
 #define JC2_MODULE_WINDOW_H
 
 #include "Module.h"
+#include "../vm/BuiltinRegistry.h"
+#include "../vm/VM.h"
 #include "image_module.h"
 
 #ifdef _WIN32
@@ -232,12 +234,14 @@ JC2_MODULE(window) {
     jc::ModuleReg R(env, builtins, arity);
 
     windowClass = GcHeap::get().allocate<ObjClass>();
+    jc::Value winClassVal(windowClass);
+
     windowClass->name = "Window";
-    R.set("Window", jc::Value(windowClass));
+    R.set("Window", winClassVal);
 
     auto addWinMethod = [&](const std::string& name, jc::NativeCallable fn) {
         auto fc = GcHeap::get().allocate<ObjClosure>(std::vector<std::string>{}, std::vector<bool>{}, name, nullptr);
-        fc->nativeFn = std::make_any<NativeCallable>(fn);
+        fc->nativeFn = jc::VM::makeNativeFn(fn);
         windowClass->methods[name] = fc;
         };
 
@@ -256,7 +260,7 @@ JC2_MODULE(window) {
     addWinMethod("isOpen", [](const std::vector<jc::Value>&) -> jc::Value {
         auto inst = jc::helpers::getGlobalCallback("self").asInstance();
         auto win = std::any_cast<std::shared_ptr<NativeWindow>&>(inst->nativeData);
-        return jc::Value(win->isOpen() ? 1.0 : 0.0);
+        return jc::Value(win->isOpen());
         });
 
     // ─── 暴露 pollEvent：无阻塞抓取单次键鼠事件（带智能字符串按键！） ───
@@ -267,9 +271,11 @@ JC2_MODULE(window) {
         WinEvent ev;
         if (win->pollEvent(ev)) {
             ObjDict* d = GcHeap::get().allocate<ObjDict>();
+            jc::Value dVal(d);
             auto setDict = [&](const std::string& k, jc::Value v) {
-                d->keyMap[jc::Value(k)] = d->elements.size();
-                d->elements.push_back({jc::Value(k), v});
+                jc::Value keyVal(k);
+                d->elements.push_back({keyVal, v});
+                d->keyMap[keyVal] = d->elements.size() - 1;
             };
             setDict("type", jc::Value(ev.type));
 
@@ -354,13 +360,13 @@ JC2_MODULE(window) {
             catch (...) {}
         }
 
-        if (key == 0) return jc::Value(0.0);
+        if (key == 0) return jc::Value(false);
 
         // 0x8000 表示最高位为1（正在按下）
         bool isDown = (GetAsyncKeyState(key) & 0x8000) != 0;
-        return jc::Value(isDown ? 1.0 : 0.0);
+        return jc::Value(isDown);
 #else
-        return jc::Value(0.0);
+        return jc::Value(false);
 #endif
         });
 

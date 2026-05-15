@@ -46,6 +46,8 @@ typedef int NativeSocket;
 // 现在拥有了极其纯净的命名空间，可以安全引入 JC2 的内部结构了
 // =========================================================================
 #include "Module.h"
+#include "../vm/BuiltinRegistry.h"
+#include "../vm/VM.h"
 #include <string>
 #include <vector>
 #include <memory>
@@ -77,7 +79,7 @@ namespace jc {
         static ObjClass* cls = nullptr;
         if (!cls) {
             cls = GcHeap::get().allocate<ObjClass>();
-            cls->name = "NativeSocket";
+            cls->name = "Socket";
         }
         return cls;
     }
@@ -96,7 +98,18 @@ namespace jc {
         initNetwork();
         jc::ModuleReg R(env, builtins, arity);
 
-        R.reg("net_tcp_connect", { 2 }, [](const std::vector<Value>& args) -> Value {
+        ObjClass* socketClass = getSocketClass();
+        jc::Value sockClassVal(socketClass);
+
+        R.set("Socket", sockClassVal);
+
+        auto addSockMethod = [&](const std::string& name, jc::NativeCallable fn) {
+            auto fc = GcHeap::get().allocate<ObjClosure>(std::vector<std::string>{}, std::vector<bool>{}, name, nullptr);
+            fc->nativeFn = jc::VM::makeNativeFn(fn);
+            socketClass->methods[name] = fc;
+        };
+
+        R.reg("connect", { 2 }, [](const std::vector<Value>& args) -> Value {
             std::string host = args[0].asString();
             std::string port = std::to_string(static_cast<int>(std::round(args[1].asDouble())));
 
@@ -127,18 +140,18 @@ namespace jc {
             return Value(inst);
             });
 
-        R.reg("net_send", { 2 }, [](const std::vector<Value>& args) -> Value {
-            auto wrapper = getSock(args[0], "net_send");
-            std::string data = args[1].asString();
+        addSockMethod("send", [](const std::vector<Value>& args) -> Value {
+            auto wrapper = getSock(jc::helpers::getGlobalCallback("self"), "send");
+            std::string data = args[0].asString();
             if (send(wrapper->sock, data.c_str(), (int)data.size(), 0) == SOCKET_ERROR) {
                 throw std::runtime_error("Network Error: Connection lost during send.");
             }
             return Value(static_cast<double>(data.size()));
             });
 
-        R.reg("net_recv", { 2 }, [](const std::vector<Value>& args) -> Value {
-            auto wrapper = getSock(args[0], "net_recv");
-            int max_bytes = static_cast<int>(args[1].asDouble());
+        addSockMethod("recv", [](const std::vector<Value>& args) -> Value {
+            auto wrapper = getSock(jc::helpers::getGlobalCallback("self"), "recv");
+            int max_bytes = args.size() > 0 ? static_cast<int>(args[0].asDouble()) : 4096;
             if (max_bytes <= 0) max_bytes = 4096;
 
             std::vector<char> buffer(max_bytes);
@@ -150,8 +163,8 @@ namespace jc {
             return Value(std::string(buffer.data(), bytes_read));
             });
 
-        R.reg("net_close", { 1 }, [](const std::vector<Value>& args) -> Value {
-            auto wrapper = getSock(args[0], "net_close");
+        addSockMethod("close", [](const std::vector<Value>&) -> Value {
+            auto wrapper = getSock(jc::helpers::getGlobalCallback("self"), "close");
             if (wrapper->sock != INVALID_SOCKET) {
                 closesocket(wrapper->sock);
                 wrapper->sock = INVALID_SOCKET;
@@ -162,7 +175,7 @@ namespace jc {
         // ==========================================================
         // 接待前台: 监听本机端口 (Server Bind & Listen)
         // ==========================================================
-        R.reg("net_tcp_server", { 2 }, [](const std::vector<Value>& args) -> Value {
+        R.reg("server", { 2 }, [](const std::vector<Value>& args) -> Value {
             std::string host = args[0].asString();
             std::string port = std::to_string(static_cast<int>(std::round(args[1].asDouble())));
 
@@ -212,8 +225,8 @@ namespace jc {
         // ==========================================================
         // 迎接客人: 阻塞并接收浏览器连接 (Server Accept)
         // ==========================================================
-        R.reg("net_tcp_accept", { 1 }, [](const std::vector<Value>& args) -> Value {
-            auto server_wrapper = getSock(args[0], "net_tcp_accept");
+        addSockMethod("accept", [](const std::vector<Value>&) -> Value {
+            auto server_wrapper = getSock(jc::helpers::getGlobalCallback("self"), "accept");
 
             // accept 阻塞直到有新连接接入 (无视客户端IP以便保持绝对的跨平台跨头文件安全)
             NativeSocket client_sock = accept(server_wrapper->sock, nullptr, nullptr);

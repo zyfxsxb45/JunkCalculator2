@@ -2,6 +2,8 @@
 #define JC2_MODULE_PROB_H
 
 #include "Module.h"
+#include "../vm/BuiltinRegistry.h"
+#include "../vm/VM.h"
 #include "Probability.h"
 
 namespace jc_prob {
@@ -30,8 +32,10 @@ JC2_MODULE(prob) {
     using namespace jc_prob;
     jc::ModuleReg R(env, builtins, arity);
     distClass = GcHeap::get().allocate<ObjClass>();
+    jc::Value distClassVal(distClass);
+
     distClass->name = "Distribution";
-    R.set("Distribution", jc::Value(distClass));
+    R.set("Distribution", distClassVal);
 
     // ── 原生全局纯函数 (Global Math Functions) ──
     R.reg("gamma", { 1 }, [](const std::vector<jc::Value>& a) -> jc::Value { return jc::Value(jc::prob::tgamma(a[0].asDouble())); });
@@ -64,7 +68,7 @@ JC2_MODULE(prob) {
     auto addDistMethod = [&](const std::string& name, jc::NativeCallable fn) {
         auto fc = GcHeap::get().allocate<ObjClosure>(
             std::vector<std::string>{}, std::vector<bool>{}, name, nullptr);
-        fc->nativeFn = std::make_any<jc::NativeCallable>(fn);
+        fc->nativeFn = jc::VM::makeNativeFn(fn);
         distClass->methods[name] = fc;
         };
 
@@ -190,7 +194,8 @@ JC2_MODULE(prob) {
 
     // ★ 覆盖 mean/var/std 支持泛型多态调用
     {
-        auto oldMean = builtins["mean"];
+        auto it = builtins.find("mean");
+        auto oldMean = (it != builtins.end()) ? it->second : nullptr;
         R.reg("mean", { 1 }, [oldMean](const std::vector<jc::Value>& args) -> jc::Value {
             if (args[0].isInstance()) {
                 auto inst = args[0].asInstance();
@@ -199,11 +204,13 @@ JC2_MODULE(prob) {
                     return jc::Value(getDist(args[0])->distMean());
                 }
             }
-            return oldMean(args);
+            if (oldMean) return oldMean(args);
+            throw std::runtime_error("Type Error: mean() expects a Distribution.");
             });
     }
     {
-        auto oldVar = builtins["var"];
+        auto it = builtins.find("var");
+        auto oldVar = (it != builtins.end()) ? it->second : nullptr;
         R.reg("var", { 1 }, [oldVar](const std::vector<jc::Value>& args) -> jc::Value {
             if (args[0].isInstance()) {
                 auto inst = args[0].asInstance();
@@ -212,11 +219,13 @@ JC2_MODULE(prob) {
                     return jc::Value(getDist(args[0])->distVar());
                 }
             }
-            return oldVar(args);
+            if (oldVar) return oldVar(args);
+            throw std::runtime_error("Type Error: var() expects a Distribution.");
             });
     }
     {
-        auto oldStd = builtins["std"];
+        auto it = builtins.find("std");
+        auto oldStd = (it != builtins.end()) ? it->second : nullptr;
         R.reg("std", { 1 }, [oldStd](const std::vector<jc::Value>& args) -> jc::Value {
             if (args[0].isInstance()) {
                 auto inst = args[0].asInstance();
@@ -225,7 +234,8 @@ JC2_MODULE(prob) {
                     return jc::Value(std::sqrt(getDist(args[0])->distVar()));
                 }
             }
-            return oldStd(args);
+            if (oldStd) return oldStd(args);
+            throw std::runtime_error("Type Error: std() expects a Distribution.");
             });
     }
 }

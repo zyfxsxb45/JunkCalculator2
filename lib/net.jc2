@@ -3,7 +3,7 @@
 // Pure, Zero-Dependency Socket Engine (Client & Server)
 // ═══════════════════════════════════════════════════════════════
 
-import "socket"
+import socket
 
 // ─── Socket Object (Client) ───────────────────────────────────
 
@@ -15,29 +15,29 @@ class TcpSocket {
     }
 
     connect() -> TcpSocket = {
-        self.sock = net_tcp_connect(self.host, self.port)
+        self.sock = socket.connect(self.host, self.port)
         return self
     }
 
     close() = {
-        if (!isnone(self.sock)) {
-            net_close(self.sock)
+        if (!self.sock.isnone()) {
+            self.sock.close()
             self.sock = none()
         }
     }
 
     send(text: string) -> TcpSocket = {
-        if (isnone(self.sock)) throw "Network Error: Socket is not connected!"
-        net_send(self.sock, text)
+        if (self.sock.isnone()) throw "Network Error: Socket is not connected!"
+        self.sock.send(text)
         return self
     }
 
     recv(max_bytes: int = 4096) -> string = {
-        if (isnone(self.sock)) throw "Network Error: Socket is not connected!"
-        return net_recv(self.sock, max_bytes)
+        if (self.sock.isnone()) throw "Network Error: Socket is not connected!"
+        return self.sock.recv(max_bytes)
     }
 
-    __str__() -> string = return f"<TcpSocket host=\"{self.host}\" port={self.port} connected={!isnone(self.sock)}>"
+    __str__() -> string = return f"<TcpSocket host=\"{self.host}\" port={self.port} connected={!self.sock.isnone()}>"
 }
 
 // ─── Server Object (Daemon) ───────────────────────────────────
@@ -50,13 +50,13 @@ class TcpServer {
     }
 
     bind() -> TcpServer = {
-        self.sock = net_tcp_server(self.host, self.port)
+        self.sock = socket.server(self.host, self.port)
         return self
     }
 
     accept() -> TcpSocket = {
-        if (isnone(self.sock)) throw "Network Error: TCP Server is not bound to a port!"
-        native_client = net_tcp_accept(self.sock)
+        if (self.sock.isnone()) throw "Network Error: TCP Server is not bound to a port!"
+        native_client = self.sock.accept()
         
         client = TcpSocket(self.host, self.port)
         client.sock = native_client
@@ -64,8 +64,8 @@ class TcpServer {
     }
 
     close() = {
-        if (!isnone(self.sock)) {
-            net_close(self.sock)
+        if (!self.sock.isnone()) {
+            self.sock.close()
             self.sock = none()
         }
     }
@@ -77,7 +77,7 @@ if (isfunction(__register_help)) {
     __register_help("net", r"DOC(
 ═══ Network (Standard Library) ═══
 
-  Requires: import "net"
+  Requires: import net
 
   The `net` module provides a comprehensive object-oriented API for zero-dependency 
   TCP networking. It supports both outbound Client requests and inbound Server hosting.

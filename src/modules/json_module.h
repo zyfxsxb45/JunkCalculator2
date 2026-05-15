@@ -236,7 +236,8 @@ namespace jc {
             }
 
             while (true) {
-                elements.push_back(parseValue());
+                jc::Value v = parseValue();
+                elements.push_back(v);
                 skipWS();
                 if (pos < s.size() && s[pos] == ',') { 
                     pos++; 
@@ -256,6 +257,7 @@ namespace jc {
         jc::Value parseObject() {
             pos++; // skip '{'
             ObjDict* d = GcHeap::get().allocate<ObjDict>();
+            jc::Value dVal(d);
             skipWS();
             if (pos < s.size() && s[pos] == '}') { pos++; return jc::Value(d); }
 
@@ -268,8 +270,9 @@ namespace jc {
                 pos++; skipWS();
 
                 jc::Value v = parseValue();
-                d->keyMap[jc::Value(key)] = d->elements.size();
-                d->elements.push_back({jc::Value(key), v});
+                jc::Value keyVal(key);
+                d->elements.push_back({keyVal, v});
+                d->keyMap[keyVal] = d->elements.size() - 1;
                 skipWS();
 
                 if (pos < s.size() && s[pos] == ',') { 
@@ -308,7 +311,7 @@ namespace jc {
         jc::ModuleReg R(env, builtins, arity);
 
         // serialize 函数挂载
-        R.reg("json_encode", { 1 }, [](const std::vector<jc::Value>& args) -> jc::Value {
+        R.reg("encode", { 1 }, [](const std::vector<jc::Value>& args) -> jc::Value {
             return jc::Value(JsonEngine::encode(args[0], 0, 0));
             });
         R.reg("stringify", { 1 }, [](const std::vector<jc::Value>& args) -> jc::Value {
@@ -316,15 +319,15 @@ namespace jc {
             });
 
         // 格式化输出函数 (默认使用 4 个缩进空格)
-        R.reg("json_pretty", { 1, 2 }, [](const std::vector<jc::Value>& args) -> jc::Value {
+        R.reg("pretty", { 1, 2 }, [](const std::vector<jc::Value>& args) -> jc::Value {
             int indent = (args.size() == 2) ? static_cast<int>(std::round(args[1].asDouble())) : 4;
             return jc::Value(JsonEngine::encode(args[0], indent, 0));
             });
 
         // deserialize 函数挂载
-        R.reg("json_decode", { 1 }, [](const std::vector<jc::Value>& args) -> jc::Value {
+        R.reg("decode", { 1 }, [](const std::vector<jc::Value>& args) -> jc::Value {
             if (!args[0].isString()) {
-                throw std::runtime_error("Type Error: json_decode() expects a string.");
+                throw std::runtime_error("Type Error: decode() expects a string.");
             }
             JsonParser parser(args[0].asString());
             return parser.parseValue();

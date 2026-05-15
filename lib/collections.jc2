@@ -12,13 +12,13 @@ class Stack {
     }
     
     push(item: any) = {
-        push(self.data, item)
+        self.data.push(item)
         return self
     }
     
     pop() = {
         if (self.isEmpty()) throw "IndexError: pop from empty Stack"
-        return pop(self.data)
+        return self.data.pop()
     }
     
     peek() = {
@@ -26,9 +26,9 @@ class Stack {
         return self.data[-1]
     }
     
-    isEmpty() -> bool = return len(self.data) == 0
-    size() -> int     = return len(self.data)
-    clear()           = clear(self.data)
+    isEmpty() -> bool = return self.data.len() == 0
+    size() -> int     = return self.data.len()
+    clear()           = self.data.clear()
 }
 
 
@@ -40,13 +40,13 @@ class Queue {
     }
     
     enqueue(item: any) = {
-        push(self.data, item)
+        self.data.push(item)
         return self
     }
     
     dequeue() = {
         if (self.isEmpty()) throw "IndexError: dequeue from empty Queue"
-        return shift(self.data)
+        return self.data.shift()
     }
     
     peek() = {
@@ -54,9 +54,9 @@ class Queue {
         return self.data[0]
     }
     
-    isEmpty() -> bool = return len(self.data) == 0
-    size() -> int     = return len(self.data)
-    clear()           = clear(self.data)
+    isEmpty() -> bool = return self.data.len() == 0
+    size() -> int     = return self.data.len()
+    clear()           = self.data.clear()
 }
 
 
@@ -67,22 +67,22 @@ class Deque {
         self.data = list()
     }
     
-    pushRight(item: any) = { push(self.data, item); return self }
-    pushLeft(item: any)  = { prepend(self.data, item); return self }
+    pushRight(item: any) = { self.data.push(item); return self }
+    pushLeft(item: any)  = { self.data.prepend(item); return self }
     
     popRight() = {
         if (self.isEmpty()) throw "IndexError: popRight from empty Deque"
-        return pop(self.data)
+        return self.data.pop()
     }
     
     popLeft() = {
         if (self.isEmpty()) throw "IndexError: popLeft from empty Deque"
-        return shift(self.data)
+        return self.data.shift()
     }
     
-    isEmpty() -> bool = return len(self.data) == 0
-    size() -> int     = return len(self.data)
-    clear()           = clear(self.data)
+    isEmpty() -> bool = return self.data.len() == 0
+    size() -> int     = return self.data.len()
+    clear()           = self.data.clear()
 }
 
 
@@ -95,17 +95,17 @@ class DefaultDict {
     }
     
     __getitem__(key: any) = {
-        if (!hasKey(self.data, key)) {
+        if (!self.data.hasKey(key)) {
             self.data[key] = self.factory()
         }
         return self.data[key]
     }
     
     __setitem__(key: any, val: any) = { self.data[key] = val }
-    __contains__(key: any) -> bool  = return hasKey(self.data, key)
+    __contains__(key: any) -> bool  = return self.data.hasKey(key)
     
-    keys() -> list   = return keys(self.data)
-    values() -> list = return values(self.data)
+    keys() -> list   = return self.data.keys()
+    values() -> list = return self.data.values()
 }
 
 
@@ -119,21 +119,21 @@ class Counter {
     
     update(iterable: any) = {
         for (item in iterable) {
-            if (hasKey(self.data, item)) { self.data[item] += 1 } 
+            if (self.data.hasKey(item)) { self.data[item] += 1 } 
             else { self.data[item] = 1 }
         }
         return self
     }
     
     get(key: any) -> int = {
-        return hasKey(self.data, key) ? self.data[key] : 0
+        return self.data.hasKey(key) ? self.data[key] : 0
     }
     
     mostCommon(n: int = 1) -> list = {
         L = list()
-        for ([k, v] in self.data) push(L, [k, v])
-        sorted = sort(L, (a, b) => a[1] > b[1])
-        return slice(sorted, 0, n)
+        for ([k, v] in self.data) L.push([k, v])
+        sorted = L.sort((a, b) => a[1] > b[1])
+        return sorted.slice(0, n)
     }
 }
 
@@ -147,17 +147,17 @@ class PriorityQueue {
     }
     
     push(item: any) = {
-        push(self.data, item)
-        self._siftUp(len(self.data) - 1)
+        self.data.push(item)
+        self._siftUp(self.data.len() - 1)
         return self
     }
     
     pop() = {
-        n = len(self.data)
+        n = self.data.len()
         if (n == 0) throw "IndexError: pop from empty PriorityQueue"
         
         result = self.data[0]
-        last = pop(self.data)
+        last = self.data.pop()
         
         if (n > 1) {
             self.data[0] = last
@@ -171,8 +171,8 @@ class PriorityQueue {
         return self.data[0]
     }
     
-    isEmpty() -> bool = return len(self.data) == 0
-    size() -> int     = return len(self.data)
+    isEmpty() -> bool = return self.data.len() == 0
+    size() -> int     = return self.data.len()
 
     _siftUp(idx: int) = {
         while (idx > 0) {
@@ -187,7 +187,7 @@ class PriorityQueue {
     }
     
     _siftDown(idx: int) = {
-        n = len(self.data)
+        n = self.data.len()
         while (true) {
             left = 2 * idx + 1
             right = 2 * idx + 2
@@ -277,7 +277,7 @@ if (isfunction(__register_help)) {
     __register_help("collections", r"DOC(
 ═══ Collections (Standard Library) ═══
 
-  Requires: import "collections"
+  Requires: import collections
 
   High-performance, OOP-based data structures backed by JC2 native lists 
   and hash dictionaries.

@@ -354,6 +354,7 @@ namespace jc {
                         return { false, 0 };
                     }
                 }
+                return { false, 0 };
             }
             else if constexpr (std::is_same_v<T, double>) {
                 if (std::isfinite(arg) && arg == std::round(arg)) {
@@ -362,9 +363,11 @@ namespace jc {
                         return { true, static_cast<int64_t>(std::round(arg)) };
                     }
                 }
+                return { false, 0 };
             }
-
-            return { false, 0 };
+            else {
+                return { false, 0 };
+            }
             }, cval);
     }
 

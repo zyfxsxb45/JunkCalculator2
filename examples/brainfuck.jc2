@@ -28,20 +28,20 @@ jumps = dict()
 stack = list()
 
 t0 = clock()
-for (i = 0; i < len(bf_code); i += 1) {
+for (i = 0; i < bf_code.len(); i += 1) {
     c = bf_code[i]
     if (c == "[") {
-        push(stack, i)
+        stack.push(i)
     } else if (c == "]") {
-        open_pos = last(stack)
-        pop(stack)
+        open_pos = stack.last()
+        stack.pop()
         // Bind the addresses bidirectionally in a Dict for instantaneous O(1) jumps.
         jumps[str(open_pos)] = i
         jumps[str(i)] = open_pos
     }
 }
 t1 = clock()
-print(f"      Matched {len(jumps)/2} bracket pairs in {t1 - t0::.4f}s.")
+print(f"      Matched {jumps.len()/2} bracket pairs in {t1 - t0::.4f}s.")
 
 // 3. Initialize Turing Machine State
 print("[2/3] Initializing Turing Machine Tape and Pointers...")
@@ -60,7 +60,7 @@ output_str = ""
 steps = 0
 t2 = clock()
 
-while (ip < len(bf_code)) {
+while (ip < bf_code.len()) {
     cmd = bf_code[ip]
     
     if (cmd == ">") {
@@ -72,24 +72,24 @@ while (ip < len(bf_code)) {
     else if (cmd == "+") {
         // Brainfuck requires 8-bit unsigned integers (0~255) with cyclic wrapping.
         dp_s = str(dp)
-        val = hasKey(tape, dp_s) ? tape[dp_s] : 0
+        val = tape.hasKey(dp_s) ? tape[dp_s] : 0
         tape[dp_s] = (val + 1) % 256
     } 
     else if (cmd == "-") {
         dp_s = str(dp)
-        val = hasKey(tape, dp_s) ? tape[dp_s] : 0
+        val = tape.hasKey(dp_s) ? tape[dp_s] : 0
         tape[dp_s] = (val - 1 + 256) % 256
     } 
     else if (cmd == ".") {
         dp_s = str(dp)
-        val = hasKey(tape, dp_s) ? tape[dp_s] : 0
+        val = tape.hasKey(dp_s) ? tape[dp_s] : 0
         // Defensive C++ bridging: clamp bounds to prevent the native chr() from panicking
         output_str += (val >= 0 && val <= 127) ? chr(val) : "?"
     }
     else if (cmd == "[") {
         // If current cell is 0, skip the loop and jump past the matching ]
         dp_s = str(dp)
-        val = hasKey(tape, dp_s) ? tape[dp_s] : 0
+        val = tape.hasKey(dp_s) ? tape[dp_s] : 0
         if (val == 0) {
             ip = jumps[str(ip)]
         }
@@ -97,7 +97,7 @@ while (ip < len(bf_code)) {
     else if (cmd == "]") {
         // If current cell is NOT 0, jump back to the matching [ and continue the loop
         dp_s = str(dp)
-        val = hasKey(tape, dp_s) ? tape[dp_s] : 0
+        val = tape.hasKey(dp_s) ? tape[dp_s] : 0
         if (val != 0) {
             ip = jumps[str(ip)]
         }
@@ -116,4 +116,4 @@ print("\n<<<<< OUTPUT END <<<<<")
 
 print(f"\n[Success] Brainfuck Process Terminated Successfully.")
 print(f"Metrics: Executed {steps} instructions via hot-loop in {t3 - t2::.4f}s.")
-print(f"Memory used: {len(tape)} tape blocks allocated.")
+print(f"Memory used: {tape.len()} tape blocks allocated.")

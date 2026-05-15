@@ -3,7 +3,7 @@
 // Built with strict JC2 Lexer / Scope standards
 // ═══════════════════════════════════════════════════════════════
 
-import "net"
+import net
 
 // ─── Response Class ───────────────────────────────────────────
 
@@ -16,41 +16,41 @@ class HttpResponse {
     }
 
     json() -> any = {
-        import "json"
-        return parse(self.body)
+        import json
+        return json.parse(self.body)
     }
 
-    __str__() -> string = return f"<HttpResponse [{self.status}] body_len={len(self.body)}>"
+    __str__() -> string = return f"<HttpResponse [{self.status}] body_len={self.body.len()}>"
 }
 
 // ─── Internal Parsers ─────────────────────────────────────────
 
 _parse_url(url_str: string) -> dict = {
     u = url_str
-    if (startsWith(u, "https://")) {
+    if (u.startsWith("https://")) {
         throw "HTTP Library currently only supports plain HTTP (TCP 80)."
     }
-    if (startsWith(u, "http://")) {
-        u = substr(u, 7)
+    if (u.startsWith("http://")) {
+        u = u.substr(7)
     }
 
     url_host = ""
     url_path = "/"
-    slash_idx = find(u, "/", 0)
+    slash_idx = u.find("/", 0)
     
     if (slash_idx == -1) {
         url_host = u
     } else {
-        url_host = substr(u, 0, slash_idx)
-        url_path = substr(u, slash_idx)
+        url_host = u.substr(0, slash_idx)
+        url_path = u.substr(slash_idx)
     }
 
     url_port = 80
-    colon_idx = find(url_host, ":", 0)
+    colon_idx = url_host.find(":", 0)
     if (colon_idx != -1) {
-        port_str = substr(url_host, colon_idx + 1)
-        url_port = int(parseNum(port_str))
-        url_host = substr(url_host, 0, colon_idx)
+        port_str = url_host.substr(colon_idx + 1)
+        url_port = int(port_str.parseNum())
+        url_host = url_host.substr(0, colon_idx)
     }
 
     res_dict = dict()
@@ -61,30 +61,30 @@ _parse_url(url_str: string) -> dict = {
 }
 
 _parse_response(raw: string) -> HttpResponse = {
-    header_end = find(raw, "\r\n\r\n", 0)
+    header_end = raw.find("\r\n\r\n", 0)
     if (header_end == -1) {
         return HttpResponse(0, dict(), raw, raw)
     }
 
-    head_part = substr(raw, 0, header_end)
-    body_part = substr(raw, header_end + 4)
+    head_part = raw.substr(0, header_end)
+    body_part = raw.substr(header_end + 4)
 
-    lines = split(head_part, "\r\n")
+    lines = head_part.split("\r\n")
     
     status_code = 0
-    if (len(lines) > 0) {
-        parts = split(lines[0], " ")
-        if (len(parts) > 1) status_code = int(parseNum(parts[1]))
+    if (lines.len() > 0) {
+        parts = lines[0].split(" ")
+        if (parts.len() > 1) status_code = int(parts[1].parseNum())
     }
 
     headers_dict = dict()
-    lines_count = len(lines)
+    lines_count = lines.len()
     for (i in range(1, lines_count)) {
         line = lines[i]
-        colon = find(line, ":", 0)
+        colon = line.find(":", 0)
         if (colon != -1) {
-            k = trim(substr(line, 0, colon))
-            v = trim(substr(line, colon + 1))
+            k = line.substr(0, colon).trim()
+            v = line.substr(colon + 1).trim()
             headers_dict[k] = v
         }
     }
@@ -113,7 +113,7 @@ http_get(url: string) -> HttpResponse = {
     raw_res = ""
     while (true) {
         chunk = client.recv(4096)
-        if (len(chunk) == 0) break
+        if (chunk.len() == 0) break
         raw_res += chunk
     }
     
@@ -127,7 +127,7 @@ if (isfunction(__register_help)) {
     __register_help("http", r"DOC(
 ═══ HTTP Client (Standard Library) ═══
 
-  Requires: import "http"
+  Requires: import http
 
   A modern, high-level HTTP client capable of parsing URLs, dispatching GET 
   requests, and cleanly separating HTTP metadata from the payload body.
@@ -146,8 +146,8 @@ if (isfunction(__register_help)) {
 
   Example
   ──────────────────────
-    import "http"
-    response = http_get("http://httpbin.org/get")
+    import http
+    response = http.http_get("http://httpbin.org/get")
     print(response.status)
 )DOC")
 }

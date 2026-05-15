@@ -958,8 +958,15 @@ namespace jc {
             return std::make_unique<TryCatchExpr>(std::move(tryBody), catchName, std::move(catchBody));
         }
         if (match({ TokenType::IMPORT })) {
-            auto path = assignment();  // ★ 降级：防止逗号被误吞
-            return std::make_unique<ImportExpr>(std::move(path));
+            if (check(TokenType::IDENTIFIER)) {
+                Token nameTok = advance();
+                auto pathExpr = std::make_unique<Literal>(nameTok.lexeme, true);
+                auto importExpr = std::make_unique<ImportExpr>(std::move(pathExpr));
+                return std::make_unique<Assign>(nameTok, std::move(importExpr));
+            } else {
+                auto path = assignment();  // ★ 降级：防止逗号被误吞
+                return std::make_unique<ImportExpr>(std::move(path));
+            }
         }
         if (match({ TokenType::SWITCH })) return switchExpr();
         if (match({ TokenType::DELETE })) {

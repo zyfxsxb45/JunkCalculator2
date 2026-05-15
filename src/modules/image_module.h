@@ -2,6 +2,8 @@
 #define JC2_MODULE_IMAGE_H
 
 #include "Module.h"
+#include "../vm/BuiltinRegistry.h"
+#include "../vm/VM.h"
 #include "Image.h"
 #include <fstream>
 #include <sstream>
@@ -38,15 +40,17 @@ JC2_MODULE(image) {
     jc::ModuleReg R(env, builtins, arity);
 
     imageClass = GcHeap::get().allocate<jc::ObjClass>();
+    jc::Value imgClassVal(imageClass);
+
     imageClass->name = "Image";
-    R.set("Image", jc::Value(imageClass));
+    R.set("Image", imgClassVal);
 
     auto addImgMethod = [&](const std::string& name, int maxArgs, jc::NativeCallable fn) {
         std::vector<std::string> pNames(maxArgs, "_");
         std::vector<bool> pRefs(maxArgs, false);
         auto fc = GcHeap::get().allocate<jc::ObjClosure>(pNames, pRefs, name, nullptr);
         fc->defaultValues.resize(maxArgs, jc::Value::none()); // 允许参数缺省
-        fc->nativeFn = std::make_any<jc::NativeCallable>(fn);
+        fc->nativeFn = jc::VM::makeNativeFn(fn);
         imageClass->methods[name] = fc;
         };
 

@@ -1910,6 +1910,9 @@ void BuiltinRegistry::registerStringFunctions() {
         if (args[0].isObjType(ObjType::SET)) return Value(static_cast<double>(static_cast<ObjSet*>(args[0].asObj())->elements.size()));
         throw std::runtime_error("Type Error: len() expects a string, vector, matrix, dict, or list.");
         });
+    builtins["length"] = builtins["len"]; builtinArity["length"] = builtinArity["len"];
+    builtins["size"] = builtins["len"]; builtinArity["size"] = builtinArity["len"];
+
     reg("eval", { 1 }, [](const std::vector<Value>& args) -> Value {
         if (!args[0].isString())
             throw std::runtime_error("Type Error: eval() expects a string.");
@@ -2086,6 +2089,7 @@ void BuiltinRegistry::registerArrayFunctions() {
         }
         return expectContainer("push");
         });
+    builtins["append"] = builtins["push"]; builtinArity["append"] = builtinArity["push"];
 
     reg("prepend", { 2 }, [expectContainer](const std::vector<Value>& args) -> Value {
         if (args[0].isObjType(ObjType::LIST)) {
@@ -2600,7 +2604,6 @@ void BuiltinRegistry::registerDictFunctions() {
     reg("dictSize", { 1 }, [](const std::vector<Value>& args) -> Value {
         ObjDict* d = helpers::getDictMap(args[0], "dictSize"); return Value(static_cast<double>(d->elements.size()));
         });
-    builtins["size"] = builtins["dictSize"]; builtinArity["size"] = builtinArity["dictSize"];
 
     reg("dictMerge", { 2 }, [](const std::vector<Value>& args) -> Value {
         ObjDict* d1 = helpers::getDictMap(args[0], "dictMerge"); ObjDict* d2 = helpers::getDictMap(args[1], "dictMerge");
@@ -2929,9 +2932,9 @@ void BuiltinRegistry::registerFormatType() {
 void BuiltinRegistry::registerHigherOrder() {
 
     reg("apply", { 2 }, [](const std::vector<Value>& args) -> Value {
-        auto cl = args[0].asFunction();
+        auto cl = args[1].asFunction();
         std::vector<Value> unpackedArgs;
-        const Value& argList = args[1];
+        const Value& argList = args[0];
 
         if (argList.isObjType(ObjType::LIST)) {
             for (const auto& e : static_cast<ObjList*>(argList.asObj())->vec) unpackedArgs.push_back(e);
@@ -2955,11 +2958,9 @@ void BuiltinRegistry::registerHigherOrder() {
         return safeCallFunction(cl, unpackedArgs);
         });
 
-    reg("map", { 2 }, [](const std::vector<Value>& args) -> Value {
-        auto cl = args[0].asFunction();
+    auto mapCore = [](const Value& argList, ObjClosure* cl) -> Value {
         if (!cl->acceptsArgCount(1)) throw std::runtime_error("Runtime Error: map() requires a single-parameter function.");
 
-        Value argList = args[1];
         if (argList.isObjType(ObjType::LIST)) {
             ObjList* result = GcHeap::get().allocate<ObjList>();
             for (const auto& e : static_cast<ObjList*>(argList.asObj())->vec) {
@@ -3027,13 +3028,24 @@ void BuiltinRegistry::registerHigherOrder() {
             return Value(RealMatrix(rows, cols, rd));
         }
         throw std::runtime_error("Type Error: map() expects a vector/matrix/list.");
+    };
+
+    reg("map", { 1, 2 }, [mapCore](const std::vector<Value>& args) -> Value {
+        if (args.size() == 1) {
+            Value capturedFn = args[0];
+            if (!capturedFn.isFunctionClosure()) throw std::runtime_error("Type Error: map() currying expects a function.");
+            auto bound = GcHeap::get().allocate<ObjClosure>(std::vector<std::string>{"v"}, std::vector<bool>{false}, "map_curried", nullptr);
+            bound->nativeFn = VM::makeNativeFn([capturedFn, mapCore](const std::vector<Value>& innerArgs) -> Value {
+                return mapCore(innerArgs[0], capturedFn.asFunction());
+            });
+            return Value(bound);
+        }
+        return mapCore(args[0], args[1].asFunction());
         });
 
-    reg("filter", { 2 }, [](const std::vector<Value>& args) -> Value {
-        auto cl = args[0].asFunction();
+    auto filterCore = [](const Value& argList, ObjClosure* cl) -> Value {
         if (!cl->acceptsArgCount(1)) throw std::runtime_error("Runtime Error: filter() requires a single-parameter function.");
 
-        Value argList = args[1];
         if (argList.isObjType(ObjType::LIST)) {
             ObjList* result = GcHeap::get().allocate<ObjList>();
             for (const auto& e : static_cast<ObjList*>(argList.asObj())->vec) {
@@ -3070,17 +3082,28 @@ void BuiltinRegistry::registerHigherOrder() {
             return Value(StringMatrix(1, n, result));
         }
         throw std::runtime_error("Type Error: filter() expects a vector/matrix/list.");
+    };
+
+    reg("filter", { 1, 2 }, [filterCore](const std::vector<Value>& args) -> Value {
+        if (args.size() == 1) {
+            Value capturedFn = args[0];
+            if (!capturedFn.isFunctionClosure()) throw std::runtime_error("Type Error: filter() currying expects a function.");
+            auto bound = GcHeap::get().allocate<ObjClosure>(std::vector<std::string>{"v"}, std::vector<bool>{false}, "filter_curried", nullptr);
+            bound->nativeFn = VM::makeNativeFn([capturedFn, filterCore](const std::vector<Value>& innerArgs) -> Value {
+                return filterCore(innerArgs[0], capturedFn.asFunction());
+            });
+            return Value(bound);
+        }
+        return filterCore(args[0], args[1].asFunction());
         });
 
-    reg("reduce", { 2, 3 }, [](const std::vector<Value>& args) -> Value {
-        auto cl = args[0].asFunction();
+    auto reduceCore = [](const Value& argList, ObjClosure* cl, const Value& initVal) -> Value {
         if (!cl->acceptsArgCount(2)) throw std::runtime_error("Runtime Error: reduce() requires a two-parameter function.");
 
-        Value argList = args[1];
         if (argList.isObjType(ObjType::LIST)) {
             auto l = static_cast<ObjList*>(argList.asObj());
             Value acc; size_t startIdx = 0;
-            if (args.size() == 3) { acc = args[2]; }
+            if (!initVal.isNone()) { acc = initVal; }
             else { if (l->vec.empty()) throw std::runtime_error("Runtime Error: reduce() on empty."); acc = l->vec[0]; startIdx = 1; }
             for (size_t i = startIdx; i < l->vec.size(); ++i) { jc::checkInterrupt(); acc = safeCallFunction(cl, { acc, l->vec[i] }); }
             return acc;
@@ -3094,12 +3117,26 @@ void BuiltinRegistry::registerHigherOrder() {
                 for (auto s : static_cast<ObjStringMatrix*>(argList.asObj())->mat.rawData()) flatVals.push_back(Value(s));
             }
             Value acc; size_t startIdx = 0;
-            if (args.size() == 3) { acc = args[2]; }
+            if (!initVal.isNone()) { acc = initVal; }
             else { if (flatVals.empty()) throw std::runtime_error("Runtime Error: reduce() on empty."); acc = flatVals[0]; startIdx = 1; }
             for (size_t i = startIdx; i < flatVals.size(); ++i) { jc::checkInterrupt(); acc = safeCallFunction(cl, { acc, flatVals[i] }); }
             return acc;
         }
         throw std::runtime_error("Type Error: reduce() expects a vector/matrix/list.");
+    };
+
+    reg("reduce", { 1, 2, 3 }, [reduceCore](const std::vector<Value>& args) -> Value {
+        if (args.size() == 1 || (args.size() == 2 && args[0].isFunctionClosure())) {
+            Value capturedFn = args[0];
+            if (!capturedFn.isFunctionClosure()) throw std::runtime_error("Type Error: reduce() currying expects a function.");
+            Value capturedInit = args.size() == 2 ? args[1] : Value::none();
+            auto bound = GcHeap::get().allocate<ObjClosure>(std::vector<std::string>{"v"}, std::vector<bool>{false}, "reduce_curried", nullptr);
+            bound->nativeFn = VM::makeNativeFn([capturedFn, capturedInit, reduceCore](const std::vector<Value>& innerArgs) -> Value {
+                return reduceCore(innerArgs[0], capturedFn.asFunction(), capturedInit);
+            });
+            return Value(bound);
+        }
+        return reduceCore(args[0], args[1].asFunction(), args.size() == 3 ? args[2] : Value::none());
         });
 
     auto iterateAndCheck = [](const Value& argList, ObjClosure* cl, auto checkFn) -> Value {
@@ -3129,23 +3166,45 @@ void BuiltinRegistry::registerHigherOrder() {
         return Value(false);
     };
 
-    reg("any", { 2 }, [iterateAndCheck](const std::vector<Value>& args) -> Value {
-        auto cl = args[0].asFunction();
+    auto anyCore = [iterateAndCheck](const Value& argList, ObjClosure* cl) -> Value {
         if (!cl->acceptsArgCount(1)) throw std::runtime_error("Runtime Error: any() requires a single-parameter function.");
-        return iterateAndCheck(args[1], cl, [](bool res) { return res; });
+        return iterateAndCheck(argList, cl, [](bool res) { return res; });
+    };
+
+    reg("any", { 1, 2 }, [anyCore](const std::vector<Value>& args) -> Value {
+        if (args.size() == 1) {
+            Value capturedFn = args[0];
+            if (!capturedFn.isFunctionClosure()) throw std::runtime_error("Type Error: any() currying expects a function.");
+            auto bound = GcHeap::get().allocate<ObjClosure>(std::vector<std::string>{"v"}, std::vector<bool>{false}, "any_curried", nullptr);
+            bound->nativeFn = VM::makeNativeFn([capturedFn, anyCore](const std::vector<Value>& innerArgs) -> Value {
+                return anyCore(innerArgs[0], capturedFn.asFunction());
+            });
+            return Value(bound);
+        }
+        return anyCore(args[0], args[1].asFunction());
         });
 
-    reg("all", { 2 }, [iterateAndCheck](const std::vector<Value>& args) -> Value {
-        auto cl = args[0].asFunction();
+    auto allCore = [iterateAndCheck](const Value& argList, ObjClosure* cl) -> Value {
         if (!cl->acceptsArgCount(1)) throw std::runtime_error("Runtime Error: all() requires a single-parameter function.");
-        Value res = iterateAndCheck(args[1], cl, [](bool res) { return !res; });
+        Value res = iterateAndCheck(argList, cl, [](bool res) { return !res; });
         return Value(!res.asBool());
+    };
+
+    reg("all", { 1, 2 }, [allCore](const std::vector<Value>& args) -> Value {
+        if (args.size() == 1) {
+            Value capturedFn = args[0];
+            if (!capturedFn.isFunctionClosure()) throw std::runtime_error("Type Error: all() currying expects a function.");
+            auto bound = GcHeap::get().allocate<ObjClosure>(std::vector<std::string>{"v"}, std::vector<bool>{false}, "all_curried", nullptr);
+            bound->nativeFn = VM::makeNativeFn([capturedFn, allCore](const std::vector<Value>& innerArgs) -> Value {
+                return allCore(innerArgs[0], capturedFn.asFunction());
+            });
+            return Value(bound);
+        }
+        return allCore(args[0], args[1].asFunction());
         });
 
-    reg("countIf", { 2 }, [](const std::vector<Value>& args) -> Value {
-        auto cl = args[0].asFunction();
+    auto countIfCore = [](const Value& argList, ObjClosure* cl) -> Value {
         if (!cl->acceptsArgCount(1)) throw std::runtime_error("Runtime Error: countIf() requires a single-parameter function.");
-        Value argList = args[1];
         int c = 0;
         if (argList.isObjType(ObjType::LIST)) {
             for (const auto& e : static_cast<ObjList*>(argList.asObj())->vec) { jc::checkInterrupt(); if (safeCallFunction(cl, { e }).truthy()) c++; }
@@ -3159,28 +3218,23 @@ void BuiltinRegistry::registerHigherOrder() {
             throw std::runtime_error("Type Error: countIf() expects a vector/list.");
         }
         return Value(static_cast<double>(c));
+    };
+
+    reg("countIf", { 1, 2 }, [countIfCore](const std::vector<Value>& args) -> Value {
+        if (args.size() == 1) {
+            Value capturedFn = args[0];
+            if (!capturedFn.isFunctionClosure()) throw std::runtime_error("Type Error: countIf() currying expects a function.");
+            auto bound = GcHeap::get().allocate<ObjClosure>(std::vector<std::string>{"v"}, std::vector<bool>{false}, "countIf_curried", nullptr);
+            bound->nativeFn = VM::makeNativeFn([capturedFn, countIfCore](const std::vector<Value>& innerArgs) -> Value {
+                return countIfCore(innerArgs[0], capturedFn.asFunction());
+            });
+            return Value(bound);
+        }
+        return countIfCore(args[0], args[1].asFunction());
         });
 
-    reg("sort", { 1, 2 }, [](const std::vector<Value>& args) -> Value {
-        Value arg = args[0];
-        if (args.size() == 1) {
-            if (arg.isObjType(ObjType::REAL_MATRIX)) {
-                auto f = static_cast<ObjRealMatrix*>(arg.asObj())->mat.rawData();
-                std::sort(f.begin(), f.end()); return Value(RealMatrix(1, static_cast<int>(f.size()), f));
-            } else if (arg.isObjType(ObjType::STRING_MATRIX)) {
-                auto f = static_cast<ObjStringMatrix*>(arg.asObj())->mat.rawData();
-                std::sort(f.begin(), f.end()); return Value(StringMatrix(1, static_cast<int>(f.size()), f));
-            } else if (arg.isObjType(ObjType::LIST)) {
-                ObjList* L = GcHeap::get().allocate<ObjList>();
-                L->vec = static_cast<ObjList*>(arg.asObj())->vec;
-                std::sort(L->vec.begin(), L->vec.end(), [](const Value& a, const Value& b) {
-                    std::ostringstream oa, ob; oa << a; ob << b; return oa.str() < ob.str();
-                });
-                return Value(L);
-            }
-            throw std::runtime_error("Type Error: sort() without comparator expects an array or list.");
-        } else if (args.size() == 2) {
-            auto cmp = args[1].asFunction();
+    auto sortCore = [](const Value& arg, ObjClosure* cmp) -> Value {
+        if (cmp) {
             if (!cmp->acceptsArgCount(2)) throw std::runtime_error("Runtime Error: sort() comparator must be a 2-parameter function.");
             if (arg.isObjType(ObjType::LIST)) {
                 ObjList* L = GcHeap::get().allocate<ObjList>();
@@ -3203,8 +3257,36 @@ void BuiltinRegistry::registerHigherOrder() {
                 return Value(StringMatrix(1, static_cast<int>(f.size()), f));
             }
             throw std::runtime_error("Type Error: sort() expects a vector or list.");
+        } else {
+            if (arg.isObjType(ObjType::REAL_MATRIX)) {
+                auto f = static_cast<ObjRealMatrix*>(arg.asObj())->mat.rawData();
+                std::sort(f.begin(), f.end()); return Value(RealMatrix(1, static_cast<int>(f.size()), f));
+            } else if (arg.isObjType(ObjType::STRING_MATRIX)) {
+                auto f = static_cast<ObjStringMatrix*>(arg.asObj())->mat.rawData();
+                std::sort(f.begin(), f.end()); return Value(StringMatrix(1, static_cast<int>(f.size()), f));
+            } else if (arg.isObjType(ObjType::LIST)) {
+                ObjList* L = GcHeap::get().allocate<ObjList>();
+                L->vec = static_cast<ObjList*>(arg.asObj())->vec;
+                std::sort(L->vec.begin(), L->vec.end(), [](const Value& a, const Value& b) {
+                    std::ostringstream oa, ob; oa << a; ob << b; return oa.str() < ob.str();
+                });
+                return Value(L);
+            }
+            throw std::runtime_error("Type Error: sort() without comparator expects an array or list.");
         }
-        throw std::runtime_error("Runtime Error: sort() expects 1 or 2 arguments.");
+    };
+
+    reg("sort", { 1, 2 }, [sortCore](const std::vector<Value>& args) -> Value {
+        if (args.size() == 1 && args[0].isFunctionClosure()) {
+            Value capturedFn = args[0];
+            auto bound = GcHeap::get().allocate<ObjClosure>(std::vector<std::string>{"v"}, std::vector<bool>{false}, "sort_curried", nullptr);
+            bound->nativeFn = VM::makeNativeFn([capturedFn, sortCore](const std::vector<Value>& innerArgs) -> Value {
+                return sortCore(innerArgs[0], capturedFn.asFunction());
+            });
+            return Value(bound);
+        }
+        if (args.size() == 1) return sortCore(args[0], nullptr);
+        return sortCore(args[0], args[1].asFunction());
         });
 
 }
@@ -4509,7 +4591,7 @@ void BuiltinRegistry::registerCAS() {
 
             return jc::evalUniversal(ast.ptr, valEnv, resolver);
             };
-        cls->nativeFn = std::make_any<jc::NativeCallable>(std::move(jc_caller));
+        cls->nativeFn = VM::makeNativeFn(std::move(jc_caller));
         return jc::Value(cls);
         });
 

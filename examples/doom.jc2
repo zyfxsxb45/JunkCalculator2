@@ -1,4 +1,4 @@
-import "engine"
+import engine
 
 class Raycaster3D extends GameEngine {
     init() = {
@@ -43,10 +43,10 @@ class Raycaster3D extends GameEngine {
         // Iterative DFS maze generation using a stack (prevents stack overflow)
         path_stack = list()
         self.map[1, 1] = 0.0 
-        push(path_stack, list(1, 1))
+        path_stack.push(list(1, 1))
         
-        while (len(path_stack) > 0) {
-            curr = last(path_stack)
+        while (path_stack.len() > 0) {
+            curr = path_stack.last()
             r = int(curr[0]); c = int(curr[1])
             
             // Four tunneling directions [dRow, dCol]
@@ -69,13 +69,13 @@ class Raycaster3D extends GameEngine {
                         // Break the wall between current and target nodes
                         self.map[r + int(dr/2), c + int(dc/2)] = 0.0
                         self.map[nr, nc] = 0.0 // Mark target node as a path
-                        push(path_stack, list(nr, nc))
+                        path_stack.push(list(nr, nc))
                         moved = true
                         break
                     }
                 }
             }
-            if (!moved) pop(path_stack) // Dead end reached, backtrack!
+            if (!moved) path_stack.pop() // Dead end reached, backtrack!
         }
         
         // Apply random Cyberpunk paint/textures to walls (Color index 1-4)
@@ -200,7 +200,7 @@ class Raycaster3D extends GameEngine {
 
     // Helper to center text (Hardware ASCII font width is 8px)
     drawCentered(im, txt, y, color, scale) = {
-        txt_width = len(txt) * 8 * scale
+        txt_width = txt.len() * 8 * scale
         x = int((self.W - txt_width) / 2)
         im.text(txt, x, y, color, scale)
     }
@@ -243,8 +243,8 @@ class Raycaster3D extends GameEngine {
             line_height = self.H / perp_dist
             
             // ★ Use float precision to allow hardware SDF Alpha-blending on edges!
-            draw_start = max([0.0, -line_height / 2.0 + self.H / 2.0])
-            draw_end = min([self.H - 1.0, line_height / 2.0 + self.H / 2.0])
+            draw_start = [0.0, -line_height / 2.0 + self.H / 2.0].max()
+            draw_end = [self.H - 1.0, line_height / 2.0 + self.H / 2.0].min()
             
             color_idx = int(self.map[map_x, map_y])
             c_hex = (side == 1) ? self.shades[color_idx] : self.colors[color_idx]
@@ -274,7 +274,7 @@ class Raycaster3D extends GameEngine {
         // 🛰️ Minimap (Toggle with 'M', auto-scales based on maze size!)
         if (self.show_map) {
             rx = self.W - 160; ry = 20
-            r_cell = max([2, int(130 / self.size)])  // Adaptive radar scaling
+            r_cell = [2, int(130 / self.size)].max()  // Adaptive radar scaling
             im.fillRect(rx - 5, ry - 5, self.size * r_cell + 10, self.size * r_cell + 10, "#111111")
             for (r in range(self.size)) {
                 for (c in range(self.size)) {

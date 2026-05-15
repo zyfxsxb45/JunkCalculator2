@@ -2,6 +2,7 @@
 #define JC2_MODULE_LATEX_H
 
 #include "Module.h"
+#include "../vm/VM.h"
 #include <sstream>
 #include <iomanip>
 #include <cctype>
@@ -293,7 +294,7 @@ JC2_MODULE(latex) {
             std::vector<bool> pRefs(argCount, false);
             auto cls = GcHeap::get().allocate<ObjClosure>(pNames, pRefs, name, nullptr);
             cls->defaultValues.resize(argCount, Value::none());
-            cls->nativeFn = std::make_any<NativeCallable>(std::move(fn));
+            cls->nativeFn = jc::VM::makeNativeFn(std::move(fn));
             return Value(cls);
         }
     );
@@ -303,9 +304,9 @@ JC2_MODULE(latex) {
         return Value(valueToLatex(args[0]));
         }));
 
-    R.set("eval_latex", (*makeNativeFn)("eval_latex", 1, [](const std::vector<Value>& args) -> Value {
+    R.set("eval", (*makeNativeFn)("eval", 1, [](const std::vector<Value>& args) -> Value {
         if (args.empty() || !args[0].isString())
-            throw std::runtime_error("eval_latex() requires a LaTeX string.");
+            throw std::runtime_error("eval() requires a LaTeX string.");
         LatexParser parser;
         auto ast = parser.compile(args[0].asString());
 
@@ -315,9 +316,9 @@ JC2_MODULE(latex) {
         return Value(Complex(res.real(), res.imag()));           // 否则以复数形式返还！
         }));
 
-    R.set("compile_latex", (*makeNativeFn)("compile_latex", 2, [makeNativeFn](const std::vector<Value>& args) -> Value {
+    R.set("compile", (*makeNativeFn)("compile", 2, [makeNativeFn](const std::vector<Value>& args) -> Value {
         if (args.size() < 2 || !args[0].isString())
-            throw std::runtime_error("compile_latex(string, vars): Requires formula and variable names.");
+            throw std::runtime_error("compile(string, vars): Requires formula and variable names.");
 
         std::string latex_str = args[0].asString();
         std::vector<std::string> varNames;

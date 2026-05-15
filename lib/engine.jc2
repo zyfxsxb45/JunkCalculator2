@@ -1,8 +1,8 @@
 // ═══════════════════════════════════════════════════════════════
 // engine.jc2 — Object-Oriented Game Framework for JC2
 // ═══════════════════════════════════════════════════════════════
-import "image"
-import "window"
+import image
+import window
 
 class GameEngine {
     init(title: string = "JC2 Game", width: int = 800, height: int = 600, fps: int = 60) = {
@@ -11,8 +11,8 @@ class GameEngine {
         self.fps = fps
         self.frame_time = 1.0 / fps
         
-        self.im = img(width, height)
-        self.win = Window(title, width, height)
+        self.im = image.img(width, height)
+        self.win = window.Window(title, width, height)
         self.running = true
         self.bg_color = "#000000"
     }
@@ -40,7 +40,7 @@ class GameEngine {
         while (self.win.isOpen() && self.running) {
             while (true) {
                 ev = self.win.pollEvent()
-                if (isnone(ev)) break
+                if (ev.isnone()) break
                 
                 if (ev.type == "keydown")   self.onKeyDown(ev.key)
                 if (ev.type == "keyup")     self.onKeyUp(ev.key)
@@ -76,7 +76,7 @@ if (isfunction(__register_help)) {
     __register_help("engine", r"DOC(
 ═══ Game Engine Framework (Standard Library) ═══
 
-  Requires: import "engine"
+  Requires: import engine
 
   A fully Object-Oriented, Pygame-like framework for rapid interactive 
   application and game development in JC2. It manages the boilerplate of 
