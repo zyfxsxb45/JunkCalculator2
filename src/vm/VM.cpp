@@ -1348,6 +1348,23 @@ namespace jc {
                             }
                         }
                     }
+                    else if (iterable.isObjType(ObjType::NAMESPACE)) {
+                        const auto* ns = static_cast<ObjNamespace*>(iterable.asObj());
+                        if (destructFlag) {
+                            for (const auto& [key, field] : ns->fields) {
+                                ObjList* pair = GcHeap::get().allocate<ObjList>();
+                                pair->vec.push_back(Value(key));
+                                pair->vec.push_back(*(field.upval->location));
+                                pair->is_frozen = true;
+                                elements->vec.push_back(Value(pair));
+                            }
+                        }
+                        else {
+                            for (const auto& [key, field] : ns->fields) {
+                                elements->vec.push_back(Value(key));
+                            }
+                        }
+                    }
                     else if (iterable.isObjType(ObjType::SET)) {
                         const auto* s = static_cast<ObjSet*>(iterable.asObj());
                         for (const auto& val : s->elements) {
@@ -1957,6 +1974,7 @@ namespace jc {
 
                     if (obj.isInstance()) {
                         auto inst = obj.asInstance();
+                        inst->checkModify();
                         auto setattrMethod = findDunder(obj, DUNDER_SETATTR);
                         if (setattrMethod) {
                             callDunder(obj, DUNDER_SETATTR, { Value(field), val });
@@ -1981,6 +1999,7 @@ namespace jc {
                     }
                     else if (obj.isObjType(ObjType::NAMESPACE)) {
                         auto ns = static_cast<ObjNamespace*>(obj.asObj());
+                        ns->checkModify();
                         auto it = ns->fields.find(field);
                         if (it != ns->fields.end()) {
                             if (it->second.isConst) throw std::runtime_error("Runtime Error: Cannot modify const property '" + field + "' in namespace '" + ns->name + "'.");
@@ -2791,6 +2810,15 @@ namespace jc {
                 return;
             }
 
+            if (obj.isObjType(ObjType::NAMESPACE)) {
+                auto ns = static_cast<ObjNamespace*>(obj.asObj());
+                if (!idx.isString()) throw std::runtime_error("Type Error: Namespace keys must be strings.");
+                auto it = ns->fields.find(idx.asString());
+                if (it == ns->fields.end()) throw std::runtime_error("VM Error: Field '" + idx.asString() + "' not found in namespace.");
+                push(*(it->second.upval->location));
+                return;
+            }
+
             // ── Instance (__getitem__) ──
             if (obj.isInstance()) {
                 auto inst = obj.asInstance();
@@ -2978,9 +3006,28 @@ namespace jc {
                 push(val); push(obj); return;
             }
 
+            if (obj.isObjType(ObjType::NAMESPACE)) {
+                auto ns = static_cast<ObjNamespace*>(obj.asObj());
+                ns->checkModify();
+                if (!idx.isString()) throw std::runtime_error("Type Error: Namespace keys must be strings.");
+                std::string key = idx.asString();
+                auto it = ns->fields.find(key);
+                if (it != ns->fields.end()) {
+                    if (it->second.isConst) throw std::runtime_error("Runtime Error: Cannot modify const property '" + key + "' in namespace '" + ns->name + "'.");
+                    *(it->second.upval->location) = val;
+                } else {
+                    auto uv = std::make_shared<UpVal>();
+                    uv->closed = val;
+                    uv->location = &uv->closed;
+                    ns->fields[key] = { uv, false };
+                }
+                push(val); push(obj); return;
+            }
+
             // ── Instance (__setitem__) ──
             if (obj.isInstance()) {
                 auto inst = obj.asInstance();
+                inst->checkModify();
                 auto c = inst->classDef;
                 ObjClosure* setitemMethod = nullptr;
                 while (c) {
@@ -4029,6 +4076,16 @@ namespace jc {
         if (haystack.isObjType(ObjType::DICT)) {
             auto d = static_cast<ObjDict*>(haystack.asObj());
             push(Value(d->keyMap.find(needle) != d->keyMap.end() ? 1.0 : 0.0));
+            return;
+        }
+
+        if (haystack.isObjType(ObjType::NAMESPACE)) {
+            auto ns = static_cast<ObjNamespace*>(haystack.asObj());
+            if (!needle.isString()) {
+                push(Value(0.0));
+                return;
+            }
+            push(Value(ns->fields.find(needle.asString()) != ns->fields.end() ? 1.0 : 0.0));
             return;
         }
 

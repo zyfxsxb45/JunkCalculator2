@@ -402,15 +402,53 @@ namespace jc {
 
         double toDouble() const {
             double result = 0.0;
-            double base_power = 1.0;
-            for (size_t i = 0; i < data.size(); ++i) {
-                result += static_cast<double>(data[i]) * base_power;
-                base_power *= static_cast<double>(BASE);
-                // ★ 同时检查 inf 和 NaN（覆盖 0*inf=NaN 的边界情况）
+            for (int i = static_cast<int>(data.size()) - 1; i >= 0; --i) {
+                result = result * static_cast<double>(BASE) + static_cast<double>(data[i]);
                 if (!std::isfinite(result))
                     throw std::runtime_error("Math Error: BigInt too large to convert to double.");
             }
             return negative ? -result : result;
+        }
+
+        static double toDoubleRatio(const BigInt& num, const BigInt& den) {
+            if (den.isZero()) throw std::runtime_error("Math Error: Division by zero.");
+            if (num.isZero()) return 0.0;
+
+            int n_size = static_cast<int>(num.data.size());
+            int d_size = static_cast<int>(den.data.size());
+
+            // 如果两者都在 double 安全范围内 (34 * 9 = 306 位十进制)，直接计算
+            if (n_size <= 34 && d_size <= 34) {
+                return num.toDouble() / den.toDouble();
+            }
+
+            // 否则，提取最高 3 个 limb (约 27 位十进制，足以覆盖 double 的 53 bits 精度)
+            auto extract = [](const BigInt& b) -> std::pair<double, int> {
+                if (b.isZero()) return {0.0, 0};
+                int sz = static_cast<int>(b.data.size());
+                double res = 0.0;
+                int start = std::max(0, sz - 3);
+                for (int i = sz - 1; i >= start; --i) {
+                    res = res * BASE + b.data[i];
+                }
+                if (b.negative) res = -res;
+                return {res, start};
+            };
+
+            auto [n_val, n_exp] = extract(num);
+            auto [d_val, d_exp] = extract(den);
+
+            double ratio = n_val / d_val;
+            int exp_diff = n_exp - d_exp;
+
+            if (exp_diff != 0) {
+                ratio *= std::pow(static_cast<double>(BASE), exp_diff);
+            }
+            
+            if (!std::isfinite(ratio)) {
+                throw std::runtime_error("Math Error: Fraction too large to convert to double.");
+            }
+            return ratio;
         }
 
         int64_t toInt64() const {

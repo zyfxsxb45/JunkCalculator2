@@ -105,6 +105,13 @@ namespace jc {
         else if (v.isObjType(ObjType::NAMESPACE)) {
             oss << static_cast<ObjNamespace*>(v.asObj())->name;
         }
+        else if (v.isFunctionClosure()) {
+            auto cl = v.asFunction();
+            if (cl->compiledFnIndex >= 0) oss << "fn:" << cl->compiledFnIndex;
+            else oss << "native:" << cl->rawBody;
+            oss << "|self:" << setValueKey(cl->boundSelf);
+            oss << "|cls:" << setValueKey(cl->boundClass);
+        }
         else {
             oss << v;
         }
@@ -1454,6 +1461,11 @@ void BuiltinRegistry::registerSystemUtils() {
             static_cast<ObjDict*>(args[0].asObj())->is_frozen = true;
         } else if (args[0].isObjType(ObjType::SET)) {
             static_cast<ObjSet*>(args[0].asObj())->is_frozen = true;
+        } else if (args[0].isInstance()) {
+            args[0].asInstance()->is_frozen = true;
+            if (args[0].asInstance()->fields) args[0].asInstance()->fields->is_frozen = true;
+        } else if (args[0].isObjType(ObjType::NAMESPACE)) {
+            static_cast<ObjNamespace*>(args[0].asObj())->is_frozen = true;
         }
         return args[0];
         });
@@ -1465,6 +1477,10 @@ void BuiltinRegistry::registerSystemUtils() {
             return Value(static_cast<ObjDict*>(args[0].asObj())->is_frozen);
         } else if (args[0].isObjType(ObjType::SET)) {
             return Value(static_cast<ObjSet*>(args[0].asObj())->is_frozen);
+        } else if (args[0].isInstance()) {
+            return Value(args[0].asInstance()->is_frozen);
+        } else if (args[0].isObjType(ObjType::NAMESPACE)) {
+            return Value(static_cast<ObjNamespace*>(args[0].asObj())->is_frozen);
         }
         return Value(false);
         });
@@ -1516,6 +1532,34 @@ void BuiltinRegistry::registerSystemUtils() {
                 }
                 return newVal;
             }
+            if (v.isInstance()) {
+                auto inst = v.asInstance();
+                if (visited.count(inst)) return visited[inst];
+                ObjInstance* newInst = GcHeap::get().allocate<ObjInstance>();
+                newInst->classDef = inst->classDef;
+                newInst->nativeData = inst->nativeData;
+                Value newVal(newInst);
+                visited[inst] = newVal;
+                if (inst->fields) {
+                    newInst->fields = static_cast<ObjDict*>(deepCopy(Value(inst->fields)).asObj());
+                }
+                return newVal;
+            }
+            if (v.isObjType(ObjType::NAMESPACE)) {
+                auto ns = static_cast<ObjNamespace*>(v.asObj());
+                if (visited.count(ns)) return visited[ns];
+                ObjNamespace* newNs = GcHeap::get().allocate<ObjNamespace>();
+                newNs->name = ns->name;
+                Value newVal(newNs);
+                visited[ns] = newVal;
+                for (const auto& [k, field] : ns->fields) {
+                    auto uv = std::make_shared<UpVal>();
+                    uv->closed = deepCopy(*(field.upval->location));
+                    uv->location = &uv->closed;
+                    newNs->fields[k] = { uv, field.isConst };
+                }
+                return newVal;
+            }
             return v;
         };
         return deepCopy(args[0]);
@@ -1563,6 +1607,36 @@ void BuiltinRegistry::registerSystemUtils() {
                     newSet->elements.push_back(newV);
                 }
                 newSet->is_frozen = true;
+                return newVal;
+            }
+            if (v.isInstance()) {
+                auto inst = v.asInstance();
+                if (visited.count(inst)) return visited[inst];
+                ObjInstance* newInst = GcHeap::get().allocate<ObjInstance>();
+                newInst->classDef = inst->classDef;
+                newInst->nativeData = inst->nativeData;
+                Value newVal(newInst);
+                visited[inst] = newVal;
+                if (inst->fields) {
+                    newInst->fields = static_cast<ObjDict*>(deepCopyAndFreeze(Value(inst->fields)).asObj());
+                }
+                newInst->is_frozen = true;
+                return newVal;
+            }
+            if (v.isObjType(ObjType::NAMESPACE)) {
+                auto ns = static_cast<ObjNamespace*>(v.asObj());
+                if (visited.count(ns)) return visited[ns];
+                ObjNamespace* newNs = GcHeap::get().allocate<ObjNamespace>();
+                newNs->name = ns->name;
+                Value newVal(newNs);
+                visited[ns] = newVal;
+                for (const auto& [k, field] : ns->fields) {
+                    auto uv = std::make_shared<UpVal>();
+                    uv->closed = deepCopyAndFreeze(*(field.upval->location));
+                    uv->location = &uv->closed;
+                    newNs->fields[k] = { uv, field.isConst };
+                }
+                newNs->is_frozen = true;
                 return newVal;
             }
             return v;
@@ -1779,11 +1853,34 @@ void BuiltinRegistry::registerControlFlow() {
         }
         else if (args[0].isObjType(ObjType::DICT) || args[0].isInstance()) {
             if (args.size() != 3) throw std::runtime_error("Runtime Error: add() on Dict/Instance takes 3 args (obj, key, val).");
+            if (args[0].isInstance()) args[0].asInstance()->checkModify();
             auto d = args[0].isInstance() ? args[0].asInstance()->fields : static_cast<ObjDict*>(args[0].asObj());
+            if (!d && args[0].isInstance()) {
+                d = GcHeap::get().allocate<ObjDict>();
+                args[0].asInstance()->fields = d;
+            }
             d->set(args[1], args[2]);
             return args[0]; // 返回原对象
         }
-        throw std::runtime_error("Type Error: add() expects a Set, List, Dict, or Instance.");
+        else if (args[0].isObjType(ObjType::NAMESPACE)) {
+            if (args.size() != 3) throw std::runtime_error("Runtime Error: add() on Namespace takes 3 args (obj, key, val).");
+            auto ns = static_cast<ObjNamespace*>(args[0].asObj());
+            ns->checkModify();
+            if (!args[1].isString()) throw std::runtime_error("Type Error: Namespace keys must be strings.");
+            std::string key = args[1].asString();
+            auto it = ns->fields.find(key);
+            if (it != ns->fields.end()) {
+                if (it->second.isConst) throw std::runtime_error("Runtime Error: Cannot modify const property '" + key + "'.");
+                *(it->second.upval->location) = args[2];
+            } else {
+                auto uv = std::make_shared<UpVal>();
+                uv->closed = args[2];
+                uv->location = &uv->closed;
+                ns->fields[key] = { uv, false };
+            }
+            return args[0];
+        }
+        throw std::runtime_error("Type Error: add() expects a Set, List, Dict, Instance, or Namespace.");
         });
 
     reg("remove", { 2 }, [](const std::vector<Value>& args) -> Value {
@@ -1801,11 +1898,22 @@ void BuiltinRegistry::registerControlFlow() {
             return args[0];
         }
         else if (args[0].isObjType(ObjType::DICT) || args[0].isInstance()) {
+            if (args[0].isInstance()) args[0].asInstance()->checkModify();
             auto d = args[0].isInstance() ? args[0].asInstance()->fields : static_cast<ObjDict*>(args[0].asObj());
-            d->remove(args[1]);
+            if (d) d->remove(args[1]);
+            else throw std::runtime_error("Runtime Error: Key not found.");
             return args[0];
         }
-        throw std::runtime_error("Type Error: remove() expects a Set, List, Dict, or Instance.");
+        else if (args[0].isObjType(ObjType::NAMESPACE)) {
+            auto ns = static_cast<ObjNamespace*>(args[0].asObj());
+            ns->checkModify();
+            if (!args[1].isString()) throw std::runtime_error("Type Error: Namespace keys must be strings.");
+            auto it = ns->fields.find(args[1].asString());
+            if (it == ns->fields.end()) throw std::runtime_error("Runtime Error: Key not found.");
+            ns->fields.erase(it);
+            return args[0];
+        }
+        throw std::runtime_error("Type Error: remove() expects a Set, List, Dict, Instance, or Namespace.");
         });
 
     reg("discard", { 2 }, [](const std::vector<Value>& args) -> Value {
@@ -1815,11 +1923,18 @@ void BuiltinRegistry::registerControlFlow() {
             return args[0];
         }
         else if (args[0].isObjType(ObjType::DICT) || args[0].isInstance()) {
+            if (args[0].isInstance()) args[0].asInstance()->checkModify();
             auto d = args[0].isInstance() ? args[0].asInstance()->fields : static_cast<ObjDict*>(args[0].asObj());
-            d->discard(args[1]);
+            if (d) d->discard(args[1]);
             return args[0];
         }
-        throw std::runtime_error("Type Error: discard() expects a Set, Dict, or Instance.");
+        else if (args[0].isObjType(ObjType::NAMESPACE)) {
+            auto ns = static_cast<ObjNamespace*>(args[0].asObj());
+            ns->checkModify();
+            if (args[1].isString()) ns->fields.erase(args[1].asString());
+            return args[0];
+        }
+        throw std::runtime_error("Type Error: discard() expects a Set, Dict, Instance, or Namespace.");
         });
 
     reg("clear", { 1 }, [](const std::vector<Value>& args) -> Value {
@@ -1834,11 +1949,17 @@ void BuiltinRegistry::registerControlFlow() {
             return args[0];
         }
         else if (args[0].isObjType(ObjType::DICT) || args[0].isInstance()) {
+            if (args[0].isInstance()) args[0].asInstance()->checkModify();
             auto d = args[0].isInstance() ? args[0].asInstance()->fields : static_cast<ObjDict*>(args[0].asObj());
-            d->clear();
+            if (d) d->clear();
             return args[0];
         }
-        throw std::runtime_error("Type Error: clear() expects a Set, List, Dict, or Instance.");
+        else if (args[0].isObjType(ObjType::NAMESPACE)) {
+            auto ns = static_cast<ObjNamespace*>(args[0].asObj());
+            ns->clear();
+            return args[0];
+        }
+        throw std::runtime_error("Type Error: clear() expects a Set, List, Dict, Instance, or Namespace.");
         });
 }
 
@@ -1873,7 +1994,8 @@ void BuiltinRegistry::registerStringFunctions() {
         if (args[0].isObjType(ObjType::DICT)) return Value(static_cast<double>(static_cast<ObjDict*>(args[0].asObj())->elements.size()));
         if (args[0].isObjType(ObjType::LIST)) return Value(static_cast<double>(static_cast<ObjList*>(args[0].asObj())->vec.size()));
         if (args[0].isObjType(ObjType::SET)) return Value(static_cast<double>(static_cast<ObjSet*>(args[0].asObj())->elements.size()));
-        throw std::runtime_error("Type Error: len() expects a string, vector, matrix, dict, or list.");
+        if (args[0].isObjType(ObjType::NAMESPACE)) return Value(static_cast<double>(static_cast<ObjNamespace*>(args[0].asObj())->fields.size()));
+        throw std::runtime_error("Type Error: len() expects a string, vector, matrix, dict, list, set, or namespace.");
         });
     reg("length", builtinArity["len"], builtins["len"]);
     reg("size", builtinArity["len"], builtins["len"]);
@@ -2532,6 +2654,12 @@ void BuiltinRegistry::registerDictFunctions() {
     reg("dict", {}, [](const std::vector<Value>& args) -> Value { ObjDict* d = GcHeap::get().allocate<ObjDict>(); if (args.size() % 2 != 0) throw std::runtime_error("Runtime Error: dict() expects even number of arguments."); for (size_t i = 0; i < args.size(); i += 2) { d->keyMap[args[i]] = d->elements.size(); d->elements.push_back({args[i], args[i + 1]}); } return Value(d); });
 
     reg("keys", { 1 }, [](const std::vector<Value>& args) -> Value {
+        if (args[0].isObjType(ObjType::NAMESPACE)) {
+            auto ns = static_cast<ObjNamespace*>(args[0].asObj());
+            ObjList* L = GcHeap::get().allocate<ObjList>();
+            for (const auto& [k, v] : ns->fields) L->vec.push_back(Value(k));
+            return Value(L);
+        }
         ObjDict* d = helpers::getDictMap(args[0], "keys");
         ObjList* L = GcHeap::get().allocate<ObjList>();
         for (const auto& [k, v] : d->elements) L->vec.push_back(k);
@@ -2541,6 +2669,12 @@ void BuiltinRegistry::registerDictFunctions() {
     reg("getFields", builtinArity["keys"], builtins["keys"]);
 
     reg("values", { 1 }, [](const std::vector<Value>& args) -> Value {
+        if (args[0].isObjType(ObjType::NAMESPACE)) {
+            auto ns = static_cast<ObjNamespace*>(args[0].asObj());
+            ObjList* L = GcHeap::get().allocate<ObjList>();
+            for (const auto& [k, v] : ns->fields) L->vec.push_back(*(v.upval->location));
+            return Value(L);
+        }
         ObjDict* d = helpers::getDictMap(args[0], "values");
         ObjList* L = GcHeap::get().allocate<ObjList>();
         for (const auto& [k, v] : d->elements) L->vec.push_back(v);
@@ -2548,6 +2682,11 @@ void BuiltinRegistry::registerDictFunctions() {
         });
 
     reg("hasKey", { 2 }, [](const std::vector<Value>& args) -> Value {
+        if (args[0].isObjType(ObjType::NAMESPACE)) {
+            auto ns = static_cast<ObjNamespace*>(args[0].asObj());
+            if (!args[1].isString()) return Value(false);
+            return Value(ns->fields.find(args[1].asString()) != ns->fields.end());
+        }
         ObjDict* d = helpers::getDictMap(args[0], "hasKey");
         return Value(d->keyMap.find(args[1]) != d->keyMap.end());
         });
@@ -2556,24 +2695,83 @@ void BuiltinRegistry::registerDictFunctions() {
     reg("has", builtinArity["hasKey"], builtins["hasKey"]);
 
     reg("removeKey", { 2 }, [](const std::vector<Value>& args) -> Value {
+        if (args[0].isObjType(ObjType::NAMESPACE)) {
+            auto ns = static_cast<ObjNamespace*>(args[0].asObj());
+            ns->checkModify();
+            if (!args[1].isString()) throw std::runtime_error("Type Error: Namespace keys must be strings.");
+            auto it = ns->fields.find(args[1].asString());
+            if (it == ns->fields.end()) throw std::runtime_error("Runtime Error: Key not found.");
+            ns->fields.erase(it);
+            return args[0];
+        }
         ObjDict* d = helpers::getDictMap(args[0], "removeKey");
         d->remove(args[1]);
         return args[0];
         });
 
     reg("dictSize", { 1 }, [](const std::vector<Value>& args) -> Value {
+        if (args[0].isObjType(ObjType::NAMESPACE)) {
+            auto ns = static_cast<ObjNamespace*>(args[0].asObj());
+            return Value(static_cast<double>(ns->fields.size()));
+        }
         ObjDict* d = helpers::getDictMap(args[0], "dictSize"); return Value(static_cast<double>(d->elements.size()));
         });
 
     reg("dictMerge", { 2 }, [](const std::vector<Value>& args) -> Value {
-        ObjDict* d1 = helpers::getDictMap(args[0], "dictMerge"); ObjDict* d2 = helpers::getDictMap(args[1], "dictMerge");
-        for (const auto& [k, v] : d2->elements) {
+        auto getPairs = [](const Value& v) -> std::vector<std::pair<Value, Value>> {
+            if (v.isObjType(ObjType::NAMESPACE)) {
+                std::vector<std::pair<Value, Value>> res;
+                for (const auto& [k, field] : static_cast<ObjNamespace*>(v.asObj())->fields) {
+                    res.push_back({Value(k), *(field.upval->location)});
+                }
+                return res;
+            }
+            ObjDict* d = helpers::getDictMap(v, "dictMerge");
+            return d->elements;
+        };
+        
+        if (args[0].isObjType(ObjType::NAMESPACE)) {
+            auto ns = static_cast<ObjNamespace*>(args[0].asObj());
+            ns->checkModify();
+            auto pairs2 = getPairs(args[1]);
+            for (const auto& [k, v] : pairs2) {
+                if (!k.isString()) throw std::runtime_error("Type Error: Namespace keys must be strings.");
+                std::string key = k.asString();
+                auto it = ns->fields.find(key);
+                if (it != ns->fields.end()) {
+                    if (it->second.isConst) throw std::runtime_error("Runtime Error: Cannot modify const property '" + key + "'.");
+                    *(it->second.upval->location) = v;
+                } else {
+                    auto uv = std::make_shared<UpVal>();
+                    uv->closed = v;
+                    uv->location = &uv->closed;
+                    ns->fields[key] = { uv, false };
+                }
+            }
+            return args[0];
+        }
+        
+        ObjDict* d1 = helpers::getDictMap(args[0], "dictMerge");
+        auto pairs2 = getPairs(args[1]);
+        for (const auto& [k, v] : pairs2) {
             d1->set(k, v);
         }
         return args[0];
         });
 
     reg("dictPairs", { 1 }, [](const std::vector<Value>& args) -> Value {
+        if (args[0].isObjType(ObjType::NAMESPACE)) {
+            auto ns = static_cast<ObjNamespace*>(args[0].asObj());
+            ObjList* L = GcHeap::get().allocate<ObjList>();
+            for (const auto& [k, v] : ns->fields) {
+                ObjList* pair = GcHeap::get().allocate<ObjList>();
+                pair->vec.push_back(Value(k));
+                pair->vec.push_back(*(v.upval->location));
+                pair->is_frozen = true;
+                L->vec.push_back(Value(pair));
+            }
+            return Value(L);
+        }
         ObjDict* d = helpers::getDictMap(args[0], "dictPairs");
         ObjList* L = GcHeap::get().allocate<ObjList>();
         for (const auto& [k, v] : d->elements) {

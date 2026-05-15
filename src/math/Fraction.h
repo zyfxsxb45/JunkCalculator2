@@ -55,7 +55,7 @@ namespace jc {
         BigInt getDen() const { return den; }
 
         double toDouble() const {
-            return num.toDouble() / den.toDouble();
+            return BigInt::toDoubleRatio(num, den);
         }
 
         std::string toString() const {
