@@ -23,6 +23,8 @@
       "    /save <name>           Snapshot variables  → data/<name>.jc2",
       "    /load <name>           Restore a previously saved workspace",
       "    run(\"file\")            Execute a script (sets relative path context)",
+      "    compileFile(\"file\")    Compile a script to bytecode and return it as a function",
+      "    compileCode(\"code\")    Compile a string of code to bytecode and return it as a function",
       "    import lib             Load a library and bind to namespace (recommended)",
       "    import \"lib\"           Load a library without binding to a variable",
       "",
@@ -1291,6 +1293,8 @@
       "  Script Execution & Path Context",
       "  ──────────────────────",
       "    run(\"path\")                  Execute a .jc2 script file (function form)",
+      "    compileFile(\"path\")          Compile a script to bytecode and return it as a function",
+      "    compileCode(\"code\")          Compile a string of code to bytecode and return it as a function",
       "",
       "    Executing a script automatically pushes its directory onto the",
       "    Path Stack. All relative file operations (readFile, import) inside",
@@ -4387,6 +4391,22 @@
       "desc": "Executes a .jc2 script file in the current environment.",
       "examples": [
         "run(\"script.jc2\")"
+      ]
+    },
+    "compileFile": {
+      "signature": "compileFile(path)",
+      "desc": "Compiles a .jc2 script file into bytecode and returns it as a callable function. Preserves relative path context.",
+      "examples": [
+        "logic = compileFile(\"script.jc2\")",
+        "logic()"
+      ]
+    },
+    "compileCode": {
+      "signature": "compileCode(code)",
+      "desc": "Compiles a string of JC2 code into bytecode and returns it as a callable function.",
+      "examples": [
+        "f = compileCode(\"print(1+1)\")",
+        "f()"
       ]
     },
     "sym": {

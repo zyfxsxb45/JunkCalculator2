@@ -3,6 +3,9 @@
 #include "../cas/Integration.h"
 #include "../cas/Factorization.h"
 #include "../frontend/Highlight.h"          // ★ highlightCode(), colorsEnabled
+#include "../frontend/Lexer.h"
+#include "../frontend/Parser.h"
+#include "../frontend/Compiler.h"
 #include "../modules/Module.h"
 #include "VM.h"
 #include "../memory/GcHeap.h"
@@ -3958,6 +3961,105 @@ void BuiltinRegistry::registerSystemShell() {
         helpers::g_scriptDirStack.pop_back();
 
         return result;
+        });
+
+    reg("compileCode", { 1 }, [](const std::vector<Value>& args) -> Value {
+        if (!args[0].isString()) throw std::runtime_error("Type Error: compileCode() expects a string.");
+        std::string code = args[0].asString();
+        
+        jc::Lexer lexer(code, "<compileCode>");
+        auto tokens = lexer.tokenize();
+        jc::Parser parser(tokens);
+        auto ast = parser.parse();
+        
+        jc::Compiler compiler;
+        // ★ 借用当前 VM 的 compiledFunctions 列表，保证内部闭包索引正确
+        compiler.setCompiledFunctions(VM::activeVM->getCompiledFunctions());
+        compiler.setFunctionIndexOffset(0);
+        
+        Chunk chunk = compiler.compile(ast.get(), "<compileCode>");
+        
+        auto mainFn = std::make_shared<CompiledFunction>();
+        mainFn->name = "<compiled_code>";
+        mainFn->sourceFile = "<compileCode>";
+        mainFn->chunk = std::move(chunk);
+        mainFn->arity = 0;
+        mainFn->maxArity = 0;
+        mainFn->localCount = compiler.getCompiledFunctions().empty() ? 0 : compiler.getCompiledFunctions().back()->localCount;
+        
+        // ★ 将编译出的所有函数（包括主函数）注入 VM
+        auto fns = compiler.getCompiledFunctions();
+        fns.push_back(mainFn);
+        int mainFnIdx = static_cast<int>(fns.size()) - 1;
+        VM::activeVM->setCompiledFunctions(fns);
+        
+        ObjClosure* cls = GcHeap::get().allocate<ObjClosure>(
+            std::vector<std::string>{}, std::vector<bool>{}, "<compiled_code>", nullptr
+        );
+        cls->compiledFnIndex = mainFnIdx;
+        
+        return Value(cls);
+        });
+
+    reg("compileFile", { 1 }, [](const std::vector<Value>& args) -> Value {
+        if (!args[0].isString()) throw std::runtime_error("Type Error: compileFile() expects a string path.");
+        std::string filepath = args[0].asString();
+        std::string resolved = helpers::safeResolvePath(filepath);
+        if (!std::filesystem::exists(resolved)) resolved = helpers::safeResolvePath(filepath + ".jc2");
+        if (!std::filesystem::exists(resolved)) throw std::runtime_error("IO Error: Cannot open script '" + filepath + "'.");
+
+        std::ifstream file(resolved);
+        if (!file.is_open()) throw std::runtime_error("IO Error: Cannot read script.");
+        std::string code, line;
+        while (std::getline(file, line)) code += line + "\n";
+        file.close();
+
+        jc::Lexer lexer(code, resolved);
+        auto tokens = lexer.tokenize();
+        jc::Parser parser(tokens);
+        auto ast = parser.parse();
+        
+        jc::Compiler compiler;
+        compiler.setCompiledFunctions(VM::activeVM->getCompiledFunctions());
+        compiler.setFunctionIndexOffset(0);
+        
+        Chunk chunk = compiler.compile(ast.get(), resolved);
+        
+        auto mainFn = std::make_shared<CompiledFunction>();
+        mainFn->name = "<compiled_file>";
+        mainFn->sourceFile = resolved;
+        mainFn->chunk = std::move(chunk);
+        mainFn->arity = 0;
+        mainFn->maxArity = 0;
+        mainFn->localCount = compiler.getCompiledFunctions().empty() ? 0 : compiler.getCompiledFunctions().back()->localCount;
+        
+        auto fns = compiler.getCompiledFunctions();
+        fns.push_back(mainFn);
+        int mainFnIdx = static_cast<int>(fns.size()) - 1;
+        VM::activeVM->setCompiledFunctions(fns);
+        
+        // ★ 核心：使用原生闭包代理，保护相对路径上下文！
+        std::string scriptDir = std::filesystem::path(resolved).parent_path().string();
+        VM* vm = VM::activeVM;
+        
+        ObjClosure* proxy = GcHeap::get().allocate<ObjClosure>(
+            std::vector<std::string>{}, std::vector<bool>{}, "<compiled_file_proxy>", nullptr
+        );
+        
+        proxy->nativeFn = VM::makeNativeFn([vm, mainFnIdx, scriptDir](const std::vector<Value>& callArgs) -> Value {
+            helpers::g_scriptDirStack.push_back(scriptDir);
+            Value result;
+            try {
+                result = vm->callVMFunction(mainFnIdx, callArgs);
+            } catch (...) {
+                helpers::g_scriptDirStack.pop_back();
+                throw;
+            }
+            helpers::g_scriptDirStack.pop_back();
+            return result;
+        });
+        
+        return Value(proxy);
         });
 
     reg("imgPlot", { 7, 8 }, [](const std::vector<Value>& args) -> Value {
