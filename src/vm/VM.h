@@ -79,7 +79,7 @@ namespace jc {
             *stackTop = Value::none();
         }
         inline void insertStack(int indexFromTop, const Value& val) {
-            Value* target = stackTop - 1 - indexFromTop;
+            Value* target = stackTop - indexFromTop; // ★ FIX: 移除多余的 -1，精准定位插入点
             for (Value* p = stackTop; p > target; --p) {
                 *p = std::move(*(p - 1));
             }

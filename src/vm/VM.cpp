@@ -4305,7 +4305,7 @@ namespace jc {
             auto gIt = globals.find(methodName);
             if (gIt != globals.end() && gIt->second.isFunctionClosure()) {
                 if (static_cast<int>(getStackSize()) >= MAX_STACK) throw std::runtime_error("VM Error: Stack overflow.");
-                insertStack(argc, gIt->second);
+                insertStack(argc + 1, gIt->second); // ★ FIX: 插入点上方有 argc + 1 个元素 (obj + args)
                 execCall(argc + 1);
                 return;
             }
