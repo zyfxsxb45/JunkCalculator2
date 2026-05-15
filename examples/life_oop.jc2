@@ -19,7 +19,7 @@ class LifeGame extends GameEngine {
         // 2. Setup game-specific states
         self.universe = zeros(self.ROWS, self.COLS)
         self.is_paused = false
-        self.speeds = [0.5, 0.2, 0.08]
+        self.speeds = [0.5, 0.2, 0.08, 0.05, 0]
         self.speed_idx = 2
         
         self.time_acc = 0.0     // Physics evolution time accumulator
@@ -54,6 +54,8 @@ class LifeGame extends GameEngine {
         if (key == "1") { self.speed_idx = 0 }
         if (key == "2") { self.speed_idx = 1 }
         if (key == "3") { self.speed_idx = 2 }
+        if (key == "4") { self.speed_idx = 3 }
+        if (key == "5") { self.speed_idx = 4 }
         if (key == "C") { self.universe = zeros(self.ROWS, self.COLS) }
         if (key == "ESC") { self.quit() }
     }
