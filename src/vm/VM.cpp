@@ -246,9 +246,9 @@ namespace jc {
 
     VM::VM() {
         activeVM = this;
-        stack.resize(MAX_STACK + 1024); // ★ 预分配全部空间
-        stackTop = stack.data();
-        stackLimit = stack.data() + MAX_STACK;
+        stack = new Value[MAX_STACK + 1024]; // ★ 彻底抛弃 vector，使用原生数组
+        stackTop = stack;
+        stackLimit = stack + MAX_STACK;
 
         // ★ 核心重定向器：C++ 层索要 "self" 时，直接打劫当前虚拟机的寄存器！
         helpers::getGlobalCallback = [this](const std::string& name) -> Value {
@@ -289,6 +289,10 @@ namespace jc {
             constGlobals.erase(name);  // 同步清除 const 标记
             return Value::none();
             }, { 1 });
+    }
+
+    VM::~VM() {
+        delete[] stack;
     }
 
     std::any VM::makeNativeFn(NativeCallable fn) {
@@ -2251,7 +2255,7 @@ namespace jc {
             markValue(val);
 
         // 根集合 2: 虚拟机求值栈
-        for (Value* p = stack.data(); p < stackTop; ++p)
+        for (Value* p = stack; p < stackTop; ++p)
             markValue(*p);
 
         // 根集合 3: 所有调用帧的闭包上值，以及存活帧的上下文引擎！
@@ -2291,7 +2295,7 @@ namespace jc {
     int VM::runGC() {
         for (const auto& [name, val] : globals)  markValue(val);
         for (const auto& [name, val] : loadedModules) markValue(val);
-        for (Value* p = stack.data(); p < stackTop; ++p) markValue(*p);
+        for (Value* p = stack; p < stackTop; ++p) markValue(*p);
         for (const auto& f : frames) {
             if (f.upvalues) {
                 for (const auto& uv : *f.upvalues) {

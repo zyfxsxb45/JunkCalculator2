@@ -32,7 +32,7 @@ namespace jc {
         CallFrame& frame() { return frames.back(); }
         const Chunk& currentChunk() { return frame().function->chunk; }
 
-        std::vector<Value> stack;
+        Value* stack = nullptr;
         Value* stackTop = nullptr;
         Value* stackLimit = nullptr;
         static constexpr int MAX_STACK = 65536;
@@ -60,13 +60,13 @@ namespace jc {
         }
         
         inline size_t getStackSize() const {
-            return static_cast<size_t>(stackTop - stack.data());
+            return static_cast<size_t>(stackTop - stack);
         }
         inline void setStackSize(size_t newSize) {
             while (getStackSize() > newSize) {
                 pop();
             }
-            stackTop = stack.data() + newSize;
+            stackTop = stack + newSize;
         }
         inline void eraseStack(int indexFromTop) {
             Value* target = stackTop - 1 - indexFromTop;
@@ -167,6 +167,7 @@ namespace jc {
 
     public:
         VM();
+        ~VM();
 
         void registerBuiltin(const std::string& name, NativeCallable fn, std::set<int> arity);
         void setGlobal(const std::string& name, const Value& val);
