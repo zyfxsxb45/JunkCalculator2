@@ -134,6 +134,8 @@ namespace jc {
         std::any nativeData;
         bool is_frozen = false;
         mutable bool is_hashable_cached = false;
+        mutable bool has_cached_hash = false;
+        mutable size_t cached_hash = 0;
         ObjInstance() { type = ObjType::INSTANCE; }
         void checkModify() const { if (is_frozen) throw std::runtime_error("Runtime Error: Cannot modify frozen Instance."); }
         void clear() override { checkModify(); nativeData.reset(); }
@@ -524,6 +526,8 @@ namespace jc {
         std::vector<Value> vec;
         bool is_frozen = false;
         mutable bool is_hashable_cached = false;
+        mutable bool has_cached_hash = false;
+        mutable size_t cached_hash = 0;
         ObjList() { type = ObjType::LIST; }
         void checkModify() const { if (is_frozen) throw std::runtime_error("Runtime Error: Cannot modify frozen List."); }
         std::vector<Value>& mut() { checkModify(); return vec; }
@@ -534,6 +538,8 @@ namespace jc {
         std::unordered_map<Value, size_t, ValueHasher, ValueEqual> keyMap;
         bool is_frozen = false;
         mutable bool is_hashable_cached = false;
+        mutable bool has_cached_hash = false;
+        mutable size_t cached_hash = 0;
         ObjDict() { type = ObjType::DICT; }
         void checkModify() const { if (is_frozen) throw std::runtime_error("Runtime Error: Cannot modify frozen Dict."); }
         void clear() override { checkModify(); elements.clear(); keyMap.clear(); }
@@ -576,6 +582,8 @@ namespace jc {
         std::unordered_set<Value, ValueHasher, ValueEqual> keys;
         bool is_frozen = false;
         mutable bool is_hashable_cached = false;
+        mutable bool has_cached_hash = false;
+        mutable size_t cached_hash = 0;
         ObjSet() { type = ObjType::SET; }
         void checkModify() const { if (is_frozen) throw std::runtime_error("Runtime Error: Cannot modify frozen Set."); }
         void clear() override { checkModify(); elements.clear(); keys.clear(); }
@@ -1932,14 +1940,17 @@ inline size_t ValueHasher::operator()(const Value& v) const {
         case ObjType::SYMBOLIC: return std::hash<std::string>{}(static_cast<ObjSym*>(obj)->sym.toString());
         case ObjType::LIST: {
             auto l = static_cast<ObjList*>(obj);
+            if (l->is_frozen && l->has_cached_hash) return l->cached_hash;
             size_t seed = 0;
             for (const auto& e : l->vec) {
                 seed ^= ValueHasher{}(e) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
             }
+            if (l->is_frozen) { l->cached_hash = seed; l->has_cached_hash = true; }
             return seed;
         }
         case ObjType::DICT: {
             auto d = static_cast<ObjDict*>(obj);
+            if (d->is_frozen && d->has_cached_hash) return d->cached_hash;
             size_t seed = 0;
             for (const auto& [k, val] : d->elements) {
                 size_t k_hash = ValueHasher{}(k);
@@ -1947,14 +1958,17 @@ inline size_t ValueHasher::operator()(const Value& v) const {
                 size_t kv_hash = k_hash ^ (v_hash + 0x9e3779b9 + (k_hash << 6) + (k_hash >> 2));
                 seed += kv_hash; // 无序容器使用满足交换律的累加
             }
+            if (d->is_frozen) { d->cached_hash = seed; d->has_cached_hash = true; }
             return seed;
         }
         case ObjType::SET: {
             auto s = static_cast<ObjSet*>(obj);
+            if (s->is_frozen && s->has_cached_hash) return s->cached_hash;
             size_t seed = 0;
             for (const auto& e : s->elements) {
                 seed += ValueHasher{}(e); // 无序容器使用满足交换律的累加
             }
+            if (s->is_frozen) { s->cached_hash = seed; s->has_cached_hash = true; }
             return seed;
         }
         case ObjType::INSTANCE: {
@@ -1966,6 +1980,7 @@ inline size_t ValueHasher::operator()(const Value& v) const {
                 if (res.isBigInt()) return std::hash<std::string>{}(res.asBigInt().toString());
             }
             if (inst->is_frozen) {
+                if (inst->has_cached_hash) return inst->cached_hash;
                 size_t seed = std::hash<std::string>{}(inst->classDef ? inst->classDef->name : "");
                 if (inst->fields) {
                     size_t fields_hash = 0;
@@ -1977,6 +1992,8 @@ inline size_t ValueHasher::operator()(const Value& v) const {
                     }
                     seed ^= fields_hash + 0x9e3779b9 + (seed << 6) + (seed >> 2);
                 }
+                inst->cached_hash = seed;
+                inst->has_cached_hash = true;
                 return seed;
             }
             return std::hash<const void*>{}(obj);
