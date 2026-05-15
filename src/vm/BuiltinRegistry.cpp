@@ -1565,6 +1565,85 @@ void BuiltinRegistry::registerSystemUtils() {
         return deepCopy(args[0]);
         });
 
+    reg("copy", { 1 }, [](const std::vector<Value>& args) -> Value {
+        std::map<const void*, Value> visited;
+        std::function<Value(const Value&)> deepCopyExact = [&](const Value& v) -> Value {
+            if (v.isObjType(ObjType::LIST)) {
+                auto l = static_cast<ObjList*>(v.asObj());
+                if (visited.count(l)) return visited[l];
+                ObjList* newList = GcHeap::get().allocate<ObjList>();
+                Value newVal(newList);
+                visited[l] = newVal;
+                for (const auto& e : l->vec) {
+                    newList->vec.push_back(deepCopyExact(e));
+                }
+                newList->is_frozen = l->is_frozen;
+                return newVal;
+            }
+            if (v.isObjType(ObjType::DICT)) {
+                auto d = static_cast<ObjDict*>(v.asObj());
+                if (visited.count(d)) return visited[d];
+                ObjDict* newDict = GcHeap::get().allocate<ObjDict>();
+                Value newVal(newDict);
+                visited[d] = newVal;
+                for (const auto& [k, val] : d->elements) {
+                    Value newK = deepCopyExact(k);
+                    Value newV = deepCopyExact(val);
+                    newDict->keyMap[newK] = newDict->elements.size();
+                    newDict->elements.push_back({newK, newV});
+                }
+                newDict->is_frozen = d->is_frozen;
+                return newVal;
+            }
+            if (v.isObjType(ObjType::SET)) {
+                auto s = static_cast<ObjSet*>(v.asObj());
+                if (visited.count(s)) return visited[s];
+                ObjSet* newSet = GcHeap::get().allocate<ObjSet>();
+                Value newVal(newSet);
+                visited[s] = newVal;
+                for (const auto& val : s->elements) {
+                    Value newV = deepCopyExact(val);
+                    newSet->keys.insert(newV);
+                    newSet->elements.push_back(newV);
+                }
+                newSet->is_frozen = s->is_frozen;
+                return newVal;
+            }
+            if (v.isInstance()) {
+                auto inst = v.asInstance();
+                if (visited.count(inst)) return visited[inst];
+                ObjInstance* newInst = GcHeap::get().allocate<ObjInstance>();
+                newInst->classDef = inst->classDef;
+                newInst->nativeData = inst->nativeData;
+                Value newVal(newInst);
+                visited[inst] = newVal;
+                if (inst->fields) {
+                    newInst->fields = static_cast<ObjDict*>(deepCopyExact(Value(inst->fields)).asObj());
+                }
+                newInst->is_frozen = inst->is_frozen;
+                return newVal;
+            }
+            if (v.isObjType(ObjType::NAMESPACE)) {
+                auto ns = static_cast<ObjNamespace*>(v.asObj());
+                if (visited.count(ns)) return visited[ns];
+                ObjNamespace* newNs = GcHeap::get().allocate<ObjNamespace>();
+                newNs->name = ns->name;
+                Value newVal(newNs);
+                visited[ns] = newVal;
+                for (const auto& [k, field] : ns->fields) {
+                    auto uv = std::make_shared<UpVal>();
+                    uv->closed = deepCopyExact(*(field.upval->location));
+                    uv->location = &uv->closed;
+                    newNs->fields[k] = { uv, field.isConst };
+                }
+                newNs->is_frozen = ns->is_frozen;
+                return newVal;
+            }
+            return v;
+        };
+        return deepCopyExact(args[0]);
+        });
+
     reg("val", { 1 }, [](const std::vector<Value>& args) -> Value {
         std::map<const void*, Value> visited;
         std::function<Value(const Value&)> deepCopyAndFreeze = [&](const Value& v) -> Value {
