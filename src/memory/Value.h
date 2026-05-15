@@ -122,26 +122,6 @@ namespace jc {
         StringMatrix mat;
         ObjStringMatrix(StringMatrix m) : mat(std::move(m)) { type = ObjType::STRING_MATRIX; }
     };
-    struct ObjList : public Obj {
-        std::vector<Value> vec;
-        bool is_frozen = false;
-        ObjList() { type = ObjType::LIST; }
-        void clear() override { vec.clear(); }
-    };
-    struct ObjDict : public Obj {
-        std::vector<std::pair<Value, Value>> elements;
-        std::unordered_map<Value, size_t, ValueHasher, ValueEqual> keyMap;
-        bool is_frozen = false;
-        ObjDict() { type = ObjType::DICT; }
-        void clear() override { elements.clear(); keyMap.clear(); }
-    };
-    struct ObjSet : public Obj {
-        std::vector<Value> elements;
-        std::unordered_set<Value, ValueHasher, ValueEqual> keys;
-        bool is_frozen = false;
-        ObjSet() { type = ObjType::SET; }
-        void clear() override { elements.clear(); keys.clear(); }
-    };
     struct ObjClass : public Obj {
         std::string name;
         ObjClass* parent = nullptr;
@@ -474,923 +454,38 @@ namespace jc {
         // ==========================================
         // 统一哈希判定 (The One and Only Hashability)
         // ==========================================
-        bool isHashable() const {
-            static thread_local std::vector<const void*> visited;
-            if (isNumber() || isBool() || isNone()) return true;
-            Obj* obj = asObj();
-            switch (obj->type) {
-                case ObjType::STRING:
-                case ObjType::BIGINT:
-                case ObjType::FRACTION:
-                case ObjType::COMPLEX:
-                case ObjType::BASENUM:
-                case ObjType::REAL_MATRIX:
-                case ObjType::COMPLEX_MATRIX:
-                case ObjType::STRING_MATRIX:
-                case ObjType::CLOSURE:
-                case ObjType::CLASS:
-                case ObjType::SYMBOLIC:
-                    return true;
-                case ObjType::LIST: {
-                    ObjList* list = static_cast<ObjList*>(obj);
-                    if (!list->is_frozen) return false;
-                    RecursionGuard guard(visited, list);
-                    if (guard.isCycle) return true;
-                    for (const auto& e : list->vec) {
-                        try { if (!e.isHashable()) return false; } catch (...) { return false; }
-                    }
-                    return true;
-                }
-                case ObjType::DICT: {
-                    ObjDict* dict = static_cast<ObjDict*>(obj);
-                    if (!dict->is_frozen) return false;
-                    RecursionGuard guard(visited, dict);
-                    if (guard.isCycle) return true;
-                    for (const auto& [k, v] : dict->elements) {
-                        try { if (!v.isHashable()) return false; } catch (...) { return false; }
-                    }
-                    return true;
-                }
-                case ObjType::SET: {
-                    ObjSet* set = static_cast<ObjSet*>(obj);
-                    if (!set->is_frozen) return false;
-                    RecursionGuard guard(visited, set);
-                    if (guard.isCycle) return true;
-                    for (const auto& v : set->elements) {
-                        try { if (!v.isHashable()) return false; } catch (...) { return false; }
-                    }
-                    return true;
-                }
-                case ObjType::INSTANCE: {
-                    ObjInstance* inst = static_cast<ObjInstance*>(obj);
-                    RecursionGuard guard(visited, inst);
-                    if (guard.isCycle) return true;
-                    auto c = inst->classDef;
-                    while (c) {
-                        if (c->methods.count("__hash__")) return true;
-                        c = c->parent;
-                    }
-                    return false;
-                }
-                case ObjType::SUPER_PROXY:
-                case ObjType::NAMESPACE:
-                    return false;
-            }
-            return false;
-        }
+        bool isHashable() const;
 
         // ==========================================
         // 统一真值判定 (The One and Only Truthiness)
         // ==========================================
-        bool truthy() const {
-            if (isNone()) return false;
-            if (isBool()) return asBool();
-            if (isInt32()) return asInt32() != 0;
-            if (isDouble()) {
-                double d = asDoubleRaw();
-                return d != 0.0 && !std::isnan(d);
-            }
-            Obj* obj = asObj();
-            switch (obj->type) {
-                case ObjType::BIGINT: return !static_cast<ObjBigInt*>(obj)->num.isZero();
-                case ObjType::COMPLEX: {
-                    const auto& c = static_cast<ObjComplex*>(obj)->comp;
-                    return c.real != 0.0 || c.imag != 0.0;
-                }
-                case ObjType::FRACTION: return !static_cast<ObjFraction*>(obj)->frac.getNum().isZero();
-                case ObjType::BASENUM: return !static_cast<ObjBaseNum*>(obj)->base.getValue().isZero();
-                case ObjType::STRING: return !static_cast<ObjString*>(obj)->str.empty();
-                case ObjType::LIST: return !static_cast<ObjList*>(obj)->vec.empty();
-                case ObjType::DICT: return !static_cast<ObjDict*>(obj)->elements.empty();
-                case ObjType::SET: return !static_cast<ObjSet*>(obj)->elements.empty();
-                case ObjType::SYMBOLIC: return !static_cast<ObjSym*>(obj)->sym.isZero();
-                case ObjType::NAMESPACE: return true;
-                case ObjType::INSTANCE: {
-                    auto inst = static_cast<ObjInstance*>(obj);
-                    auto [found, res] = invokeDunder(inst, "__bool__");
-                    if (found) {
-                        if (res.isBool()) return res.asBool();
-                        if (res.isNumber()) return res.asDouble() != 0.0;
-                        return res.truthy();
-                    }
-                    return true;
-                }
-                default: return true;
-            }
-        }
+        bool truthy() const;
 
         // ==========================================
         // 统一相等判定 (The One and Only Equality)
         // ==========================================
-        static bool equals(const Value& lhs, const Value& rhs) {
-            if (lhs.as_bits == rhs.as_bits) return true;
+        static bool equals(const Value& lhs, const Value& rhs);
 
-            // 防循环递归锁
-            static thread_local std::vector<std::pair<const void*, const void*>> comparingPairs;
+        std::string typeName() const;
+        Value operator~() const;
+        Value operator-() const;
 
-            if (lhs.isInt32() && rhs.isInt32()) return lhs.asInt32() == rhs.asInt32();
-            if (lhs.isNumber() && rhs.isNumber()) return lhs.asNumber() == rhs.asNumber();
-            if (lhs.isNone() || rhs.isNone()) return false;
-            if (lhs.isBool() && rhs.isBool()) return lhs.asBool() == rhs.asBool();
-            if (lhs.isBool() && rhs.isNumber()) return (lhs.asBool() ? 1.0 : 0.0) == rhs.asNumber();
-            if (rhs.isBool() && lhs.isNumber()) return (rhs.asBool() ? 1.0 : 0.0) == lhs.asNumber();
+        friend Value operator+(const Value& lhs, const Value& rhs);
 
-            // 同类型快速通道
-            if (lhs.isObj() && rhs.isObj() && lhs.asObj()->type == rhs.asObj()->type) {
-                Obj* lobj = lhs.asObj();
-                Obj* robj = rhs.asObj();
-                switch (lobj->type) {
-                    case ObjType::STRING: return static_cast<ObjString*>(lobj)->str == static_cast<ObjString*>(robj)->str;
-                    case ObjType::BIGINT: return static_cast<ObjBigInt*>(lobj)->num == static_cast<ObjBigInt*>(robj)->num;
-                    case ObjType::COMPLEX: return static_cast<ObjComplex*>(lobj)->comp == static_cast<ObjComplex*>(robj)->comp;
-                    case ObjType::FRACTION: return static_cast<ObjFraction*>(lobj)->frac == static_cast<ObjFraction*>(robj)->frac;
-                    case ObjType::BASENUM: return static_cast<ObjBaseNum*>(lobj)->base.getValue() == static_cast<ObjBaseNum*>(robj)->base.getValue();
-                    case ObjType::SYMBOLIC: return static_cast<ObjSym*>(lobj)->sym == static_cast<ObjSym*>(robj)->sym;
-                    case ObjType::REAL_MATRIX: {
-                        const auto& a = static_cast<ObjRealMatrix*>(lobj)->mat;
-                        const auto& b = static_cast<ObjRealMatrix*>(robj)->mat;
-                        if (a.getRows() != b.getRows() || a.getCols() != b.getCols()) return false;
-                        for (int i = 0; i < a.getRows(); ++i)
-                            for (int j = 0; j < a.getCols(); ++j)
-                                if (a(i, j) != b(i, j)) return false;
-                        return true;
-                    }
-                    case ObjType::COMPLEX_MATRIX: {
-                        const auto& a = static_cast<ObjComplexMatrix*>(lobj)->mat;
-                        const auto& b = static_cast<ObjComplexMatrix*>(robj)->mat;
-                        if (a.getRows() != b.getRows() || a.getCols() != b.getCols()) return false;
-                        for (int i = 0; i < a.getRows(); ++i)
-                            for (int j = 0; j < a.getCols(); ++j)
-                                if (!(a(i, j) == b(i, j))) return false;
-                        return true;
-                    }
-                    case ObjType::STRING_MATRIX: {
-                        const auto& a = static_cast<ObjStringMatrix*>(lobj)->mat;
-                        const auto& b = static_cast<ObjStringMatrix*>(robj)->mat;
-                        if (a.getRows() != b.getRows() || a.getCols() != b.getCols()) return false;
-                        for (int i = 0; i < a.getRows(); ++i)
-                            for (int j = 0; j < a.getCols(); ++j)
-                                if (a(i, j) != b(i, j)) return false;
-                        return true;
-                    }
-                    case ObjType::LIST: {
-                        const auto& a = static_cast<ObjList*>(lobj)->vec;
-                        const auto& b = static_cast<ObjList*>(robj)->vec;
-                        if (a.size() != b.size()) return false;
-                        auto pair = lobj < robj ? std::make_pair((const void*)lobj, (const void*)robj) : std::make_pair((const void*)robj, (const void*)lobj);
-                        if (std::find(comparingPairs.begin(), comparingPairs.end(), pair) != comparingPairs.end()) return true;
-                        comparingPairs.push_back(pair);
-                        bool eq = true;
-                        for (size_t i = 0; i < a.size(); ++i) {
-                            try { if (!equals(a[i], b[i])) { eq = false; break; } }
-                            catch (...) { eq = false; break; }
-                        }
-                        comparingPairs.pop_back();
-                        return eq;
-                    }
-                    case ObjType::DICT: {
-                        auto a = static_cast<ObjDict*>(lobj);
-                        auto b = static_cast<ObjDict*>(robj);
-                        if (a->elements.size() != b->elements.size()) return false;
-                        auto pair = lobj < robj ? std::make_pair((const void*)lobj, (const void*)robj) : std::make_pair((const void*)robj, (const void*)lobj);
-                        if (std::find(comparingPairs.begin(), comparingPairs.end(), pair) != comparingPairs.end()) return true;
-                        comparingPairs.push_back(pair);
-                        bool eq = true;
-                        for (const auto& [key, val] : a->elements) {
-                            auto it = b->keyMap.find(key);
-                            if (it == b->keyMap.end()) { eq = false; break; }
-                            try { if (!equals(val, b->elements[it->second].second)) { eq = false; break; } }
-                            catch (...) { eq = false; break; }
-                        }
-                        comparingPairs.pop_back();
-                        return eq;
-                    }
-                    case ObjType::SET: {
-                        auto a = static_cast<ObjSet*>(lobj);
-                        auto b = static_cast<ObjSet*>(robj);
-                        if (a->elements.size() != b->elements.size()) return false;
-                        for (const auto& val : a->elements) {
-                            if (b->keys.find(val) == b->keys.end()) return false;
-                        }
-                        return true;
-                    }
-                    case ObjType::INSTANCE: {
-                        auto inst1 = static_cast<ObjInstance*>(lobj);
-                        auto [found, res] = invokeDunder(inst1, "__eq__", {rhs});
-                        if (found) return res.truthy();
-                        return false;
-                    }
-                    case ObjType::CLOSURE:
-                    case ObjType::CLASS:
-                    case ObjType::NAMESPACE:
-                        return false; // Pointer equality already checked
-                    case ObjType::SUPER_PROXY: {
-                        auto sp1 = static_cast<ObjSuper*>(lobj);
-                        auto sp2 = static_cast<ObjSuper*>(robj);
-                        return sp1->instance == sp2->instance && sp1->parentClass == sp2->parentClass;
-                    }
-                }
-            }
+        friend Value operator-(const Value& lhs, const Value& rhs);
 
-            // 跨类型兼容比较
-            if (lhs.isObjType(ObjType::BIGINT) && rhs.isObjType(ObjType::FRACTION))
-                return Fraction(static_cast<ObjBigInt*>(lhs.asObj())->num) == static_cast<ObjFraction*>(rhs.asObj())->frac;
-            if (lhs.isObjType(ObjType::FRACTION) && rhs.isObjType(ObjType::BIGINT))
-                return static_cast<ObjFraction*>(lhs.asObj())->frac == Fraction(static_cast<ObjBigInt*>(rhs.asObj())->num);
+        friend Value operator*(const Value& lhs, const Value& rhs);
 
-            if ((lhs.isObjType(ObjType::REAL_MATRIX) && rhs.isObjType(ObjType::COMPLEX_MATRIX)) ||
-                (lhs.isObjType(ObjType::COMPLEX_MATRIX) && rhs.isObjType(ObjType::REAL_MATRIX))) {
-                try {
-                    ComplexMatrix a = lhs.asComplexMatrix(), b = rhs.asComplexMatrix();
-                    if (a.getRows() != b.getRows() || a.getCols() != b.getCols()) return false;
-                    for (int i = 0; i < a.getRows(); ++i)
-                        for (int j = 0; j < a.getCols(); ++j)
-                            if (!(a(i, j) == b(i, j))) return false;
-                    return true;
-                }
-                catch (...) { return false; }
-            }
+        friend Value operator/(const Value& lhs, const Value& rhs);
 
-            if (lhs.isInstance()) {
-                auto [found, res] = invokeDunder(lhs.asInstance(), "__eq__", {rhs});
-                if (found) return res.truthy();
-            }
-            if (rhs.isInstance()) {
-                auto [found, res] = invokeDunder(rhs.asInstance(), "__eq__", {lhs});
-                if (found) return res.truthy();
-            }
+        friend Value operator^(const Value& lhs, const Value& rhs);
 
-            // ★ 终极数值降维防线：安全处理极大 BigInt 与浮点/复数的跨类型比较
-            if (lhs.isObjType(ObjType::BASENUM)) return equals(Value(static_cast<ObjBaseNum*>(lhs.asObj())->base.getValue()), rhs);
-            if (rhs.isObjType(ObjType::BASENUM)) return equals(lhs, Value(static_cast<ObjBaseNum*>(rhs.asObj())->base.getValue()));
-
-            auto getNumeric = [](const Value& v) -> std::optional<Complex> {
-                try {
-                    if (v.isNumber()) return Complex(v.asNumber());
-                    if (v.isBool()) return Complex(v.asBool() ? 1.0 : 0.0);
-                    if (v.isObjType(ObjType::COMPLEX)) return static_cast<ObjComplex*>(v.asObj())->comp;
-                    if (v.isObjType(ObjType::FRACTION)) return Complex(static_cast<ObjFraction*>(v.asObj())->frac.toDouble());
-                } catch (...) {}
-                return std::nullopt;
-            };
-
-            auto numL = getNumeric(lhs);
-            auto numR = getNumeric(rhs);
-
-            if (numL && numR) return *numL == *numR;
-
-            if (lhs.isObjType(ObjType::BIGINT) && numR) {
-                const BigInt& b = static_cast<ObjBigInt*>(lhs.asObj())->num;
-                if (numR->imag != 0.0) return false;
-                double d = numR->real;
-                if (std::floor(d) != d) return false;
-                if (std::abs(d) < 9e15) return b == BigInt(static_cast<int64_t>(d));
-                try { return b.toDouble() == d; } catch (...) { return false; }
-            }
-            if (rhs.isObjType(ObjType::BIGINT) && numL) {
-                const BigInt& b = static_cast<ObjBigInt*>(rhs.asObj())->num;
-                if (numL->imag != 0.0) return false;
-                double d = numL->real;
-                if (std::floor(d) != d) return false;
-                if (std::abs(d) < 9e15) return b == BigInt(static_cast<int64_t>(d));
-                try { return b.toDouble() == d; } catch (...) { return false; }
-            }
-
-            return false;
-        }
-
-        std::string typeName() const {
-            if (isNone()) return "none";
-            if (isBool()) return "bool";
-            if (isInt32()) return "int";
-            if (isDouble()) return "double";
-            Obj* obj = asObj();
-            switch (obj->type) {
-                case ObjType::STRING: return "string";
-                case ObjType::BIGINT: return "int";
-                case ObjType::FRACTION: return "Fraction";
-                case ObjType::COMPLEX: return "Complex";
-                case ObjType::BASENUM: return "BaseNum";
-                case ObjType::REAL_MATRIX: return "RealMatrix";
-                case ObjType::COMPLEX_MATRIX: return "ComplexMatrix";
-                case ObjType::STRING_MATRIX: return "StringMatrix";
-                case ObjType::LIST: return "list";
-                case ObjType::DICT: return "dict";
-                case ObjType::SET: return "set";
-                case ObjType::CLOSURE: return "function";
-                case ObjType::CLASS: return "class";
-                case ObjType::INSTANCE: {
-                    auto inst = static_cast<ObjInstance*>(obj);
-                    return inst->classDef ? inst->classDef->name : "instance";
-                }
-                case ObjType::SUPER_PROXY: return "super";
-                case ObjType::SYMBOLIC: return "symbolic";
-                case ObjType::NAMESPACE: return "namespace";
-            }
-            return "unknown";
-        }
-
-        Value operator~() const {
-            if (isInt32()) return Value::fromInt32(~asInt32());
-            if (isObjType(ObjType::BASENUM)) {
-                auto& base = static_cast<ObjBaseNum*>(asObj())->base;
-                return Value(BaseNum(-base.getValue() - BigInt(1), base.getRadix()));
-            }
-            if (isBigInt()) return Value(-asBigInt() - BigInt(1));
-            throw std::runtime_error("Type Error: Bitwise NOT '~' not supported for this type.");
-        }
-
-        Value operator-() const {
-            if (isInt32()) {
-                int32_t v = asInt32();
-                if (v == -2147483648) return Value(BigInt(2147483648LL));
-                return Value::fromInt32(-v);
-            }
-            if (isDouble()) return Value(-asDoubleRaw());
-            if (isObj()) {
-                Obj* obj = asObj();
-                switch (obj->type) {
-                    case ObjType::BIGINT: return Value(-static_cast<ObjBigInt*>(obj)->num);
-                    case ObjType::FRACTION: return Value(-static_cast<ObjFraction*>(obj)->frac);
-                    case ObjType::COMPLEX: return Value(-static_cast<ObjComplex*>(obj)->comp);
-                    case ObjType::BASENUM: return Value(-static_cast<ObjBaseNum*>(obj)->base);
-                    case ObjType::REAL_MATRIX: return Value(-static_cast<ObjRealMatrix*>(obj)->mat);
-                    case ObjType::COMPLEX_MATRIX: return Value(-static_cast<ObjComplexMatrix*>(obj)->mat);
-                    case ObjType::SYMBOLIC: return Value(-static_cast<ObjSym*>(obj)->sym);
-                    default: break;
-                }
-            }
-            throw std::runtime_error("Type Error: Cannot negate this type.");
-        }
-
-        friend Value operator+(const Value& lhs, const Value& rhs) {
-            if (lhs.isInt32() && rhs.isInt32()) {
-                int64_t sum = static_cast<int64_t>(lhs.asInt32()) + rhs.asInt32();
-                if (sum >= -2147483648LL && sum <= 2147483647LL) return Value::fromInt32(static_cast<int32_t>(sum));
-                return Value(BigInt(sum));
-            }
-            if (lhs.isNumber() && rhs.isNumber()) return Value(lhs.asNumber() + rhs.asNumber());
-            if (lhs.isObjType(ObjType::STRING) && rhs.isObjType(ObjType::STRING)) {
-                return Value(static_cast<ObjString*>(lhs.asObj())->str + static_cast<ObjString*>(rhs.asObj())->str);
-            }
-            if (lhs.isObjType(ObjType::LIST) && rhs.isObjType(ObjType::LIST)) {
-                ObjList* l1 = static_cast<ObjList*>(lhs.asObj());
-                ObjList* l2 = static_cast<ObjList*>(rhs.asObj());
-                ObjList* res = GcHeap::get().allocate<ObjList>();
-                res->vec.reserve(l1->vec.size() + l2->vec.size());
-                res->vec.insert(res->vec.end(), l1->vec.begin(), l1->vec.end());
-                res->vec.insert(res->vec.end(), l2->vec.begin(), l2->vec.end());
-                return Value(res);
-            }
-            
-            try {
-                if (lhs.isObjType(ObjType::REAL_MATRIX) && rhs.isObjType(ObjType::REAL_MATRIX)) return Value(static_cast<ObjRealMatrix*>(lhs.asObj())->mat + static_cast<ObjRealMatrix*>(rhs.asObj())->mat);
-                if (lhs.isObjType(ObjType::COMPLEX_MATRIX) && rhs.isObjType(ObjType::COMPLEX_MATRIX)) return Value(static_cast<ObjComplexMatrix*>(lhs.asObj())->mat + static_cast<ObjComplexMatrix*>(rhs.asObj())->mat);
-                if (lhs.isObjType(ObjType::REAL_MATRIX) && rhs.isObjType(ObjType::COMPLEX_MATRIX)) return Value(lhs.asComplexMatrix() + rhs.asComplexMatrix());
-                if (lhs.isObjType(ObjType::COMPLEX_MATRIX) && rhs.isObjType(ObjType::REAL_MATRIX)) return Value(lhs.asComplexMatrix() + rhs.asComplexMatrix());
-                
-                bool lhsIsMat = lhs.isObjType(ObjType::REAL_MATRIX) || lhs.isObjType(ObjType::COMPLEX_MATRIX);
-                bool rhsIsMat = rhs.isObjType(ObjType::REAL_MATRIX) || rhs.isObjType(ObjType::COMPLEX_MATRIX);
-                bool lhsIsScalar = lhs.isNumber() || lhs.isBigInt() || lhs.isObjType(ObjType::FRACTION) || lhs.isComplex();
-                bool rhsIsScalar = rhs.isNumber() || rhs.isBigInt() || rhs.isObjType(ObjType::FRACTION) || rhs.isComplex();
-
-                if (lhsIsMat && rhsIsScalar) {
-                    if (lhs.isObjType(ObjType::REAL_MATRIX) && !rhs.isComplex()) {
-                        RealMatrix m = static_cast<ObjRealMatrix*>(lhs.asObj())->mat;
-                        if (m.getRows() != m.getCols()) throw std::runtime_error("Math Error: Matrix-scalar addition requires a square matrix.");
-                        double c = rhs.asDouble();
-                        for (int i = 0; i < m.getRows(); ++i) m(i, i) += c;
-                        return Value(m);
-                    }
-                    ComplexMatrix m = lhs.asComplexMatrix();
-                    if (m.getRows() != m.getCols()) throw std::runtime_error("Math Error: Matrix-scalar addition requires a square matrix.");
-                    Complex c = rhs.asComplex();
-                    for (int i = 0; i < m.getRows(); ++i) m(i, i) = m(i, i) + c;
-                    return Value(m);
-                }
-                if (lhsIsScalar && rhsIsMat) {
-                    if (rhs.isObjType(ObjType::REAL_MATRIX) && !lhs.isComplex()) {
-                        RealMatrix m = static_cast<ObjRealMatrix*>(rhs.asObj())->mat;
-                        if (m.getRows() != m.getCols()) throw std::runtime_error("Math Error: Matrix-scalar addition requires a square matrix.");
-                        double c = lhs.asDouble();
-                        for (int i = 0; i < m.getRows(); ++i) m(i, i) += c;
-                        return Value(m);
-                    }
-                    ComplexMatrix m = rhs.asComplexMatrix();
-                    if (m.getRows() != m.getCols()) throw std::runtime_error("Math Error: Matrix-scalar addition requires a square matrix.");
-                    Complex c = lhs.asComplex();
-                    for (int i = 0; i < m.getRows(); ++i) m(i, i) = m(i, i) + c;
-                    return Value(m);
-                }
-                
-                if (lhs.isObjType(ObjType::STRING_MATRIX) && rhs.isObjType(ObjType::STRING_MATRIX)) {
-                    const auto& a = static_cast<ObjStringMatrix*>(lhs.asObj())->mat;
-                    const auto& b = static_cast<ObjStringMatrix*>(rhs.asObj())->mat;
-                    if (a.getRows() != b.getRows() || a.getCols() != b.getCols()) throw std::runtime_error("Type Error: StringMatrix dimensions must match for +.");
-                    std::vector<std::string> flat(a.getRows() * a.getCols());
-                    for (int i = 0; i < a.getRows(); ++i)
-                        for (int j = 0; j < a.getCols(); ++j)
-                            flat[i * a.getCols() + j] = a(i, j) + b(i, j);
-                    return Value(StringMatrix(a.getRows(), a.getCols(), flat));
-                }
-
-                if (lhs.isSymbolic() || rhs.isSymbolic()) return Value(lhs.asSymbolic() + rhs.asSymbolic());
-
-                if (lhs.isObjType(ObjType::BASENUM) && rhs.isObjType(ObjType::BASENUM)) return Value(static_cast<ObjBaseNum*>(lhs.asObj())->base + static_cast<ObjBaseNum*>(rhs.asObj())->base);
-                if (lhs.isObjType(ObjType::BASENUM)) return Value(static_cast<ObjBaseNum*>(lhs.asObj())->base + BaseNum(rhs.asBigInt(), static_cast<ObjBaseNum*>(lhs.asObj())->base.getRadix()));
-                if (rhs.isObjType(ObjType::BASENUM)) return Value(BaseNum(lhs.asBigInt(), static_cast<ObjBaseNum*>(rhs.asObj())->base.getRadix()) + static_cast<ObjBaseNum*>(rhs.asObj())->base);
-
-                if (lhs.isObjType(ObjType::COMPLEX) || rhs.isObjType(ObjType::COMPLEX)) return Value(lhs.asComplex() + rhs.asComplex());
-                
-                bool lhsIsExactInt = lhs.isBigInt() || lhs.isInt32();
-                bool rhsIsExactInt = rhs.isBigInt() || rhs.isInt32();
-                if (lhsIsExactInt && rhsIsExactInt) return Value(lhs.asBigInt() + rhs.asBigInt());
-                if (lhs.isObjType(ObjType::FRACTION) && rhs.isObjType(ObjType::FRACTION)) return Value::fromFraction(static_cast<ObjFraction*>(lhs.asObj())->frac + static_cast<ObjFraction*>(rhs.asObj())->frac);
-                if (lhs.isObjType(ObjType::FRACTION) && rhsIsExactInt) return Value::fromFraction(static_cast<ObjFraction*>(lhs.asObj())->frac + Fraction(rhs.asBigInt()));
-                if (lhsIsExactInt && rhs.isObjType(ObjType::FRACTION)) return Value::fromFraction(Fraction(lhs.asBigInt()) + static_cast<ObjFraction*>(rhs.asObj())->frac);
-                
-                if (lhs.isDouble() || rhs.isDouble()) return Value(lhs.asDouble() + rhs.asDouble());
-            } catch (...) {}
-            
-            throw std::runtime_error("Type Error: Cannot add these types.");
-        }
-
-        friend Value operator-(const Value& lhs, const Value& rhs) {
-            if (lhs.isInt32() && rhs.isInt32()) {
-                int64_t diff = static_cast<int64_t>(lhs.asInt32()) - rhs.asInt32();
-                if (diff >= -2147483648LL && diff <= 2147483647LL) return Value::fromInt32(static_cast<int32_t>(diff));
-                return Value(BigInt(diff));
-            }
-            if (lhs.isNumber() && rhs.isNumber()) return Value(lhs.asNumber() - rhs.asNumber());
-            
-            try {
-                if (lhs.isObjType(ObjType::REAL_MATRIX) && rhs.isObjType(ObjType::REAL_MATRIX)) return Value(static_cast<ObjRealMatrix*>(lhs.asObj())->mat - static_cast<ObjRealMatrix*>(rhs.asObj())->mat);
-                if (lhs.isObjType(ObjType::COMPLEX_MATRIX) && rhs.isObjType(ObjType::COMPLEX_MATRIX)) return Value(static_cast<ObjComplexMatrix*>(lhs.asObj())->mat - static_cast<ObjComplexMatrix*>(rhs.asObj())->mat);
-                if (lhs.isObjType(ObjType::REAL_MATRIX) && rhs.isObjType(ObjType::COMPLEX_MATRIX)) return Value(lhs.asComplexMatrix() - rhs.asComplexMatrix());
-                if (lhs.isObjType(ObjType::COMPLEX_MATRIX) && rhs.isObjType(ObjType::REAL_MATRIX)) return Value(lhs.asComplexMatrix() - rhs.asComplexMatrix());
-                
-                bool lhsIsMat = lhs.isObjType(ObjType::REAL_MATRIX) || lhs.isObjType(ObjType::COMPLEX_MATRIX);
-                bool rhsIsMat = rhs.isObjType(ObjType::REAL_MATRIX) || rhs.isObjType(ObjType::COMPLEX_MATRIX);
-                bool lhsIsScalar = lhs.isNumber() || lhs.isBigInt() || lhs.isObjType(ObjType::FRACTION) || lhs.isComplex();
-                bool rhsIsScalar = rhs.isNumber() || rhs.isBigInt() || rhs.isObjType(ObjType::FRACTION) || rhs.isComplex();
-
-                if (lhsIsMat && rhsIsScalar) {
-                    if (lhs.isObjType(ObjType::REAL_MATRIX) && !rhs.isComplex()) {
-                        RealMatrix m = static_cast<ObjRealMatrix*>(lhs.asObj())->mat;
-                        if (m.getRows() != m.getCols()) throw std::runtime_error("Math Error: Matrix-scalar subtraction requires a square matrix.");
-                        double c = rhs.asDouble();
-                        for (int i = 0; i < m.getRows(); ++i) m(i, i) -= c;
-                        return Value(m);
-                    }
-                    ComplexMatrix m = lhs.asComplexMatrix();
-                    if (m.getRows() != m.getCols()) throw std::runtime_error("Math Error: Matrix-scalar subtraction requires a square matrix.");
-                    Complex c = rhs.asComplex();
-                    for (int i = 0; i < m.getRows(); ++i) m(i, i) = m(i, i) - c;
-                    return Value(m);
-                }
-                if (lhsIsScalar && rhsIsMat) {
-                    if (rhs.isObjType(ObjType::REAL_MATRIX) && !lhs.isComplex()) {
-                        RealMatrix m = static_cast<ObjRealMatrix*>(rhs.asObj())->mat;
-                        if (m.getRows() != m.getCols()) throw std::runtime_error("Math Error: Matrix-scalar subtraction requires a square matrix.");
-                        double c = lhs.asDouble();
-                        RealMatrix res(m.getRows(), m.getCols());
-                        for (int i = 0; i < m.getRows(); ++i) {
-                            for (int j = 0; j < m.getCols(); ++j) {
-                                res(i, j) = (i == j ? c : 0.0) - m(i, j);
-                            }
-                        }
-                        return Value(res);
-                    }
-                    ComplexMatrix m = rhs.asComplexMatrix();
-                    if (m.getRows() != m.getCols()) throw std::runtime_error("Math Error: Matrix-scalar subtraction requires a square matrix.");
-                    Complex c = lhs.asComplex();
-                    ComplexMatrix res(m.getRows(), m.getCols());
-                    for (int i = 0; i < m.getRows(); ++i) {
-                        for (int j = 0; j < m.getCols(); ++j) {
-                            res(i, j) = (i == j ? c : Complex(0.0, 0.0)) - m(i, j);
-                        }
-                    }
-                    return Value(res);
-                }
-                
-                if (lhs.isObjType(ObjType::SET) && rhs.isObjType(ObjType::SET)) {
-                    ObjSet* s1 = static_cast<ObjSet*>(lhs.asObj());
-                    ObjSet* s2 = static_cast<ObjSet*>(rhs.asObj());
-                    ObjSet* res = GcHeap::get().allocate<ObjSet>();
-                    for (const auto& val : s1->elements) {
-                        if (s2->keys.find(val) == s2->keys.end()) {
-                            res->keys.insert(val);
-                            res->elements.push_back(val);
-                        }
-                    }
-                    return Value(res);
-                }
-
-                if (lhs.isSymbolic() || rhs.isSymbolic()) return Value(lhs.asSymbolic() - rhs.asSymbolic());
-
-                if (lhs.isObjType(ObjType::BASENUM) && rhs.isObjType(ObjType::BASENUM)) return Value(static_cast<ObjBaseNum*>(lhs.asObj())->base - static_cast<ObjBaseNum*>(rhs.asObj())->base);
-                if (lhs.isObjType(ObjType::BASENUM)) return Value(static_cast<ObjBaseNum*>(lhs.asObj())->base - BaseNum(rhs.asBigInt(), static_cast<ObjBaseNum*>(lhs.asObj())->base.getRadix()));
-                if (rhs.isObjType(ObjType::BASENUM)) return Value(BaseNum(lhs.asBigInt(), static_cast<ObjBaseNum*>(rhs.asObj())->base.getRadix()) - static_cast<ObjBaseNum*>(rhs.asObj())->base);
-
-                if (lhs.isObjType(ObjType::COMPLEX) || rhs.isObjType(ObjType::COMPLEX)) return Value(lhs.asComplex() - rhs.asComplex());
-                
-                bool lhsIsExactInt = lhs.isBigInt() || lhs.isInt32();
-                bool rhsIsExactInt = rhs.isBigInt() || rhs.isInt32();
-                if (lhsIsExactInt && rhsIsExactInt) return Value(lhs.asBigInt() - rhs.asBigInt());
-                if (lhs.isObjType(ObjType::FRACTION) && rhs.isObjType(ObjType::FRACTION)) return Value::fromFraction(static_cast<ObjFraction*>(lhs.asObj())->frac - static_cast<ObjFraction*>(rhs.asObj())->frac);
-                if (lhs.isObjType(ObjType::FRACTION) && rhsIsExactInt) return Value::fromFraction(static_cast<ObjFraction*>(lhs.asObj())->frac - Fraction(rhs.asBigInt()));
-                if (lhsIsExactInt && rhs.isObjType(ObjType::FRACTION)) return Value::fromFraction(Fraction(lhs.asBigInt()) - static_cast<ObjFraction*>(rhs.asObj())->frac);
-                
-                if (lhs.isDouble() || rhs.isDouble()) return Value(lhs.asDouble() - rhs.asDouble());
-            } catch (...) {}
-            
-            throw std::runtime_error("Type Error: Subtraction not supported for these types.");
-        }
-
-        friend Value operator*(const Value& lhs, const Value& rhs) {
-            if (lhs.isInt32() && rhs.isInt32()) {
-                int64_t prod = static_cast<int64_t>(lhs.asInt32()) * rhs.asInt32();
-                if (prod >= -2147483648LL && prod <= 2147483647LL) return Value::fromInt32(static_cast<int32_t>(prod));
-                return Value(BigInt(prod));
-            }
-            if (lhs.isNumber() && rhs.isNumber()) return Value(lhs.asNumber() * rhs.asNumber());
-            
-            try {
-                if (lhs.isObjType(ObjType::REAL_MATRIX) && rhs.isObjType(ObjType::REAL_MATRIX)) return Value(static_cast<ObjRealMatrix*>(lhs.asObj())->mat * static_cast<ObjRealMatrix*>(rhs.asObj())->mat);
-                if (lhs.isObjType(ObjType::COMPLEX_MATRIX) && rhs.isObjType(ObjType::COMPLEX_MATRIX)) return Value(static_cast<ObjComplexMatrix*>(lhs.asObj())->mat * static_cast<ObjComplexMatrix*>(rhs.asObj())->mat);
-                if (lhs.isObjType(ObjType::REAL_MATRIX) && rhs.isObjType(ObjType::COMPLEX_MATRIX)) return Value(lhs.asComplexMatrix() * rhs.asComplexMatrix());
-                if (lhs.isObjType(ObjType::COMPLEX_MATRIX) && rhs.isObjType(ObjType::REAL_MATRIX)) return Value(lhs.asComplexMatrix() * rhs.asComplexMatrix());
-                
-                bool lhsIsMat = lhs.isObjType(ObjType::REAL_MATRIX) || lhs.isObjType(ObjType::COMPLEX_MATRIX);
-                bool rhsIsMat = rhs.isObjType(ObjType::REAL_MATRIX) || rhs.isObjType(ObjType::COMPLEX_MATRIX);
-                bool lhsIsScalar = lhs.isNumber() || lhs.isBigInt() || lhs.isObjType(ObjType::FRACTION) || lhs.isComplex();
-                bool rhsIsScalar = rhs.isNumber() || rhs.isBigInt() || rhs.isObjType(ObjType::FRACTION) || rhs.isComplex();
-
-                if (lhsIsMat && rhsIsScalar) {
-                    if (lhs.isObjType(ObjType::REAL_MATRIX) && !rhs.isComplex()) return Value(static_cast<ObjRealMatrix*>(lhs.asObj())->mat * rhs.asDouble());
-                    return Value(lhs.asComplexMatrix() * rhs.asComplex());
-                }
-                if (lhsIsScalar && rhsIsMat) {
-                    if (rhs.isObjType(ObjType::REAL_MATRIX) && !lhs.isComplex()) return Value(static_cast<ObjRealMatrix*>(rhs.asObj())->mat * lhs.asDouble());
-                    return Value(rhs.asComplexMatrix() * lhs.asComplex());
-                }
-                
-                if (lhs.isObjType(ObjType::STRING) && (rhs.isNumber() || rhs.isObjType(ObjType::BIGINT))) {
-                    int n = static_cast<int>(rhs.asDouble());
-                    if (n < 0) throw std::runtime_error("Type Error: String repeat count must be non-negative.");
-                    std::string result;
-                    const std::string& s = static_cast<ObjString*>(lhs.asObj())->str;
-                    result.reserve(s.size() * n);
-                    for (int i = 0; i < n; ++i) result += s;
-                    return Value(result);
-                }
-                if ((lhs.isNumber() || lhs.isObjType(ObjType::BIGINT)) && rhs.isObjType(ObjType::STRING)) {
-                    int n = static_cast<int>(lhs.asDouble());
-                    if (n < 0) throw std::runtime_error("Type Error: String repeat count must be non-negative.");
-                    std::string result;
-                    const std::string& s = static_cast<ObjString*>(rhs.asObj())->str;
-                    result.reserve(s.size() * n);
-                    for (int i = 0; i < n; ++i) result += s;
-                    return Value(result);
-                }
-
-                if (lhs.isObjType(ObjType::SET) && rhs.isObjType(ObjType::SET)) {
-                    ObjSet* s1 = static_cast<ObjSet*>(lhs.asObj());
-                    ObjSet* s2 = static_cast<ObjSet*>(rhs.asObj());
-                    ObjSet* res = GcHeap::get().allocate<ObjSet>();
-                    for (const auto& v1 : s1->elements) {
-                        for (const auto& v2 : s2->elements) {
-                            ObjList* pair = GcHeap::get().allocate<ObjList>();
-                            pair->vec.push_back(v1);
-                            pair->vec.push_back(v2);
-                            pair->is_frozen = true;
-                            Value pairVal(pair);
-                            if (res->keys.find(pairVal) == res->keys.end()) {
-                                res->keys.insert(pairVal);
-                                res->elements.push_back(pairVal);
-                            }
-                        }
-                    }
-                    return Value(res);
-                }
-
-                if (lhs.isSymbolic() || rhs.isSymbolic()) return Value(lhs.asSymbolic() * rhs.asSymbolic());
-
-                if (lhs.isObjType(ObjType::BASENUM) && rhs.isObjType(ObjType::BASENUM)) return Value(static_cast<ObjBaseNum*>(lhs.asObj())->base * static_cast<ObjBaseNum*>(rhs.asObj())->base);
-                if (lhs.isObjType(ObjType::BASENUM)) return Value(static_cast<ObjBaseNum*>(lhs.asObj())->base * BaseNum(rhs.asBigInt(), static_cast<ObjBaseNum*>(lhs.asObj())->base.getRadix()));
-                if (rhs.isObjType(ObjType::BASENUM)) return Value(BaseNum(lhs.asBigInt(), static_cast<ObjBaseNum*>(rhs.asObj())->base.getRadix()) * static_cast<ObjBaseNum*>(rhs.asObj())->base);
-
-                if (lhs.isObjType(ObjType::COMPLEX) || rhs.isObjType(ObjType::COMPLEX)) return Value(lhs.asComplex() * rhs.asComplex());
-                
-                bool lhsIsExactInt = lhs.isBigInt() || lhs.isInt32();
-                bool rhsIsExactInt = rhs.isBigInt() || rhs.isInt32();
-                if (lhsIsExactInt && rhsIsExactInt) return Value(lhs.asBigInt() * rhs.asBigInt());
-                if (lhs.isObjType(ObjType::FRACTION) && rhs.isObjType(ObjType::FRACTION)) return Value::fromFraction(static_cast<ObjFraction*>(lhs.asObj())->frac * static_cast<ObjFraction*>(rhs.asObj())->frac);
-                if (lhs.isObjType(ObjType::FRACTION) && rhsIsExactInt) return Value::fromFraction(static_cast<ObjFraction*>(lhs.asObj())->frac * Fraction(rhs.asBigInt()));
-                if (lhsIsExactInt && rhs.isObjType(ObjType::FRACTION)) return Value::fromFraction(Fraction(lhs.asBigInt()) * static_cast<ObjFraction*>(rhs.asObj())->frac);
-                
-                if (lhs.isDouble() || rhs.isDouble()) return Value(lhs.asDouble() * rhs.asDouble());
-            } catch (...) {}
-            
-            throw std::runtime_error("Type Error: Multiplication not supported for these types.");
-        }
-
-        friend Value operator/(const Value& lhs, const Value& rhs) {
-            if (lhs.isInt32() && rhs.isInt32()) {
-                int32_t a = lhs.asInt32(), b = rhs.asInt32();
-                if (b == 0) throw std::runtime_error("Math Error: Division by zero.");
-                if (a % b == 0) {
-                    if (a == -2147483648 && b == -1) return Value(BigInt(2147483648LL));
-                    return Value::fromInt32(a / b);
-                }
-                return Value(Fraction(BigInt(a), BigInt(b)));
-            }
-            if (lhs.isNumber() && rhs.isNumber()) {
-                double b = rhs.asNumber();
-                if (b == 0.0) throw std::runtime_error("Math Error: Division by zero.");
-                return Value(lhs.asNumber() / b);
-            }
-            
-            try {
-                if (rhs.isObjType(ObjType::REAL_MATRIX) || rhs.isObjType(ObjType::COMPLEX_MATRIX)) {
-                    return lhs * Value(rhs.asComplexMatrix().inverse());
-                }
-
-                bool lhsIsMat = lhs.isObjType(ObjType::REAL_MATRIX) || lhs.isObjType(ObjType::COMPLEX_MATRIX);
-                bool rhsIsScalar = rhs.isNumber() || rhs.isBigInt() || rhs.isObjType(ObjType::FRACTION) || rhs.isComplex();
-
-                if (lhsIsMat && rhsIsScalar) {
-                    if (rhs.isComplex()) {
-                        Complex c = rhs.asComplex();
-                        if (c == 0.0) throw std::runtime_error("Math Error: Division by zero complex number.");
-                        return Value(lhs.asComplexMatrix() / c);
-                    } else {
-                        double d = rhs.asDouble();
-                        if (d == 0.0) throw std::runtime_error("Math Error: Division by zero.");
-                        if (lhs.isObjType(ObjType::REAL_MATRIX)) return Value(static_cast<ObjRealMatrix*>(lhs.asObj())->mat / d);
-                        return Value(lhs.asComplexMatrix() / Complex(d, 0.0));
-                    }
-                }
-
-                if (lhs.isSymbolic() || rhs.isSymbolic()) return Value(lhs.asSymbolic() / rhs.asSymbolic());
-
-                if (lhs.isObjType(ObjType::BASENUM) && rhs.isObjType(ObjType::BASENUM)) return Value(static_cast<ObjBaseNum*>(lhs.asObj())->base / static_cast<ObjBaseNum*>(rhs.asObj())->base);
-                if (lhs.isObjType(ObjType::BASENUM)) return Value(static_cast<ObjBaseNum*>(lhs.asObj())->base / BaseNum(rhs.asBigInt(), static_cast<ObjBaseNum*>(lhs.asObj())->base.getRadix()));
-                if (rhs.isObjType(ObjType::BASENUM)) return Value(BaseNum(lhs.asBigInt(), static_cast<ObjBaseNum*>(rhs.asObj())->base.getRadix()) / static_cast<ObjBaseNum*>(rhs.asObj())->base);
-
-                bool lhsIsExactInt = lhs.isBigInt() || lhs.isInt32();
-                bool rhsIsExactInt = rhs.isBigInt() || rhs.isInt32();
-                if (lhsIsExactInt && rhsIsExactInt) {
-                    BigInt a = lhs.asBigInt();
-                    BigInt b = rhs.asBigInt();
-                    if (b.isZero()) throw std::runtime_error("Math Error: Division by zero.");
-                    if ((a % b).isZero()) return Value(a / b);
-                    return Value(Fraction(a, b));
-                }
-                if (lhs.isObjType(ObjType::FRACTION) && rhs.isObjType(ObjType::FRACTION)) return Value::fromFraction(static_cast<ObjFraction*>(lhs.asObj())->frac / static_cast<ObjFraction*>(rhs.asObj())->frac);
-                if (lhs.isObjType(ObjType::FRACTION) && rhsIsExactInt) return Value::fromFraction(static_cast<ObjFraction*>(lhs.asObj())->frac / Fraction(rhs.asBigInt()));
-                if (lhsIsExactInt && rhs.isObjType(ObjType::FRACTION)) return Value::fromFraction(Fraction(lhs.asBigInt()) / static_cast<ObjFraction*>(rhs.asObj())->frac);
-
-                if (lhs.isObjType(ObjType::COMPLEX) || rhs.isObjType(ObjType::COMPLEX)) {
-                    Complex b = rhs.asComplex();
-                    if (b == 0.0) throw std::runtime_error("Math Error: Division by zero.");
-                    return Value(lhs.asComplex() / b);
-                }
-                if (lhs.isDouble() || rhs.isDouble()) {
-                    double b = rhs.asDouble();
-                    if (b == 0.0) throw std::runtime_error("Math Error: Division by zero.");
-                    return Value(lhs.asDouble() / b);
-                }
-            } catch (...) {}
-            
-            throw std::runtime_error("Type Error: Division not supported for these types.");
-        }
-
-        friend Value operator^(const Value& lhs, const Value& rhs) {
-            if (lhs.isSymbolic() || rhs.isSymbolic()) return Value(lhs.asSymbolic() ^ rhs.asSymbolic());
-            
-            try {
-                if (lhs.isObjType(ObjType::COMPLEX) || rhs.isObjType(ObjType::COMPLEX)) return Value(lhs.asComplex() ^ rhs.asComplex());
-
-                if (lhs.isObjType(ObjType::REAL_MATRIX) || lhs.isObjType(ObjType::COMPLEX_MATRIX)) {
-                    bool rhsIsScalar = rhs.isNumber() || rhs.isBigInt() || rhs.isObjType(ObjType::FRACTION) || rhs.isComplex();
-                    if (rhsIsScalar) {
-                        if (rhs.isComplex()) {
-                            return Value((matLog(lhs.asComplexMatrix()) * rhs.asComplex()).matExp());
-                        } else {
-                            double b = rhs.asDouble();
-                            if (Tol::isEq(b, std::round(b), 1e5)) return Value(lhs.asComplexMatrix().power(static_cast<int>(std::round(b))));
-                            return Value((matLog(lhs.asComplexMatrix()) * Complex(b)).matExp());
-                        }
-                    }
-                    if (rhs.isObjType(ObjType::REAL_MATRIX) || rhs.isObjType(ObjType::COMPLEX_MATRIX)) return Value(matPow(lhs.asComplexMatrix(), rhs.asComplexMatrix()));
-                }
-                bool lhsIsScalar = lhs.isNumber() || lhs.isBigInt() || lhs.isObjType(ObjType::FRACTION) || lhs.isComplex();
-                if (lhsIsScalar && (rhs.isObjType(ObjType::REAL_MATRIX) || rhs.isObjType(ObjType::COMPLEX_MATRIX))) {
-                    return Value((rhs.asComplexMatrix() * log(lhs.asComplex())).matExp());
-                }
-
-                if (lhs.isObjType(ObjType::BASENUM) && rhs.isObjType(ObjType::BASENUM)) return Value(static_cast<ObjBaseNum*>(lhs.asObj())->base ^ static_cast<ObjBaseNum*>(rhs.asObj())->base);
-                if (lhs.isObjType(ObjType::BASENUM)) return Value(static_cast<ObjBaseNum*>(lhs.asObj())->base ^ BaseNum(rhs.asBigInt(), static_cast<ObjBaseNum*>(lhs.asObj())->base.getRadix()));
-                if (rhs.isObjType(ObjType::BASENUM)) return Value(BaseNum(lhs.asBigInt(), static_cast<ObjBaseNum*>(rhs.asObj())->base.getRadix()) ^ static_cast<ObjBaseNum*>(rhs.asObj())->base);
-
-                bool rhsIsExactInt = false;
-                BigInt rhsInt(0);
-                if (rhs.isObjType(ObjType::BIGINT)) {
-                    rhsIsExactInt = true;
-                    rhsInt = static_cast<ObjBigInt*>(rhs.asObj())->num;
-                } else if (rhs.isInt32()) {
-                    rhsIsExactInt = true;
-                    rhsInt = BigInt(rhs.asInt32());
-                } else if (rhs.isDouble()) {
-                    double d = rhs.asDoubleRaw();
-                    if (std::isfinite(d) && d == std::floor(d) && std::abs(d) < 9e18) {
-                        rhsIsExactInt = true;
-                        rhsInt = BigInt(static_cast<int64_t>(d));
-                    }
-                } else if (rhs.isObjType(ObjType::FRACTION)) {
-                    const auto& f = static_cast<ObjFraction*>(rhs.asObj())->frac;
-                    if (f.getDen() == BigInt(1)) {
-                        rhsIsExactInt = true;
-                        rhsInt = f.getNum();
-                    }
-                }
-
-                if (rhsIsExactInt) {
-                    if (lhs.isObjType(ObjType::BIGINT)) {
-                        const BigInt& a = static_cast<ObjBigInt*>(lhs.asObj())->num;
-                        if (rhsInt.isNegative()) return Value::fromFraction(Fraction(BigInt(1), a).pow(rhsInt.abs().toInt64()));
-                        return Value(a.pow(rhsInt));
-                    }
-                    if (lhs.isObjType(ObjType::FRACTION)) {
-                        const Fraction& a = static_cast<ObjFraction*>(lhs.asObj())->frac;
-                        if (rhsInt.isNegative()) return Value::fromFraction(Fraction(a.getDen(), a.getNum()).pow(rhsInt.abs().toInt64()));
-                        return Value::fromFraction(a.pow(rhsInt.toInt64()));
-                    }
-                    if (lhs.isInt32()) {
-                        BigInt a(lhs.asInt32());
-                        if (rhsInt.isNegative()) return Value::fromFraction(Fraction(BigInt(1), a).pow(rhsInt.abs().toInt64()));
-                        return Value(a.pow(rhsInt));
-                    }
-                }
-
-                if (lhs.isObjType(ObjType::BIGINT) || lhs.isObjType(ObjType::FRACTION) || lhs.isInt32()) {
-                    if (rhs.isObjType(ObjType::FRACTION)) {
-                        Fraction b = static_cast<ObjFraction*>(rhs.asObj())->frac;
-                        BigInt aNum = lhs.isObjType(ObjType::FRACTION) ? static_cast<ObjFraction*>(lhs.asObj())->frac.getNum() : lhs.asBigInt();
-                        BigInt aDen = lhs.isObjType(ObjType::FRACTION) ? static_cast<ObjFraction*>(lhs.asObj())->frac.getDen() : BigInt(1);
-                        
-                        int64_t p = b.getNum().toInt64(), q = b.getDen().toInt64();
-                        if (q < 0) { p = -p; q = -q; }
-                        
-                        auto [ok, val] = Value::tryExactRationalPow(aNum, aDen, p, q);
-                        if (ok) return val;
-                        
-                        if (q > 0) {
-                            int64_t k = p / q, r = p % q;
-                            if (r < 0) { r += q; k -= 1; }
-                            if (k != 0 && r != 0) {
-                                Value exactPart = lhs ^ Value(BigInt(k));
-                                Value symPart = Value(SymExpr(Fraction(aNum, aDen)) ^ SymExpr(Fraction(BigInt(r), BigInt(q))));
-                                return exactPart * symPart;
-                            }
-                        }
-                        return Value(SymExpr(Fraction(aNum, aDen)) ^ SymExpr(b));
-                    }
-                }
-
-                double a = lhs.asDouble(), b = rhs.asDouble();
-                if (a < 0 && std::floor(b) != b) {
-                    for (int q = 2; q <= 1000; ++q) {
-                        double p = b * q;
-                        double rounded = std::round(p);
-                        if (Tol::isEq(p, rounded, 1e5)) {
-                            int64_t pInt = static_cast<int64_t>(rounded);
-                            int64_t g = std::gcd(std::abs(pInt), static_cast<int64_t>(q));
-                            return Value::negativePow(a, pInt / g, q / g);
-                        }
-                    }
-                    return Value(Complex(a, 0.0) ^ Complex(b, 0.0));
-                }
-                double res = std::pow(a, b);
-                double rounded = std::round(res);
-                if (Tol::isEq(res, rounded, 1e5) && std::abs(rounded) < 9e15) return Value(BigInt(static_cast<int64_t>(rounded)));
-                return Value(res);
-
-            } catch (...) {}
-            
-            throw std::runtime_error("Type Error: Power operation not supported for these types.");
-        }
-
-        friend Value operator%(const Value& lhs, const Value& rhs) {
-            if (lhs.isInt32() && rhs.isInt32()) {
-                int32_t a = lhs.asInt32(), b = rhs.asInt32();
-                if (b == 0) throw std::runtime_error("Math Error: Modulo by zero.");
-                if (a == -2147483648 && b == -1) return Value::fromInt32(0);
-                return Value::fromInt32(a % b);
-            }
-            if (lhs.isNumber() && rhs.isNumber()) {
-                double b = rhs.asNumber();
-                if (b == 0.0) throw std::runtime_error("Math Error: Modulo by zero.");
-                return Value(std::fmod(lhs.asNumber(), b));
-            }
-            
-            try {
-                bool rhsIsRealScalar = rhs.isNumber() || rhs.isBigInt() || rhs.isObjType(ObjType::FRACTION);
-                if (lhs.isObjType(ObjType::REAL_MATRIX) && rhsIsRealScalar) {
-                    double b = rhs.asDouble();
-                    if (b == 0.0) throw std::runtime_error("Math Error: Modulo by zero.");
-                    const auto& a = static_cast<ObjRealMatrix*>(lhs.asObj())->mat;
-                    RealMatrix res(a.getRows(), a.getCols());
-                    for (int i = 0; i < a.getRows(); ++i)
-                        for (int j = 0; j < a.getCols(); ++j)
-                            res(i, j) = std::fmod(a(i, j), b);
-                    return Value(res);
-                }
-                if (lhs.isObjType(ObjType::COMPLEX_MATRIX) && rhsIsRealScalar) {
-                    double b = rhs.asDouble();
-                    if (b == 0.0) throw std::runtime_error("Math Error: Modulo by zero.");
-                    const auto& a = static_cast<ObjComplexMatrix*>(lhs.asObj())->mat;
-                    ComplexMatrix res(a.getRows(), a.getCols());
-                    for (int i = 0; i < a.getRows(); ++i)
-                        for (int j = 0; j < a.getCols(); ++j)
-                            res(i, j) = Complex(std::fmod(a(i, j).real, b), std::fmod(a(i, j).imag, b));
-                    return Value(res);
-                }
-
-                if (lhs.isObjType(ObjType::BASENUM) && rhs.isObjType(ObjType::BASENUM)) return Value(static_cast<ObjBaseNum*>(lhs.asObj())->base % static_cast<ObjBaseNum*>(rhs.asObj())->base);
-                if (lhs.isObjType(ObjType::BASENUM)) return Value(static_cast<ObjBaseNum*>(lhs.asObj())->base % BaseNum(rhs.asBigInt(), static_cast<ObjBaseNum*>(lhs.asObj())->base.getRadix()));
-                if (rhs.isObjType(ObjType::BASENUM)) return Value(BaseNum(lhs.asBigInt(), static_cast<ObjBaseNum*>(rhs.asObj())->base.getRadix()) % static_cast<ObjBaseNum*>(rhs.asObj())->base);
-
-                bool lhsIsExactInt = lhs.isBigInt() || lhs.isInt32();
-                bool rhsIsExactInt = rhs.isBigInt() || rhs.isInt32();
-                if (lhsIsExactInt && rhsIsExactInt) return Value(lhs.asBigInt() % rhs.asBigInt());
-                if (lhs.isObjType(ObjType::FRACTION) && rhs.isObjType(ObjType::FRACTION)) return Value::fromFraction(static_cast<ObjFraction*>(lhs.asObj())->frac % static_cast<ObjFraction*>(rhs.asObj())->frac);
-                if (lhs.isObjType(ObjType::FRACTION) && rhsIsExactInt) return Value::fromFraction(static_cast<ObjFraction*>(lhs.asObj())->frac % Fraction(rhs.asBigInt()));
-                if (lhsIsExactInt && rhs.isObjType(ObjType::FRACTION)) return Value::fromFraction(Fraction(lhs.asBigInt()) % static_cast<ObjFraction*>(rhs.asObj())->frac);
-            } catch (...) {}
-            
-            throw std::runtime_error("Type Error: Modulo not supported for these types.");
-        }
+        friend Value operator%(const Value& lhs, const Value& rhs);
 
         friend std::ostream& operator<<(std::ostream& os, const Value& val);
 
-        friend Value operator&(const Value& lhs, const Value& rhs) {
-            if (lhs.isObjType(ObjType::SET) && rhs.isObjType(ObjType::SET)) {
-                ObjSet* s1 = static_cast<ObjSet*>(lhs.asObj());
-                ObjSet* s2 = static_cast<ObjSet*>(rhs.asObj());
-                ObjSet* res = GcHeap::get().allocate<ObjSet>();
-                for (const auto& val : s1->elements) {
-                    if (s2->keys.find(val) != s2->keys.end()) {
-                        res->keys.insert(val);
-                        res->elements.push_back(val);
-                    }
-                }
-                return Value(res);
-            }
-            if (lhs.isObjType(ObjType::BASENUM) && rhs.isObjType(ObjType::BASENUM)) return Value(static_cast<ObjBaseNum*>(lhs.asObj())->base.bitAnd(static_cast<ObjBaseNum*>(rhs.asObj())->base));
-            if (lhs.isObjType(ObjType::BASENUM)) return Value(static_cast<ObjBaseNum*>(lhs.asObj())->base.bitAnd(BaseNum(rhs.asBigInt(), static_cast<ObjBaseNum*>(lhs.asObj())->base.getRadix())));
-            if (rhs.isObjType(ObjType::BASENUM)) return Value(BaseNum(lhs.asBigInt(), static_cast<ObjBaseNum*>(rhs.asObj())->base.getRadix()).bitAnd(static_cast<ObjBaseNum*>(rhs.asObj())->base));
-            
-            if (lhs.isInt32() && rhs.isInt32()) return Value::fromInt32(lhs.asInt32() & rhs.asInt32());
-            
-            bool lhsIsInt = lhs.isInt32() || lhs.isBigInt();
-            bool rhsIsInt = rhs.isInt32() || rhs.isBigInt();
-            if (lhsIsInt && rhsIsInt) {
-                BigInt res = BaseNum(lhs.asBigInt(), 2).bitAnd(BaseNum(rhs.asBigInt(), 2)).getValue();
-                return Value(res);
-            }
-            throw std::runtime_error("Type Error: Bitwise/Set AND '&' not supported for these types.");
-        }
-
-        friend Value operator|(const Value& lhs, const Value& rhs) {
-            if (lhs.isObjType(ObjType::SET) && rhs.isObjType(ObjType::SET)) {
-                ObjSet* s1 = static_cast<ObjSet*>(lhs.asObj());
-                ObjSet* s2 = static_cast<ObjSet*>(rhs.asObj());
-                ObjSet* res = GcHeap::get().allocate<ObjSet>();
-                for (const auto& val : s1->elements) { res->keys.insert(val); res->elements.push_back(val); }
-                for (const auto& val : s2->elements) {
-                    if (res->keys.find(val) == res->keys.end()) {
-                        res->keys.insert(val);
-                        res->elements.push_back(val);
-                    }
-                }
-                return Value(res);
-            }
-            if (lhs.isObjType(ObjType::BASENUM) && rhs.isObjType(ObjType::BASENUM)) return Value(static_cast<ObjBaseNum*>(lhs.asObj())->base.bitOr(static_cast<ObjBaseNum*>(rhs.asObj())->base));
-            if (lhs.isObjType(ObjType::BASENUM)) return Value(static_cast<ObjBaseNum*>(lhs.asObj())->base.bitOr(BaseNum(rhs.asBigInt(), static_cast<ObjBaseNum*>(lhs.asObj())->base.getRadix())));
-            if (rhs.isObjType(ObjType::BASENUM)) return Value(BaseNum(lhs.asBigInt(), static_cast<ObjBaseNum*>(rhs.asObj())->base.getRadix()).bitOr(static_cast<ObjBaseNum*>(rhs.asObj())->base));
-            
-            if (lhs.isInt32() && rhs.isInt32()) return Value::fromInt32(lhs.asInt32() | rhs.asInt32());
-            
-            bool lhsIsInt = lhs.isInt32() || lhs.isBigInt();
-            bool rhsIsInt = rhs.isInt32() || rhs.isBigInt();
-            if (lhsIsInt && rhsIsInt) {
-                BigInt res = BaseNum(lhs.asBigInt(), 2).bitOr(BaseNum(rhs.asBigInt(), 2)).getValue();
-                return Value(res);
-            }
-            throw std::runtime_error("Type Error: Bitwise/Set OR '|' not supported for these types.");
-        }
+        friend Value operator&(const Value& lhs, const Value& rhs);
+        friend Value operator|(const Value& lhs, const Value& rhs);
 
         std::string toJC2Expression() const;
 
@@ -1419,6 +514,479 @@ namespace jc {
         ObjNamespace() { type = ObjType::NAMESPACE; }
         void clear() override { fields.clear(); }
     };
+
+    struct ObjList : public Obj {
+        std::vector<Value> vec;
+        bool is_frozen = false;
+        ObjList() { type = ObjType::LIST; }
+        void checkModify() const { if (is_frozen) throw std::runtime_error("Runtime Error: Cannot modify frozen List."); }
+        std::vector<Value>& mut() { checkModify(); return vec; }
+        void clear() override { checkModify(); vec.clear(); }
+    };
+    struct ObjDict : public Obj {
+        std::vector<std::pair<Value, Value>> elements;
+        std::unordered_map<Value, size_t, ValueHasher, ValueEqual> keyMap;
+        bool is_frozen = false;
+        ObjDict() { type = ObjType::DICT; }
+        void checkModify() const { if (is_frozen) throw std::runtime_error("Runtime Error: Cannot modify frozen Dict."); }
+        void clear() override { checkModify(); elements.clear(); keyMap.clear(); }
+        void set(const Value& key, const Value& val) {
+            checkModify();
+            auto it = keyMap.find(key);
+            if (it != keyMap.end()) {
+                elements[it->second].second = val;
+            } else {
+                keyMap[key] = elements.size();
+                elements.push_back({key, val});
+            }
+        }
+        void remove(const Value& key) {
+            checkModify();
+            auto it = keyMap.find(key);
+            if (it == keyMap.end()) throw std::runtime_error("Runtime Error: Key not found.");
+            size_t idx = it->second;
+            keyMap.erase(it);
+            elements.erase(elements.begin() + idx);
+            for (size_t i = idx; i < elements.size(); ++i) {
+                keyMap[elements[i].first] = i;
+            }
+        }
+        void discard(const Value& key) {
+            checkModify();
+            auto it = keyMap.find(key);
+            if (it != keyMap.end()) {
+                size_t idx = it->second;
+                keyMap.erase(it);
+                elements.erase(elements.begin() + idx);
+                for (size_t i = idx; i < elements.size(); ++i) {
+                    keyMap[elements[i].first] = i;
+                }
+            }
+        }
+    };
+    struct ObjSet : public Obj {
+        std::vector<Value> elements;
+        std::unordered_set<Value, ValueHasher, ValueEqual> keys;
+        bool is_frozen = false;
+        ObjSet() { type = ObjType::SET; }
+        void checkModify() const { if (is_frozen) throw std::runtime_error("Runtime Error: Cannot modify frozen Set."); }
+        void clear() override { checkModify(); elements.clear(); keys.clear(); }
+        void add(const Value& val) {
+            checkModify();
+            if (keys.find(val) == keys.end()) {
+                keys.insert(val);
+                elements.push_back(val);
+            }
+        }
+        void remove(const Value& val) {
+            checkModify();
+            auto it = keys.find(val);
+            if (it == keys.end()) throw std::runtime_error("Runtime Error: Element not found in Set.");
+            keys.erase(it);
+            elements.erase(std::remove_if(elements.begin(), elements.end(), [&](const Value& v) { return Value::equals(v, val); }), elements.end());
+        }
+        void discard(const Value& val) {
+            checkModify();
+            auto it = keys.find(val);
+            if (it != keys.end()) {
+                keys.erase(it);
+                elements.erase(std::remove_if(elements.begin(), elements.end(), [&](const Value& v) { return Value::equals(v, val); }), elements.end());
+            }
+        }
+        Value pop() {
+            checkModify();
+            if (elements.empty()) throw std::runtime_error("Runtime Error: setPop() on empty Set.");
+            Value result = elements.back();
+            keys.erase(result);
+            elements.pop_back();
+            return result;
+        }
+    };
+
+
+
+    inline Value operator*(const Value& lhs, const Value& rhs) {
+        if (lhs.isInt32() && rhs.isInt32()) {
+            int64_t prod = static_cast<int64_t>(lhs.asInt32()) * rhs.asInt32();
+            if (prod >= -2147483648LL && prod <= 2147483647LL) return Value::fromInt32(static_cast<int32_t>(prod));
+            return Value(BigInt(prod));
+        }
+        if (lhs.isNumber() && rhs.isNumber()) return Value(lhs.asNumber() * rhs.asNumber());
+        
+        try {
+            if (lhs.isObjType(ObjType::REAL_MATRIX) && rhs.isObjType(ObjType::REAL_MATRIX)) return Value(static_cast<ObjRealMatrix*>(lhs.asObj())->mat * static_cast<ObjRealMatrix*>(rhs.asObj())->mat);
+            if (lhs.isObjType(ObjType::COMPLEX_MATRIX) && rhs.isObjType(ObjType::COMPLEX_MATRIX)) return Value(static_cast<ObjComplexMatrix*>(lhs.asObj())->mat * static_cast<ObjComplexMatrix*>(rhs.asObj())->mat);
+            if (lhs.isObjType(ObjType::REAL_MATRIX) && rhs.isObjType(ObjType::COMPLEX_MATRIX)) return Value(lhs.asComplexMatrix() * rhs.asComplexMatrix());
+            if (lhs.isObjType(ObjType::COMPLEX_MATRIX) && rhs.isObjType(ObjType::REAL_MATRIX)) return Value(lhs.asComplexMatrix() * rhs.asComplexMatrix());
+            
+            bool lhsIsMat = lhs.isObjType(ObjType::REAL_MATRIX) || lhs.isObjType(ObjType::COMPLEX_MATRIX);
+            bool rhsIsMat = rhs.isObjType(ObjType::REAL_MATRIX) || rhs.isObjType(ObjType::COMPLEX_MATRIX);
+            bool lhsIsScalar = lhs.isNumber() || lhs.isBigInt() || lhs.isObjType(ObjType::FRACTION) || lhs.isComplex();
+            bool rhsIsScalar = rhs.isNumber() || rhs.isBigInt() || rhs.isObjType(ObjType::FRACTION) || rhs.isComplex();
+
+            if (lhsIsMat && rhsIsScalar) {
+                if (lhs.isObjType(ObjType::REAL_MATRIX) && !rhs.isComplex()) return Value(static_cast<ObjRealMatrix*>(lhs.asObj())->mat * rhs.asDouble());
+                return Value(lhs.asComplexMatrix() * rhs.asComplex());
+            }
+            if (lhsIsScalar && rhsIsMat) {
+                if (rhs.isObjType(ObjType::REAL_MATRIX) && !rhs.isComplex()) return Value(static_cast<ObjRealMatrix*>(rhs.asObj())->mat * lhs.asDouble());
+                return Value(rhs.asComplexMatrix() * rhs.asComplex());
+            }
+            
+            if (lhs.isObjType(ObjType::STRING) && (rhs.isNumber() || rhs.isObjType(ObjType::BIGINT))) {
+                int n = static_cast<int>(rhs.asDouble());
+                if (n < 0) throw std::runtime_error("Type Error: String repeat count must be non-negative.");
+                std::string result;
+                const std::string& s = static_cast<ObjString*>(lhs.asObj())->str;
+                result.reserve(s.size() * n);
+                for (int i = 0; i < n; ++i) result += s;
+                return Value(result);
+            }
+            if ((lhs.isNumber() || lhs.isObjType(ObjType::BIGINT)) && rhs.isObjType(ObjType::STRING)) {
+                int n = static_cast<int>(lhs.asDouble());
+                if (n < 0) throw std::runtime_error("Type Error: String repeat count must be non-negative.");
+                std::string result;
+                const std::string& s = static_cast<ObjString*>(rhs.asObj())->str;
+                result.reserve(s.size() * n);
+                for (int i = 0; i < n; ++i) result += s;
+                return Value(result);
+            }
+
+            if (lhs.isObjType(ObjType::SET) && rhs.isObjType(ObjType::SET)) {
+                ObjSet* s1 = static_cast<ObjSet*>(lhs.asObj());
+                ObjSet* s2 = static_cast<ObjSet*>(rhs.asObj());
+                ObjSet* res = GcHeap::get().allocate<ObjSet>();
+                for (const auto& v1 : s1->elements) {
+                    for (const auto& v2 : s2->elements) {
+                        ObjList* pair = GcHeap::get().allocate<ObjList>();
+                        pair->vec.push_back(v1);
+                        pair->vec.push_back(v2);
+                        pair->is_frozen = true;
+                        Value pairVal(pair);
+                        if (res->keys.find(pairVal) == res->keys.end()) {
+                            res->keys.insert(pairVal);
+                            res->elements.push_back(pairVal);
+                        }
+                    }
+                }
+                return Value(res);
+            }
+
+            if (lhs.isSymbolic() || rhs.isSymbolic()) return Value(lhs.asSymbolic() * rhs.asSymbolic());
+
+            if (lhs.isObjType(ObjType::BASENUM) && rhs.isObjType(ObjType::BASENUM)) return Value(static_cast<ObjBaseNum*>(lhs.asObj())->base * static_cast<ObjBaseNum*>(rhs.asObj())->base);
+            if (lhs.isObjType(ObjType::BASENUM)) return Value(static_cast<ObjBaseNum*>(lhs.asObj())->base * BaseNum(rhs.asBigInt(), static_cast<ObjBaseNum*>(lhs.asObj())->base.getRadix()));
+            if (rhs.isObjType(ObjType::BASENUM)) return Value(BaseNum(lhs.asBigInt(), static_cast<ObjBaseNum*>(rhs.asObj())->base.getRadix()) * static_cast<ObjBaseNum*>(rhs.asObj())->base);
+
+            if (lhs.isObjType(ObjType::COMPLEX) || rhs.isObjType(ObjType::COMPLEX)) return Value(lhs.asComplex() * rhs.asComplex());
+            
+            bool lhsIsExactInt = lhs.isBigInt() || lhs.isInt32();
+            bool rhsIsExactInt = rhs.isBigInt() || rhs.isInt32();
+            if (lhsIsExactInt && rhsIsExactInt) return Value(lhs.asBigInt() * rhs.asBigInt());
+            if (lhs.isObjType(ObjType::FRACTION) && rhs.isObjType(ObjType::FRACTION)) return Value::fromFraction(static_cast<ObjFraction*>(lhs.asObj())->frac * static_cast<ObjFraction*>(rhs.asObj())->frac);
+            if (lhs.isObjType(ObjType::FRACTION) && rhsIsExactInt) return Value::fromFraction(static_cast<ObjFraction*>(lhs.asObj())->frac * Fraction(rhs.asBigInt()));
+            if (lhsIsExactInt && rhs.isObjType(ObjType::FRACTION)) return Value::fromFraction(Fraction(lhs.asBigInt()) * static_cast<ObjFraction*>(rhs.asObj())->frac);
+            
+            if (lhs.isDouble() || rhs.isDouble()) return Value(lhs.asDouble() * rhs.asDouble());
+        } catch (...) {}
+        
+        throw std::runtime_error("Type Error: Multiplication not supported for these types.");
+    }
+
+    inline Value operator/(const Value& lhs, const Value& rhs) {
+        if (lhs.isInt32() && rhs.isInt32()) {
+            int32_t a = lhs.asInt32(), b = rhs.asInt32();
+            if (b == 0) throw std::runtime_error("Math Error: Division by zero.");
+            if (a % b == 0) {
+                if (a == -2147483648 && b == -1) return Value(BigInt(2147483648LL));
+                return Value::fromInt32(a / b);
+            }
+            return Value(Fraction(BigInt(a), BigInt(b)));
+        }
+        if (lhs.isNumber() && rhs.isNumber()) {
+            double b = rhs.asNumber();
+            if (b == 0.0) throw std::runtime_error("Math Error: Division by zero.");
+            return Value(lhs.asNumber() / b);
+        }
+        
+        try {
+            if (rhs.isObjType(ObjType::REAL_MATRIX) || rhs.isObjType(ObjType::COMPLEX_MATRIX)) {
+                return lhs * Value(rhs.asComplexMatrix().inverse());
+            }
+
+            bool lhsIsMat = lhs.isObjType(ObjType::REAL_MATRIX) || lhs.isObjType(ObjType::COMPLEX_MATRIX);
+            bool rhsIsScalar = rhs.isNumber() || rhs.isBigInt() || rhs.isObjType(ObjType::FRACTION) || rhs.isComplex();
+
+            if (lhsIsMat && rhsIsScalar) {
+                if (rhs.isComplex()) {
+                    Complex c = rhs.asComplex();
+                    if (c == 0.0) throw std::runtime_error("Math Error: Division by zero complex number.");
+                    return Value(lhs.asComplexMatrix() / c);
+                } else {
+                    double d = rhs.asDouble();
+                    if (d == 0.0) throw std::runtime_error("Math Error: Division by zero.");
+                    if (lhs.isObjType(ObjType::REAL_MATRIX)) return Value(static_cast<ObjRealMatrix*>(lhs.asObj())->mat / d);
+                    return Value(lhs.asComplexMatrix() / Complex(d, 0.0));
+                }
+            }
+
+            if (lhs.isSymbolic() || rhs.isSymbolic()) return Value(lhs.asSymbolic() / rhs.asSymbolic());
+
+            if (lhs.isObjType(ObjType::BASENUM) && rhs.isObjType(ObjType::BASENUM)) return Value(static_cast<ObjBaseNum*>(lhs.asObj())->base / static_cast<ObjBaseNum*>(rhs.asObj())->base);
+            if (lhs.isObjType(ObjType::BASENUM)) return Value(static_cast<ObjBaseNum*>(lhs.asObj())->base / BaseNum(rhs.asBigInt(), static_cast<ObjBaseNum*>(lhs.asObj())->base.getRadix()));
+            if (rhs.isObjType(ObjType::BASENUM)) return Value(BaseNum(lhs.asBigInt(), static_cast<ObjBaseNum*>(rhs.asObj())->base.getRadix()) / static_cast<ObjBaseNum*>(rhs.asObj())->base);
+
+            bool lhsIsExactInt = lhs.isBigInt() || lhs.isInt32();
+            bool rhsIsExactInt = rhs.isBigInt() || rhs.isInt32();
+            if (lhsIsExactInt && rhsIsExactInt) {
+                BigInt a = lhs.asBigInt();
+                BigInt b = rhs.asBigInt();
+                if (b.isZero()) throw std::runtime_error("Math Error: Division by zero.");
+                if ((a % b).isZero()) return Value(a / b);
+                return Value(Fraction(a, b));
+            }
+            if (lhs.isObjType(ObjType::FRACTION) && rhs.isObjType(ObjType::FRACTION)) return Value::fromFraction(static_cast<ObjFraction*>(lhs.asObj())->frac / static_cast<ObjFraction*>(rhs.asObj())->frac);
+            if (lhs.isObjType(ObjType::FRACTION) && rhsIsExactInt) return Value::fromFraction(static_cast<ObjFraction*>(lhs.asObj())->frac / Fraction(rhs.asBigInt()));
+            if (lhsIsExactInt && rhs.isObjType(ObjType::FRACTION)) return Value::fromFraction(Fraction(lhs.asBigInt()) / static_cast<ObjFraction*>(rhs.asObj())->frac);
+
+            if (lhs.isObjType(ObjType::COMPLEX) || rhs.isObjType(ObjType::COMPLEX)) {
+                Complex b = rhs.asComplex();
+                if (b == 0.0) throw std::runtime_error("Math Error: Division by zero.");
+                return Value(lhs.asComplex() / b);
+            }
+            if (lhs.isDouble() || rhs.isDouble()) {
+                double b = rhs.asDouble();
+                if (b == 0.0) throw std::runtime_error("Math Error: Division by zero.");
+                return Value(lhs.asDouble() / b);
+            }
+        } catch (...) {}
+        
+        throw std::runtime_error("Type Error: Division not supported for these types.");
+    }
+
+    inline Value operator^(const Value& lhs, const Value& rhs) {
+        if (lhs.isSymbolic() || rhs.isSymbolic()) return Value(lhs.asSymbolic() ^ rhs.asSymbolic());
+        
+        try {
+            if (lhs.isObjType(ObjType::COMPLEX) || rhs.isObjType(ObjType::COMPLEX)) return Value(lhs.asComplex() ^ rhs.asComplex());
+
+            if (lhs.isObjType(ObjType::REAL_MATRIX) || lhs.isObjType(ObjType::COMPLEX_MATRIX)) {
+                bool rhsIsScalar = rhs.isNumber() || rhs.isBigInt() || rhs.isObjType(ObjType::FRACTION) || rhs.isComplex();
+                if (rhsIsScalar) {
+                    if (rhs.isComplex()) {
+                        return Value((matLog(lhs.asComplexMatrix()) * rhs.asComplex()).matExp());
+                    } else {
+                        double b = rhs.asDouble();
+                        if (Tol::isEq(b, std::round(b), 1e5)) return Value(lhs.asComplexMatrix().power(static_cast<int>(std::round(b))));
+                        return Value((matLog(lhs.asComplexMatrix()) * Complex(b)).matExp());
+                    }
+                }
+                if (rhs.isObjType(ObjType::REAL_MATRIX) || rhs.isObjType(ObjType::COMPLEX_MATRIX)) return Value(matPow(lhs.asComplexMatrix(), rhs.asComplexMatrix()));
+            }
+            bool lhsIsScalar = lhs.isNumber() || lhs.isBigInt() || lhs.isObjType(ObjType::FRACTION) || lhs.isComplex();
+            if (lhsIsScalar && (rhs.isObjType(ObjType::REAL_MATRIX) || rhs.isObjType(ObjType::COMPLEX_MATRIX))) {
+                return Value((rhs.asComplexMatrix() * log(lhs.asComplex())).matExp());
+            }
+
+            if (lhs.isObjType(ObjType::BASENUM) && rhs.isObjType(ObjType::BASENUM)) return Value(static_cast<ObjBaseNum*>(lhs.asObj())->base ^ static_cast<ObjBaseNum*>(rhs.asObj())->base);
+            if (lhs.isObjType(ObjType::BASENUM)) return Value(static_cast<ObjBaseNum*>(lhs.asObj())->base ^ BaseNum(rhs.asBigInt(), static_cast<ObjBaseNum*>(lhs.asObj())->base.getRadix()));
+            if (rhs.isObjType(ObjType::BASENUM)) return Value(BaseNum(lhs.asBigInt(), static_cast<ObjBaseNum*>(rhs.asObj())->base.getRadix()) ^ static_cast<ObjBaseNum*>(rhs.asObj())->base);
+
+            bool rhsIsExactInt = false;
+            BigInt rhsInt(0);
+            if (rhs.isObjType(ObjType::BIGINT)) {
+                rhsIsExactInt = true;
+                rhsInt = static_cast<ObjBigInt*>(rhs.asObj())->num;
+            } else if (rhs.isInt32()) {
+                rhsIsExactInt = true;
+                rhsInt = BigInt(rhs.asInt32());
+            } else if (rhs.isDouble()) {
+                double d = rhs.asDoubleRaw();
+                if (std::isfinite(d) && d == std::floor(d) && std::abs(d) < 9e18) {
+                    rhsIsExactInt = true;
+                    rhsInt = BigInt(static_cast<int64_t>(d));
+                }
+            } else if (rhs.isObjType(ObjType::FRACTION)) {
+                const auto& f = static_cast<ObjFraction*>(rhs.asObj())->frac;
+                if (f.getDen() == BigInt(1)) {
+                    rhsIsExactInt = true;
+                    rhsInt = f.getNum();
+                }
+            }
+
+            if (rhsIsExactInt) {
+                if (lhs.isObjType(ObjType::BIGINT)) {
+                    const BigInt& a = static_cast<ObjBigInt*>(lhs.asObj())->num;
+                    if (rhsInt.isNegative()) return Value::fromFraction(Fraction(BigInt(1), a).pow(rhsInt.abs().toInt64()));
+                    return Value(a.pow(rhsInt));
+                }
+                if (lhs.isObjType(ObjType::FRACTION)) {
+                    const Fraction& a = static_cast<ObjFraction*>(lhs.asObj())->frac;
+                    if (rhsInt.isNegative()) return Value::fromFraction(Fraction(a.getDen(), a.getNum()).pow(rhsInt.abs().toInt64()));
+                    return Value::fromFraction(a.pow(rhsInt.toInt64()));
+                }
+                if (lhs.isInt32()) {
+                    BigInt a(lhs.asInt32());
+                    if (rhsInt.isNegative()) return Value::fromFraction(Fraction(BigInt(1), a).pow(rhsInt.abs().toInt64()));
+                    return Value(a.pow(rhsInt));
+                }
+            }
+
+            if (lhs.isObjType(ObjType::BIGINT) || lhs.isObjType(ObjType::FRACTION) || lhs.isInt32()) {
+                if (rhs.isObjType(ObjType::FRACTION)) {
+                    Fraction b = static_cast<ObjFraction*>(rhs.asObj())->frac;
+                    BigInt aNum = lhs.isObjType(ObjType::FRACTION) ? static_cast<ObjFraction*>(lhs.asObj())->frac.getNum() : lhs.asBigInt();
+                    BigInt aDen = lhs.isObjType(ObjType::FRACTION) ? static_cast<ObjFraction*>(lhs.asObj())->frac.getDen() : BigInt(1);
+                    
+                    int64_t p = b.getNum().toInt64(), q = b.getDen().toInt64();
+                    if (q < 0) { p = -p; q = -q; }
+                    
+                    auto [ok, val] = Value::tryExactRationalPow(aNum, aDen, p, q);
+                    if (ok) return val;
+                    
+                    if (q > 0) {
+                        int64_t k = p / q, r = p % q;
+                        if (r < 0) { r += q; k -= 1; }
+                        if (k != 0 && r != 0) {
+                            Value exactPart = lhs ^ Value(BigInt(k));
+                            Value symPart = Value(SymExpr(Fraction(aNum, aDen)) ^ SymExpr(Fraction(BigInt(r), BigInt(q))));
+                            return exactPart * symPart;
+                        }
+                    }
+                    return Value(SymExpr(Fraction(aNum, aDen)) ^ SymExpr(b));
+                }
+            }
+
+            double a = lhs.asDouble(), b = rhs.asDouble();
+            if (a < 0 && std::floor(b) != b) {
+                for (int q = 2; q <= 1000; ++q) {
+                    double p = b * q;
+                    double rounded = std::round(p);
+                    if (Tol::isEq(p, rounded, 1e5)) {
+                        int64_t pInt = static_cast<int64_t>(rounded);
+                        int64_t g = std::gcd(std::abs(pInt), static_cast<int64_t>(q));
+                        return Value::negativePow(a, pInt / g, q / g);
+                    }
+                }
+                return Value(Complex(a, 0.0) ^ Complex(b, 0.0));
+            }
+            double res = std::pow(a, b);
+            double rounded = std::round(res);
+            if (Tol::isEq(res, rounded, 1e5) && std::abs(rounded) < 9e15) return Value(BigInt(static_cast<int64_t>(rounded)));
+            return Value(res);
+
+        } catch (...) {}
+        
+        throw std::runtime_error("Type Error: Power operation not supported for these types.");
+    }
+
+    inline Value operator%(const Value& lhs, const Value& rhs) {
+        if (lhs.isInt32() && rhs.isInt32()) {
+            int32_t a = lhs.asInt32(), b = rhs.asInt32();
+            if (b == 0) throw std::runtime_error("Math Error: Modulo by zero.");
+            if (a == -2147483648 && b == -1) return Value::fromInt32(0);
+            return Value::fromInt32(a % b);
+        }
+        if (lhs.isNumber() && rhs.isNumber()) {
+            double b = rhs.asNumber();
+            if (b == 0.0) throw std::runtime_error("Math Error: Modulo by zero.");
+            return Value(std::fmod(lhs.asNumber(), b));
+        }
+        
+        try {
+            bool rhsIsRealScalar = rhs.isNumber() || rhs.isBigInt() || rhs.isObjType(ObjType::FRACTION);
+            if (lhs.isObjType(ObjType::REAL_MATRIX) && rhsIsRealScalar) {
+                double b = rhs.asDouble();
+                if (b == 0.0) throw std::runtime_error("Math Error: Modulo by zero.");
+                const auto& a = static_cast<ObjRealMatrix*>(lhs.asObj())->mat;
+                RealMatrix res(a.getRows(), a.getCols());
+                for (int i = 0; i < a.getRows(); ++i)
+                    for (int j = 0; j < a.getCols(); ++j)
+                        res(i, j) = std::fmod(a(i, j), b);
+                return Value(res);
+            }
+            if (lhs.isObjType(ObjType::COMPLEX_MATRIX) && rhsIsRealScalar) {
+                double b = rhs.asDouble();
+                if (b == 0.0) throw std::runtime_error("Math Error: Modulo by zero.");
+                const auto& a = static_cast<ObjComplexMatrix*>(lhs.asObj())->mat;
+                ComplexMatrix res(a.getRows(), a.getCols());
+                for (int i = 0; i < a.getRows(); ++i)
+                    for (int j = 0; j < a.getCols(); ++j)
+                        res(i, j) = Complex(std::fmod(a(i, j).real, b), std::fmod(a(i, j).imag, b));
+                return Value(res);
+            }
+
+            if (lhs.isObjType(ObjType::BASENUM) && rhs.isObjType(ObjType::BASENUM)) return Value(static_cast<ObjBaseNum*>(lhs.asObj())->base % static_cast<ObjBaseNum*>(rhs.asObj())->base);
+            if (lhs.isObjType(ObjType::BASENUM)) return Value(static_cast<ObjBaseNum*>(lhs.asObj())->base % BaseNum(rhs.asBigInt(), static_cast<ObjBaseNum*>(lhs.asObj())->base.getRadix()));
+            if (rhs.isObjType(ObjType::BASENUM)) return Value(BaseNum(lhs.asBigInt(), static_cast<ObjBaseNum*>(rhs.asObj())->base.getRadix()) % static_cast<ObjBaseNum*>(rhs.asObj())->base);
+
+            bool lhsIsExactInt = lhs.isBigInt() || lhs.isInt32();
+            bool rhsIsExactInt = rhs.isBigInt() || rhs.isInt32();
+            if (lhsIsExactInt && rhsIsExactInt) return Value(lhs.asBigInt() % rhs.asBigInt());
+            if (lhs.isObjType(ObjType::FRACTION) && rhs.isObjType(ObjType::FRACTION)) return Value::fromFraction(static_cast<ObjFraction*>(lhs.asObj())->frac % static_cast<ObjFraction*>(rhs.asObj())->frac);
+            if (lhs.isObjType(ObjType::FRACTION) && rhsIsExactInt) return Value::fromFraction(static_cast<ObjFraction*>(lhs.asObj())->frac % Fraction(rhs.asBigInt()));
+            if (lhsIsExactInt && rhs.isObjType(ObjType::FRACTION)) return Value::fromFraction(Fraction(lhs.asBigInt()) % static_cast<ObjFraction*>(rhs.asObj())->frac);
+        } catch (...) {}
+        
+        throw std::runtime_error("Type Error: Modulo not supported for these types.");
+    }
+
+    inline Value operator&(const Value& lhs, const Value& rhs) {
+        if (lhs.isObjType(ObjType::SET) && rhs.isObjType(ObjType::SET)) {
+            ObjSet* s1 = static_cast<ObjSet*>(lhs.asObj());
+            ObjSet* s2 = static_cast<ObjSet*>(rhs.asObj());
+            ObjSet* res = GcHeap::get().allocate<ObjSet>();
+            for (const auto& val : s1->elements) {
+                if (s2->keys.find(val) != s2->keys.end()) {
+                    res->keys.insert(val);
+                    res->elements.push_back(val);
+                }
+            }
+            return Value(res);
+        }
+        if (lhs.isObjType(ObjType::BASENUM) && rhs.isObjType(ObjType::BASENUM)) return Value(static_cast<ObjBaseNum*>(lhs.asObj())->base.bitAnd(static_cast<ObjBaseNum*>(rhs.asObj())->base));
+        if (lhs.isObjType(ObjType::BASENUM)) return Value(static_cast<ObjBaseNum*>(lhs.asObj())->base.bitAnd(BaseNum(rhs.asBigInt(), static_cast<ObjBaseNum*>(lhs.asObj())->base.getRadix())));
+        if (rhs.isObjType(ObjType::BASENUM)) return Value(BaseNum(lhs.asBigInt(), static_cast<ObjBaseNum*>(rhs.asObj())->base.getRadix()).bitAnd(static_cast<ObjBaseNum*>(rhs.asObj())->base));
+        
+        if (lhs.isInt32() && rhs.isInt32()) return Value::fromInt32(lhs.asInt32() & rhs.asInt32());
+        
+        bool lhsIsInt = lhs.isInt32() || lhs.isBigInt();
+        bool rhsIsInt = rhs.isInt32() || rhs.isBigInt();
+        if (lhsIsInt && rhsIsInt) {
+            BigInt res = BaseNum(lhs.asBigInt(), 2).bitAnd(BaseNum(rhs.asBigInt(), 2)).getValue();
+            return Value(res);
+        }
+        throw std::runtime_error("Type Error: Bitwise/Set AND '&' not supported for these types.");
+    }
+
+    inline Value operator|(const Value& lhs, const Value& rhs) {
+        if (lhs.isObjType(ObjType::SET) && rhs.isObjType(ObjType::SET)) {
+            ObjSet* s1 = static_cast<ObjSet*>(lhs.asObj());
+            ObjSet* s2 = static_cast<ObjSet*>(rhs.asObj());
+            ObjSet* res = GcHeap::get().allocate<ObjSet>();
+            for (const auto& val : s1->elements) { res->keys.insert(val); res->elements.push_back(val); }
+            for (const auto& val : s2->elements) {
+                if (res->keys.find(val) == res->keys.end()) {
+                    res->keys.insert(val);
+                    res->elements.push_back(val);
+                }
+            }
+            return Value(res);
+        }
+        if (lhs.isObjType(ObjType::BASENUM) && rhs.isObjType(ObjType::BASENUM)) return Value(static_cast<ObjBaseNum*>(lhs.asObj())->base.bitOr(static_cast<ObjBaseNum*>(rhs.asObj())->base));
+        if (lhs.isObjType(ObjType::BASENUM)) return Value(static_cast<ObjBaseNum*>(lhs.asObj())->base.bitOr(BaseNum(rhs.asBigInt(), static_cast<ObjBaseNum*>(lhs.asObj())->base.getRadix())));
+        if (rhs.isObjType(ObjType::BASENUM)) return Value(BaseNum(lhs.asBigInt(), static_cast<ObjBaseNum*>(rhs.asObj())->base.getRadix()).bitOr(static_cast<ObjBaseNum*>(rhs.asObj())->base));
+        
+        if (lhs.isInt32() && rhs.isInt32()) return Value::fromInt32(lhs.asInt32() | rhs.asInt32());
+        
+        bool lhsIsInt = lhs.isInt32() || lhs.isBigInt();
+        bool rhsIsInt = rhs.isInt32() || rhs.isBigInt();
+        if (lhsIsInt && rhsIsInt) {
+            BigInt res = BaseNum(lhs.asBigInt(), 2).bitOr(BaseNum(rhs.asBigInt(), 2)).getValue();
+            return Value(res);
+        }
+        throw std::runtime_error("Type Error: Bitwise/Set OR '|' not supported for these types.");
+    }
 
     inline std::string Value::toJC2Expression() const {
         static thread_local std::vector<const void*> visited;
@@ -1601,6 +1169,533 @@ namespace jc {
         StackTracedException(const std::string& raw, const std::string& fullTraceText)
             : std::runtime_error(fullTraceText), rawMessage(raw) {}
     };
+
+    inline bool Value::isHashable() const {
+        static thread_local std::vector<const void*> visited;
+        if (isNumber() || isBool() || isNone()) return true;
+        Obj* obj = asObj();
+        switch (obj->type) {
+            case ObjType::STRING:
+            case ObjType::BIGINT:
+            case ObjType::FRACTION:
+            case ObjType::COMPLEX:
+            case ObjType::BASENUM:
+            case ObjType::REAL_MATRIX:
+            case ObjType::COMPLEX_MATRIX:
+            case ObjType::STRING_MATRIX:
+            case ObjType::CLOSURE:
+            case ObjType::CLASS:
+            case ObjType::SYMBOLIC:
+                return true;
+            case ObjType::LIST: {
+                ObjList* list = static_cast<ObjList*>(obj);
+                if (!list->is_frozen) return false;
+                RecursionGuard guard(visited, list);
+                if (guard.isCycle) return true;
+                for (const auto& e : list->vec) {
+                    try { if (!e.isHashable()) return false; } catch (...) { return false; }
+                }
+                return true;
+            }
+            case ObjType::DICT: {
+                ObjDict* dict = static_cast<ObjDict*>(obj);
+                if (!dict->is_frozen) return false;
+                RecursionGuard guard(visited, dict);
+                if (guard.isCycle) return true;
+                for (const auto& [k, v] : dict->elements) {
+                    try { if (!v.isHashable()) return false; } catch (...) { return false; }
+                }
+                return true;
+            }
+            case ObjType::SET: {
+                ObjSet* set = static_cast<ObjSet*>(obj);
+                if (!set->is_frozen) return false;
+                RecursionGuard guard(visited, set);
+                if (guard.isCycle) return true;
+                for (const auto& v : set->elements) {
+                    try { if (!v.isHashable()) return false; } catch (...) { return false; }
+                }
+                return true;
+            }
+            case ObjType::INSTANCE: {
+                ObjInstance* inst = static_cast<ObjInstance*>(obj);
+                RecursionGuard guard(visited, inst);
+                if (guard.isCycle) return true;
+                auto c = inst->classDef;
+                while (c) {
+                    if (c->methods.count("__hash__")) return true;
+                    c = c->parent;
+                }
+                return false;
+            }
+            case ObjType::SUPER_PROXY:
+            case ObjType::NAMESPACE:
+                return false;
+        }
+        return false;
+    }
+
+    inline bool Value::truthy() const {
+        if (isNone()) return false;
+        if (isBool()) return asBool();
+        if (isInt32()) return asInt32() != 0;
+        if (isDouble()) {
+            double d = asDoubleRaw();
+            return d != 0.0 && !std::isnan(d);
+        }
+        Obj* obj = asObj();
+        switch (obj->type) {
+            case ObjType::BIGINT: return !static_cast<ObjBigInt*>(obj)->num.isZero();
+            case ObjType::COMPLEX: {
+                const auto& c = static_cast<ObjComplex*>(obj)->comp;
+                return c.real != 0.0 || c.imag != 0.0;
+            }
+            case ObjType::FRACTION: return !static_cast<ObjFraction*>(obj)->frac.getNum().isZero();
+            case ObjType::BASENUM: return !static_cast<ObjBaseNum*>(obj)->base.getValue().isZero();
+            case ObjType::STRING: return !static_cast<ObjString*>(obj)->str.empty();
+            case ObjType::LIST: return !static_cast<ObjList*>(obj)->vec.empty();
+            case ObjType::DICT: return !static_cast<ObjDict*>(obj)->elements.empty();
+            case ObjType::SET: return !static_cast<ObjSet*>(obj)->elements.empty();
+            case ObjType::SYMBOLIC: return !static_cast<ObjSym*>(obj)->sym.isZero();
+            case ObjType::NAMESPACE: return true;
+            case ObjType::INSTANCE: {
+                auto inst = static_cast<ObjInstance*>(obj);
+                auto [found, res] = invokeDunder(inst, "__bool__");
+                if (found) {
+                    if (res.isBool()) return res.asBool();
+                    if (res.isNumber()) return res.asDouble() != 0.0;
+                    return res.truthy();
+                }
+                return true;
+            }
+            default: return true;
+        }
+    }
+
+    inline bool Value::equals(const Value& lhs, const Value& rhs) {
+        if (lhs.as_bits == rhs.as_bits) return true;
+
+        // 防循环递归锁
+        static thread_local std::vector<std::pair<const void*, const void*>> comparingPairs;
+
+        if (lhs.isInt32() && rhs.isInt32()) return lhs.asInt32() == rhs.asInt32();
+        if (lhs.isNumber() && rhs.isNumber()) return lhs.asNumber() == rhs.asNumber();
+        if (lhs.isNone() || rhs.isNone()) return false;
+        if (lhs.isBool() && rhs.isBool()) return lhs.asBool() == rhs.asBool();
+        if (lhs.isBool() && rhs.isNumber()) return (lhs.asBool() ? 1.0 : 0.0) == rhs.asNumber();
+        if (rhs.isBool() && lhs.isNumber()) return (rhs.asBool() ? 1.0 : 0.0) == lhs.asNumber();
+
+        // 同类型快速通道
+        if (lhs.isObj() && rhs.isObj() && lhs.asObj()->type == rhs.asObj()->type) {
+            Obj* lobj = lhs.asObj();
+            Obj* robj = rhs.asObj();
+            switch (lobj->type) {
+                case ObjType::STRING: return static_cast<ObjString*>(lobj)->str == static_cast<ObjString*>(robj)->str;
+                case ObjType::BIGINT: return static_cast<ObjBigInt*>(lobj)->num == static_cast<ObjBigInt*>(robj)->num;
+                case ObjType::COMPLEX: return static_cast<ObjComplex*>(lobj)->comp == static_cast<ObjComplex*>(robj)->comp;
+                case ObjType::FRACTION: return static_cast<ObjFraction*>(lobj)->frac == static_cast<ObjFraction*>(robj)->frac;
+                case ObjType::BASENUM: return static_cast<ObjBaseNum*>(lobj)->base.getValue() == static_cast<ObjBaseNum*>(robj)->base.getValue();
+                case ObjType::SYMBOLIC: return static_cast<ObjSym*>(lobj)->sym == static_cast<ObjSym*>(robj)->sym;
+                case ObjType::REAL_MATRIX: {
+                    const auto& a = static_cast<ObjRealMatrix*>(lobj)->mat;
+                    const auto& b = static_cast<ObjRealMatrix*>(robj)->mat;
+                    if (a.getRows() != b.getRows() || a.getCols() != b.getCols()) return false;
+                    for (int i = 0; i < a.getRows(); ++i)
+                        for (int j = 0; j < a.getCols(); ++j)
+                            if (a(i, j) != b(i, j)) return false;
+                    return true;
+                }
+                case ObjType::COMPLEX_MATRIX: {
+                    const auto& a = static_cast<ObjComplexMatrix*>(lobj)->mat;
+                    const auto& b = static_cast<ObjComplexMatrix*>(robj)->mat;
+                    if (a.getRows() != b.getRows() || a.getCols() != b.getCols()) return false;
+                    for (int i = 0; i < a.getRows(); ++i)
+                        for (int j = 0; j < a.getCols(); ++j)
+                            if (!(a(i, j) == b(i, j))) return false;
+                    return true;
+                }
+                case ObjType::STRING_MATRIX: {
+                    const auto& a = static_cast<ObjStringMatrix*>(lobj)->mat;
+                    const auto& b = static_cast<ObjStringMatrix*>(robj)->mat;
+                    if (a.getRows() != b.getRows() || a.getCols() != b.getCols()) return false;
+                    for (int i = 0; i < a.getRows(); ++i)
+                        for (int j = 0; j < a.getCols(); ++j)
+                            if (a(i, j) != b(i, j)) return false;
+                    return true;
+                }
+                case ObjType::LIST: {
+                    const auto& a = static_cast<ObjList*>(lobj)->vec;
+                    const auto& b = static_cast<ObjList*>(robj)->vec;
+                    if (a.size() != b.size()) return false;
+                    auto pair = lobj < robj ? std::make_pair((const void*)lobj, (const void*)robj) : std::make_pair((const void*)robj, (const void*)lobj);
+                    if (std::find(comparingPairs.begin(), comparingPairs.end(), pair) != comparingPairs.end()) return true;
+                    comparingPairs.push_back(pair);
+                    bool eq = true;
+                    for (size_t i = 0; i < a.size(); ++i) {
+                        try { if (!equals(a[i], b[i])) { eq = false; break; } }
+                        catch (...) { eq = false; break; }
+                    }
+                    comparingPairs.pop_back();
+                    return eq;
+                }
+                case ObjType::DICT: {
+                    auto a = static_cast<ObjDict*>(lobj);
+                    auto b = static_cast<ObjDict*>(robj);
+                    if (a->elements.size() != b->elements.size()) return false;
+                    auto pair = lobj < robj ? std::make_pair((const void*)lobj, (const void*)robj) : std::make_pair((const void*)robj, (const void*)lobj);
+                    if (std::find(comparingPairs.begin(), comparingPairs.end(), pair) != comparingPairs.end()) return true;
+                    comparingPairs.push_back(pair);
+                    bool eq = true;
+                    for (const auto& [key, val] : a->elements) {
+                        auto it = b->keyMap.find(key);
+                        if (it == b->keyMap.end()) { eq = false; break; }
+                        try { if (!equals(val, b->elements[it->second].second)) { eq = false; break; } }
+                        catch (...) { eq = false; break; }
+                    }
+                    comparingPairs.pop_back();
+                    return eq;
+                }
+                case ObjType::SET: {
+                    auto a = static_cast<ObjSet*>(lobj);
+                    auto b = static_cast<ObjSet*>(robj);
+                    if (a->elements.size() != b->elements.size()) return false;
+                    for (const auto& val : a->elements) {
+                        if (b->keys.find(val) == b->keys.end()) return false;
+                    }
+                    return true;
+                }
+                case ObjType::INSTANCE: {
+                    auto inst1 = static_cast<ObjInstance*>(lobj);
+                    auto [found, res] = invokeDunder(inst1, "__eq__", {rhs});
+                    if (found) return res.truthy();
+                    return false;
+                }
+                case ObjType::CLOSURE:
+                case ObjType::CLASS:
+                case ObjType::NAMESPACE:
+                    return false; // Pointer equality already checked
+                case ObjType::SUPER_PROXY: {
+                    auto sp1 = static_cast<ObjSuper*>(lobj);
+                    auto sp2 = static_cast<ObjSuper*>(robj);
+                    return sp1->instance == sp2->instance && sp1->parentClass == sp2->parentClass;
+                }
+            }
+        }
+
+        // 跨类型兼容比较
+        if (lhs.isObjType(ObjType::BIGINT) && rhs.isObjType(ObjType::FRACTION))
+            return Fraction(static_cast<ObjBigInt*>(lhs.asObj())->num) == static_cast<ObjFraction*>(rhs.asObj())->frac;
+        if (lhs.isObjType(ObjType::FRACTION) && rhs.isObjType(ObjType::BIGINT))
+            return static_cast<ObjFraction*>(lhs.asObj())->frac == Fraction(static_cast<ObjBigInt*>(rhs.asObj())->num);
+
+        if ((lhs.isObjType(ObjType::REAL_MATRIX) && rhs.isObjType(ObjType::COMPLEX_MATRIX)) ||
+            (lhs.isObjType(ObjType::COMPLEX_MATRIX) && rhs.isObjType(ObjType::REAL_MATRIX))) {
+            try {
+                ComplexMatrix a = lhs.asComplexMatrix(), b = rhs.asComplexMatrix();
+                if (a.getRows() != b.getRows() || a.getCols() != b.getCols()) return false;
+                for (int i = 0; i < a.getRows(); ++i)
+                    for (int j = 0; j < a.getCols(); ++j)
+                        if (!(a(i, j) == b(i, j))) return false;
+                return true;
+            }
+            catch (...) { return false; }
+        }
+
+        if (lhs.isInstance()) {
+            auto [found, res] = invokeDunder(lhs.asInstance(), "__eq__", {rhs});
+            if (found) return res.truthy();
+        }
+        if (rhs.isInstance()) {
+            auto [found, res] = invokeDunder(rhs.asInstance(), "__eq__", {lhs});
+            if (found) return res.truthy();
+        }
+
+        // ★ 终极数值降维防线：安全处理极大 BigInt 与浮点/复数的跨类型比较
+        if (lhs.isObjType(ObjType::BASENUM)) return equals(Value(static_cast<ObjBaseNum*>(lhs.asObj())->base.getValue()), rhs);
+        if (rhs.isObjType(ObjType::BASENUM)) return equals(lhs, Value(static_cast<ObjBaseNum*>(rhs.asObj())->base.getValue()));
+
+        auto getNumeric = [](const Value& v) -> std::optional<Complex> {
+            try {
+                if (v.isNumber()) return Complex(v.asNumber());
+                if (v.isBool()) return Complex(v.asBool() ? 1.0 : 0.0);
+                if (v.isObjType(ObjType::COMPLEX)) return static_cast<ObjComplex*>(v.asObj())->comp;
+                if (v.isObjType(ObjType::FRACTION)) return Complex(static_cast<ObjFraction*>(v.asObj())->frac.toDouble());
+            } catch (...) {}
+            return std::nullopt;
+        };
+
+        auto numL = getNumeric(lhs);
+        auto numR = getNumeric(rhs);
+
+        if (numL && numR) return *numL == *numR;
+
+        if (lhs.isObjType(ObjType::BIGINT) && numR) {
+            const BigInt& b = static_cast<ObjBigInt*>(lhs.asObj())->num;
+            if (numR->imag != 0.0) return false;
+            double d = numR->real;
+            if (std::floor(d) != d) return false;
+            if (std::abs(d) < 9e15) return b == BigInt(static_cast<int64_t>(d));
+            try { return b.toDouble() == d; } catch (...) { return false; }
+        }
+        if (rhs.isObjType(ObjType::BIGINT) && numL) {
+            const BigInt& b = static_cast<ObjBigInt*>(rhs.asObj())->num;
+            if (numL->imag != 0.0) return false;
+            double d = numL->real;
+            if (std::floor(d) != d) return false;
+            if (std::abs(d) < 9e15) return b == BigInt(static_cast<int64_t>(d));
+            try { return b.toDouble() == d; } catch (...) { return false; }
+        }
+
+        return false;
+    }
+
+    inline std::string Value::typeName() const {
+        if (isNone()) return "none";
+        if (isBool()) return "bool";
+        if (isInt32()) return "int";
+        if (isDouble()) return "double";
+        Obj* obj = asObj();
+        switch (obj->type) {
+            case ObjType::STRING: return "string";
+            case ObjType::BIGINT: return "int";
+            case ObjType::FRACTION: return "Fraction";
+            case ObjType::COMPLEX: return "Complex";
+            case ObjType::BASENUM: return "BaseNum";
+            case ObjType::REAL_MATRIX: return "RealMatrix";
+            case ObjType::COMPLEX_MATRIX: return "ComplexMatrix";
+            case ObjType::STRING_MATRIX: return "StringMatrix";
+            case ObjType::LIST: return "list";
+            case ObjType::DICT: return "dict";
+            case ObjType::SET: return "set";
+            case ObjType::CLOSURE: return "function";
+            case ObjType::CLASS: return "class";
+            case ObjType::INSTANCE: {
+                auto inst = static_cast<ObjInstance*>(obj);
+                return inst->classDef ? inst->classDef->name : "instance";
+            }
+            case ObjType::SUPER_PROXY: return "super";
+            case ObjType::SYMBOLIC: return "symbolic";
+            case ObjType::NAMESPACE: return "namespace";
+        }
+        return "unknown";
+    }
+
+    inline Value Value::operator~() const {
+        if (isInt32()) return Value::fromInt32(~asInt32());
+        if (isObjType(ObjType::BASENUM)) {
+            auto& base = static_cast<ObjBaseNum*>(asObj())->base;
+            return Value(BaseNum(-base.getValue() - BigInt(1), base.getRadix()));
+        }
+        if (isBigInt()) return Value(-asBigInt() - BigInt(1));
+        throw std::runtime_error("Type Error: Bitwise NOT '~' not supported for this type.");
+    }
+
+    inline Value Value::operator-() const {
+        if (isInt32()) {
+            int32_t v = asInt32();
+            if (v == -2147483648) return Value(BigInt(2147483648LL));
+            return Value::fromInt32(-v);
+        }
+        if (isDouble()) return Value(-asDoubleRaw());
+        if (isObj()) {
+            Obj* obj = asObj();
+            switch (obj->type) {
+                case ObjType::BIGINT: return Value(-static_cast<ObjBigInt*>(obj)->num);
+                case ObjType::FRACTION: return Value(-static_cast<ObjFraction*>(obj)->frac);
+                case ObjType::COMPLEX: return Value(-static_cast<ObjComplex*>(obj)->comp);
+                case ObjType::BASENUM: return Value(-static_cast<ObjBaseNum*>(obj)->base);
+                case ObjType::REAL_MATRIX: return Value(-static_cast<ObjRealMatrix*>(obj)->mat);
+                case ObjType::COMPLEX_MATRIX: return Value(-static_cast<ObjComplexMatrix*>(obj)->mat);
+                case ObjType::SYMBOLIC: return Value(-static_cast<ObjSym*>(obj)->sym);
+                default: break;
+            }
+        }
+        throw std::runtime_error("Type Error: Cannot negate this type.");
+    }
+
+    inline Value operator+(const Value& lhs, const Value& rhs) {
+        if (lhs.isInt32() && rhs.isInt32()) {
+            int64_t sum = static_cast<int64_t>(lhs.asInt32()) + rhs.asInt32();
+            if (sum >= -2147483648LL && sum <= 2147483647LL) return Value::fromInt32(static_cast<int32_t>(sum));
+            return Value(BigInt(sum));
+        }
+        if (lhs.isNumber() && rhs.isNumber()) return Value(lhs.asNumber() + rhs.asNumber());
+        if (lhs.isObjType(ObjType::STRING) && rhs.isObjType(ObjType::STRING)) {
+            return Value(static_cast<ObjString*>(lhs.asObj())->str + static_cast<ObjString*>(rhs.asObj())->str);
+        }
+        if (lhs.isObjType(ObjType::LIST) && rhs.isObjType(ObjType::LIST)) {
+            ObjList* l1 = static_cast<ObjList*>(lhs.asObj());
+            ObjList* l2 = static_cast<ObjList*>(rhs.asObj());
+            ObjList* res = GcHeap::get().allocate<ObjList>();
+            res->vec.reserve(l1->vec.size() + l2->vec.size());
+            res->vec.insert(res->vec.end(), l1->vec.begin(), l1->vec.end());
+            res->vec.insert(res->vec.end(), l2->vec.begin(), l2->vec.end());
+            return Value(res);
+        }
+        
+        try {
+            if (lhs.isObjType(ObjType::REAL_MATRIX) && rhs.isObjType(ObjType::REAL_MATRIX)) return Value(static_cast<ObjRealMatrix*>(lhs.asObj())->mat + static_cast<ObjRealMatrix*>(rhs.asObj())->mat);
+            if (lhs.isObjType(ObjType::COMPLEX_MATRIX) && rhs.isObjType(ObjType::COMPLEX_MATRIX)) return Value(static_cast<ObjComplexMatrix*>(lhs.asObj())->mat + static_cast<ObjComplexMatrix*>(rhs.asObj())->mat);
+            if (lhs.isObjType(ObjType::REAL_MATRIX) && rhs.isObjType(ObjType::COMPLEX_MATRIX)) return Value(lhs.asComplexMatrix() + rhs.asComplexMatrix());
+            if (lhs.isObjType(ObjType::COMPLEX_MATRIX) && rhs.isObjType(ObjType::REAL_MATRIX)) return Value(lhs.asComplexMatrix() + rhs.asComplexMatrix());
+            
+            bool lhsIsMat = lhs.isObjType(ObjType::REAL_MATRIX) || lhs.isObjType(ObjType::COMPLEX_MATRIX);
+            bool rhsIsMat = rhs.isObjType(ObjType::REAL_MATRIX) || rhs.isObjType(ObjType::COMPLEX_MATRIX);
+            bool lhsIsScalar = lhs.isNumber() || lhs.isBigInt() || lhs.isObjType(ObjType::FRACTION) || lhs.isComplex();
+            bool rhsIsScalar = rhs.isNumber() || rhs.isBigInt() || rhs.isObjType(ObjType::FRACTION) || rhs.isComplex();
+
+            if (lhsIsMat && rhsIsScalar) {
+                if (lhs.isObjType(ObjType::REAL_MATRIX) && !rhs.isComplex()) {
+                    RealMatrix m = static_cast<ObjRealMatrix*>(lhs.asObj())->mat;
+                    if (m.getRows() != m.getCols()) throw std::runtime_error("Math Error: Matrix-scalar addition requires a square matrix.");
+                    double c = rhs.asDouble();
+                    for (int i = 0; i < m.getRows(); ++i) m(i, i) += c;
+                    return Value(m);
+                }
+                ComplexMatrix m = lhs.asComplexMatrix();
+                if (m.getRows() != m.getCols()) throw std::runtime_error("Math Error: Matrix-scalar addition requires a square matrix.");
+                Complex c = rhs.asComplex();
+                for (int i = 0; i < m.getRows(); ++i) m(i, i) = m(i, i) + c;
+                return Value(m);
+            }
+            if (lhsIsScalar && rhsIsMat) {
+                if (rhs.isObjType(ObjType::REAL_MATRIX) && !lhs.isComplex()) {
+                    RealMatrix m = static_cast<ObjRealMatrix*>(rhs.asObj())->mat;
+                    if (m.getRows() != m.getCols()) throw std::runtime_error("Math Error: Matrix-scalar addition requires a square matrix.");
+                    double c = lhs.asDouble();
+                    for (int i = 0; i < m.getRows(); ++i) m(i, i) += c;
+                    return Value(m);
+                }
+                ComplexMatrix m = rhs.asComplexMatrix();
+                if (m.getRows() != m.getCols()) throw std::runtime_error("Math Error: Matrix-scalar addition requires a square matrix.");
+                Complex c = lhs.asComplex();
+                for (int i = 0; i < m.getRows(); ++i) m(i, i) = m(i, i) + c;
+                return Value(m);
+            }
+            
+            if (lhs.isObjType(ObjType::STRING_MATRIX) && rhs.isObjType(ObjType::STRING_MATRIX)) {
+                const auto& a = static_cast<ObjStringMatrix*>(lhs.asObj())->mat;
+                const auto& b = static_cast<ObjStringMatrix*>(rhs.asObj())->mat;
+                if (a.getRows() != b.getRows() || a.getCols() != b.getCols()) throw std::runtime_error("Type Error: StringMatrix dimensions must match for +.");
+                std::vector<std::string> flat(a.getRows() * a.getCols());
+                for (int i = 0; i < a.getRows(); ++i)
+                    for (int j = 0; j < a.getCols(); ++j)
+                        flat[i * a.getCols() + j] = a(i, j) + b(i, j);
+                return Value(StringMatrix(a.getRows(), a.getCols(), flat));
+            }
+
+            if (lhs.isSymbolic() || rhs.isSymbolic()) return Value(lhs.asSymbolic() + rhs.asSymbolic());
+
+            if (lhs.isObjType(ObjType::BASENUM) && rhs.isObjType(ObjType::BASENUM)) return Value(static_cast<ObjBaseNum*>(lhs.asObj())->base + static_cast<ObjBaseNum*>(rhs.asObj())->base);
+            if (lhs.isObjType(ObjType::BASENUM)) return Value(static_cast<ObjBaseNum*>(lhs.asObj())->base + BaseNum(rhs.asBigInt(), static_cast<ObjBaseNum*>(lhs.asObj())->base.getRadix()));
+            if (rhs.isObjType(ObjType::BASENUM)) return Value(BaseNum(lhs.asBigInt(), static_cast<ObjBaseNum*>(rhs.asObj())->base.getRadix()) + static_cast<ObjBaseNum*>(rhs.asObj())->base);
+
+            if (lhs.isObjType(ObjType::COMPLEX) || rhs.isObjType(ObjType::COMPLEX)) return Value(lhs.asComplex() + rhs.asComplex());
+            
+            bool lhsIsExactInt = lhs.isBigInt() || lhs.isInt32();
+            bool rhsIsExactInt = rhs.isBigInt() || rhs.isInt32();
+            if (lhsIsExactInt && rhsIsExactInt) return Value(lhs.asBigInt() + rhs.asBigInt());
+            if (lhs.isObjType(ObjType::FRACTION) && rhs.isObjType(ObjType::FRACTION)) return Value::fromFraction(static_cast<ObjFraction*>(lhs.asObj())->frac + static_cast<ObjFraction*>(rhs.asObj())->frac);
+            if (lhs.isObjType(ObjType::FRACTION) && rhsIsExactInt) return Value::fromFraction(static_cast<ObjFraction*>(lhs.asObj())->frac + Fraction(rhs.asBigInt()));
+            if (lhsIsExactInt && rhs.isObjType(ObjType::FRACTION)) return Value::fromFraction(Fraction(lhs.asBigInt()) + static_cast<ObjFraction*>(rhs.asObj())->frac);
+            
+            if (lhs.isDouble() || rhs.isDouble()) return Value(lhs.asDouble() + rhs.asDouble());
+        } catch (...) {}
+        
+        throw std::runtime_error("Type Error: Cannot add these types.");
+    }
+
+    inline Value operator-(const Value& lhs, const Value& rhs) {
+        if (lhs.isInt32() && rhs.isInt32()) {
+            int64_t diff = static_cast<int64_t>(lhs.asInt32()) - rhs.asInt32();
+            if (diff >= -2147483648LL && diff <= 2147483647LL) return Value::fromInt32(static_cast<int32_t>(diff));
+            return Value(BigInt(diff));
+        }
+        if (lhs.isNumber() && rhs.isNumber()) return Value(lhs.asNumber() - rhs.asNumber());
+        
+        try {
+            if (lhs.isObjType(ObjType::REAL_MATRIX) && rhs.isObjType(ObjType::REAL_MATRIX)) return Value(static_cast<ObjRealMatrix*>(lhs.asObj())->mat - static_cast<ObjRealMatrix*>(rhs.asObj())->mat);
+            if (lhs.isObjType(ObjType::COMPLEX_MATRIX) && rhs.isObjType(ObjType::COMPLEX_MATRIX)) return Value(static_cast<ObjComplexMatrix*>(lhs.asObj())->mat - static_cast<ObjComplexMatrix*>(rhs.asObj())->mat);
+            if (lhs.isObjType(ObjType::REAL_MATRIX) && rhs.isObjType(ObjType::COMPLEX_MATRIX)) return Value(lhs.asComplexMatrix() - rhs.asComplexMatrix());
+            if (lhs.isObjType(ObjType::COMPLEX_MATRIX) && rhs.isObjType(ObjType::REAL_MATRIX)) return Value(lhs.asComplexMatrix() - rhs.asComplexMatrix());
+            
+            bool lhsIsMat = lhs.isObjType(ObjType::REAL_MATRIX) || lhs.isObjType(ObjType::COMPLEX_MATRIX);
+            bool rhsIsMat = rhs.isObjType(ObjType::REAL_MATRIX) || rhs.isObjType(ObjType::COMPLEX_MATRIX);
+            bool lhsIsScalar = lhs.isNumber() || lhs.isBigInt() || lhs.isObjType(ObjType::FRACTION) || lhs.isComplex();
+            bool rhsIsScalar = rhs.isNumber() || rhs.isBigInt() || rhs.isObjType(ObjType::FRACTION) || rhs.isComplex();
+
+            if (lhsIsMat && rhsIsScalar) {
+                if (lhs.isObjType(ObjType::REAL_MATRIX) && !rhs.isComplex()) {
+                    RealMatrix m = static_cast<ObjRealMatrix*>(lhs.asObj())->mat;
+                    if (m.getRows() != m.getCols()) throw std::runtime_error("Math Error: Matrix-scalar subtraction requires a square matrix.");
+                    double c = rhs.asDouble();
+                    for (int i = 0; i < m.getRows(); ++i) m(i, i) -= c;
+                    return Value(m);
+                }
+                ComplexMatrix m = lhs.asComplexMatrix();
+                if (m.getRows() != m.getCols()) throw std::runtime_error("Math Error: Matrix-scalar subtraction requires a square matrix.");
+                Complex c = rhs.asComplex();
+                for (int i = 0; i < m.getRows(); ++i) m(i, i) = m(i, i) - c;
+                return Value(m);
+            }
+            if (lhsIsScalar && rhsIsMat) {
+                if (rhs.isObjType(ObjType::REAL_MATRIX) && !lhs.isComplex()) {
+                    RealMatrix m = static_cast<ObjRealMatrix*>(rhs.asObj())->mat;
+                    if (m.getRows() != m.getCols()) throw std::runtime_error("Math Error: Matrix-scalar subtraction requires a square matrix.");
+                    double c = lhs.asDouble();
+                    RealMatrix res(m.getRows(), m.getCols());
+                    for (int i = 0; i < m.getRows(); ++i) {
+                        for (int j = 0; j < m.getCols(); ++j) {
+                            res(i, j) = (i == j ? c : 0.0) - m(i, j);
+                        }
+                    }
+                    return Value(res);
+                }
+                ComplexMatrix m = rhs.asComplexMatrix();
+                if (m.getRows() != m.getCols()) throw std::runtime_error("Math Error: Matrix-scalar subtraction requires a square matrix.");
+                Complex c = lhs.asComplex();
+                ComplexMatrix res(m.getRows(), m.getCols());
+                for (int i = 0; i < m.getRows(); ++i) {
+                    for (int j = 0; j < m.getCols(); ++j) {
+                        res(i, j) = (i == j ? c : Complex(0.0, 0.0)) - m(i, j);
+                    }
+                }
+                return Value(res);
+            }
+            
+            if (lhs.isObjType(ObjType::SET) && rhs.isObjType(ObjType::SET)) {
+                ObjSet* s1 = static_cast<ObjSet*>(lhs.asObj());
+                ObjSet* s2 = static_cast<ObjSet*>(rhs.asObj());
+                ObjSet* res = GcHeap::get().allocate<ObjSet>();
+                for (const auto& val : s1->elements) {
+                    if (s2->keys.find(val) == s2->keys.end()) {
+                        res->keys.insert(val);
+                        res->elements.push_back(val);
+                    }
+                }
+                return Value(res);
+            }
+
+            if (lhs.isSymbolic() || rhs.isSymbolic()) return Value(lhs.asSymbolic() - rhs.asSymbolic());
+
+            if (lhs.isObjType(ObjType::BASENUM) && rhs.isObjType(ObjType::BASENUM)) return Value(static_cast<ObjBaseNum*>(lhs.asObj())->base - static_cast<ObjBaseNum*>(rhs.asObj())->base);
+            if (lhs.isObjType(ObjType::BASENUM)) return Value(static_cast<ObjBaseNum*>(lhs.asObj())->base - BaseNum(rhs.asBigInt(), static_cast<ObjBaseNum*>(lhs.asObj())->base.getRadix()));
+            if (rhs.isObjType(ObjType::BASENUM)) return Value(BaseNum(lhs.asBigInt(), static_cast<ObjBaseNum*>(rhs.asObj())->base.getRadix()) - static_cast<ObjBaseNum*>(rhs.asObj())->base);
+
+            if (lhs.isObjType(ObjType::COMPLEX) || rhs.isObjType(ObjType::COMPLEX)) return Value(lhs.asComplex() - rhs.asComplex());
+            
+            bool lhsIsExactInt = lhs.isBigInt() || lhs.isInt32();
+            bool rhsIsExactInt = rhs.isBigInt() || rhs.isInt32();
+            if (lhsIsExactInt && rhsIsExactInt) return Value(lhs.asBigInt() - rhs.asBigInt());
+            if (lhs.isObjType(ObjType::FRACTION) && rhs.isObjType(ObjType::FRACTION)) return Value::fromFraction(static_cast<ObjFraction*>(lhs.asObj())->frac - static_cast<ObjFraction*>(rhs.asObj())->frac);
+            if (lhs.isObjType(ObjType::FRACTION) && rhsIsExactInt) return Value::fromFraction(static_cast<ObjFraction*>(lhs.asObj())->frac - Fraction(rhs.asBigInt()));
+            if (lhsIsExactInt && rhs.isObjType(ObjType::FRACTION)) return Value::fromFraction(Fraction(lhs.asBigInt()) - static_cast<ObjFraction*>(rhs.asObj())->frac);
+            
+            if (lhs.isDouble() || rhs.isDouble()) return Value(lhs.asDouble() - rhs.asDouble());
+        } catch (...) {}
+        
+        throw std::runtime_error("Type Error: Subtraction not supported for these types.");
+    }
 
 inline ObjClosure* Value::asFunction() const {
     if (isObjType(ObjType::CLOSURE)) return static_cast<ObjClosure*>(asObj());

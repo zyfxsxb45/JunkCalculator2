@@ -1768,28 +1768,19 @@ void BuiltinRegistry::registerControlFlow() {
         if (args[0].isObjType(ObjType::SET)) {
             if (args.size() != 2) throw std::runtime_error("Runtime Error: add() on Set takes 2 args (set, val).");
             auto s = static_cast<ObjSet*>(args[0].asObj());
-            if (s->keys.find(args[1]) == s->keys.end()) {
-                s->keys.insert(args[1]);
-                s->elements.push_back(args[1]);
-            }
+            s->add(args[1]);
             return args[0];
         }
         else if (args[0].isObjType(ObjType::LIST)) {
             if (args.size() != 2) throw std::runtime_error("Runtime Error: add() on List takes 2 args (list, val).");
             auto l = static_cast<ObjList*>(args[0].asObj());
-            l->vec.push_back(args[1]);
+            l->mut().push_back(args[1]);
             return args[0];
         }
         else if (args[0].isObjType(ObjType::DICT) || args[0].isInstance()) {
             if (args.size() != 3) throw std::runtime_error("Runtime Error: add() on Dict/Instance takes 3 args (obj, key, val).");
             auto d = args[0].isInstance() ? args[0].asInstance()->fields : static_cast<ObjDict*>(args[0].asObj());
-            auto it = d->keyMap.find(args[1]);
-            if (it != d->keyMap.end()) {
-                d->elements[it->second].second = args[2];
-            } else {
-                d->keyMap[args[1]] = d->elements.size();
-                d->elements.push_back({args[1], args[2]});
-            }
+            d->set(args[1], args[2]);
             return args[0]; // 返回原对象
         }
         throw std::runtime_error("Type Error: add() expects a Set, List, Dict, or Instance.");
@@ -1798,10 +1789,7 @@ void BuiltinRegistry::registerControlFlow() {
     reg("remove", { 2 }, [](const std::vector<Value>& args) -> Value {
         if (args[0].isObjType(ObjType::SET)) {
             auto s = static_cast<ObjSet*>(args[0].asObj());
-            auto it = s->keys.find(args[1]);
-            if (it == s->keys.end()) throw std::runtime_error("Runtime Error: Element not found in Set.");
-            s->keys.erase(it);
-            s->elements.erase(std::remove_if(s->elements.begin(), s->elements.end(), [&](const Value& v) { return Value::equals(v, args[1]); }), s->elements.end());
+            s->remove(args[1]);
             return args[0];
         }
         else if (args[0].isObjType(ObjType::LIST)) {
@@ -1809,19 +1797,12 @@ void BuiltinRegistry::registerControlFlow() {
             int idx = static_cast<int>(std::round(args[1].asDouble()));
             if (idx < 0) idx += static_cast<int>(l->vec.size());
             if (idx < 0 || idx >= static_cast<int>(l->vec.size())) throw std::runtime_error("Runtime Error: Index out of bounds.");
-            l->vec.erase(l->vec.begin() + idx);
+            l->mut().erase(l->mut().begin() + idx);
             return args[0];
         }
         else if (args[0].isObjType(ObjType::DICT) || args[0].isInstance()) {
             auto d = args[0].isInstance() ? args[0].asInstance()->fields : static_cast<ObjDict*>(args[0].asObj());
-            auto it = d->keyMap.find(args[1]);
-            if (it == d->keyMap.end()) throw std::runtime_error("Runtime Error: Key not found.");
-            size_t idx = it->second;
-            d->keyMap.erase(it);
-            d->elements.erase(d->elements.begin() + idx);
-            for (size_t i = idx; i < d->elements.size(); ++i) {
-                d->keyMap[d->elements[i].first] = i;
-            }
+            d->remove(args[1]);
             return args[0];
         }
         throw std::runtime_error("Type Error: remove() expects a Set, List, Dict, or Instance.");
@@ -1830,24 +1811,12 @@ void BuiltinRegistry::registerControlFlow() {
     reg("discard", { 2 }, [](const std::vector<Value>& args) -> Value {
         if (args[0].isObjType(ObjType::SET)) {
             auto s = static_cast<ObjSet*>(args[0].asObj());
-            auto it = s->keys.find(args[1]);
-            if (it != s->keys.end()) {
-                s->keys.erase(it);
-                s->elements.erase(std::remove_if(s->elements.begin(), s->elements.end(), [&](const Value& v) { return Value::equals(v, args[1]); }), s->elements.end());
-            }
+            s->discard(args[1]);
             return args[0];
         }
         else if (args[0].isObjType(ObjType::DICT) || args[0].isInstance()) {
             auto d = args[0].isInstance() ? args[0].asInstance()->fields : static_cast<ObjDict*>(args[0].asObj());
-            auto it = d->keyMap.find(args[1]);
-            if (it != d->keyMap.end()) {
-                size_t idx = it->second;
-                d->keyMap.erase(it);
-                d->elements.erase(d->elements.begin() + idx);
-                for (size_t i = idx; i < d->elements.size(); ++i) {
-                    d->keyMap[d->elements[i].first] = i;
-                }
-            }
+            d->discard(args[1]);
             return args[0];
         }
         throw std::runtime_error("Type Error: discard() expects a Set, Dict, or Instance.");
@@ -1856,17 +1825,17 @@ void BuiltinRegistry::registerControlFlow() {
     reg("clear", { 1 }, [](const std::vector<Value>& args) -> Value {
         if (args[0].isObjType(ObjType::SET)) {
             auto s = static_cast<ObjSet*>(args[0].asObj());
-            s->keys.clear(); s->elements.clear();
+            s->clear();
             return args[0];
         }
         else if (args[0].isObjType(ObjType::LIST)) {
             auto l = static_cast<ObjList*>(args[0].asObj());
-            l->vec.clear();
+            l->clear();
             return args[0];
         }
         else if (args[0].isObjType(ObjType::DICT) || args[0].isInstance()) {
             auto d = args[0].isInstance() ? args[0].asInstance()->fields : static_cast<ObjDict*>(args[0].asObj());
-            d->keyMap.clear(); d->elements.clear();
+            d->clear();
             return args[0];
         }
         throw std::runtime_error("Type Error: clear() expects a Set, List, Dict, or Instance.");
@@ -1999,7 +1968,7 @@ void BuiltinRegistry::registerArrayFunctions() {
             auto l = static_cast<ObjList*>(args[0].asObj());
             if (l->vec.empty()) throw std::runtime_error("Runtime Error: pop() on empty list.");
             Value val = l->vec.back();
-            l->vec.pop_back();
+            l->mut().pop_back();
             return val;
         }
         if (args[0].isObjType(ObjType::REAL_MATRIX)) {
@@ -2028,7 +1997,7 @@ void BuiltinRegistry::registerArrayFunctions() {
             auto l = static_cast<ObjList*>(args[0].asObj());
             if (l->vec.empty()) throw std::runtime_error("Runtime Error: shift() on empty list.");
             Value val = l->vec.front();
-            l->vec.erase(l->vec.begin());
+            l->mut().erase(l->mut().begin());
             return val;
         }
         if (args[0].isObjType(ObjType::REAL_MATRIX)) {
@@ -2055,7 +2024,7 @@ void BuiltinRegistry::registerArrayFunctions() {
     reg("push", { 2 }, [expectContainer](const std::vector<Value>& args) -> Value {
         if (args[0].isObjType(ObjType::LIST)) {
             auto l = static_cast<ObjList*>(args[0].asObj());
-            l->vec.push_back(args[1]);
+            l->mut().push_back(args[1]);
             return args[0];
         }
         if (args[0].isObjType(ObjType::REAL_MATRIX)) {
@@ -2090,7 +2059,7 @@ void BuiltinRegistry::registerArrayFunctions() {
     reg("prepend", { 2 }, [expectContainer](const std::vector<Value>& args) -> Value {
         if (args[0].isObjType(ObjType::LIST)) {
             auto l = static_cast<ObjList*>(args[0].asObj());
-            l->vec.insert(l->vec.begin(), args[1]);
+            l->mut().insert(l->mut().begin(), args[1]);
             return args[0];
         }
         if (args[0].isObjType(ObjType::REAL_MATRIX)) {
@@ -2127,7 +2096,7 @@ void BuiltinRegistry::registerArrayFunctions() {
             auto l = static_cast<ObjList*>(args[0].asObj());
             int i = idx < 0 ? static_cast<int>(l->vec.size()) + idx : idx;
             if (i < 0 || i > static_cast<int>(l->vec.size())) throw std::runtime_error("Runtime Error: insert() index out of range.");
-            l->vec.insert(l->vec.begin() + i, args[2]);
+            l->mut().insert(l->mut().begin() + i, args[2]);
             return args[0];
         }
         if (args[0].isObjType(ObjType::REAL_MATRIX)) {
@@ -2170,7 +2139,7 @@ void BuiltinRegistry::registerArrayFunctions() {
             auto l = static_cast<ObjList*>(args[0].asObj());
             int i = idx < 0 ? static_cast<int>(l->vec.size()) + idx : idx;
             if (i < 0 || i >= static_cast<int>(l->vec.size())) throw std::runtime_error("Runtime Error: removeAt() index out of range.");
-            l->vec.erase(l->vec.begin() + i);
+            l->mut().erase(l->mut().begin() + i);
             return args[0];
         }
         if (args[0].isObjType(ObjType::REAL_MATRIX)) {
@@ -2588,12 +2557,7 @@ void BuiltinRegistry::registerDictFunctions() {
 
     reg("removeKey", { 2 }, [](const std::vector<Value>& args) -> Value {
         ObjDict* d = helpers::getDictMap(args[0], "removeKey");
-        auto it = d->keyMap.find(args[1]);
-        if (it == d->keyMap.end()) throw std::runtime_error("Runtime Error: Key not found.");
-        size_t idx = it->second;
-        d->keyMap.erase(it);
-        d->elements.erase(d->elements.begin() + idx);
-        for (size_t i = idx; i < d->elements.size(); ++i) d->keyMap[d->elements[i].first] = i;
+        d->remove(args[1]);
         return args[0];
         });
 
@@ -2604,9 +2568,7 @@ void BuiltinRegistry::registerDictFunctions() {
     reg("dictMerge", { 2 }, [](const std::vector<Value>& args) -> Value {
         ObjDict* d1 = helpers::getDictMap(args[0], "dictMerge"); ObjDict* d2 = helpers::getDictMap(args[1], "dictMerge");
         for (const auto& [k, v] : d2->elements) {
-            auto it = d1->keyMap.find(k);
-            if (it != d1->keyMap.end()) d1->elements[it->second].second = v;
-            else { d1->keyMap[k] = d1->elements.size(); d1->elements.push_back({k, v}); }
+            d1->set(k, v);
         }
         return args[0];
         });
@@ -4197,10 +4159,7 @@ void BuiltinRegistry::registerSetFunctions() {
         if (!args[0].isObjType(ObjType::SET))
             throw std::runtime_error("Type Error: setAdd() expects a Set.");
         auto s = static_cast<ObjSet*>(args[0].asObj());
-        if (s->keys.find(args[1]) == s->keys.end()) {
-            s->keys.insert(args[1]);
-            s->elements.push_back(args[1]);
-        }
+        s->add(args[1]);
         return args[0];
         });
 
@@ -4208,11 +4167,7 @@ void BuiltinRegistry::registerSetFunctions() {
         if (!args[0].isObjType(ObjType::SET))
             throw std::runtime_error("Type Error: setRemove() expects a Set.");
         auto s = static_cast<ObjSet*>(args[0].asObj());
-        auto it = s->keys.find(args[1]);
-        if (it == s->keys.end())
-            throw std::runtime_error("Runtime Error: Element not found in Set.");
-        s->keys.erase(it);
-        s->elements.erase(std::remove_if(s->elements.begin(), s->elements.end(), [&](const Value& v) { return Value::equals(v, args[1]); }), s->elements.end());
+        s->remove(args[1]);
         return args[0];
         });
 
@@ -4220,11 +4175,7 @@ void BuiltinRegistry::registerSetFunctions() {
         if (!args[0].isObjType(ObjType::SET))
             throw std::runtime_error("Type Error: setDiscard() expects a Set.");
         auto s = static_cast<ObjSet*>(args[0].asObj());
-        auto it = s->keys.find(args[1]);
-        if (it != s->keys.end()) {
-            s->keys.erase(it);
-            s->elements.erase(std::remove_if(s->elements.begin(), s->elements.end(), [&](const Value& v) { return Value::equals(v, args[1]); }), s->elements.end());
-        }
+        s->discard(args[1]);
         return args[0];
         });
 
@@ -4232,8 +4183,7 @@ void BuiltinRegistry::registerSetFunctions() {
         if (!args[0].isObjType(ObjType::SET))
             throw std::runtime_error("Type Error: setClear() expects a Set.");
         auto s = static_cast<ObjSet*>(args[0].asObj());
-        s->keys.clear();
-        s->elements.clear();
+        s->clear();
         return args[0];
         });
 
@@ -4241,11 +4191,7 @@ void BuiltinRegistry::registerSetFunctions() {
         if (!args[0].isObjType(ObjType::SET))
             throw std::runtime_error("Type Error: setPop() expects a Set.");
         auto s = static_cast<ObjSet*>(args[0].asObj());
-        if (s->elements.empty()) throw std::runtime_error("Runtime Error: setPop() on empty Set.");
-        Value result = s->elements.back();
-        s->keys.erase(result);
-        s->elements.pop_back();
-        return result;
+        return s->pop();
         });
 
     // ═══ 集合运算（返回新 Set）═══

@@ -1264,13 +1264,7 @@ namespace jc {
                         pairs[j] = { key, val };
                     }
                     for (auto& [k, v] : pairs) {
-                        auto it = d->keyMap.find(k);
-                        if (it != d->keyMap.end()) {
-                            d->elements[it->second].second = v;
-                        } else {
-                            d->keyMap[k] = d->elements.size();
-                            d->elements.push_back({k, v});
-                        }
+                        d->set(k, v);
                     }
                     push(Value(d));
                     break;
@@ -1496,7 +1490,7 @@ namespace jc {
                     Value elem = pop();
                     int listIdx = static_cast<int>(getStackSize()) - 1 - static_cast<int>(depth);
                     if (listIdx >= 0 && stack[listIdx].isObjType(ObjType::LIST)) {
-                        static_cast<ObjList*>(stack[listIdx].asObj())->vec.push_back(elem);
+                        static_cast<ObjList*>(stack[listIdx].asObj())->mut().push_back(elem);
                     }
                     else {
                         throw std::runtime_error("VM Error: LIST_APPEND target not found at depth " +
@@ -1982,14 +1976,7 @@ namespace jc {
                     }
                     else if (obj.isObjType(ObjType::DICT)) {
                         auto d = static_cast<ObjDict*>(obj.asObj());
-                        Value key(field);
-                        auto it = d->keyMap.find(key);
-                        if (it != d->keyMap.end()) {
-                            d->elements[it->second].second = val;
-                        } else {
-                            d->keyMap[key] = d->elements.size();
-                            d->elements.push_back({key, val});
-                        }
+                        d->set(Value(field), val);
                         push(val);
                     }
                     else if (obj.isObjType(ObjType::NAMESPACE)) {
@@ -2987,13 +2974,7 @@ namespace jc {
 
             if (obj.isObjType(ObjType::DICT)) {
                 auto d = static_cast<ObjDict*>(obj.asObj());
-                auto it = d->keyMap.find(idx);
-                if (it != d->keyMap.end()) {
-                    d->elements[it->second].second = val;
-                } else {
-                    d->keyMap[idx] = d->elements.size();
-                    d->elements.push_back({idx, val});
-                }
+                d->set(idx, val);
                 push(val); push(obj); return;
             }
 
@@ -3190,7 +3171,7 @@ namespace jc {
                 int n = static_cast<int>(list->vec.size());
                 if (i < 0) i = n + i;
                 if (i < 0 || i >= n) throw std::out_of_range("List Error: Index out of bounds.");
-                list->vec[i] = val;
+                list->mut()[i] = val;
             }
             else if (obj.isString()) {
                 if (obj.asObj()->refCount > 2) obj = Value(static_cast<ObjString*>(obj.asObj())->str);
@@ -3569,11 +3550,11 @@ namespace jc {
                     if (srcL.size() != ids.size())
                         throw std::runtime_error("VM Error: Slice assignment size mismatch.");
                     for (size_t k = 0; k < ids.size(); ++k)
-                        list->vec[ids[k]] = srcL[k];
+                        list->mut()[ids[k]] = srcL[k];
                 }
                 else {
                     for (int id : ids)
-                        list->vec[id] = val;
+                        list->mut()[id] = val;
                 }
             }
             else if (obj.isString()) {
