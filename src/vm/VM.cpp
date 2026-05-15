@@ -397,7 +397,7 @@ namespace jc {
         Value boundSelf, Value boundClass) {
         if (fnIdx < 0 || fnIdx >= static_cast<int>(compiledFunctions.size()))
             throw std::runtime_error("VM Error: Invalid function index in callback.");
-        auto& fn = compiledFunctions[fnIdx];
+        auto fn = compiledFunctions[fnIdx]; // ★ 拷贝 shared_ptr，防止 run 期间 compiledFunctions 重新分配导致悬空引用
         int savedTargetFrameDepth = currentTargetFrameDepth;
         auto savedRefWritebacks = pendingRefWritebacks;
         pendingRefWritebacks.clear();
