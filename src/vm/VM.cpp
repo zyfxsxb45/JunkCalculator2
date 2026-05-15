@@ -2580,7 +2580,7 @@ namespace jc {
             }
             else if (closure->isNative()) {
                 // ★ 修复：检查原生闭包的参数数量，防止 C++ 越界崩溃
-                auto ait = builtinArity.find(closure->name);
+                auto ait = builtinArity.find(closure->rawBody);
                 if (ait != builtinArity.end() && !ait->second.empty()) {
                     if (ait->second.find(argc) == ait->second.end()) {
                         std::string expected;
@@ -2588,12 +2588,12 @@ namespace jc {
                             if (aIt != ait->second.begin()) expected += " or ";
                             expected += std::to_string(*aIt);
                         }
-                        throw std::runtime_error("Runtime Error: Function '" + closure->name + 
+                        throw std::runtime_error("Runtime Error: Function '" + closure->rawBody + 
                             "' expects " + expected + " arguments, got " + std::to_string(argc) + ".");
                     }
                 } else if (closure->maxArgs() > 0 && !closure->hasRestParam) {
                     if (static_cast<int>(argc) < closure->minArgs() || static_cast<int>(argc) > closure->maxArgs()) {
-                        throw std::runtime_error("Runtime Error: Function '" + closure->name + 
+                        throw std::runtime_error("Runtime Error: Function '" + closure->rawBody + 
                             "' expects " + std::to_string(closure->minArgs()) + " to " + 
                             std::to_string(closure->maxArgs()) + " arguments, got " + 
                             std::to_string(argc) + ".");
