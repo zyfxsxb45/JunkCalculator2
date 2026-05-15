@@ -101,7 +101,40 @@ namespace jc {
             "', but returned '" + getTypeName(val) + "'.");
     }
 
-    static ObjClosure* findDunder(const Value& val, const char* name);
+    static ObjClosure* findDunder(const Value& val, const std::string& name);
+
+    static const std::string DUNDER_ADD = "__add__";
+    static const std::string DUNDER_RADD = "__radd__";
+    static const std::string DUNDER_SUB = "__sub__";
+    static const std::string DUNDER_RSUB = "__rsub__";
+    static const std::string DUNDER_MUL = "__mul__";
+    static const std::string DUNDER_RMUL = "__rmul__";
+    static const std::string DUNDER_DIV = "__div__";
+    static const std::string DUNDER_RDIV = "__rdiv__";
+    static const std::string DUNDER_MOD = "__mod__";
+    static const std::string DUNDER_RMOD = "__rmod__";
+    static const std::string DUNDER_POW = "__pow__";
+    static const std::string DUNDER_RPOW = "__rpow__";
+    static const std::string DUNDER_NEG = "__neg__";
+    static const std::string DUNDER_BITNOT = "__bitnot__";
+    static const std::string DUNDER_BITAND = "__bitand__";
+    static const std::string DUNDER_BITOR = "__bitor__";
+    static const std::string DUNDER_EQ = "__eq__";
+    static const std::string DUNDER_NEQ = "__neq__";
+    static const std::string DUNDER_LT = "__lt__";
+    static const std::string DUNDER_LE = "__le__";
+    static const std::string DUNDER_GT = "__gt__";
+    static const std::string DUNDER_GE = "__ge__";
+    static const std::string DUNDER_GETITEM = "__getitem__";
+    static const std::string DUNDER_SETITEM = "__setitem__";
+    static const std::string DUNDER_GETATTR = "__getattr__";
+    static const std::string DUNDER_SETATTR = "__setattr__";
+    static const std::string DUNDER_CALL = "__call__";
+    static const std::string DUNDER_ITER = "__iter__";
+    static const std::string DUNDER_NEXT = "__next__";
+    static const std::string DUNDER_STR = "__str__";
+    static const std::string DUNDER_BOOL = "__bool__";
+    static const std::string DUNDER_CONTAINS = "__contains__";
 
     bool VM::checkValueType(const Value& val, const std::string& typeStr) {
         if (typeStr == "any" || typeStr.empty()) return true;
@@ -183,22 +216,21 @@ namespace jc {
     }
 
     static ObjClosure* findDunder(
-        const Value& val, const char* name)
+        const Value& val, const std::string& name)
     {
         if (!val.isInstance())
             return nullptr;
         auto inst = val.asInstance();
         auto c = inst->classDef;
-        std::string sname(name);
         while (c) {
-            auto it = c->methods.find(sname);
+            auto it = c->methods.find(name);
             if (it != c->methods.end()) return it->second;
             c = c->parent;
         }
         return nullptr;
     }
 
-    Value VM::callDunder(const Value& obj, const char* name,
+    Value VM::callDunder(const Value& obj, const std::string& name,
         const std::vector<Value>& args)
     {
         auto inst = obj.asInstance();
@@ -302,8 +334,29 @@ namespace jc {
     }
 
     void VM::registerBuiltin(const std::string& name, NativeCallable fn, std::set<int> arity) {
-        nativeBuiltins[name] = std::move(fn);
-        builtinArity[name] = std::move(arity);
+        nativeBuiltins[name] = fn;
+        builtinArity[name] = arity;
+
+        auto closure = GcHeap::get().allocate<ObjClosure>(
+            std::vector<std::string>{},
+            std::vector<bool>{},
+            name,
+            nullptr
+        );
+        closure->nativeFn = std::make_any<NativeCallable>(fn);
+
+        if (!arity.empty()) {
+            int maxA = *arity.rbegin();
+            int minA = *arity.begin();
+            for (int j = 0; j < maxA; ++j) {
+                closure->paramNames.push_back("_" + std::to_string(j));
+                closure->isRef.push_back(false);
+            }
+            for (int j = minA; j < maxA; ++j) {
+                closure->defaultValues.push_back(Value::none());
+            }
+        }
+        builtinClosures[name] = Value(closure);
     }
 
     void VM::setGlobal(const std::string& name, const Value& val) {
@@ -528,43 +581,43 @@ namespace jc {
 
                 case OpCode::OP_ADD: {
                     Value& b = peek(0); Value& a = peek(1);
-                    if (a.isInstance() && findDunder(a, "__add__")) { Value res = callDunder(a, "__add__", { b }); pop(); peek(0) = res; break; }
-                    if (b.isInstance() && findDunder(b, "__radd__")) { Value res = callDunder(b, "__radd__", { a }); pop(); peek(0) = res; break; }
+                    if (a.isInstance() && findDunder(a, DUNDER_ADD)) { Value res = callDunder(a, DUNDER_ADD, { b }); pop(); peek(0) = res; break; }
+                    if (b.isInstance() && findDunder(b, DUNDER_RADD)) { Value res = callDunder(b, DUNDER_RADD, { a }); pop(); peek(0) = res; break; }
                     Value res = a + b; pop(); peek(0) = res; break;
                 }
                 case OpCode::OP_SUBTRACT: {
                     Value& b = peek(0); Value& a = peek(1);
-                    if (a.isInstance() && findDunder(a, "__sub__")) { Value res = callDunder(a, "__sub__", { b }); pop(); peek(0) = res; break; }
-                    if (b.isInstance() && findDunder(b, "__rsub__")) { Value res = callDunder(b, "__rsub__", { a }); pop(); peek(0) = res; break; }
+                    if (a.isInstance() && findDunder(a, DUNDER_SUB)) { Value res = callDunder(a, DUNDER_SUB, { b }); pop(); peek(0) = res; break; }
+                    if (b.isInstance() && findDunder(b, DUNDER_RSUB)) { Value res = callDunder(b, DUNDER_RSUB, { a }); pop(); peek(0) = res; break; }
                     Value res = a - b; pop(); peek(0) = res; break;
                 }
                 case OpCode::OP_MULTIPLY: {
                     Value& b = peek(0); Value& a = peek(1);
-                    if (a.isInstance() && findDunder(a, "__mul__")) { Value res = callDunder(a, "__mul__", { b }); pop(); peek(0) = res; break; }
-                    if (b.isInstance() && findDunder(b, "__rmul__")) { Value res = callDunder(b, "__rmul__", { a }); pop(); peek(0) = res; break; }
+                    if (a.isInstance() && findDunder(a, DUNDER_MUL)) { Value res = callDunder(a, DUNDER_MUL, { b }); pop(); peek(0) = res; break; }
+                    if (b.isInstance() && findDunder(b, DUNDER_RMUL)) { Value res = callDunder(b, DUNDER_RMUL, { a }); pop(); peek(0) = res; break; }
                     Value res = a * b; pop(); peek(0) = res; break;
                 }
                 case OpCode::OP_DIVIDE: {
                     Value& b = peek(0); Value& a = peek(1);
-                    if (a.isInstance() && findDunder(a, "__div__")) { Value res = callDunder(a, "__div__", { b }); pop(); peek(0) = res; break; }
-                    if (b.isInstance() && findDunder(b, "__rdiv__")) { Value res = callDunder(b, "__rdiv__", { a }); pop(); peek(0) = res; break; }
+                    if (a.isInstance() && findDunder(a, DUNDER_DIV)) { Value res = callDunder(a, DUNDER_DIV, { b }); pop(); peek(0) = res; break; }
+                    if (b.isInstance() && findDunder(b, DUNDER_RDIV)) { Value res = callDunder(b, DUNDER_RDIV, { a }); pop(); peek(0) = res; break; }
                     Value res = a / b; pop(); peek(0) = res; break;
                 }
                 case OpCode::OP_MODULO: {
                     Value& b = peek(0); Value& a = peek(1);
-                    if (a.isInstance() && findDunder(a, "__mod__")) { Value res = callDunder(a, "__mod__", { b }); pop(); peek(0) = res; break; }
-                    if (b.isInstance() && findDunder(b, "__rmod__")) { Value res = callDunder(b, "__rmod__", { a }); pop(); peek(0) = res; break; }
+                    if (a.isInstance() && findDunder(a, DUNDER_MOD)) { Value res = callDunder(a, DUNDER_MOD, { b }); pop(); peek(0) = res; break; }
+                    if (b.isInstance() && findDunder(b, DUNDER_RMOD)) { Value res = callDunder(b, DUNDER_RMOD, { a }); pop(); peek(0) = res; break; }
                     Value res = a % b; pop(); peek(0) = res; break;
                 }
                 case OpCode::OP_POWER: {
                     Value& b = peek(0); Value& a = peek(1);
-                    if (a.isInstance() && findDunder(a, "__pow__")) { Value res = callDunder(a, "__pow__", { b }); pop(); peek(0) = res; break; }
-                    if (b.isInstance() && findDunder(b, "__rpow__")) { Value res = callDunder(b, "__rpow__", { a }); pop(); peek(0) = res; break; }
+                    if (a.isInstance() && findDunder(a, DUNDER_POW)) { Value res = callDunder(a, DUNDER_POW, { b }); pop(); peek(0) = res; break; }
+                    if (b.isInstance() && findDunder(b, DUNDER_RPOW)) { Value res = callDunder(b, DUNDER_RPOW, { a }); pop(); peek(0) = res; break; }
                     Value res = a ^ b; pop(); peek(0) = res; break;
                 }
                 case OpCode::OP_NEGATE: {
                     Value& a = peek(0);
-                    if (a.isInstance() && findDunder(a, "__neg__")) { Value res = callDunder(a, "__neg__", {}); peek(0) = res; break; }
+                    if (a.isInstance() && findDunder(a, DUNDER_NEG)) { Value res = callDunder(a, DUNDER_NEG, {}); peek(0) = res; break; }
                     Value res = -a; peek(0) = res; break;
                 }
                 case OpCode::OP_NOT: { 
@@ -572,35 +625,35 @@ namespace jc {
                 }
                 case OpCode::OP_BIT_NOT: {
                     Value& a = peek(0);
-                    if (a.isInstance() && findDunder(a, "__bitnot__")) { Value res = callDunder(a, "__bitnot__", {}); peek(0) = res; break; }
+                    if (a.isInstance() && findDunder(a, DUNDER_BITNOT)) { Value res = callDunder(a, DUNDER_BITNOT, {}); peek(0) = res; break; }
                     Value res = ~a; peek(0) = res; break;
                 }
 
                 case OpCode::OP_BIT_AND: {
                     Value& b = peek(0); Value& a = peek(1);
-                    if (a.isInstance() && findDunder(a, "__bitand__")) { Value res = callDunder(a, "__bitand__", { b }); pop(); peek(0) = res; break; }
+                    if (a.isInstance() && findDunder(a, DUNDER_BITAND)) { Value res = callDunder(a, DUNDER_BITAND, { b }); pop(); peek(0) = res; break; }
                     Value res = a & b; pop(); peek(0) = res; break;
                 }
                 case OpCode::OP_BIT_OR: {
                     Value& b = peek(0); Value& a = peek(1);
-                    if (a.isInstance() && findDunder(a, "__bitor__")) { Value res = callDunder(a, "__bitor__", { b }); pop(); peek(0) = res; break; }
+                    if (a.isInstance() && findDunder(a, DUNDER_BITOR)) { Value res = callDunder(a, DUNDER_BITOR, { b }); pop(); peek(0) = res; break; }
                     Value res = a | b; pop(); peek(0) = res; break;
                 }
 
                 case OpCode::OP_EQUAL: {
                     Value& b = peek(0); Value& a = peek(1);
-                    if (a.isInstance() && findDunder(a, "__eq__")) { Value res = Value(callDunder(a, "__eq__", { b }).truthy()); pop(); peek(0) = res; break; }
+                    if (a.isInstance() && findDunder(a, DUNDER_EQ)) { Value res = Value(callDunder(a, DUNDER_EQ, { b }).truthy()); pop(); peek(0) = res; break; }
                     Value res = Value(Value::equals(a, b)); pop(); peek(0) = res; break;
                 }
                 case OpCode::OP_NOT_EQUAL: {
                     Value& b = peek(0); Value& a = peek(1);
-                    if (a.isInstance() && findDunder(a, "__neq__")) { Value res = Value(callDunder(a, "__neq__", { b }).truthy()); pop(); peek(0) = res; break; }
-                    if (a.isInstance() && findDunder(a, "__eq__")) { Value res = Value(!callDunder(a, "__eq__", { b }).truthy()); pop(); peek(0) = res; break; }
+                    if (a.isInstance() && findDunder(a, DUNDER_NEQ)) { Value res = Value(callDunder(a, DUNDER_NEQ, { b }).truthy()); pop(); peek(0) = res; break; }
+                    if (a.isInstance() && findDunder(a, DUNDER_EQ)) { Value res = Value(!callDunder(a, DUNDER_EQ, { b }).truthy()); pop(); peek(0) = res; break; }
                     Value res = Value(!Value::equals(a, b)); pop(); peek(0) = res; break;
                 }
                 case OpCode::OP_LESS: {
                     Value& b = peek(0); Value& a = peek(1);
-                    if (a.isInstance() && findDunder(a, "__lt__")) { Value res = Value(callDunder(a, "__lt__", { b }).truthy()); pop(); peek(0) = res; break; }
+                    if (a.isInstance() && findDunder(a, DUNDER_LT)) { Value res = Value(callDunder(a, DUNDER_LT, { b }).truthy()); pop(); peek(0) = res; break; }
                     Value res;
                     if ((a.isBigInt() || a.isInt32()) && (b.isBigInt() || b.isInt32())) res = Value(a.asBigInt() < b.asBigInt());
                     else if (a.isObjType(ObjType::FRACTION) && b.isObjType(ObjType::FRACTION)) res = Value(static_cast<ObjFraction*>(a.asObj())->frac < static_cast<ObjFraction*>(b.asObj())->frac);
@@ -610,7 +663,7 @@ namespace jc {
                 }
                 case OpCode::OP_LESS_EQUAL: {
                     Value& b = peek(0); Value& a = peek(1);
-                    if (a.isInstance() && findDunder(a, "__le__")) { Value res = Value(callDunder(a, "__le__", { b }).truthy()); pop(); peek(0) = res; break; }
+                    if (a.isInstance() && findDunder(a, DUNDER_LE)) { Value res = Value(callDunder(a, DUNDER_LE, { b }).truthy()); pop(); peek(0) = res; break; }
                     Value res;
                     if ((a.isBigInt() || a.isInt32()) && (b.isBigInt() || b.isInt32())) res = Value(a.asBigInt() <= b.asBigInt());
                     else if (a.isObjType(ObjType::FRACTION) && b.isObjType(ObjType::FRACTION)) res = Value(static_cast<ObjFraction*>(a.asObj())->frac <= static_cast<ObjFraction*>(b.asObj())->frac);
@@ -620,7 +673,7 @@ namespace jc {
                 }
                 case OpCode::OP_GREATER: {
                     Value& b = peek(0); Value& a = peek(1);
-                    if (a.isInstance() && findDunder(a, "__gt__")) { Value res = Value(callDunder(a, "__gt__", { b }).truthy()); pop(); peek(0) = res; break; }
+                    if (a.isInstance() && findDunder(a, DUNDER_GT)) { Value res = Value(callDunder(a, DUNDER_GT, { b }).truthy()); pop(); peek(0) = res; break; }
                     Value res;
                     if ((a.isBigInt() || a.isInt32()) && (b.isBigInt() || b.isInt32())) res = Value(a.asBigInt() > b.asBigInt());
                     else if (a.isObjType(ObjType::FRACTION) && b.isObjType(ObjType::FRACTION)) res = Value(static_cast<ObjFraction*>(a.asObj())->frac > static_cast<ObjFraction*>(b.asObj())->frac);
@@ -630,7 +683,7 @@ namespace jc {
                 }
                 case OpCode::OP_GREATER_EQUAL: {
                     Value& b = peek(0); Value& a = peek(1);
-                    if (a.isInstance() && findDunder(a, "__ge__")) { Value res = Value(callDunder(a, "__ge__", { b }).truthy()); pop(); peek(0) = res; break; }
+                    if (a.isInstance() && findDunder(a, DUNDER_GE)) { Value res = Value(callDunder(a, DUNDER_GE, { b }).truthy()); pop(); peek(0) = res; break; }
                     Value res;
                     if ((a.isBigInt() || a.isInt32()) && (b.isBigInt() || b.isInt32())) res = Value(a.asBigInt() >= b.asBigInt());
                     else if (a.isObjType(ObjType::FRACTION) && b.isObjType(ObjType::FRACTION)) res = Value(static_cast<ObjFraction*>(a.asObj())->frac >= static_cast<ObjFraction*>(b.asObj())->frac);
@@ -668,34 +721,14 @@ namespace jc {
                     if (it != globals.end()) {
                         push(it->second);
                     }
-                    else if (nativeBuiltins.count(name)) {
-                        auto closure = GcHeap::get().allocate<ObjClosure>(
-                            std::vector<std::string>{},
-                            std::vector<bool>{},
-                            name,
-                            nullptr
-                        );
-                        closure->nativeFn = std::make_any<NativeCallable>(nativeBuiltins[name]);
-
-                        // ★ 补上参数元数据，让 map/filter/reduce 等高阶函数能正确识别
-                        auto ait = builtinArity.find(name);
-                        if (ait != builtinArity.end() && !ait->second.empty()) {
-                            int maxA = *ait->second.rbegin();
-                            int minA = *ait->second.begin();
-                            for (int j = 0; j < maxA; ++j) {
-                                closure->paramNames.push_back("_" + std::to_string(j));
-                                closure->isRef.push_back(false);
-                            }
-                            // 超出最小参数数量的部分视为有默认值
-                            for (int j = minA; j < maxA; ++j) {
-                                closure->defaultValues.push_back(Value::none());
-                            }
-                        }
-
-                        push(Value(closure));
-                    }
                     else {
-                        throw std::runtime_error("VM Error: Undefined variable '" + name + "'.");
+                        auto bit = builtinClosures.find(name);
+                        if (bit != builtinClosures.end()) {
+                            push(bit->second);
+                        }
+                        else {
+                            throw std::runtime_error("VM Error: Undefined variable '" + name + "'.");
+                        }
                     }
                     break;
                 }
@@ -1071,9 +1104,9 @@ namespace jc {
                         push(v);
                     }
                     else {
-                        auto d = findDunder(v, "__str__");
+                        auto d = findDunder(v, DUNDER_STR);
                         if (d) {
-                            push(callDunder(v, "__str__", {}));
+                            push(callDunder(v, DUNDER_STR, {}));
                         }
                         else {
                             std::ostringstream oss;
@@ -1316,9 +1349,9 @@ namespace jc {
                         }
                     }
                     else if (iterable.isInstance()) {
-                        auto method = findDunder(iterable, "__iter__");
+                        auto method = findDunder(iterable, DUNDER_ITER);
                         if (method) {
-                            Value iterObj = callDunder(iterable, "__iter__", {});
+                            Value iterObj = callDunder(iterable, DUNDER_ITER, {});
                             push(iterObj);
                             push(Value::none()); // 使用 none 作为自定义迭代器的索引标记
                             break;
@@ -1340,10 +1373,10 @@ namespace jc {
                     if (idxVal.isNone()) {
                         // 自定义迭代器分支
                         Value iterObj = peek(1);
-                        auto method = findDunder(iterObj, "__next__");
+                        auto method = findDunder(iterObj, DUNDER_NEXT);
                         if (!method) throw std::runtime_error("VM Error: Iterator missing __next__ method.");
                         
-                        Value nextVal = callDunder(iterObj, "__next__", {});
+                        Value nextVal = callDunder(iterObj, DUNDER_NEXT, {});
                         if (nextVal.isNone()) {
                             currentFrame->ip += offset; // 迭代结束
                         } else {
@@ -1687,26 +1720,8 @@ namespace jc {
 
                         for (const auto& kv : nativeBuiltins) {
                             if (!oldNatives.count(kv.first)) {
-                                auto closure = GcHeap::get().allocate<ObjClosure>(
-                                    std::vector<std::string>{}, std::vector<bool>{}, kv.first, nullptr
-                                );
-                                closure->nativeFn = std::make_any<NativeCallable>(kv.second);
-                                
-                                auto ait = builtinArity.find(kv.first);
-                                if (ait != builtinArity.end() && !ait->second.empty()) {
-                                    int maxA = *ait->second.rbegin();
-                                    int minA = *ait->second.begin();
-                                    for (int j = 0; j < maxA; ++j) {
-                                        closure->paramNames.push_back("_" + std::to_string(j));
-                                        closure->isRef.push_back(false);
-                                    }
-                                    for (int j = minA; j < maxA; ++j) {
-                                        closure->defaultValues.push_back(Value::none());
-                                    }
-                                }
-
                                 auto uv = std::make_shared<UpVal>();
-                                uv->closed = Value(closure);
+                                uv->closed = builtinClosures[kv.first];
                                 uv->location = &uv->closed;
                                 ns->fields[kv.first] = { uv, true };
                             }
@@ -1831,9 +1846,9 @@ namespace jc {
                                 result = Value(bound);
                                 found = true;
                             } else {
-                                auto getattrMethod = findDunder(obj, "__getattr__");
+                                auto getattrMethod = findDunder(obj, DUNDER_GETATTR);
                                 if (getattrMethod) {
-                                    result = callDunder(obj, "__getattr__", { Value(field) });
+                                    result = callDunder(obj, DUNDER_GETATTR, { Value(field) });
                                     found = true;
                                 }
                             }
@@ -1936,9 +1951,9 @@ namespace jc {
 
                     if (obj.isInstance()) {
                         auto inst = obj.asInstance();
-                        auto setattrMethod = findDunder(obj, "__setattr__");
+                        auto setattrMethod = findDunder(obj, DUNDER_SETATTR);
                         if (setattrMethod) {
-                            callDunder(obj, "__setattr__", { Value(field), val });
+                            callDunder(obj, DUNDER_SETATTR, { Value(field), val });
                             push(val);
                             break;
                         }
@@ -2258,6 +2273,10 @@ namespace jc {
         for (const auto& [name, val] : loadedModules)
             markValue(val);
 
+        // 根集合 1.6: 内置函数闭包缓存
+        for (const auto& [name, val] : builtinClosures)
+            markValue(val);
+
         // 根集合 2: 虚拟机求值栈
         for (Value* p = stack; p < stackTop; ++p)
             markValue(*p);
@@ -2300,6 +2319,7 @@ namespace jc {
     int VM::runGC() {
         for (const auto& [name, val] : globals)  markValue(val);
         for (const auto& [name, val] : loadedModules) markValue(val);
+        for (const auto& [name, val] : builtinClosures) markValue(val);
         for (Value* p = stack; p < stackTop; ++p) markValue(*p);
         for (int i = 0; i < frameCount; ++i) {
             const auto& f = frames[i];
@@ -2639,7 +2659,7 @@ namespace jc {
             ObjClass* owningClass = nullptr;
             auto c = inst->classDef;
             while (c) {
-                auto it = c->methods.find("__call__");
+                auto it = c->methods.find(DUNDER_CALL);
                 if (it != c->methods.end()) {
                     method = it->second;
                     owningClass = c;
@@ -2757,7 +2777,7 @@ namespace jc {
                 auto c = inst->classDef;
                 ObjClosure* getitemMethod = nullptr;
                 while (c) {
-                    auto it = c->methods.find("__getitem__");
+                    auto it = c->methods.find(DUNDER_GETITEM);
                     if (it != c->methods.end()) {
                         getitemMethod = it->second;
                         break;
@@ -2950,7 +2970,7 @@ namespace jc {
                 auto c = inst->classDef;
                 ObjClosure* setitemMethod = nullptr;
                 while (c) {
-                    auto it = c->methods.find("__setitem__");
+                    auto it = c->methods.find(DUNDER_SETITEM);
                     if (it != c->methods.end()) {
                         setitemMethod = it->second;
                         break;
@@ -4005,9 +4025,9 @@ namespace jc {
         }
 
         if (haystack.isInstance()) {
-            auto method = findDunder(haystack, "__contains__");
+            auto method = findDunder(haystack, DUNDER_CONTAINS);
             if (method) {
-                push(Value(callDunder(haystack, "__contains__", { needle }).truthy() ? 1.0 : 0.0));
+                push(Value(callDunder(haystack, DUNDER_CONTAINS, { needle }).truthy() ? 1.0 : 0.0));
                 return;
             }
         }

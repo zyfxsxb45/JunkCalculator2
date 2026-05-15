@@ -40,6 +40,7 @@ namespace jc {
 
         std::unordered_map<std::string, Value> globals;
         std::unordered_map<std::string, NativeCallable> nativeBuiltins;
+        std::unordered_map<std::string, Value> builtinClosures;    // ★ 新增：内置函数闭包缓存
         std::unordered_set<std::string> constGlobals;              // ★ 新增：const 变量追踪
 
         // ★ 存储编译后的函数对象
@@ -109,7 +110,7 @@ namespace jc {
         // ==============================================================
         bool handleExceptionUnwind(std::string& msg);
         std::string buildStackTrace(const std::string& errorMsg);
-        Value callDunder(const Value& obj, const char* name,
+        Value callDunder(const Value& obj, const std::string& name,
             const std::vector<Value>& args);
 
         // ★ 类型检查冷路径：让繁重的字符串操作离开核心循环
