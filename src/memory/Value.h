@@ -1395,7 +1395,7 @@ namespace jc {
                     auto [found, res] = invokeDunder(inst1, "__eq__", {rhs});
                     if (found) return res.truthy();
                     auto inst2 = static_cast<ObjInstance*>(robj);
-                    if (inst1->is_frozen && inst2->is_frozen && inst1->classDef == inst2->classDef) {
+                    if (inst1->classDef == inst2->classDef) {
                         if (!inst1->fields && !inst2->fields) return true;
                         if (!inst1->fields || !inst2->fields) return false;
                         if (inst1->fields->elements.size() != inst2->fields->elements.size()) return false;
