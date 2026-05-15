@@ -925,16 +925,12 @@ void BuiltinRegistry::registerMatrixOps() {
     });
     reg("eqE", { 2 }, [elementWiseOp](const std::vector<Value>& args) -> Value { return elementWiseOp(args[0], args[1], "eqE", [](const Value& a, const Value& b) { return Value(helpers::checkEqual(a, b) ? 1.0 : 0.0); }); });
     reg("neqE", { 2 }, [elementWiseOp](const std::vector<Value>& args) -> Value { return elementWiseOp(args[0], args[1], "neqE", [](const Value& a, const Value& b) { return Value(!helpers::checkEqual(a, b) ? 1.0 : 0.0); }); });
-    auto checkNoStr = [](const Value& a, const Value& b, const std::string& op) {
-        if (a.isString() || b.isString())
-            throw std::runtime_error("Type Error: " + op + "() does not support strings.");
-    };
-    reg("ltE", { 2 }, [elementWiseOp, checkNoStr](const std::vector<Value>& args) -> Value { return elementWiseOp(args[0], args[1], "ltE", [checkNoStr](const Value& a, const Value& b) { checkNoStr(a, b, "ltE"); return Value(helpers::checkLess(a, b) ? 1.0 : 0.0); }); });
-    reg("leE", { 2 }, [elementWiseOp, checkNoStr](const std::vector<Value>& args) -> Value { return elementWiseOp(args[0], args[1], "leE", [checkNoStr](const Value& a, const Value& b) { checkNoStr(a, b, "leE"); return Value(!helpers::checkGreater(a, b) ? 1.0 : 0.0); }); });
-    reg("gtE", { 2 }, [elementWiseOp, checkNoStr](const std::vector<Value>& args) -> Value { return elementWiseOp(args[0], args[1], "gtE", [checkNoStr](const Value& a, const Value& b) { checkNoStr(a, b, "gtE"); return Value(helpers::checkGreater(a, b) ? 1.0 : 0.0); }); });
-    reg("geE", { 2 }, [elementWiseOp, checkNoStr](const std::vector<Value>& args) -> Value { return elementWiseOp(args[0], args[1], "geE", [checkNoStr](const Value& a, const Value& b) { checkNoStr(a, b, "geE"); return Value(!helpers::checkLess(a, b) ? 1.0 : 0.0); }); });
-    reg("maxE", { 2 }, [elementWiseOp, checkNoStr](const std::vector<Value>& args) -> Value { return elementWiseOp(args[0], args[1], "maxE", [checkNoStr](const Value& a, const Value& b) { checkNoStr(a, b, "maxE"); return helpers::checkGreater(a, b) ? a : b; }); });
-    reg("minE", { 2 }, [elementWiseOp, checkNoStr](const std::vector<Value>& args) -> Value { return elementWiseOp(args[0], args[1], "minE", [checkNoStr](const Value& a, const Value& b) { checkNoStr(a, b, "minE"); return helpers::checkLess(a, b) ? a : b; }); });
+    reg("ltE", { 2 }, [elementWiseOp](const std::vector<Value>& args) -> Value { return elementWiseOp(args[0], args[1], "ltE", [](const Value& a, const Value& b) { return Value(helpers::checkLess(a, b) ? 1.0 : 0.0); }); });
+    reg("leE", { 2 }, [elementWiseOp](const std::vector<Value>& args) -> Value { return elementWiseOp(args[0], args[1], "leE", [](const Value& a, const Value& b) { return Value(!helpers::checkGreater(a, b) ? 1.0 : 0.0); }); });
+    reg("gtE", { 2 }, [elementWiseOp](const std::vector<Value>& args) -> Value { return elementWiseOp(args[0], args[1], "gtE", [](const Value& a, const Value& b) { return Value(helpers::checkGreater(a, b) ? 1.0 : 0.0); }); });
+    reg("geE", { 2 }, [elementWiseOp](const std::vector<Value>& args) -> Value { return elementWiseOp(args[0], args[1], "geE", [](const Value& a, const Value& b) { return Value(!helpers::checkLess(a, b) ? 1.0 : 0.0); }); });
+    reg("maxE", { 2 }, [elementWiseOp](const std::vector<Value>& args) -> Value { return elementWiseOp(args[0], args[1], "maxE", [](const Value& a, const Value& b) { return helpers::checkGreater(a, b) ? a : b; }); });
+    reg("minE", { 2 }, [elementWiseOp](const std::vector<Value>& args) -> Value { return elementWiseOp(args[0], args[1], "minE", [](const Value& a, const Value& b) { return helpers::checkLess(a, b) ? a : b; }); });
     reg("andE", { 2 }, [elementWiseOp](const std::vector<Value>& args) -> Value { return elementWiseOp(args[0], args[1], "andE", [](const Value& a, const Value& b) { return Value((a.truthy() && b.truthy()) ? 1.0 : 0.0); }); });
     reg("orE", { 2 }, [elementWiseOp](const std::vector<Value>& args) -> Value { return elementWiseOp(args[0], args[1], "orE", [](const Value& a, const Value& b) { return Value((a.truthy() || b.truthy()) ? 1.0 : 0.0); }); });
     reg("xorE", { 2 }, [elementWiseOp](const std::vector<Value>& args) -> Value { return elementWiseOp(args[0], args[1], "xorE", [](const Value& a, const Value& b) { return Value((a.truthy() != b.truthy()) ? 1.0 : 0.0); }); });
@@ -3035,8 +3031,9 @@ void BuiltinRegistry::registerHigherOrder() {
             Value capturedFn = args[0];
             if (!capturedFn.isFunctionClosure()) throw std::runtime_error("Type Error: map() currying expects a function.");
             auto bound = GcHeap::get().allocate<ObjClosure>(std::vector<std::string>{"v"}, std::vector<bool>{false}, "map_curried", nullptr);
-            bound->nativeFn = VM::makeNativeFn([capturedFn, mapCore](const std::vector<Value>& innerArgs) -> Value {
-                return mapCore(innerArgs[0], capturedFn.asFunction());
+            bound->boundSelf = capturedFn; // ★ 让 GC 追踪
+            bound->nativeFn = VM::makeNativeFn([mapCore](const std::vector<Value>& innerArgs) -> Value {
+                return mapCore(innerArgs[0], helpers::nativeSelfStack.back().asFunction());
             });
             return Value(bound);
         }
@@ -3089,8 +3086,9 @@ void BuiltinRegistry::registerHigherOrder() {
             Value capturedFn = args[0];
             if (!capturedFn.isFunctionClosure()) throw std::runtime_error("Type Error: filter() currying expects a function.");
             auto bound = GcHeap::get().allocate<ObjClosure>(std::vector<std::string>{"v"}, std::vector<bool>{false}, "filter_curried", nullptr);
-            bound->nativeFn = VM::makeNativeFn([capturedFn, filterCore](const std::vector<Value>& innerArgs) -> Value {
-                return filterCore(innerArgs[0], capturedFn.asFunction());
+            bound->boundSelf = capturedFn; // ★ 让 GC 追踪
+            bound->nativeFn = VM::makeNativeFn([filterCore](const std::vector<Value>& innerArgs) -> Value {
+                return filterCore(innerArgs[0], helpers::nativeSelfStack.back().asFunction());
             });
             return Value(bound);
         }
@@ -3131,8 +3129,10 @@ void BuiltinRegistry::registerHigherOrder() {
             if (!capturedFn.isFunctionClosure()) throw std::runtime_error("Type Error: reduce() currying expects a function.");
             Value capturedInit = args.size() == 2 ? args[1] : Value::none();
             auto bound = GcHeap::get().allocate<ObjClosure>(std::vector<std::string>{"v"}, std::vector<bool>{false}, "reduce_curried", nullptr);
-            bound->nativeFn = VM::makeNativeFn([capturedFn, capturedInit, reduceCore](const std::vector<Value>& innerArgs) -> Value {
-                return reduceCore(innerArgs[0], capturedFn.asFunction(), capturedInit);
+            bound->boundSelf = capturedFn;   // ★ 让 GC 追踪
+            bound->boundClass = capturedInit; // ★ 让 GC 追踪
+            bound->nativeFn = VM::makeNativeFn([reduceCore](const std::vector<Value>& innerArgs) -> Value {
+                return reduceCore(innerArgs[0], helpers::nativeSelfStack.back().asFunction(), helpers::nativeClassStack.back());
             });
             return Value(bound);
         }
@@ -3176,8 +3176,9 @@ void BuiltinRegistry::registerHigherOrder() {
             Value capturedFn = args[0];
             if (!capturedFn.isFunctionClosure()) throw std::runtime_error("Type Error: any() currying expects a function.");
             auto bound = GcHeap::get().allocate<ObjClosure>(std::vector<std::string>{"v"}, std::vector<bool>{false}, "any_curried", nullptr);
-            bound->nativeFn = VM::makeNativeFn([capturedFn, anyCore](const std::vector<Value>& innerArgs) -> Value {
-                return anyCore(innerArgs[0], capturedFn.asFunction());
+            bound->boundSelf = capturedFn; // ★ 让 GC 追踪
+            bound->nativeFn = VM::makeNativeFn([anyCore](const std::vector<Value>& innerArgs) -> Value {
+                return anyCore(innerArgs[0], helpers::nativeSelfStack.back().asFunction());
             });
             return Value(bound);
         }
@@ -3195,8 +3196,9 @@ void BuiltinRegistry::registerHigherOrder() {
             Value capturedFn = args[0];
             if (!capturedFn.isFunctionClosure()) throw std::runtime_error("Type Error: all() currying expects a function.");
             auto bound = GcHeap::get().allocate<ObjClosure>(std::vector<std::string>{"v"}, std::vector<bool>{false}, "all_curried", nullptr);
-            bound->nativeFn = VM::makeNativeFn([capturedFn, allCore](const std::vector<Value>& innerArgs) -> Value {
-                return allCore(innerArgs[0], capturedFn.asFunction());
+            bound->boundSelf = capturedFn; // ★ 让 GC 追踪
+            bound->nativeFn = VM::makeNativeFn([allCore](const std::vector<Value>& innerArgs) -> Value {
+                return allCore(innerArgs[0], helpers::nativeSelfStack.back().asFunction());
             });
             return Value(bound);
         }
@@ -3225,8 +3227,9 @@ void BuiltinRegistry::registerHigherOrder() {
             Value capturedFn = args[0];
             if (!capturedFn.isFunctionClosure()) throw std::runtime_error("Type Error: countIf() currying expects a function.");
             auto bound = GcHeap::get().allocate<ObjClosure>(std::vector<std::string>{"v"}, std::vector<bool>{false}, "countIf_curried", nullptr);
-            bound->nativeFn = VM::makeNativeFn([capturedFn, countIfCore](const std::vector<Value>& innerArgs) -> Value {
-                return countIfCore(innerArgs[0], capturedFn.asFunction());
+            bound->boundSelf = capturedFn; // ★ 让 GC 追踪
+            bound->nativeFn = VM::makeNativeFn([countIfCore](const std::vector<Value>& innerArgs) -> Value {
+                return countIfCore(innerArgs[0], helpers::nativeSelfStack.back().asFunction());
             });
             return Value(bound);
         }
@@ -3239,21 +3242,21 @@ void BuiltinRegistry::registerHigherOrder() {
             if (arg.isObjType(ObjType::LIST)) {
                 ObjList* L = GcHeap::get().allocate<ObjList>();
                 L->vec = static_cast<ObjList*>(arg.asObj())->vec;
-                std::sort(L->vec.begin(), L->vec.end(), [&](const Value& a, const Value& b) {
+                std::stable_sort(L->vec.begin(), L->vec.end(), [&](const Value& a, const Value& b) {
                     return safeCallFunction(cmp, { a, b }).truthy();
                 });
                 return Value(L);
             } else if (arg.isObjType(ObjType::REAL_MATRIX)) {
                 auto f = static_cast<ObjRealMatrix*>(arg.asObj())->mat.rawData();
-                std::sort(f.begin(), f.end(), [&](const auto& a, const auto& b) { return safeCallFunction(cmp, { Value(a), Value(b) }).truthy(); });
+                std::stable_sort(f.begin(), f.end(), [&](const auto& a, const auto& b) { return safeCallFunction(cmp, { Value(a), Value(b) }).truthy(); });
                 return Value(RealMatrix(1, static_cast<int>(f.size()), f));
             } else if (arg.isObjType(ObjType::COMPLEX_MATRIX)) {
                 auto f = static_cast<ObjComplexMatrix*>(arg.asObj())->mat.rawData();
-                std::sort(f.begin(), f.end(), [&](const auto& a, const auto& b) { return safeCallFunction(cmp, { Value(a), Value(b) }).truthy(); });
+                std::stable_sort(f.begin(), f.end(), [&](const auto& a, const auto& b) { return safeCallFunction(cmp, { Value(a), Value(b) }).truthy(); });
                 return Value(ComplexMatrix(1, static_cast<int>(f.size()), f));
             } else if (arg.isObjType(ObjType::STRING_MATRIX)) {
                 auto f = static_cast<ObjStringMatrix*>(arg.asObj())->mat.rawData();
-                std::sort(f.begin(), f.end(), [&](const auto& a, const auto& b) { return safeCallFunction(cmp, { Value(a), Value(b) }).truthy(); });
+                std::stable_sort(f.begin(), f.end(), [&](const auto& a, const auto& b) { return safeCallFunction(cmp, { Value(a), Value(b) }).truthy(); });
                 return Value(StringMatrix(1, static_cast<int>(f.size()), f));
             }
             throw std::runtime_error("Type Error: sort() expects a vector or list.");
@@ -3267,8 +3270,8 @@ void BuiltinRegistry::registerHigherOrder() {
             } else if (arg.isObjType(ObjType::LIST)) {
                 ObjList* L = GcHeap::get().allocate<ObjList>();
                 L->vec = static_cast<ObjList*>(arg.asObj())->vec;
-                std::sort(L->vec.begin(), L->vec.end(), [](const Value& a, const Value& b) {
-                    std::ostringstream oa, ob; oa << a; ob << b; return oa.str() < ob.str();
+                std::stable_sort(L->vec.begin(), L->vec.end(), [](const Value& a, const Value& b) {
+                    return helpers::checkLess(a, b);
                 });
                 return Value(L);
             }
@@ -3280,8 +3283,9 @@ void BuiltinRegistry::registerHigherOrder() {
         if (args.size() == 1 && args[0].isFunctionClosure()) {
             Value capturedFn = args[0];
             auto bound = GcHeap::get().allocate<ObjClosure>(std::vector<std::string>{"v"}, std::vector<bool>{false}, "sort_curried", nullptr);
-            bound->nativeFn = VM::makeNativeFn([capturedFn, sortCore](const std::vector<Value>& innerArgs) -> Value {
-                return sortCore(innerArgs[0], capturedFn.asFunction());
+            bound->boundSelf = capturedFn; // ★ 让 GC 追踪
+            bound->nativeFn = VM::makeNativeFn([sortCore](const std::vector<Value>& innerArgs) -> Value {
+                return sortCore(innerArgs[0], helpers::nativeSelfStack.back().asFunction());
             });
             return Value(bound);
         }

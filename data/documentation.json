@@ -633,7 +633,8 @@
       "    eqE(A, B)   neqE(A, B)  ltE(A, B)   leE(A, B)   gtE(A, B)   geE(A, B)",
       "    maxE(A, B)  minE(A, B)  andE(A, B)  orE(A, B)   xorE(A, B)",
       "    atan2E(A, B) hypotE(A, B)  whereE(mask, A, B)",
-      "      (Element-wise operations. Supports scalar-scalar, scalar-matrix broadcasting, and matrix-matrix)",
+      "      (Element-wise operations. Supports scalar-scalar, scalar-matrix broadcasting, and matrix-matrix.",
+      "       Comparisons also support StringMatrix and strings.)",
       "",
       "  Dimensions & Element Access",
       "  ──────────────────────",
@@ -1882,10 +1883,10 @@
       "",
       "  Sorting (Works on ALL container types)",
       "  ──────────────────────",
-      "    v.sort()            Natural sort (numeric or lexicographic)",
+      "    v.sort()            Stable natural sort (numeric or lexicographic)",
       "                          [3,1,4].sort()                 → [1,3,4]",
       "                          [\"banana\",\"apple\"].sort()      → [\"apple\",\"banana\"]",
-      "    v.sort(cmp)         Custom comparator function",
+      "    v.sort(cmp)         Stable sort with custom comparator function",
       "                          [3,1,4].sort((a,b) => a > b)   → [4,3,1]  (descending)",
       "                          [\"bb\",\"a\"].sort((a,b) => a.len() < b.len()) → [\"a\",\"bb\"]",
       "",
@@ -1998,8 +1999,8 @@
       "",
       "  Sorting",
       "  ──────────────────────",
-      "    L.sort()                Sorts by string representation (lexicographic)",
-      "    L.sort(cmp)             Sort with custom boolean comparator",
+      "    L.sort()                Stable natural sort (numeric or lexicographic)",
+      "    L.sort(cmp)             Stable sort with custom boolean comparator",
       "                              L.sort((a, b) => a < b)",
       "",
       "  Functional Programming (Full support — identical to arrays)",
@@ -4260,7 +4261,7 @@
     },
     "sort": {
       "signature": "v.sort([cmp]) / sort(cmp)",
-      "desc": "Sorts a list or array. Optionally accepts a custom comparator function. Supports currying.",
+      "desc": "Stably sorts a list or array using natural ordering. Optionally accepts a custom comparator function. Supports currying.",
       "examples": [
         "[3, 1, 2].sort()"
       ]
@@ -5644,32 +5645,32 @@
     },
     "ltE": {
       "signature": "ltE(A, B)",
-      "desc": "Element-wise less-than comparison. Supports scalar-scalar, scalar-matrix broadcasting, and matrix-matrix.",
+      "desc": "Element-wise less-than comparison. Supports scalar-scalar, scalar-matrix broadcasting, and matrix-matrix. Also supports strings.",
       "examples": ["ltE([1, 2], 2)"]
     },
     "leE": {
       "signature": "leE(A, B)",
-      "desc": "Element-wise less-than-or-equal comparison. Supports scalar-scalar, scalar-matrix broadcasting, and matrix-matrix.",
+      "desc": "Element-wise less-than-or-equal comparison. Supports scalar-scalar, scalar-matrix broadcasting, and matrix-matrix. Also supports strings.",
       "examples": ["leE([1, 2], 2)"]
     },
     "gtE": {
       "signature": "gtE(A, B)",
-      "desc": "Element-wise greater-than comparison. Supports scalar-scalar, scalar-matrix broadcasting, and matrix-matrix.",
+      "desc": "Element-wise greater-than comparison. Supports scalar-scalar, scalar-matrix broadcasting, and matrix-matrix. Also supports strings.",
       "examples": ["gtE([1, 2], 1)"]
     },
     "geE": {
       "signature": "geE(A, B)",
-      "desc": "Element-wise greater-than-or-equal comparison. Supports scalar-scalar, scalar-matrix broadcasting, and matrix-matrix.",
+      "desc": "Element-wise greater-than-or-equal comparison. Supports scalar-scalar, scalar-matrix broadcasting, and matrix-matrix. Also supports strings.",
       "examples": ["geE([1, 2], 1)"]
     },
     "maxE": {
       "signature": "maxE(A, B)",
-      "desc": "Element-wise maximum. Supports scalar-scalar, scalar-matrix broadcasting, and matrix-matrix.",
+      "desc": "Element-wise maximum. Supports scalar-scalar, scalar-matrix broadcasting, and matrix-matrix. Also supports strings.",
       "examples": ["maxE([1, 5], [3, 2])"]
     },
     "minE": {
       "signature": "minE(A, B)",
-      "desc": "Element-wise minimum. Supports scalar-scalar, scalar-matrix broadcasting, and matrix-matrix.",
+      "desc": "Element-wise minimum. Supports scalar-scalar, scalar-matrix broadcasting, and matrix-matrix. Also supports strings.",
       "examples": ["minE([1, 5], [3, 2])"]
     },
     "andE": {

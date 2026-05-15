@@ -21,7 +21,7 @@ namespace jc {
             exceptionHandlers.pop_back();
 
             // 剥除所有比 catch 更深的函数堆栈
-            while (static_cast<int>(frames.size()) > handler.frameIndex + 1) frames.pop_back();
+            frameCount = handler.frameIndex + 1;
 
             // 回复当时的变量栈大小
             closeUpvalues(handler.stackSize);
@@ -49,7 +49,7 @@ namespace jc {
         // ★ 核心修复 1：不要使用 RESET 把外层的红洗没，使用专属于后续文本的颜色控制！
         oss << col(Ansi::GRAY) << "Traceback (most recent call last):\n";
 
-        for (int i = static_cast<int>(frames.size()) - 1; i >= 0; --i) {
+        for (int i = frameCount - 1; i >= 0; --i) {
             const CallFrame& f = frames[i];
 
             int ip = f.ip - 1;
@@ -249,6 +249,7 @@ namespace jc {
         stack = new Value[MAX_STACK + 1024]; // ★ 彻底抛弃 vector，使用原生数组
         stackTop = stack;
         stackLimit = stack + MAX_STACK;
+        frames = new CallFrame[MAX_FRAMES];
 
         // ★ 核心重定向器：C++ 层索要 "self" 时，直接打劫当前虚拟机的寄存器！
         helpers::getGlobalCallback = [this](const std::string& name) -> Value {
@@ -258,12 +259,12 @@ namespace jc {
 
             // 2. 然后满足 VM 字节码的 CallFrame 寄存器
             if (name == "self") {
-                if (frames.empty() || frames.back().selfContext.isNone()) return Value::none();
-                return frames.back().selfContext;
+                if (frameCount == 0 || frames[frameCount - 1].selfContext.isNone()) return Value::none();
+                return frames[frameCount - 1].selfContext;
             }
             if (name == "__class__") {
-                if (frames.empty() || frames.back().classContext.isNone()) return Value::none();
-                return frames.back().classContext;
+                if (frameCount == 0 || frames[frameCount - 1].classContext.isNone()) return Value::none();
+                return frames[frameCount - 1].classContext;
             }
             // 3. 最后才是普通的全局变量
             auto it = globals.find(name);
@@ -293,6 +294,7 @@ namespace jc {
 
     VM::~VM() {
         delete[] stack;
+        delete[] frames;
     }
 
     std::any VM::makeNativeFn(NativeCallable fn) {
@@ -315,13 +317,13 @@ namespace jc {
         mainFn->chunk = c;
         closeUpvalues(0);
         setStackSize(0);
-        frames.clear();
+        frameCount = 0;
         exceptionHandlers.clear();
         CallFrame mainFrame;
         mainFrame.function = mainFn.get();
         mainFrame.ip = 0;
         mainFrame.stackBase = 0;
-        frames.push_back(mainFrame);
+        frames[frameCount++] = mainFrame;
         return run(0);
     }
 
@@ -384,9 +386,10 @@ namespace jc {
         // ★ 清爽下发！寄存器已就位：
         newFrame.selfContext = boundSelf;
         newFrame.classContext = boundClass;
-        frames.push_back(newFrame);
+        if (frameCount >= MAX_FRAMES) throw std::runtime_error("VM Error: CallFrame stack overflow.");
+        frames[frameCount++] = newFrame;
 
-        int boundary = static_cast<int>(frames.size()) - 1;
+        int boundary = frameCount - 1;
 
         Value result;
         std::chrono::time_point<std::chrono::high_resolution_clock> start_time;
@@ -399,7 +402,7 @@ namespace jc {
         catch (const StackTracedException&) {
             currentTargetFrameDepth = savedTargetFrameDepth;
             pendingRefWritebacks = savedRefWritebacks;
-            frames.resize(boundary);
+            frameCount = boundary;
             closeUpvalues(newFrame.stackBase);
             setStackSize(newFrame.stackBase);
             throw;
@@ -407,7 +410,7 @@ namespace jc {
         catch (...) {
             currentTargetFrameDepth = savedTargetFrameDepth;
             pendingRefWritebacks = savedRefWritebacks;
-            frames.resize(boundary);
+            frameCount = boundary;
             closeUpvalues(newFrame.stackBase);
             setStackSize(newFrame.stackBase);
             throw;
@@ -434,7 +437,7 @@ namespace jc {
     // 返回当前执行帧指令对应的源码行号（仅用于断点调试显示）
     // =======================================================
     int VM::currentLine() {
-        if (frames.empty()) return 0;
+        if (frameCount == 0) return 0;
         int errorIp = frame().ip - 1;
         if (errorIp < 0) errorIp = 0;
         const auto& lines = currentChunk().lines;
@@ -448,9 +451,10 @@ namespace jc {
         currentTargetFrameDepth = targetFrameDepth;
 
         while (true) {
-            CallFrame* currentFrame = &frames.back();
+            CallFrame* currentFrame = &frames[frameCount - 1];
             const Chunk* chunk = &currentFrame->function->chunk;
-            const std::vector<uint8_t>* code = &chunk->code;
+            const uint8_t* codeData = chunk->code.data();
+            int codeSize = static_cast<int>(chunk->code.size());
             
             // ═══ GC 自动触发探针与中断探针 ═══
             if (++gcInstructionCounter_ >= 2048) {
@@ -477,13 +481,13 @@ namespace jc {
                 }
             }
 
-            if (currentFrame->ip >= static_cast<int>(code->size())) {
+            if (currentFrame->ip >= codeSize) {
                 return getStackSize() == 0 ? Value::none() : pop();
             }
             
             OpCode op;
             try {
-                op = static_cast<OpCode>((*code)[currentFrame->ip++]);
+                op = static_cast<OpCode>(codeData[currentFrame->ip++]);
             }
             catch (...) {
                 return getStackSize() == 0 ? Value::none() : pop();
@@ -495,10 +499,10 @@ namespace jc {
 				opCounts[op]++;
 			}
 
-            auto readByte = [&]() -> uint8_t { return (*code)[currentFrame->ip++]; };
+            auto readByte = [&]() -> uint8_t { return codeData[currentFrame->ip++]; };
             auto readShort = [&]() -> uint16_t {
-                uint8_t hi = (*code)[currentFrame->ip++];
-                uint8_t lo = (*code)[currentFrame->ip++];
+                uint8_t hi = codeData[currentFrame->ip++];
+                uint8_t lo = codeData[currentFrame->ip++];
                 return static_cast<uint16_t>((hi << 8) | lo);
             };
 
@@ -1149,7 +1153,7 @@ namespace jc {
                     (void)catchNameIdx;
 
                     ExceptionHandler handler;
-                    handler.frameIndex = static_cast<int>(frames.size()) - 1;
+                    handler.frameIndex = frameCount - 1;
                     handler.ip = currentFrame->ip + catchRelOffset;
                     handler.stackSize = static_cast<int>(getStackSize());
                     exceptionHandlers.push_back(handler);
@@ -2259,7 +2263,8 @@ namespace jc {
             markValue(*p);
 
         // 根集合 3: 所有调用帧的闭包上值，以及存活帧的上下文引擎！
-        for (const auto& f : frames) {
+        for (int i = 0; i < frameCount; ++i) {
+            const auto& f = frames[i];
             if (f.upvalues) {
                 for (const auto& uv : *f.upvalues) {
                     if (uv && uv->location) markValue(*(uv->location));
@@ -2296,7 +2301,8 @@ namespace jc {
         for (const auto& [name, val] : globals)  markValue(val);
         for (const auto& [name, val] : loadedModules) markValue(val);
         for (Value* p = stack; p < stackTop; ++p) markValue(*p);
-        for (const auto& f : frames) {
+        for (int i = 0; i < frameCount; ++i) {
+            const auto& f = frames[i];
             if (f.upvalues) {
                 for (const auto& uv : *f.upvalues) {
                     if (uv && uv->location) markValue(*(uv->location));
@@ -2344,7 +2350,8 @@ namespace jc {
                 for (int j = 0; j < reserveCount; ++j) push(Value::none());
                 CallFrame newFrame; newFrame.function = fn.get(); newFrame.ip = 0;
                 newFrame.stackBase = static_cast<int>(getStackSize()) - fn->localCount;
-                frames.push_back(newFrame); return;
+                if (frameCount >= MAX_FRAMES) throw std::runtime_error("VM Error: CallFrame stack overflow.");
+                frames[frameCount++] = newFrame; return;
             }
             if (tag.size() >= 10 && tag.substr(0, 10) == "__builtin:") {
                 std::string fnName = tag.substr(10); std::vector<Value> args(argc);
@@ -2434,7 +2441,8 @@ namespace jc {
                         newFrame.upvalues = std::any_cast<std::shared_ptr<std::vector<std::shared_ptr<UpVal>>>>(
                             initMethod->capturedEnv);
                     }
-                    frames.push_back(newFrame);
+                    if (frameCount >= MAX_FRAMES) throw std::runtime_error("VM Error: CallFrame stack overflow.");
+                    frames[frameCount++] = newFrame;
                     return;
                 }
                 else if (initMethod->isNative()) {
@@ -2534,7 +2542,8 @@ namespace jc {
                 newFrame.selfContext = closure->boundSelf;
                 newFrame.classContext = closure->boundClass;
 
-                frames.push_back(newFrame);
+                if (frameCount >= MAX_FRAMES) throw std::runtime_error("VM Error: CallFrame stack overflow.");
+                frames[frameCount++] = newFrame;
                 return;
             }
             else if (closure->isNative()) {
@@ -2606,7 +2615,8 @@ namespace jc {
 
                 CallFrame newFrame; newFrame.function = fn.get(); newFrame.ip = 0;
                 newFrame.stackBase = static_cast<int>(getStackSize()) - fn->localCount;
-                frames.push_back(newFrame); return;
+                if (frameCount >= MAX_FRAMES) throw std::runtime_error("VM Error: CallFrame stack overflow.");
+                frames[frameCount++] = newFrame; return;
             }
 
             if (tag.size() >= 10 && tag.substr(0, 10) == "__builtin:") {
@@ -2682,7 +2692,8 @@ namespace jc {
                     newFrame.selfContext = callee;
                     newFrame.classContext = Value(owningClass);
 
-                    frames.push_back(newFrame);
+                    if (frameCount >= MAX_FRAMES) throw std::runtime_error("VM Error: CallFrame stack overflow.");
+                    frames[frameCount++] = newFrame;
                     return;
                 } else if (method->isNative()) {
                     std::vector<Value> argsVec(argc);
@@ -2772,7 +2783,8 @@ namespace jc {
                         }
                         newFrame.selfContext = Value(inst);
                         newFrame.classContext = Value(inst->classDef);
-                        frames.push_back(newFrame);
+                        if (frameCount >= MAX_FRAMES) throw std::runtime_error("VM Error: CallFrame stack overflow.");
+                        frames[frameCount++] = newFrame;
                         return; // ★ 绝对返回防线
                     }
                     else if (getitemMethod->isNative()) {
@@ -4028,14 +4040,14 @@ namespace jc {
         }
 
         while (!exceptionHandlers.empty() &&
-            exceptionHandlers.back().frameIndex == static_cast<int>(frames.size()) - 1) {
+            exceptionHandlers.back().frameIndex == frameCount - 1) {
             exceptionHandlers.pop_back();
         }
 
-        frames.pop_back();
+        frameCount--;
 
         // ★ 退出判定
-        if (static_cast<int>(frames.size()) <= currentTargetFrameDepth) {
+        if (frameCount <= currentTargetFrameDepth) {
             if (currentTargetFrameDepth == 0) {
                 closeUpvalues(0);
                 setStackSize(0);
@@ -4221,7 +4233,8 @@ namespace jc {
                 newFrame.upvalues = std::any_cast<std::shared_ptr<std::vector<std::shared_ptr<UpVal>>>>(
                     method->capturedEnv);
             }
-            frames.push_back(newFrame);
+            if (frameCount >= MAX_FRAMES) throw std::runtime_error("VM Error: CallFrame stack overflow.");
+            frames[frameCount++] = newFrame;
             return;
         }
         else if (method->isNative()) {
@@ -4267,7 +4280,8 @@ namespace jc {
                     newFrame.stackBase = static_cast<int>(getStackSize()) - fnDef->localCount;
                     newFrame.selfContext = obj;
                     newFrame.classContext = owningClass ? Value(owningClass) : Value::none();
-                    frames.push_back(newFrame);
+                    if (frameCount >= MAX_FRAMES) throw std::runtime_error("VM Error: CallFrame stack overflow.");
+                    frames[frameCount++] = newFrame;
                     return;
                 }
                 if (tag.size() >= 10 && tag.substr(0, 10) == "__builtin:") {
@@ -4394,7 +4408,8 @@ namespace jc {
                 newFrame.upvalues = std::any_cast<std::shared_ptr<std::vector<std::shared_ptr<UpVal>>>>(
                     method->capturedEnv);
             }
-            frames.push_back(newFrame);
+            if (frameCount >= MAX_FRAMES) throw std::runtime_error("VM Error: CallFrame stack overflow.");
+            frames[frameCount++] = newFrame;
             return;
         }
         else if (method->isNative()) {

@@ -26,10 +26,11 @@ namespace jc {
         std::vector<RefWriteback> pendingRefWritebacks;
 
         // ★ 多帧栈：支持嵌套函数调用
-        std::vector<CallFrame> frames;
+        CallFrame* frames = nullptr;
+        int frameCount = 0;
         static constexpr int MAX_FRAMES = 1024;
 
-        CallFrame& frame() { return frames.back(); }
+        CallFrame& frame() { return frames[frameCount - 1]; }
         const Chunk& currentChunk() { return frame().function->chunk; }
 
         Value* stack = nullptr;
