@@ -1189,15 +1189,10 @@ namespace jc {
             case ObjType::STRING_MATRIX:
             case ObjType::CLASS:
             case ObjType::SYMBOLIC:
+            case ObjType::CLOSURE:
+            case ObjType::NAMESPACE:
+            case ObjType::SUPER_PROXY:
                 return true;
-            case ObjType::CLOSURE: {
-                auto cl = static_cast<ObjClosure*>(obj);
-                try {
-                    if (!cl->boundSelf.isHashable()) return false;
-                    if (!cl->boundClass.isHashable()) return false;
-                } catch (...) { return false; }
-                return true;
-            }
             case ObjType::LIST: {
                 ObjList* list = static_cast<ObjList*>(obj);
                 if (!list->is_frozen) return false;
@@ -1245,18 +1240,8 @@ namespace jc {
                     }
                     return true;
                 }
-                return false;
+                return true; // 普通实例按指针哈希，永远可哈希
             }
-            case ObjType::NAMESPACE: {
-                auto ns = static_cast<ObjNamespace*>(obj);
-                if (!ns->is_frozen) return false;
-                for (const auto& [k, field] : ns->fields) {
-                    try { if (!field.upval->location->isHashable()) return false; } catch (...) { return false; }
-                }
-                return true;
-            }
-            case ObjType::SUPER_PROXY:
-                return false;
         }
         return false;
     }
@@ -1395,7 +1380,7 @@ namespace jc {
                     auto [found, res] = invokeDunder(inst1, "__eq__", {rhs});
                     if (found) return res.truthy();
                     auto inst2 = static_cast<ObjInstance*>(robj);
-                    if (inst1->classDef == inst2->classDef) {
+                    if (inst1->is_frozen && inst2->is_frozen && inst1->classDef == inst2->classDef) {
                         if (!inst1->fields && !inst2->fields) return true;
                         if (!inst1->fields || !inst2->fields) return false;
                         if (inst1->fields->elements.size() != inst2->fields->elements.size()) return false;
@@ -1414,47 +1399,10 @@ namespace jc {
                     }
                     return false;
                 }
-                case ObjType::CLOSURE: {
-                    auto c1 = static_cast<ObjClosure*>(lobj);
-                    auto c2 = static_cast<ObjClosure*>(robj);
-                    if (c1->compiledFnIndex != c2->compiledFnIndex) return false;
-                    if (c1->compiledFnIndex < 0 && c1->rawBody != c2->rawBody) return false;
-                    if (!equals(c1->boundSelf, c2->boundSelf)) return false;
-                    if (!equals(c1->boundClass, c2->boundClass)) return false;
-                    bool hasEnv1 = c1->hasCaptures();
-                    bool hasEnv2 = c2->hasCaptures();
-                    if (hasEnv1 != hasEnv2) return false;
-                    if (hasEnv1) {
-                        try {
-                            auto env1 = std::any_cast<std::shared_ptr<std::vector<std::shared_ptr<UpVal>>>>(c1->capturedEnv);
-                            auto env2 = std::any_cast<std::shared_ptr<std::vector<std::shared_ptr<UpVal>>>>(c2->capturedEnv);
-                            if (env1 != env2) return false;
-                        } catch (...) { return false; }
-                    }
-                    return true;
-                }
+                case ObjType::CLOSURE:
                 case ObjType::CLASS:
+                case ObjType::NAMESPACE:
                     return false; // Pointer equality already checked
-                case ObjType::NAMESPACE: {
-                    auto ns1 = static_cast<ObjNamespace*>(lobj);
-                    auto ns2 = static_cast<ObjNamespace*>(robj);
-                    if (ns1->is_frozen && ns2->is_frozen && ns1->name == ns2->name) {
-                        if (ns1->fields.size() != ns2->fields.size()) return false;
-                        auto pair = lobj < robj ? std::make_pair((const void*)lobj, (const void*)robj) : std::make_pair((const void*)robj, (const void*)lobj);
-                        if (std::find(comparingPairs.begin(), comparingPairs.end(), pair) != comparingPairs.end()) return true;
-                        comparingPairs.push_back(pair);
-                        bool eq = true;
-                        for (const auto& [k, field1] : ns1->fields) {
-                            auto it = ns2->fields.find(k);
-                            if (it == ns2->fields.end()) { eq = false; break; }
-                            try { if (!equals(*(field1.upval->location), *(it->second.upval->location))) { eq = false; break; } }
-                            catch (...) { eq = false; break; }
-                        }
-                        comparingPairs.pop_back();
-                        return eq;
-                    }
-                    return false;
-                }
                 case ObjType::SUPER_PROXY: {
                     auto sp1 = static_cast<ObjSuper*>(lobj);
                     auto sp2 = static_cast<ObjSuper*>(robj);
@@ -2013,43 +1961,6 @@ inline size_t ValueHasher::operator()(const Value& v) const {
                     }
                     seed ^= fields_hash + 0x9e3779b9 + (seed << 6) + (seed >> 2);
                 }
-                return seed;
-            }
-            return std::hash<const void*>{}(obj);
-        }
-        case ObjType::CLOSURE: {
-            auto cl = static_cast<ObjClosure*>(obj);
-            size_t seed = 0;
-            if (cl->compiledFnIndex >= 0) {
-                seed = std::hash<int>{}(cl->compiledFnIndex);
-            } else {
-                seed = std::hash<std::string>{}(cl->rawBody);
-            }
-            size_t bs_hash = ValueHasher{}(cl->boundSelf);
-            seed ^= bs_hash + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-            size_t bc_hash = ValueHasher{}(cl->boundClass);
-            seed ^= bc_hash + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-            if (cl->hasCaptures()) {
-                try {
-                    auto env = std::any_cast<std::shared_ptr<std::vector<std::shared_ptr<UpVal>>>>(cl->capturedEnv);
-                    size_t env_hash = std::hash<void*>{}(env.get());
-                    seed ^= env_hash + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-                } catch (...) {}
-            }
-            return seed;
-        }
-        case ObjType::NAMESPACE: {
-            auto ns = static_cast<ObjNamespace*>(obj);
-            if (ns->is_frozen) {
-                size_t seed = std::hash<std::string>{}(ns->name);
-                size_t fields_hash = 0;
-                for (const auto& [k, field] : ns->fields) {
-                    size_t k_hash = std::hash<std::string>{}(k);
-                    size_t v_hash = ValueHasher{}(*(field.upval->location));
-                    size_t kv_hash = k_hash ^ (v_hash + 0x9e3779b9 + (k_hash << 6) + (k_hash >> 2));
-                    fields_hash += kv_hash; // 无序字段使用满足交换律的累加
-                }
-                seed ^= fields_hash + 0x9e3779b9 + (seed << 6) + (seed >> 2);
                 return seed;
             }
             return std::hash<const void*>{}(obj);
