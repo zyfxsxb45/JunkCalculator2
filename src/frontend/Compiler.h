@@ -8,6 +8,7 @@
 #include <vector>
 #include <set>
 #include <unordered_set>
+#include <optional>
 
 namespace jc {
 
@@ -73,6 +74,7 @@ namespace jc {
         int resolveUpvalueAt(int level, const std::string& name, bool isRef, bool isState);
         int addUpvalue(int level, const std::string& name, bool isLocal, int index, bool isRef, bool isGlobal = false);
         void emitStoreTarget(Expr* target);
+        std::optional<Value> tryFoldConstant(Expr* expr);
 
     public:
         Chunk compile(Expr* ast, const std::string& sourceFile = "");

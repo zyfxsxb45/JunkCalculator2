@@ -443,8 +443,123 @@ namespace jc {
         return {};
     }
 
+    std::optional<Value> Compiler::tryFoldConstant(Expr* expr) {
+        if (auto* lit = dynamic_cast<Literal*>(expr)) {
+            if (lit->isKeyword) {
+                if (lit->value == "true") return Value(true);
+                if (lit->value == "false") return Value(false);
+                if (lit->value == "none") return Value::none();
+            }
+            else if (lit->isString) {
+                return Value(lit->value);
+            }
+            else if (lit->isImaginary) {
+                return Value(Complex(0.0, std::stod(lit->value)));
+            }
+            else {
+                const std::string& s = lit->value;
+                if (s.find('.') == std::string::npos &&
+                    s.find('e') == std::string::npos &&
+                    s.find('E') == std::string::npos) {
+                    try { return Value(BigInt(s)); }
+                    catch (...) { return Value(std::stod(s)); }
+                }
+                else {
+                    return Value(std::stod(s));
+                }
+            }
+        }
+        else if (auto* un = dynamic_cast<Unary*>(expr)) {
+            auto rightVal = tryFoldConstant(un->right.get());
+            if (!rightVal) return std::nullopt;
+            try {
+                switch (un->op.type) {
+                case TokenType::MINUS: return -(*rightVal);
+                case TokenType::BANG:  return Value(!rightVal->truthy());
+                case TokenType::TILDE: return ~(*rightVal);
+                case TokenType::PLUS:  return rightVal;
+                default: return std::nullopt;
+                }
+            }
+            catch (...) { return std::nullopt; }
+        }
+        else if (auto* bin = dynamic_cast<Binary*>(expr)) {
+            if (bin->op.type == TokenType::AND_AND) {
+                auto leftVal = tryFoldConstant(bin->left.get());
+                if (leftVal && !leftVal->truthy()) return Value(false);
+                if (leftVal && leftVal->truthy()) {
+                    auto rightVal = tryFoldConstant(bin->right.get());
+                    if (rightVal) return Value(rightVal->truthy());
+                }
+                return std::nullopt;
+            }
+            if (bin->op.type == TokenType::OR_OR) {
+                auto leftVal = tryFoldConstant(bin->left.get());
+                if (leftVal && leftVal->truthy()) return Value(true);
+                if (leftVal && !leftVal->truthy()) {
+                    auto rightVal = tryFoldConstant(bin->right.get());
+                    if (rightVal) return Value(rightVal->truthy());
+                }
+                return std::nullopt;
+            }
+
+            auto leftVal = tryFoldConstant(bin->left.get());
+            auto rightVal = tryFoldConstant(bin->right.get());
+            if (!leftVal || !rightVal) return std::nullopt;
+
+            try {
+                switch (bin->op.type) {
+                case TokenType::PLUS:          return (*leftVal) + (*rightVal);
+                case TokenType::MINUS:         return (*leftVal) - (*rightVal);
+                case TokenType::STAR:          return (*leftVal) * (*rightVal);
+                case TokenType::SLASH:         return (*leftVal) / (*rightVal);
+                case TokenType::PERCENT:       return (*leftVal) % (*rightVal);
+                case TokenType::CARET:         return (*leftVal) ^ (*rightVal);
+                case TokenType::EQUAL:         return Value(Value::equals(*leftVal, *rightVal));
+                case TokenType::BANG_EQUAL:    return Value(!Value::equals(*leftVal, *rightVal));
+                case TokenType::BIT_AND:       return (*leftVal) & (*rightVal);
+                case TokenType::BIT_OR:        return (*leftVal) | (*rightVal);
+                case TokenType::LESS: {
+                    if ((leftVal->isBigInt() || leftVal->isInt32()) && (rightVal->isBigInt() || rightVal->isInt32())) return Value(leftVal->asBigInt() < rightVal->asBigInt());
+                    if (leftVal->isObjType(ObjType::FRACTION) && rightVal->isObjType(ObjType::FRACTION)) return Value(static_cast<ObjFraction*>(leftVal->asObj())->frac < static_cast<ObjFraction*>(rightVal->asObj())->frac);
+                    if (leftVal->isString() && rightVal->isString()) return Value(leftVal->asString() < rightVal->asString());
+                    return Value(leftVal->asDouble() < rightVal->asDouble());
+                }
+                case TokenType::LESS_EQUAL: {
+                    if ((leftVal->isBigInt() || leftVal->isInt32()) && (rightVal->isBigInt() || rightVal->isInt32())) return Value(leftVal->asBigInt() <= rightVal->asBigInt());
+                    if (leftVal->isObjType(ObjType::FRACTION) && rightVal->isObjType(ObjType::FRACTION)) return Value(static_cast<ObjFraction*>(leftVal->asObj())->frac <= static_cast<ObjFraction*>(rightVal->asObj())->frac);
+                    if (leftVal->isString() && rightVal->isString()) return Value(leftVal->asString() <= rightVal->asString());
+                    return Value(leftVal->asDouble() <= rightVal->asDouble());
+                }
+                case TokenType::GREATER: {
+                    if ((leftVal->isBigInt() || leftVal->isInt32()) && (rightVal->isBigInt() || rightVal->isInt32())) return Value(leftVal->asBigInt() > rightVal->asBigInt());
+                    if (leftVal->isObjType(ObjType::FRACTION) && rightVal->isObjType(ObjType::FRACTION)) return Value(static_cast<ObjFraction*>(leftVal->asObj())->frac > static_cast<ObjFraction*>(rightVal->asObj())->frac);
+                    if (leftVal->isString() && rightVal->isString()) return Value(leftVal->asString() > rightVal->asString());
+                    return Value(leftVal->asDouble() > rightVal->asDouble());
+                }
+                case TokenType::GREATER_EQUAL: {
+                    if ((leftVal->isBigInt() || leftVal->isInt32()) && (rightVal->isBigInt() || rightVal->isInt32())) return Value(leftVal->asBigInt() >= rightVal->asBigInt());
+                    if (leftVal->isObjType(ObjType::FRACTION) && rightVal->isObjType(ObjType::FRACTION)) return Value(static_cast<ObjFraction*>(leftVal->asObj())->frac >= static_cast<ObjFraction*>(rightVal->asObj())->frac);
+                    if (leftVal->isString() && rightVal->isString()) return Value(leftVal->asString() >= rightVal->asString());
+                    return Value(leftVal->asDouble() >= rightVal->asDouble());
+                }
+                default: return std::nullopt;
+                }
+            }
+            catch (...) { return std::nullopt; }
+        }
+        return std::nullopt;
+    }
+
     std::any Compiler::visitUnary(Unary* expr) {
         lastLine = expr->op.line;
+        if (auto folded = tryFoldConstant(expr)) {
+            uint16_t idx = makeConstant(*folded);
+            emit(OpCode::OP_CONSTANT, lastLine);
+            emit16(idx, lastLine);
+            return {};
+        }
+
         compileNode(expr->right.get());
         switch (expr->op.type) {
         case TokenType::MINUS: emit(OpCode::OP_NEGATE, expr->op.line); break;
@@ -458,6 +573,13 @@ namespace jc {
 
     std::any Compiler::visitBinary(Binary* expr) {
         lastLine = expr->op.line;
+        if (auto folded = tryFoldConstant(expr)) {
+            uint16_t idx = makeConstant(*folded);
+            emit(OpCode::OP_CONSTANT, lastLine);
+            emit16(idx, lastLine);
+            return {};
+        }
+
         if (expr->op.type == TokenType::AND_AND) {
             compileNode(expr->left.get());
             int jump = chunk()->emitJump(OpCode::OP_JUMP_IF_FALSE, expr->op.line);
@@ -623,6 +745,21 @@ namespace jc {
     }
 
     std::any Compiler::visitIfExpr(IfExpr* expr) {
+        if (auto condVal = tryFoldConstant(expr->condition.get())) {
+            beginScope();
+            if (condVal->truthy()) {
+                compileNode(expr->thenBranch.get());
+            }
+            else if (expr->elseBranch) {
+                compileNode(expr->elseBranch.get());
+            }
+            else {
+                emit(OpCode::OP_NONE, lastLine);
+            }
+            endScope();
+            return {};
+        }
+
         beginScope(); // ★ 自动创建块级作用域
         compileNode(expr->condition.get());
         int thenJump = chunk()->emitJump(OpCode::OP_JUMP_IF_FALSE, lastLine);
@@ -643,13 +780,25 @@ namespace jc {
     }
 
     std::any Compiler::visitWhileExpr(WhileExpr* expr) {
+        auto condVal = tryFoldConstant(expr->condition.get());
+        if (condVal && !condVal->truthy()) {
+            emit(OpCode::OP_NONE, lastLine);
+            return {};
+        }
+
         beginScope(); // ★ 自动创建块级作用域
         int loopStart = static_cast<int>(chunk()->code.size());
         beginLoop(loopStart);
 
-        compileNode(expr->condition.get());
-        int exitJump = chunk()->emitJump(OpCode::OP_JUMP_IF_FALSE, lastLine);
-        emit(OpCode::OP_POP, lastLine);
+        int exitJump = -1;
+        if (condVal && condVal->truthy()) {
+            // Infinite loop, no condition check needed
+        } else {
+            compileNode(expr->condition.get());
+            exitJump = chunk()->emitJump(OpCode::OP_JUMP_IF_FALSE, lastLine);
+            emit(OpCode::OP_POP, lastLine);
+        }
+
         compileNode(expr->body.get());
 
         // ★ continue 跳转目标：就在 POP body result 之前
@@ -660,8 +809,10 @@ namespace jc {
         emit(OpCode::OP_POP, lastLine);   // POP body result（或 continue 填充的 NONE）
         chunk()->emitLoop(loopStart, lastLine);
 
-        chunk()->patchJump(exitJump);
-        emit(OpCode::OP_POP, lastLine);
+        if (exitJump != -1) {
+            chunk()->patchJump(exitJump);
+            emit(OpCode::OP_POP, lastLine);
+        }
 
         emitBreakJumps();
         endLoop();
