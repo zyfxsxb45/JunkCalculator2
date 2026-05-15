@@ -1578,6 +1578,7 @@ void BuiltinRegistry::registerSystemUtils() {
                     newList->vec.push_back(deepCopyExact(e));
                 }
                 newList->is_frozen = l->is_frozen;
+                newList->is_hashable_cached = l->is_hashable_cached;
                 return newVal;
             }
             if (v.isObjType(ObjType::DICT)) {
@@ -1593,6 +1594,7 @@ void BuiltinRegistry::registerSystemUtils() {
                     newDict->elements.push_back({newK, newV});
                 }
                 newDict->is_frozen = d->is_frozen;
+                newDict->is_hashable_cached = d->is_hashable_cached;
                 return newVal;
             }
             if (v.isObjType(ObjType::SET)) {
@@ -1607,6 +1609,7 @@ void BuiltinRegistry::registerSystemUtils() {
                     newSet->elements.push_back(newV);
                 }
                 newSet->is_frozen = s->is_frozen;
+                newSet->is_hashable_cached = s->is_hashable_cached;
                 return newVal;
             }
             if (v.isInstance()) {
@@ -1621,6 +1624,7 @@ void BuiltinRegistry::registerSystemUtils() {
                     newInst->fields = static_cast<ObjDict*>(deepCopyExact(Value(inst->fields)).asObj());
                 }
                 newInst->is_frozen = inst->is_frozen;
+                newInst->is_hashable_cached = inst->is_hashable_cached;
                 return newVal;
             }
             if (v.isObjType(ObjType::NAMESPACE)) {
@@ -1657,6 +1661,7 @@ void BuiltinRegistry::registerSystemUtils() {
                     newList->vec.push_back(deepCopyAndFreeze(e));
                 }
                 newList->is_frozen = true;
+                newList->is_hashable_cached = true;
                 return newVal;
             }
             if (v.isObjType(ObjType::DICT)) {
@@ -1672,6 +1677,7 @@ void BuiltinRegistry::registerSystemUtils() {
                     newDict->elements.push_back({newK, newV});
                 }
                 newDict->is_frozen = true;
+                newDict->is_hashable_cached = true;
                 return newVal;
             }
             if (v.isObjType(ObjType::SET)) {
@@ -1686,6 +1692,7 @@ void BuiltinRegistry::registerSystemUtils() {
                     newSet->elements.push_back(newV);
                 }
                 newSet->is_frozen = true;
+                newSet->is_hashable_cached = true;
                 return newVal;
             }
             if (v.isInstance()) {
@@ -1700,6 +1707,7 @@ void BuiltinRegistry::registerSystemUtils() {
                     newInst->fields = static_cast<ObjDict*>(deepCopyAndFreeze(Value(inst->fields)).asObj());
                 }
                 newInst->is_frozen = true;
+                newInst->is_hashable_cached = true;
                 return newVal;
             }
             if (v.isObjType(ObjType::NAMESPACE)) {
@@ -3812,12 +3820,12 @@ void BuiltinRegistry::registerErrorHandling() {
             // ★ 完美拿到纯净的出错理由字符串！无视底下挂着的多行追踪栈
             ObjList* L = GcHeap::get().allocate<ObjList>();
             L->vec.push_back(Value(false)); L->vec.push_back(Value(ex.rawMessage));
-            L->is_frozen = true; return Value(L);
+            L->is_frozen = true; L->is_hashable_cached = true; return Value(L);
         }
         catch (const ErrorSignal& sig) {
             ObjList* L = GcHeap::get().allocate<ObjList>();
             L->vec.push_back(Value(false)); L->vec.push_back(Value(sig.message));
-            L->is_frozen = true; return Value(L);
+            L->is_frozen = true; L->is_hashable_cached = true; return Value(L);
         }
         catch (const jc::EngineInterruptError&) {
             throw; // 强行中断，无视 pcall 拦截
@@ -3825,7 +3833,7 @@ void BuiltinRegistry::registerErrorHandling() {
         catch (const std::exception& ex) {
             ObjList* L = GcHeap::get().allocate<ObjList>();
             L->vec.push_back(Value(false)); L->vec.push_back(Value(std::string(ex.what())));
-            L->is_frozen = true; return Value(L);
+            L->is_frozen = true; L->is_hashable_cached = true; return Value(L);
         }
         });
 
@@ -4605,6 +4613,7 @@ void BuiltinRegistry::registerSetFunctions() {
                 }
             }
             sub->is_frozen = true;
+            sub->is_hashable_cached = true;
             Value subVal(sub);
             result->keys.insert(subVal);
             result->elements.push_back(subVal);
@@ -4907,6 +4916,7 @@ void BuiltinRegistry::registerCAS() {
         L->vec.push_back(Value(q));
         L->vec.push_back(Value(r));
         L->is_frozen = true;
+        L->is_hashable_cached = true;
         return Value(L);
     });
 

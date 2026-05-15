@@ -133,6 +133,7 @@ namespace jc {
         ObjDict* fields = nullptr;
         std::any nativeData;
         bool is_frozen = false;
+        mutable bool is_hashable_cached = false;
         ObjInstance() { type = ObjType::INSTANCE; }
         void checkModify() const { if (is_frozen) throw std::runtime_error("Runtime Error: Cannot modify frozen Instance."); }
         void clear() override { checkModify(); nativeData.reset(); }
@@ -522,6 +523,7 @@ namespace jc {
     struct ObjList : public Obj {
         std::vector<Value> vec;
         bool is_frozen = false;
+        mutable bool is_hashable_cached = false;
         ObjList() { type = ObjType::LIST; }
         void checkModify() const { if (is_frozen) throw std::runtime_error("Runtime Error: Cannot modify frozen List."); }
         std::vector<Value>& mut() { checkModify(); return vec; }
@@ -531,6 +533,7 @@ namespace jc {
         std::vector<std::pair<Value, Value>> elements;
         std::unordered_map<Value, size_t, ValueHasher, ValueEqual> keyMap;
         bool is_frozen = false;
+        mutable bool is_hashable_cached = false;
         ObjDict() { type = ObjType::DICT; }
         void checkModify() const { if (is_frozen) throw std::runtime_error("Runtime Error: Cannot modify frozen Dict."); }
         void clear() override { checkModify(); elements.clear(); keyMap.clear(); }
@@ -572,6 +575,7 @@ namespace jc {
         std::vector<Value> elements;
         std::unordered_set<Value, ValueHasher, ValueEqual> keys;
         bool is_frozen = false;
+        mutable bool is_hashable_cached = false;
         ObjSet() { type = ObjType::SET; }
         void checkModify() const { if (is_frozen) throw std::runtime_error("Runtime Error: Cannot modify frozen Set."); }
         void clear() override { checkModify(); elements.clear(); keys.clear(); }
@@ -666,6 +670,7 @@ namespace jc {
                         pair->vec.push_back(v1);
                         pair->vec.push_back(v2);
                         pair->is_frozen = true;
+                        pair->is_hashable_cached = true;
                         Value pairVal(pair);
                         if (res->keys.find(pairVal) == res->keys.end()) {
                             res->keys.insert(pairVal);
@@ -1196,40 +1201,50 @@ namespace jc {
             case ObjType::LIST: {
                 ObjList* list = static_cast<ObjList*>(obj);
                 if (!list->is_frozen) return false;
+                if (list->is_hashable_cached) return true;
                 RecursionGuard guard(visited, list);
                 if (guard.isCycle) return true;
                 for (const auto& e : list->vec) {
                     try { if (!e.isHashable()) return false; } catch (...) { return false; }
                 }
+                list->is_hashable_cached = true;
                 return true;
             }
             case ObjType::DICT: {
                 ObjDict* dict = static_cast<ObjDict*>(obj);
                 if (!dict->is_frozen) return false;
+                if (dict->is_hashable_cached) return true;
                 RecursionGuard guard(visited, dict);
                 if (guard.isCycle) return true;
                 for (const auto& [k, v] : dict->elements) {
                     try { if (!v.isHashable()) return false; } catch (...) { return false; }
                 }
+                dict->is_hashable_cached = true;
                 return true;
             }
             case ObjType::SET: {
                 ObjSet* set = static_cast<ObjSet*>(obj);
                 if (!set->is_frozen) return false;
+                if (set->is_hashable_cached) return true;
                 RecursionGuard guard(visited, set);
                 if (guard.isCycle) return true;
                 for (const auto& v : set->elements) {
                     try { if (!v.isHashable()) return false; } catch (...) { return false; }
                 }
+                set->is_hashable_cached = true;
                 return true;
             }
             case ObjType::INSTANCE: {
                 ObjInstance* inst = static_cast<ObjInstance*>(obj);
+                if (inst->is_hashable_cached) return true;
                 RecursionGuard guard(visited, inst);
                 if (guard.isCycle) return true;
                 auto c = inst->classDef;
                 while (c) {
-                    if (c->methods.count("__hash__")) return true;
+                    if (c->methods.count("__hash__")) {
+                        inst->is_hashable_cached = true;
+                        return true;
+                    }
                     c = c->parent;
                 }
                 if (inst->is_frozen) {
@@ -1238,9 +1253,10 @@ namespace jc {
                             try { if (!v.isHashable()) return false; } catch (...) { return false; }
                         }
                     }
+                    inst->is_hashable_cached = true;
                     return true;
                 }
-                return true; // 普通实例按指针哈希，永远可哈希
+                return true; // 普通实例按指针哈希，永远可哈希 (不缓存，以防未来被 freeze)
             }
         }
         return false;
