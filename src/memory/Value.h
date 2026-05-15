@@ -1123,6 +1123,7 @@ namespace jc {
         int compiledFnIndex = -1;
         std::vector<Value> defaultValues;
         bool hasRestParam = false;
+        bool isUFCS = false; // ★ 新增：标记是否为 UFCS 绑定的全局函数
 
         Value boundSelf;
         Value boundClass;

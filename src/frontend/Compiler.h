@@ -48,6 +48,7 @@ namespace jc {
         std::vector<std::shared_ptr<CompiledFunction>> compiledFunctions;
         int functionIndexOffset = 0;
         int lastLine = 0;
+        int topLevelLocalCount = 0;
         std::string currentSourceFile;
         std::unordered_set<std::string> knownGlobals; // ★ 跟踪已知的全局变量
 
@@ -80,7 +81,9 @@ namespace jc {
         Chunk compile(Expr* ast, const std::string& sourceFile = "");
 
         const std::vector<std::shared_ptr<CompiledFunction>>& getCompiledFunctions() const { return compiledFunctions; }
+        void setCompiledFunctions(const std::vector<std::shared_ptr<CompiledFunction>>& fns) { compiledFunctions = fns; }
         void setFunctionIndexOffset(int offset) { functionIndexOffset = offset; }
+        int getTopLevelLocalCount() const { return topLevelLocalCount; }
 
         std::any visitLiteral(Literal* expr) override;
         std::any visitVariable(Variable* expr) override;

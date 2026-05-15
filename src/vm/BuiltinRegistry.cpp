@@ -3985,7 +3985,7 @@ void BuiltinRegistry::registerSystemShell() {
         mainFn->chunk = std::move(chunk);
         mainFn->arity = 0;
         mainFn->maxArity = 0;
-        mainFn->localCount = compiler.getCompiledFunctions().empty() ? 0 : compiler.getCompiledFunctions().back()->localCount;
+        mainFn->localCount = compiler.getTopLevelLocalCount();
         
         // ★ 将编译出的所有函数（包括主函数）注入 VM
         auto fns = compiler.getCompiledFunctions();

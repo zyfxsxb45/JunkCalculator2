@@ -278,6 +278,7 @@ namespace jc {
         compileNode(ast);
         emit(OpCode::OP_RETURN, lastLine);
         mainFn->localCount = current().maxLocals;
+        topLevelLocalCount = current().maxLocals;
         stateStack.pop_back();
         return mainFn->chunk;
     }

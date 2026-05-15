@@ -1937,19 +1937,29 @@ namespace jc {
                                 );
                                 bound->boundSelf = obj;
                                 ObjClosure* targetFn = gIt->second.asFunction();
-                                
-                                bound->nativeFn = std::make_any<NativeCallable>(
-                                    [](const std::vector<Value>& args) -> Value {
-                                        Value capturedObj = helpers::nativeSelfStack.back();
-                                        ObjClosure* fn = helpers::nativeClassStack.back().asFunction();
-                                        std::vector<Value> fullArgs;
-                                        fullArgs.reserve(args.size() + 1);
-                                        fullArgs.push_back(capturedObj);
-                                        fullArgs.insert(fullArgs.end(), args.begin(), args.end());
-                                        return helpers::safeCallFunction(fn, fullArgs);
-                                    }
-                                );
-                                bound->boundClass = Value(targetFn); // 借用 boundClass 传递 targetFn 以防被 GC 回收
+                            
+                                if (targetFn->isBytecode()) {
+                                    bound->compiledFnIndex = targetFn->compiledFnIndex;
+                                    bound->capturedEnv = targetFn->capturedEnv;
+                                    bound->hasRestParam = targetFn->hasRestParam;
+                                    bound->paramNames = targetFn->paramNames;
+                                    bound->isRef = targetFn->isRef;
+                                    bound->defaultValues = targetFn->defaultValues;
+                                    bound->isUFCS = true; // ★ 标记为 UFCS 绑定，让 execCall 自动插入 boundSelf
+                                } else {
+                                    bound->nativeFn = std::make_any<NativeCallable>(
+                                        [](const std::vector<Value>& args) -> Value {
+                                            Value capturedObj = helpers::nativeSelfStack.back();
+                                            ObjClosure* fn = helpers::nativeClassStack.back().asFunction();
+                                            std::vector<Value> fullArgs;
+                                            fullArgs.reserve(args.size() + 1);
+                                            fullArgs.push_back(capturedObj);
+                                            fullArgs.insert(fullArgs.end(), args.begin(), args.end());
+                                            return helpers::safeCallFunction(fn, fullArgs);
+                                        }
+                                    );
+                                    bound->boundClass = Value(targetFn); // 借用 boundClass 传递 targetFn 以防被 GC 回收
+                                }
                                 result = Value(bound);
                                 found = true;
                             }
@@ -2533,6 +2543,13 @@ namespace jc {
                 auto& fnDef = compiledFunctions[closure->compiledFnIndex];
 
                 eraseStack(argc); // ★ FIX: 先安全移除 callee
+
+                if (closure->isUFCS) {
+                    // ★ UFCS 绑定闭包：将 boundSelf 插入到参数列表的最前面
+                    if (static_cast<int>(getStackSize()) >= MAX_STACK) throw std::runtime_error("VM Error: Stack overflow.");
+                    insertStack(argc, closure->boundSelf);
+                    argc++;
+                }
 
                 if (fnDef->hasRestParam) {
                     int fixedMax = fnDef->maxArity - 1;
