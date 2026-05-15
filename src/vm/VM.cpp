@@ -4207,33 +4207,56 @@ namespace jc {
             }
         }
         // ==============================================================
-        // 2. 经典面向对象 Instance 的方法查询（优先类模板，后查原型挂载）
+        // 2. 经典面向对象 Instance 的方法查询（优先实例字段，后查类模板）
         // ==============================================================
         else if (obj.isInstance()) {
             auto inst = obj.asInstance();
-            auto c = inst->classDef;
-            while (c) {
-                auto it = c->methods.find(methodName);
-                if (it != c->methods.end()) {
-                    method = it->second;
-                    owningClass = c;
-                    break;
-                }
-                c = c->parent;
-            }
+            bool foundInField = false;
 
-            if (!method && inst->fields) {
+            // 2.1 优先查找实例自身的字段 (Fields)
+            if (inst->fields) {
                 auto it = inst->fields->keyMap.find(Value(methodName));
                 if (it != inst->fields->keyMap.end()) {
                     Value fv = inst->fields->elements[it->second].second;
                     if (fv.isFunctionClosure()) {
                         method = fv.asFunction();
                         owningClass = inst->classDef;
+                        foundInField = true;
                     } else {
                         // ★ 如果实例字段里存的是类或其他可调用对象
                         stack[getStackSize() - 1 - argc] = fv;
                         execCall(argc);
                         return;
+                    }
+                }
+            }
+
+            // 2.2 如果字段里没找到，再顺着类继承链查找方法 (Class Methods)
+            if (!foundInField) {
+                auto c = inst->classDef;
+                while (c) {
+                    auto it = c->methods.find(methodName);
+                    if (it != c->methods.end()) {
+                        method = it->second;
+                        owningClass = c;
+                        break;
+                    }
+                    c = c->parent;
+                }
+                
+                // 2.3 如果类方法也没找到，尝试 __getattr__
+                if (!method) {
+                    auto getattrMethod = findDunder(obj, DUNDER_GETATTR);
+                    if (getattrMethod) {
+                        Value fv = callDunder(obj, DUNDER_GETATTR, { Value(methodName) });
+                        if (fv.isFunctionClosure()) {
+                            method = fv.asFunction();
+                            owningClass = inst->classDef;
+                        } else {
+                            stack[getStackSize() - 1 - argc] = fv;
+                            execCall(argc);
+                            return;
+                        }
                     }
                 }
             }

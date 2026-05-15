@@ -1996,7 +1996,7 @@ inline size_t ValueHasher::operator()(const Value& v) const {
                 inst->has_cached_hash = true;
                 return seed;
             }
-            return std::hash<const void*>{}(obj);
+            throw std::runtime_error("TypeError: unhashable type.");
         }
         default: return std::hash<const void*>{}(obj);
     }
