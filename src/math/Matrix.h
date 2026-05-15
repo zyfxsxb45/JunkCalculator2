@@ -1296,12 +1296,26 @@ namespace jc {
         int n = A.getRows();
         ComplexMatrix I = ComplexMatrix::identity(n);
         
+        double maxEvMod = 0.0;
+        for (const auto& ev : eigenvals) {
+            maxEvMod = std::max(maxEvMod, ev.modulus());
+        }
+
         // 去重特征值（相同特征值只求一次零空间）
         std::vector<Complex> unique;
         for (const auto& ev : eigenvals) {
             bool found = false;
-            for (const auto& u : unique)
-                if (Tol::clean((ev - u).modulus(), ev.modulus(), 1e6) == 0.0) { found = true; break; }
+            for (const auto& u : unique) {
+                // 结合相对容差与绝对底噪容差：
+                // 1. 对于常规大小的特征值，参考它们自身的模长
+                // 2. 对于极微小的特征值，使用 maxEvMod * 1e-5 作为底噪参考
+                // 配合 1e6 的清洗因子，最终的绝对底噪容差为 maxEvMod * 1e-11
+                double ref = std::max({ev.modulus(), u.modulus(), maxEvMod * 1e-5});
+                if (Tol::clean((ev - u).modulus(), ref, 1e6) == 0.0) { 
+                    found = true; 
+                    break; 
+                }
+            }
             if (!found) unique.push_back(ev);
         }
         
