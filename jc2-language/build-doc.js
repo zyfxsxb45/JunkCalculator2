@@ -8,11 +8,10 @@ try {
     const rawData = fs.readFileSync(sourcePath, 'utf-8');
     const doc = JSON.parse(rawData);
     
-    // 删除不需要的 topics 和 keywords 节点以精简插件体积
+    // 删除不需要的 topics 节点以精简插件体积
     if (doc.topics) delete doc.topics;
-    if (doc.keywords) delete doc.keywords;
     
-    // 进一步剔除函数的描述与示例，并将别名提升为独立的函数条目
+    // 剔除描述与示例以精简体积，并将别名提升为独立的函数条目
     if (doc.functions) {
         const aliasesToAdd = {};
         for (const key in doc.functions) {
@@ -30,6 +29,14 @@ try {
             delete func.examples;
         }
         Object.assign(doc.functions, aliasesToAdd);
+    }
+    
+    // 同样剔除关键字的描述与示例
+    if (doc.keywords) {
+        for (const key in doc.keywords) {
+            delete doc.keywords[key].desc;
+            delete doc.keywords[key].examples;
+        }
     }
     
     fs.writeFileSync(targetPath, JSON.stringify(doc, null, 2), 'utf-8');

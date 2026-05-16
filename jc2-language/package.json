@@ -1,8 +1,8 @@
 {
     "name": "jc2-language",
     "displayName": "JC2 Language Support",
-    "description": "Syntax highlighting and script runner for Junk Calculator 2.3 [VM Edition]",
-    "version": "2.3.3",
+    "description": "Syntax highlighting and script runner for Junk Calculator 2.4 [VM Edition]",
+    "version": "2.4.0",
     "publisher": "yuliangyang",
     "repository": {
         "type": "git",

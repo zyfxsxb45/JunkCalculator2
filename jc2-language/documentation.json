@@ -9,9 +9,6 @@
     "i": {
       "signature": "i()"
     },
-    "none": {
-      "signature": "none()"
-    },
     "complex": {
       "signature": "complex(real, [imag])"
     },
@@ -487,16 +484,16 @@
       "signature": "pop(v)"
     },
     "map": {
-      "signature": "map(f, v)"
+      "signature": "v.map(f) / map(f)"
     },
     "filter": {
-      "signature": "filter(f, v)"
+      "signature": "v.filter(f) / filter(f)"
     },
     "reduce": {
-      "signature": "reduce(f, v, [init])"
+      "signature": "v.reduce(f, [init]) / reduce(f, [init])"
     },
     "sort": {
-      "signature": "sort(v, [cmp])"
+      "signature": "v.sort([cmp]) / sort(cmp)"
     },
     "keys": {
       "signature": "keys(d)"
@@ -540,6 +537,12 @@
     "run": {
       "signature": "run(path)"
     },
+    "compileFile": {
+      "signature": "compileFile(path)"
+    },
+    "compileCode": {
+      "signature": "compileCode(code)"
+    },
     "sym": {
       "signature": "sym(name)"
     },
@@ -567,20 +570,20 @@
     "evalf": {
       "signature": "evalf(expr)"
     },
-    "json_encode": {
-      "signature": "json_encode(val)"
+    "json.encode": {
+      "signature": "json.encode(val)"
     },
-    "json_decode": {
-      "signature": "json_decode(str)"
+    "json.decode": {
+      "signature": "json.decode(str)"
     },
-    "to_latex": {
-      "signature": "to_latex(obj)"
+    "latex.to_latex": {
+      "signature": "latex.to_latex(obj)"
     },
-    "eval_latex": {
-      "signature": "eval_latex(formula)"
+    "latex.eval": {
+      "signature": "latex.eval(formula)"
     },
-    "img": {
-      "signature": "img(width, height, [bg_color])"
+    "image.img": {
+      "signature": "image.img(width, height, [bg_color])"
     },
     "width": {
       "signature": "im.width()"
@@ -621,8 +624,8 @@
     "save": {
       "signature": "im.save(path)"
     },
-    "Window": {
-      "signature": "Window(title, width, height)"
+    "window.Window": {
+      "signature": "window.Window(title, width, height)"
     },
     "isOpen": {
       "signature": "win.isOpen()"
@@ -963,6 +966,9 @@
     "clone": {
       "signature": "clone(obj)"
     },
+    "copy": {
+      "signature": "copy(obj)"
+    },
     "val": {
       "signature": "val(obj)"
     },
@@ -972,8 +978,14 @@
     "setSymLimit": {
       "signature": "setSymLimit(key, val)"
     },
+    "isbool": {
+      "signature": "isbool(x)"
+    },
     "isint": {
       "signature": "isint(x)"
+    },
+    "iswhole": {
+      "signature": "iswhole(x)"
     },
     "isfloat": {
       "signature": "isfloat(x)"
@@ -990,11 +1002,14 @@
     "isfrac": {
       "signature": "isfrac(x)"
     },
-    "isbigint": {
-      "signature": "isbigint(x)"
-    },
     "isbase": {
       "signature": "isbase(x)"
+    },
+    "isexact": {
+      "signature": "isexact(x)"
+    },
+    "isbinary": {
+      "signature": "isbinary(x)"
     },
     "ismatrix": {
       "signature": "ismatrix(x)"
@@ -1019,6 +1034,18 @@
     },
     "isdict": {
       "signature": "isdict(x)"
+    },
+    "isiterable": {
+      "signature": "isiterable(x)"
+    },
+    "iscallable": {
+      "signature": "iscallable(x)"
+    },
+    "isindexable": {
+      "signature": "isindexable(x)"
+    },
+    "ishashable": {
+      "signature": "ishashable(x)"
     },
     "isstring": {
       "signature": "isstring(x)"
@@ -1052,6 +1079,9 @@
     },
     "isclass": {
       "signature": "isclass(x)"
+    },
+    "isnamespace": {
+      "signature": "isnamespace(x)"
     },
     "issym": {
       "signature": "issym(x)"
@@ -1089,113 +1119,113 @@
     "isset": {
       "signature": "isset(x)"
     },
-    "Normal": {
-      "signature": "Normal([mu], [sigma])"
+    "prob.Normal": {
+      "signature": "prob.Normal([mu], [sigma])"
     },
-    "TDist": {
-      "signature": "TDist(df)"
+    "prob.TDist": {
+      "signature": "prob.TDist(df)"
     },
-    "Chi2": {
-      "signature": "Chi2(df)"
+    "prob.Chi2": {
+      "signature": "prob.Chi2(df)"
     },
-    "FDist": {
-      "signature": "FDist(d1, d2)"
+    "prob.FDist": {
+      "signature": "prob.FDist(d1, d2)"
     },
-    "ExpDist": {
-      "signature": "ExpDist(lambda)"
+    "prob.ExpDist": {
+      "signature": "prob.ExpDist(lambda)"
     },
-    "GammaDist": {
-      "signature": "GammaDist(shape, rate)"
+    "prob.GammaDist": {
+      "signature": "prob.GammaDist(shape, rate)"
     },
-    "BetaDist": {
-      "signature": "BetaDist(a, b)"
+    "prob.BetaDist": {
+      "signature": "prob.BetaDist(a, b)"
     },
-    "Uniform": {
-      "signature": "Uniform(a, b)"
+    "prob.Uniform": {
+      "signature": "prob.Uniform(a, b)"
     },
-    "Binom": {
-      "signature": "Binom(n, p)"
+    "prob.Binom": {
+      "signature": "prob.Binom(n, p)"
     },
-    "Poisson": {
-      "signature": "Poisson(lambda)"
+    "prob.Poisson": {
+      "signature": "prob.Poisson(lambda)"
     },
-    "Geom": {
-      "signature": "Geom(p)"
+    "prob.Geom": {
+      "signature": "prob.Geom(p)"
     },
-    "gamma": {
-      "signature": "gamma(x)"
+    "prob.gamma": {
+      "signature": "prob.gamma(x)"
     },
-    "lgamma": {
-      "signature": "lgamma(x)"
+    "prob.lgamma": {
+      "signature": "prob.lgamma(x)"
     },
-    "betaFn": {
-      "signature": "betaFn(a, b)"
+    "prob.betaFn": {
+      "signature": "prob.betaFn(a, b)"
     },
-    "erfc": {
-      "signature": "erfc(x)"
+    "prob.erfc": {
+      "signature": "prob.erfc(x)"
     },
-    "ttest": {
-      "signature": "ttest(X, [mu0])"
+    "prob.ttest": {
+      "signature": "prob.ttest(X, [mu0])"
     },
-    "ttest2": {
-      "signature": "ttest2(X, Y)"
+    "prob.ttest2": {
+      "signature": "prob.ttest2(X, Y)"
     },
-    "ttestP": {
-      "signature": "ttestP(X, Y)"
+    "prob.ttestP": {
+      "signature": "prob.ttestP(X, Y)"
     },
-    "chi2test": {
-      "signature": "chi2test(obs, exp)"
+    "prob.chi2test": {
+      "signature": "prob.chi2test(obs, exp)"
     },
-    "distInfo": {
-      "signature": "distInfo(dist)"
+    "prob.distInfo": {
+      "signature": "prob.distInfo(dist)"
     },
-    "b_alloc": {
-      "signature": "b_alloc(size)"
+    "bytes.alloc": {
+      "signature": "bytes.alloc(size)"
     },
-    "b_pack": {
-      "signature": "b_pack(array)"
+    "bytes.pack": {
+      "signature": "bytes.pack(array)"
     },
-    "readFileBytes": {
-      "signature": "readFileBytes(path)"
+    "bytes.readFile": {
+      "signature": "bytes.readFile(path)"
     },
-    "writeFileBytes": {
-      "signature": "writeFileBytes(path, buf)"
+    "bytes.writeFile": {
+      "signature": "buf.writeFile(path)"
     },
-    "b_set": {
-      "signature": "b_set(buf, offset, val, type)"
+    "bytes.set": {
+      "signature": "buf.set(offset, val, type)"
     },
-    "b_write_arr": {
-      "signature": "b_write_arr(buf, offset, arr, type)"
+    "bytes.write_arr": {
+      "signature": "buf.write_arr(offset, arr, type)"
     },
-    "b_get": {
-      "signature": "b_get(buf, offset, type, [len])"
+    "bytes.get": {
+      "signature": "buf.get(offset, type, [len])"
     },
-    "b_len": {
-      "signature": "b_len(buf)"
+    "bytes.len": {
+      "signature": "buf.len()"
     },
-    "net_tcp_connect": {
-      "signature": "net_tcp_connect(host, port)"
+    "socket.connect": {
+      "signature": "socket.connect(host, port)"
     },
-    "net_send": {
-      "signature": "net_send(socket, text)"
+    "socket.send": {
+      "signature": "sock.send(text)"
     },
-    "net_recv": {
-      "signature": "net_recv(socket, max_bytes)"
+    "socket.recv": {
+      "signature": "sock.recv(max_bytes)"
     },
-    "net_close": {
-      "signature": "net_close(socket)"
+    "socket.close": {
+      "signature": "sock.close()"
     },
-    "net_tcp_server": {
-      "signature": "net_tcp_server(host, port)"
+    "socket.server": {
+      "signature": "socket.server(host, port)"
     },
-    "net_tcp_accept": {
-      "signature": "net_tcp_accept(server_socket)"
+    "socket.accept": {
+      "signature": "server.accept()"
     },
-    "compile_latex": {
-      "signature": "compile_latex(formula, vars)"
+    "latex.compile": {
+      "signature": "latex.compile(formula, vars)"
     },
-    "json_pretty": {
-      "signature": "json_pretty(val, [indent])"
+    "json.pretty": {
+      "signature": "json.pretty(val, [indent])"
     },
     "addE": {
       "signature": "addE(A, B)"
@@ -1375,16 +1405,16 @@
       "signature": "removeKey(d, key)"
     },
     "apply": {
-      "signature": "apply(f, args)"
+      "signature": "args.apply(f) / apply(f)"
     },
     "any": {
-      "signature": "any(f, v)"
+      "signature": "v.any(f)"
     },
     "all": {
-      "signature": "all(f, v)"
+      "signature": "v.all(f)"
     },
     "countIf": {
-      "signature": "countIf(f, v)"
+      "signature": "v.countIf(f)"
     },
     "solveE": {
       "signature": "solveE(f, x0)"
@@ -1413,14 +1443,14 @@
     "toSet": {
       "signature": "toSet(v)"
     },
-    "dmean": {
-      "signature": "dmean(dist)"
+    "prob.dmean": {
+      "signature": "prob.dmean(dist)"
     },
-    "dvar": {
-      "signature": "dvar(dist)"
+    "prob.dvar": {
+      "signature": "prob.dvar(dist)"
     },
-    "dstd": {
-      "signature": "dstd(dist)"
+    "prob.dstd": {
+      "signature": "prob.dstd(dist)"
     },
     "init": {
       "signature": "init(...)"
@@ -1482,6 +1512,21 @@
     "__hash__": {
       "signature": "__hash__()"
     },
+    "__iter__": {
+      "signature": "__iter__()"
+    },
+    "__next__": {
+      "signature": "__next__()"
+    },
+    "__getattr__": {
+      "signature": "__getattr__(key)"
+    },
+    "__setattr__": {
+      "signature": "__setattr__(key, val)"
+    },
+    "__call__": {
+      "signature": "__call__(...)"
+    },
     "ln": {
       "signature": "ln(x) / ln(base, x)"
     },
@@ -1490,6 +1535,9 @@
     },
     "cols": {
       "signature": "cols(A)"
+    },
+    "string": {
+      "signature": "string(x)"
     },
     "getFields": {
       "signature": "getFields(d)"
@@ -1520,6 +1568,113 @@
     },
     "loadPrimes": {
       "signature": "loadPrimes()"
+    },
+    "isdouble": {
+      "signature": "isdouble(x)"
+    },
+    "isnumber": {
+      "signature": "isnumber(x)"
+    },
+    "isstr": {
+      "signature": "isstr(x)"
+    },
+    "isfunc": {
+      "signature": "isfunc(x)"
+    },
+    "issymbolic": {
+      "signature": "issymbolic(x)"
+    },
+    "issymbol": {
+      "signature": "issymbol(x)"
+    },
+    "isexpr": {
+      "signature": "isexpr(x)"
+    }
+  },
+  "keywords": {
+    "if": {
+      "signature": "if (condition) { body } [else if (cond) { body }] [else { body }]"
+    },
+    "else": {
+      "signature": "if (cond) { ... } else { ... }  |  else if (cond) { ... }"
+    },
+    "while": {
+      "signature": "while (condition) { body }"
+    },
+    "for": {
+      "signature": "for (init; cond; update) { body }  |  for (var in iterable) { body }"
+    },
+    "in": {
+      "signature": "for (var in iterable)  |  value in container"
+    },
+    "break": {
+      "signature": "break"
+    },
+    "continue": {
+      "signature": "continue"
+    },
+    "return": {
+      "signature": "return [expr]"
+    },
+    "switch": {
+      "signature": "switch (expr) { case val: body ... [default: body] }"
+    },
+    "case": {
+      "signature": "case value [, value2, ...]: body"
+    },
+    "default": {
+      "signature": "default: body"
+    },
+    "namespace": {
+      "signature": "namespace Name { ... }"
+    },
+    "class": {
+      "signature": "class Name [extends Parent] { init(...) = {...}  method(...) = ... }"
+    },
+    "extends": {
+      "signature": "class Child extends Parent { ... }"
+    },
+    "super": {
+      "signature": "super.method(args)  |  super.init(args)"
+    },
+    "self": {
+      "signature": "self.field  |  self.method()"
+    },
+    "local": {
+      "signature": "local variable = expr  |  local variable"
+    },
+    "ref": {
+      "signature": "ref variable = expr  |  ref variable"
+    },
+    "state": {
+      "signature": "state variable = expr  |  state variable"
+    },
+    "const": {
+      "signature": "const name = expr"
+    },
+    "delete": {
+      "signature": "delete variable"
+    },
+    "try": {
+      "signature": "try { body } catch (var) { handler }"
+    },
+    "catch": {
+      "signature": "catch (variable) { handler }"
+    },
+    "throw": {
+      "signature": "throw expr"
+    },
+    "import": {
+      "signature": "import module  |  import \"path\""
+    },
+    "true": {
+      "signature": "true"
+    },
+    "false": {
+      "signature": "false"
+    },
+    "none": {
+      "signature": "none"
     }
   }
 }

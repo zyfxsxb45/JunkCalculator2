@@ -56,6 +56,7 @@ function runFile(filePath, cwd, extraFlags = "") {
 function activate(context) {
     // ★ 新增：自动补全 (从 documentation.json 加载函数列表)
     let functions = {};
+    let docKeywords = {};
     try {
         const possiblePaths = [
             path.join(__dirname, '../data/documentation.json'), // 源码仓库相对路径
@@ -72,6 +73,7 @@ function activate(context) {
                 const docData = JSON.parse(fs.readFileSync(docPath, 'utf-8'));
                 if (docData && docData.functions) {
                     functions = docData.functions;
+                    if (docData.keywords) docKeywords = docData.keywords;
                     loaded = true;
                     break;
                 }
@@ -93,7 +95,7 @@ function activate(context) {
             const keywords = [
                 'if', 'else', 'while', 'for', 'in', 'break', 'continue', 'return',
                 'switch', 'case', 'default', 'throw', 'try', 'catch',
-                'class', 'extends', 'const', 'state', 'delete', 'ref', 'import', 'local',
+                'class', 'extends', 'const', 'state', 'delete', 'ref', 'import', 'local', 'namespace',
                 'true', 'false', 'none', 'PI', 'E', 'ANS', 'self', 'super'
             ];
             for (const kw of keywords) {
@@ -108,6 +110,7 @@ function activate(context) {
                 { label: 'if', detail: 'if statement', insertText: 'if (${1:condition}) {\n\t$0\n}' },
                 { label: 'ifelse', detail: 'if..else statement', insertText: 'if (${1:condition}) {\n\t$2\n} else {\n\t$0\n}' },
                 { label: 'class', detail: 'class definition', insertText: 'class ${1:ClassName} {\n\tinit() {\n\t\t$0\n\t}\n}' },
+                { label: 'namespace', detail: 'namespace definition', insertText: 'namespace ${1:Name} {\n\t$0\n}' },
                 { label: 'func', detail: 'function definition', insertText: '${1:functionName}(${2:args}) = {\n\t$0\n}' }
             ];
             for (const snip of snippets) {
@@ -231,6 +234,21 @@ function activate(context) {
                 }
                 return new vscode.Hover(md, range);
             }
+            
+            const kwData = docKeywords[word];
+            if (kwData) {
+                const md = new vscode.MarkdownString();
+                md.appendCodeblock(kwData.signature || word, 'jc2');
+                if (kwData.desc) {
+                    const descText = Array.isArray(kwData.desc) ? kwData.desc.join('\n') : kwData.desc;
+                    md.appendMarkdown(`\n\n${descText}`);
+                }
+                if (kwData.examples && kwData.examples.length > 0) {
+                    md.appendMarkdown(`\n\n**Examples:**\n`);
+                    md.appendCodeblock(kwData.examples.join('\n'), 'jc2');
+                }
+                return new vscode.Hover(md, range);
+            }
             return null;
         }
     });
@@ -246,23 +264,24 @@ function activate(context) {
             for (let i = 0; i < lines.length; i++) {
                 const line = lines[i];
                 
-                // 匹配类定义: class MyClass
-                const classMatch = line.match(/^\s*class\s+([a-zA-Z_][a-zA-Z0-9_]*)/);
+                // 匹配类定义: class MyClass 或 namespace MyNamespace
+                const classMatch = line.match(/^\s*(?:class|namespace)\s+([a-zA-Z_][a-zA-Z0-9_]*)/);
                 if (classMatch) {
+                    const isNamespace = line.includes('namespace');
                     const range = new vscode.Range(i, 0, i, line.length);
                     const selectionRange = new vscode.Range(i, line.indexOf(classMatch[1]), i, line.indexOf(classMatch[1]) + classMatch[1].length);
                     symbols.push(new vscode.DocumentSymbol(
                         classMatch[1],
-                        'class',
-                        vscode.SymbolKind.Class,
+                        isNamespace ? 'namespace' : 'class',
+                        isNamespace ? vscode.SymbolKind.Namespace : vscode.SymbolKind.Class,
                         range,
                         selectionRange
                     ));
                     continue;
                 }
                 
-                // 匹配函数定义: funcName(args) { 或 local funcName(args) =
-                const funcMatch = line.match(/^\s*(?:local\s+)?([a-zA-Z_][a-zA-Z0-9_]*)\s*\([^)]*\)\s*(?:\{|=)/);
+                // 匹配函数定义: funcName(args) = 或 local/ref/state/const funcName(args) -> type =
+                const funcMatch = line.match(/^\s*(?:(?:local|ref|state|const)\s+)?([a-zA-Z_][a-zA-Z0-9_]*)\s*\([^)]*\)(?:\s*->\s*[a-zA-Z_][a-zA-Z0-9_]*)?\s*(?:\{|=)/);
                 if (funcMatch) {
                     const range = new vscode.Range(i, 0, i, line.length);
                     const selectionRange = new vscode.Range(i, line.indexOf(funcMatch[1]), i, line.indexOf(funcMatch[1]) + funcMatch[1].length);
