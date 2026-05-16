@@ -1462,17 +1462,37 @@ namespace jc {
 
         // ★ Pre-register ref/state names BEFORE compiling RHS so reads resolve to upvalues
         for (int i = 0; i < n; ++i) {
-            const std::string& name = expr->targets[i].name.lexeme;
-            if (name == "_") continue;
-            if (expr->targets[i].isLocal) {
-                if (current().stateNames.count(name) > 0 || current().refNames.count(name) > 0) throw std::runtime_error("Compiler Error: Cannot declare variable as both 'local' and 'ref'/'state'.");
-            } else if (expr->targets[i].isRef) {
-                if (current().stateNames.count(name) > 0) throw std::runtime_error("Compiler Error: Cannot declare variable as both 'ref' and 'state'.");
-                current().refNames.insert(name);
-            } else if (expr->targets[i].isState) {
-                if (current().refNames.count(name) > 0) throw std::runtime_error("Compiler Error: Cannot declare variable as both 'ref' and 'state'.");
-                current().stateNames.insert(name);
-                current().stateNames.insert("<init>_" + name); // ★ 注册隐藏的初始化标志
+            Expr* targetExpr = expr->targets[i].get();
+            std::string name;
+            bool isLocal = false, isRef = false, isState = false;
+
+            if (auto* var = dynamic_cast<Variable*>(targetExpr)) {
+                name = var->name.lexeme;
+            }
+            else if (auto* loc = dynamic_cast<LocalDecl*>(targetExpr)) {
+                name = loc->name.lexeme; isLocal = true;
+            }
+            else if (auto* ref = dynamic_cast<RefDecl*>(targetExpr)) {
+                name = ref->name.lexeme; isRef = true;
+            }
+            else if (auto* st = dynamic_cast<StateDecl*>(targetExpr)) {
+                name = st->name.lexeme; isState = true;
+            }
+
+            if (!name.empty() && name != "_") {
+                if (isLocal) {
+                    if (current().stateNames.count(name) > 0 || current().refNames.count(name) > 0) throw
+                        std::runtime_error("Compiler Error: Cannot declare variable as both 'local' and 'ref'/'state'.");
+                }
+                else if (isRef) {
+                    if (current().stateNames.count(name) > 0) throw std::runtime_error("Compiler Error: Cannot declare variable as both 'ref' and 'state'.");
+                        current().refNames.insert(name);
+                }
+                else if (isState) {
+                    if (current().refNames.count(name) > 0) throw std::runtime_error("Compiler Error: Cannot declare variable as both 'ref' and 'state'.");
+                        current().stateNames.insert(name);
+                    current().stateNames.insert("<init>_" + name); // ★ 注册隐藏的初始化标志
+                }
             }
         }
 
@@ -1480,89 +1500,104 @@ namespace jc {
         emit(OpCode::OP_DESTRUCT, lastLine);
         emit(static_cast<uint8_t>(n), lastLine);
 
+        // ★ 引入临时变量机制，将栈顶的 N 个解构值依次存入临时变量
+        std::vector<int> tmpSlots(n);
         for (int i = n - 1; i >= 0; --i) {
-            const std::string& name = expr->targets[i].name.lexeme;
-            if (current().constNames.count(name) > 0) {
-                throw std::runtime_error("Compiler Error: Cannot modify const variable '" + name + "'.");
-            }
-            bool isRef = expr->targets[i].isRef;
-            bool isState = expr->targets[i].isState;
-            bool isLocal = expr->targets[i].isLocal;
-
-            if (name == "_") { emit(OpCode::OP_POP, lastLine); continue; }
-
-            if (stateStack.size() == 1) knownGlobals.insert(name);
-
-            int slot = resolveLocal(name);
-            int upvalue = -1;
-
-            if (isLocal) {
-                if (slot == -1 || current().locals[slot].depth < current().scopeDepth) {
-                    addLocal(name, current().scopeDepth);
-                    slot = resolveLocal(name);
-                }
-            } else if (isRef) {
-                if (current().stateNames.count(name) > 0) throw std::runtime_error("Compiler Error: Cannot declare variable as both 'ref' and 'state'.");
-                current().refNames.insert(name);
-                upvalue = resolveUpvalue(name);
-            } else if (isState) {
-                if (current().refNames.count(name) > 0) throw std::runtime_error("Compiler Error: Cannot declare variable as both 'ref' and 'state'.");
-                current().stateNames.insert(name);
-                upvalue = resolveUpvalue(name);
-            } else {
-                if (stateStack.size() > 1 && slot == -1 && current().refNames.count(name) == 0 && current().stateNames.count(name) == 0) {
-                    addLocal(name, 0);
-                    slot = resolveLocal(name);
-                }
-            }
-
-            if (isState) {
-                std::string initFlagName = "<init>_" + name;
-                int flagUpvalue = resolveUpvalue(initFlagName);
-                if (flagUpvalue != -1 && upvalue != -1) {
-                    emit(OpCode::OP_GET_UPVALUE, lastLine);
-                    emit16(static_cast<uint16_t>(flagUpvalue), lastLine);
-                    emit(OpCode::OP_NONE, lastLine);
-                    emit(OpCode::OP_EQUAL, lastLine);
-                    
-                    int skipJump = chunk()->emitJump(OpCode::OP_JUMP_IF_FALSE, lastLine);
-                    emit(OpCode::OP_POP, lastLine); // pop boolean
-                    
-                    emit(OpCode::OP_SET_UPVALUE, lastLine);
-                    emit16(static_cast<uint16_t>(upvalue), lastLine);
-                    
-                    chunk()->emitConstant(Value(true), lastLine);
-                    emit(OpCode::OP_SET_UPVALUE, lastLine);
-                    emit16(static_cast<uint16_t>(flagUpvalue), lastLine);
-                    emit(OpCode::OP_POP, lastLine); // pop true
-                    
-                    int endJump = chunk()->emitJump(OpCode::OP_JUMP, lastLine);
-                    
-                    chunk()->patchJump(skipJump);
-                    emit(OpCode::OP_POP, lastLine); // pop boolean
-                    
-                    chunk()->patchJump(endJump);
-                }
-            } else if (slot != -1 && current().refNames.count(name) == 0 && current().stateNames.count(name) == 0) {
-                emit(OpCode::OP_SET_LOCAL, lastLine);
-                emit16(static_cast<uint16_t>(slot), lastLine);
-            } else {
-                if (upvalue == -1) upvalue = resolveUpvalue(name);
-                if (upvalue != -1) {
-                    emit(OpCode::OP_SET_UPVALUE, lastLine);
-                    emit16(static_cast<uint16_t>(upvalue), lastLine);
-                } else {
-                    uint16_t idx = identifierConstant(name);
-                    if (isRef || current().refNames.count(name) > 0) {
-                        emit(OpCode::OP_SET_GLOBAL_REF, lastLine);
-                    } else {
-                        emit(OpCode::OP_SET_GLOBAL, lastLine);
-                    }
-                    emit16(idx, lastLine);
-                }
-            }
+            addLocal("", current().scopeDepth);
+            tmpSlots[i] = static_cast<int>(current().locals.size()) - 1;
+            emit(OpCode::OP_SET_LOCAL, lastLine);
+            emit16(static_cast<uint16_t>(tmpSlots[i]), lastLine);
             emit(OpCode::OP_POP, lastLine);
         }
+
+        // ★ 依次将临时变量的值赋给目标
+        for (int i = 0; i < n; ++i) {
+            Expr* targetExpr = expr->targets[i].get();
+            
+            std::string name;
+            bool isLocal = false, isRef = false, isState = false;
+            
+            if (auto* var = dynamic_cast<Variable*>(targetExpr)) {
+                name = var->name.lexeme;
+            } else if (auto* loc = dynamic_cast<LocalDecl*>(targetExpr)) {
+                name = loc->name.lexeme; isLocal = true;
+            } else if (auto* ref = dynamic_cast<RefDecl*>(targetExpr)) {
+                name = ref->name.lexeme; isRef = true;
+            } else if (auto* st = dynamic_cast<StateDecl*>(targetExpr)) {
+                name = st->name.lexeme; isState = true;
+            }
+
+            if (!name.empty()) {
+                if (name == "_") continue;
+                if (current().constNames.count(name) > 0) {
+                    throw std::runtime_error("Compiler Error: Cannot modify const variable '" + name + "'.");
+                }
+                if (stateStack.size() == 1) knownGlobals.insert(name);
+
+                int slot = resolveLocal(name);
+                if (isLocal) {
+                    if (slot == -1 || current().locals[slot].depth < current().scopeDepth) {
+                        addLocal(name, current().scopeDepth);
+                    }
+                } else if (!isRef && !isState) {
+                    if (stateStack.size() > 1 && slot == -1 && current().refNames.count(name) == 0 && current().stateNames.count(name) == 0) {
+                        addLocal(name, 0);
+                    }
+                }
+            }
+
+            // 将临时变量的值压入栈顶
+            emit(OpCode::OP_GET_LOCAL, lastLine);
+            emit16(static_cast<uint16_t>(tmpSlots[i]), lastLine);
+
+            // 赋值
+            if (!name.empty()) {
+                Variable v(Token(TokenType::IDENTIFIER, name, 0));
+                if (isState) {
+                    int upvalue = resolveUpvalue(name);
+                    std::string initFlagName = "<init>_" + name;
+                    int flagUpvalue = resolveUpvalue(initFlagName);
+                    if (flagUpvalue != -1 && upvalue != -1) {
+                        emit(OpCode::OP_GET_UPVALUE, lastLine);
+                        emit16(static_cast<uint16_t>(flagUpvalue), lastLine);
+                        emit(OpCode::OP_NONE, lastLine);
+                        emit(OpCode::OP_EQUAL, lastLine);
+                        
+                        int skipJump = chunk()->emitJump(OpCode::OP_JUMP_IF_FALSE, lastLine);
+                        emit(OpCode::OP_POP, lastLine); // pop boolean
+                        
+                        emit(OpCode::OP_SET_UPVALUE, lastLine);
+                        emit16(static_cast<uint16_t>(upvalue), lastLine);
+                        
+                        chunk()->emitConstant(Value(true), lastLine);
+                        emit(OpCode::OP_SET_UPVALUE, lastLine);
+                        emit16(static_cast<uint16_t>(flagUpvalue), lastLine);
+                        emit(OpCode::OP_POP, lastLine); // pop true
+                        
+                        int endJump = chunk()->emitJump(OpCode::OP_JUMP, lastLine);
+                        
+                        chunk()->patchJump(skipJump);
+                        emit(OpCode::OP_POP, lastLine); // pop boolean
+                        
+                        chunk()->patchJump(endJump);
+                    }
+                } else {
+                    emitStoreTarget(&v);
+                }
+            } else {
+                // IndexAccess, DotAccess
+                emitStoreTarget(targetExpr);
+            }
+            
+            // 弹出赋值后留在栈顶的值
+            emit(OpCode::OP_POP, lastLine);
+        }
+
+        // ★ 释放临时变量
+        for (int i = 0; i < n; ++i) {
+            current().locals.pop_back();
+        }
+
         return {};
     }
 
@@ -2083,21 +2118,39 @@ namespace jc {
     }
 
     std::any Compiler::visitDictDestructAssign(DictDestructAssign* expr) {
-        lastLine = expr->targets.front().name.line;
+        lastLine = 0;
 
         // ★ Pre-register ref/state names BEFORE compiling RHS so reads resolve to upvalues
         for (auto& target : expr->targets) {
-            const std::string& varName = target.name.lexeme;
-            if (varName == "_") continue;
-            if (target.isLocal) {
-                if (current().stateNames.count(varName) > 0 || current().refNames.count(varName) > 0) throw std::runtime_error("Compiler Error: Cannot declare variable as both 'local' and 'ref'/'state'.");
-            } else if (target.isRef) {
-                if (current().stateNames.count(varName) > 0) throw std::runtime_error("Compiler Error: Cannot declare variable as both 'ref' and 'state'.");
-                current().refNames.insert(varName);
-            } else if (target.isState) {
-                if (current().refNames.count(varName) > 0) throw std::runtime_error("Compiler Error: Cannot declare variable as both 'ref' and 'state'.");
-                current().stateNames.insert(varName);
-                current().stateNames.insert("<init>_" + varName); // ★ 注册隐藏的初始化标志
+            Expr* targetExpr = target.second.get();
+            std::string name;
+            bool isLocal = false, isRef = false, isState = false;
+            
+            if (auto* var = dynamic_cast<Variable*>(targetExpr)) {
+                name = var->name.lexeme;
+                lastLine = var->name.line;
+            } else if (auto* loc = dynamic_cast<LocalDecl*>(targetExpr)) {
+                name = loc->name.lexeme; isLocal = true;
+                lastLine = loc->name.line;
+            } else if (auto* ref = dynamic_cast<RefDecl*>(targetExpr)) {
+                name = ref->name.lexeme; isRef = true;
+                lastLine = ref->name.line;
+            } else if (auto* st = dynamic_cast<StateDecl*>(targetExpr)) {
+                name = st->name.lexeme; isState = true;
+                lastLine = st->name.line;
+            }
+            
+            if (!name.empty() && name != "_") {
+                if (isLocal) {
+                    if (current().stateNames.count(name) > 0 || current().refNames.count(name) > 0) throw std::runtime_error("Compiler Error: Cannot declare variable as both 'local' and 'ref'/'state'.");
+                } else if (isRef) {
+                    if (current().stateNames.count(name) > 0) throw std::runtime_error("Compiler Error: Cannot declare variable as both 'ref' and 'state'.");
+                    current().refNames.insert(name);
+                } else if (isState) {
+                    if (current().refNames.count(name) > 0) throw std::runtime_error("Compiler Error: Cannot declare variable as both 'ref' and 'state'.");
+                    current().stateNames.insert(name);
+                    current().stateNames.insert("<init>_" + name); // ★ 注册隐藏的初始化标志
+                }
             }
         }
 
@@ -2106,14 +2159,24 @@ namespace jc {
 
         // 2. 依次扒取属性并分配
         for (auto& target : expr->targets) {
-            const std::string& fieldName = target.key;
-            const std::string& varName = target.name.lexeme;
-            if (current().constNames.count(varName) > 0) {
-                throw std::runtime_error("Compiler Error: Cannot modify const variable '" + varName + "'.");
+            const std::string& fieldName = target.first;
+            Expr* targetExpr = target.second.get();
+
+            std::string name;
+            bool isLocal = false, isRef = false, isState = false;
+
+            if (auto* var = dynamic_cast<Variable*>(targetExpr)) {
+                name = var->name.lexeme;
             }
-            bool isRef = target.isRef;
-            bool isState = target.isState;
-            bool isLocal = target.isLocal;
+            else if (auto* loc = dynamic_cast<LocalDecl*>(targetExpr)) {
+                name = loc->name.lexeme; isLocal = true;
+            }
+            else if (auto* ref = dynamic_cast<RefDecl*>(targetExpr)) {
+                name = ref->name.lexeme; isRef = true;
+            }
+            else if (auto* st = dynamic_cast<StateDecl*>(targetExpr)) {
+                name = st->name.lexeme; isState = true;
+            }
 
             // 将数据源 DUP 复制一份到栈顶，用来提取属性（因为 GET_PROPERTY 会吃掉原对象）
             emit(OpCode::OP_DUP, lastLine);
@@ -2123,85 +2186,69 @@ namespace jc {
             emit(OpCode::OP_GET_PROPERTY, lastLine);
             emit16(nameIdx, lastLine);
 
-            if (varName == "_") {
-                emit(OpCode::OP_POP, lastLine);
-                continue;
-            }
-
-            if (stateStack.size() == 1) knownGlobals.insert(varName);
-
-            // 此时提取到的数值在栈顶，准备塞入目标变量 varName 中
-            int slot = resolveLocal(varName);
-            int upvalue = -1;
-
-            if (isLocal) {
-                if (slot == -1 || current().locals[slot].depth < current().scopeDepth) {
-                    addLocal(varName, current().scopeDepth);
-                    slot = resolveLocal(varName);
+            if (!name.empty()) {
+                if (name == "_") {
+                    emit(OpCode::OP_POP, lastLine);
+                    continue;
                 }
-            } else if (isRef) {
-                if (current().stateNames.count(varName) > 0) throw std::runtime_error("Compiler Error: Cannot declare variable as both 'ref' and 'state'.");
-                current().refNames.insert(varName);
-                upvalue = resolveUpvalue(varName);
-            } else if (isState) {
-                if (current().refNames.count(varName) > 0) throw std::runtime_error("Compiler Error: Cannot declare variable as both 'ref' and 'state'.");
-                current().stateNames.insert(varName);
-                upvalue = resolveUpvalue(varName);
-            } else {
-                // Auto-local 拦截：如果我们是在局部作用域遇到新变量，自动设为 Local
-                if (stateStack.size() > 1 && slot == -1 && current().refNames.count(varName) == 0 && current().stateNames.count(varName) == 0) {
-                    addLocal(varName, 0);
-                    slot = resolveLocal(varName);
+                if (current().constNames.count(name) > 0) {
+                    throw std::runtime_error("Compiler Error: Cannot modify const variable '" + name + "'.");
+                }
+                if (stateStack.size() == 1) knownGlobals.insert(name);
+
+                int slot = resolveLocal(name);
+                if (isLocal) {
+                    if (slot == -1 || current().locals[slot].depth < current().scopeDepth) {
+                        addLocal(name, current().scopeDepth);
+                    }
+                }
+                else if (!isRef && !isState) {
+                    if (stateStack.size() > 1 && slot == -1 && current().refNames.count(name) == 0 &&
+                        current().stateNames.count(name) == 0) {
+                        addLocal(name, 0);
+                    }
                 }
             }
 
-            // 存入变量体系
-            if (isState) {
-                std::string initFlagName = "<init>_" + varName;
-                int flagUpvalue = resolveUpvalue(initFlagName);
-                if (flagUpvalue != -1 && upvalue != -1) {
-                    emit(OpCode::OP_GET_UPVALUE, lastLine);
-                    emit16(static_cast<uint16_t>(flagUpvalue), lastLine);
-                    emit(OpCode::OP_NONE, lastLine);
-                    emit(OpCode::OP_EQUAL, lastLine);
-                    
-                    int skipJump = chunk()->emitJump(OpCode::OP_JUMP_IF_FALSE, lastLine);
-                    emit(OpCode::OP_POP, lastLine); // pop boolean
-                    
-                    emit(OpCode::OP_SET_UPVALUE, lastLine);
-                    emit16(static_cast<uint16_t>(upvalue), lastLine);
-                    
-                    chunk()->emitConstant(Value(true), lastLine);
-                    emit(OpCode::OP_SET_UPVALUE, lastLine);
-                    emit16(static_cast<uint16_t>(flagUpvalue), lastLine);
-                    emit(OpCode::OP_POP, lastLine); // pop true
-                    
-                    int endJump = chunk()->emitJump(OpCode::OP_JUMP, lastLine);
-                    
-                    chunk()->patchJump(skipJump);
-                    emit(OpCode::OP_POP, lastLine); // pop boolean
-                    
-                    chunk()->patchJump(endJump);
-                }
-            } else if (slot != -1 && current().refNames.count(varName) == 0 && current().stateNames.count(varName) == 0) {
-                emit(OpCode::OP_SET_LOCAL, lastLine);
-                emit16(static_cast<uint16_t>(slot), lastLine);
-            }
-            else {
-                if (upvalue == -1) upvalue = resolveUpvalue(varName);
-                if (upvalue != -1) {
-                    emit(OpCode::OP_SET_UPVALUE, lastLine);
-                    emit16(static_cast<uint16_t>(upvalue), lastLine);
+            // 此时提取到的数值在栈顶，准备塞入目标中
+            if (!name.empty()) {
+                Variable v(Token(TokenType::IDENTIFIER, name, 0));
+                if (isState) {
+                    int upvalue = resolveUpvalue(name);
+                    std::string initFlagName = "<init>_" + name;
+                    int flagUpvalue = resolveUpvalue(initFlagName);
+                    if (flagUpvalue != -1 && upvalue != -1) {
+                        emit(OpCode::OP_GET_UPVALUE, lastLine);
+                        emit16(static_cast<uint16_t>(flagUpvalue), lastLine);
+                        emit(OpCode::OP_NONE, lastLine);
+                        emit(OpCode::OP_EQUAL, lastLine);
+
+                        int skipJump = chunk()->emitJump(OpCode::OP_JUMP_IF_FALSE, lastLine);
+                        emit(OpCode::OP_POP, lastLine); // pop boolean
+
+                        emit(OpCode::OP_SET_UPVALUE, lastLine);
+                        emit16(static_cast<uint16_t>(upvalue), lastLine);
+
+                        chunk()->emitConstant(Value(true), lastLine);
+                        emit(OpCode::OP_SET_UPVALUE, lastLine);
+                        emit16(static_cast<uint16_t>(flagUpvalue), lastLine);
+                        emit(OpCode::OP_POP, lastLine); // pop true
+
+                        int endJump = chunk()->emitJump(OpCode::OP_JUMP, lastLine);
+
+                        chunk()->patchJump(skipJump);
+                        emit(OpCode::OP_POP, lastLine); // pop boolean
+
+                        chunk()->patchJump(endJump);
+                    }
                 }
                 else {
-                    uint16_t idx = identifierConstant(varName);
-                    if (isRef || current().refNames.count(varName) > 0) {
-                        emit(OpCode::OP_SET_GLOBAL_REF, lastLine);
-                    } else {
-                        emit(OpCode::OP_SET_GLOBAL, lastLine);
-                    }
-                    emit16(idx, lastLine);
+                    emitStoreTarget(&v);
                 }
+            }
+            else {
+                // IndexAccess, DotAccess
+                emitStoreTarget(targetExpr);
             }
 
             // 将刚刚存进去的值弹栈丢弃，进入下一个 key 的解构

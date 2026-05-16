@@ -202,11 +202,11 @@ namespace jc {
                                 defaultExprs.push_back(nullptr);
 
                                 auto* dl = dynamic_cast<DictLiteral*>(dictNode.get());
-                                std::vector<DictDestructAssign::Target> targets;
+                                std::vector<std::pair<std::string, std::unique_ptr<Expr>>> targets;
                                 for (auto& entry : dl->entries) {
                                     auto* litKey = dynamic_cast<Literal*>(entry.first.get());
                                     auto* varVal = dynamic_cast<Variable*>(entry.second.get());
-                                    if (litKey && varVal) targets.push_back({ litKey->value, varVal->name, false, false });
+                                    if (litKey && varVal) targets.push_back({ litKey->value, std::move(entry.second) });
                                     else throw std::runtime_error("Invalid dict destructuring format.");
                                 }
                                 auto rhs = std::make_unique<Variable>(phTok);
@@ -340,19 +340,18 @@ namespace jc {
 
             if (auto* matNode = dynamic_cast<MatrixNode*>(expr.get())) {
                 if (isRef || isState || isConst) throw std::runtime_error("Parser Error: 'ref', 'state', or 'const' cannot be applied to destructuring.");
-                std::vector<DestructAssign::Target> targets;
+                std::vector<std::unique_ptr<Expr>> targets;
                 bool validDestruct = true;
 
                 for (auto& row : matNode->elements) {
                     for (auto& elem : row) {
-                        if (auto* v = dynamic_cast<Variable*>(elem.get())) {
-                            targets.push_back({v->name, false, false, false});
-                        } else if (auto* r = dynamic_cast<RefDecl*>(elem.get())) {
-                            targets.push_back({r->name, true, false, false});
-                        } else if (auto* s = dynamic_cast<StateDecl*>(elem.get())) {
-                            targets.push_back({s->name, false, true, false});
-                        } else if (auto* l = dynamic_cast<LocalDecl*>(elem.get())) {
-                            targets.push_back({l->name, false, false, true});
+                        if (dynamic_cast<Variable*>(elem.get()) ||
+                            dynamic_cast<RefDecl*>(elem.get()) ||
+                            dynamic_cast<StateDecl*>(elem.get()) ||
+                            dynamic_cast<LocalDecl*>(elem.get()) ||
+                            dynamic_cast<IndexAccess*>(elem.get()) ||
+                            dynamic_cast<DotAccess*>(elem.get())) {
+                            targets.push_back(std::move(elem));
                         } else {
                             validDestruct = false; break;
                         }
@@ -367,19 +366,18 @@ namespace jc {
 
             if (auto* dictNode = dynamic_cast<DictLiteral*>(expr.get())) {
                 if (isRef || isState || isConst) throw std::runtime_error("Parser Error: 'ref', 'state', or 'const' cannot be applied to destructuring.");
-                std::vector<DictDestructAssign::Target> targets;
+                std::vector<std::pair<std::string, std::unique_ptr<Expr>>> targets;
                 bool validDestruct = true;
                 for (auto& entry : dictNode->entries) {
                     auto* litKey = dynamic_cast<Literal*>(entry.first.get());
                     if (litKey && litKey->isString) {
-                        if (auto* varVal = dynamic_cast<Variable*>(entry.second.get())) {
-                            targets.push_back({ litKey->value, varVal->name, false, false, false });
-                        } else if (auto* refVal = dynamic_cast<RefDecl*>(entry.second.get())) {
-                            targets.push_back({ litKey->value, refVal->name, true, false, false });
-                        } else if (auto* stateVal = dynamic_cast<StateDecl*>(entry.second.get())) {
-                            targets.push_back({ litKey->value, stateVal->name, false, true, false });
-                        } else if (auto* localVal = dynamic_cast<LocalDecl*>(entry.second.get())) {
-                            targets.push_back({ litKey->value, localVal->name, false, false, true });
+                        if (dynamic_cast<Variable*>(entry.second.get()) ||
+                            dynamic_cast<RefDecl*>(entry.second.get()) ||
+                            dynamic_cast<StateDecl*>(entry.second.get()) ||
+                            dynamic_cast<LocalDecl*>(entry.second.get()) ||
+                            dynamic_cast<IndexAccess*>(entry.second.get()) ||
+                            dynamic_cast<DotAccess*>(entry.second.get())) {
+                            targets.push_back({ litKey->value, std::move(entry.second) });
                         } else {
                             validDestruct = false; break;
                         }
