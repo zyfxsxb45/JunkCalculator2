@@ -3177,11 +3177,8 @@ void BuiltinRegistry::registerFormatType() {
 
 void BuiltinRegistry::registerHigherOrder() {
 
-    reg("apply", { 2 }, [](const std::vector<Value>& args) -> Value {
-        auto cl = args[1].asFunction();
+    auto applyCore = [](const Value& argList, ObjClosure* cl) -> Value {
         std::vector<Value> unpackedArgs;
-        const Value& argList = args[0];
-
         if (argList.isObjType(ObjType::LIST)) {
             for (const auto& e : static_cast<ObjList*>(argList.asObj())->vec) unpackedArgs.push_back(e);
         } else if (argList.isObjType(ObjType::REAL_MATRIX)) {
@@ -3202,6 +3199,20 @@ void BuiltinRegistry::registerHigherOrder() {
             throw std::runtime_error("Type Error: apply() expects a function and an iterable argument list/vector.");
         }
         return safeCallFunction(cl, unpackedArgs);
+    };
+
+    reg("apply", { 1, 2 }, [applyCore](const std::vector<Value>& args) -> Value {
+        if (args.size() == 1) {
+            Value capturedFn = args[0];
+            if (!capturedFn.isFunctionClosure()) throw std::runtime_error("Type Error: apply() currying expects a function.");
+            auto bound = GcHeap::get().allocate<ObjClosure>(std::vector<std::string>{"v"}, std::vector<bool>{false}, "apply_curried", nullptr);
+            bound->boundSelf = capturedFn; // ★ 让 GC 追踪
+            bound->nativeFn = VM::makeNativeFn([applyCore](const std::vector<Value>& innerArgs) -> Value {
+                return applyCore(innerArgs[0], helpers::nativeSelfStack.back().asFunction());
+            });
+            return Value(bound);
+        }
+        return applyCore(args[0], args[1].asFunction());
         });
 
     auto mapCore = [](const Value& argList, ObjClosure* cl) -> Value {

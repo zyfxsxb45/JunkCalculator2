@@ -67,55 +67,40 @@ JC2 standard libraries loaded via `import`:
 
 ---
 
-## What's New in v2.3.3.0
+## What's New in v2.4.0.0
 
-Version 2.3.3.0 focuses on refactoring the compiler's scoping system and memory semantics, introducing new closure state modifiers, and expanding the Command-Line Interface (CLI) and related toolchains to further enhance the security and stability of the language core.
+Version 2.4.0.0 introduces significant architectural improvements, including a NaN-Boxing memory model and a raw pointer evaluation stack, resulting in substantial performance gains. The language syntax has been expanded with Uniform Function Call Syntax (UFCS), native namespaces, block-scoped variables, and element-wise matrix operations.
 
-### ⚠️ Breaking Changes & Migration Guide
+### Core Architecture & Performance
+- **NaN-Boxing Memory Model**: Replaced `std::variant` with a NaN-Boxing implementation for the dynamic `Value` type system, reducing memory footprint and improving dispatch speed. Introduced a dedicated boolean type (`ObjType::BOOL`).
+- **Raw Pointer Stack**: Replaced the `std::vector`-based evaluation stack in the VM with a raw pointer array, eliminating dynamic reallocation overhead.
+- **Compiler Optimizations**: Implemented constant folding and dead code elimination.
+- **Lazy Allocation**: Built-in closures are now lazily allocated and cached, significantly reducing Garbage Collector pressure during startup.
 
-This update unifies the underlying variable model processing logic. Older code may require the following migrations:
+### Language Features & Syntax
+- **Uniform Function Call Syntax (UFCS)**: Functions can now be called using method syntax (e.g., `data.map(f)` is equivalent to `map(data, f)`), enhancing functional chaining with the pipe operator.
+- **Namespaces**: Introduced the `namespace` keyword for modular encapsulation. Namespaces are compiled as IIFEs returning a dictionary, supporting upvalue-backed fields and `const` exports.
+- **Block-Scoped Variables**: Added the `local` keyword to explicitly declare variables bound to the current block (`{}`, `if`, `for`), preventing function-scope pollution.
+- **Multi-line Strings**: Added support for triple-quoted strings (`"""` or `'''`), fully compatible with `f` (interpolation) and `r` (raw) prefixes.
+- **Lambda Enhancements**: Anonymous functions now support `ref` parameter binding and variadic arguments (`...`).
+- **Callable Instances**: Added the `__call__` magic method, allowing class instances to be invoked like functions.
 
-1. **Deprecation of the `global` keyword**
-   - **Reason**: Introduced a more structured upward addressing mechanism.
-   - **Migration**: Replace all `global` keywords in old code with the newly introduced `ref` modifier. When referencing or modifying external variables inside a function, uniformly use `ref x = ...`.
-2. **Function Declaration Desugaring**
-   - **Impact**: Removed the privileged scope of explicit functions. All `func() = {}` declarations are now strictly equivalent to anonymous closure assignments `func = () => {}` at compile time. Function names are now completely identical to ordinary variables and follow the same auto-local shadowing rules.
-3. **Modifier Binding Scope Reduced to Identifier Level**
-   - **Impact**: In destructuring declarations, if you need to modify an upper-level variable or set a persistent state, you must individually mark the modifier for each specific variable. For example: `[ref a, state b, c] = [1, 2, 3]`.
-4. **Standardization of Built-in Function Names**
-   - **Impact**: The Set constructor and matrix element access functions have been renamed to align with standard naming conventions and prevent conflicts.
-   - **Migration**:
-     - Replace `Set(...)` with `set(...)`.
-     - Replace `get(A, r, c)` with `getElement(A, r, c)`.
-     - Replace `set(A, r, c, val)` with `setElement(A, r, c, val)`.
+### Memory & Object Model
+- **Value-Based Container Equality**: Refactored equality and hashing logic for containers (`List`, `Dict`, `Set`) to support deep, value-based comparisons.
+- **O(1) Hash Caching**: Introduced a lazy hash cache for frozen containers, reducing the time complexity of using them as dictionary keys or set elements from O(N) to O(1).
+- **Deep Cloning**: Added the `copy()` built-in function for deep cloning objects while perfectly preserving their frozen/unfrozen states.
 
-### Compiler & Core Scope Refactoring
-This update officially establishes a tri-state closure scope framework consisting of ordinary local assignment (Auto-local), persistent state (`state`), and reference modification (`ref`):
-- **New `ref` Modifier (Upper Scope Penetration)**: Breaks the default auto-local shadowing rule. Allows direct addressing and modification of identically named variables in the outer (or global) scope from within a closure. `ref` features strict existence validation, only permitting modifications to existing variables. If an attempt is made to penetrate and modify an undeclared variable, the VM will immediately intercept it and throw a runtime error, completely eliminating accidental global environment pollution caused by typos.
-- **New `state` Modifier (Private Persistent State)**: Grants closure variables local persistent memory capabilities. Variables marked with `state` are strictly initialized only once during the closure's lifecycle. Subsequent calls to the function will retain and allow modification of this state, perfectly implementing state machine mechanics without polluting the external space. If there is no explicit assignment (e.g., `state x`), it safely defaults to `none`.
-- **Refined Destructuring Assignment Semantics**: Optimized LHS (Left-Hand Side) addressing priority, enabling `ref` and `state` to seamlessly integrate into multi-dimensional array and dictionary destructuring syntax.
-- **Fixed Recursive Closures**: After desugaring functions into anonymous closures, the underlying system automatically captures its own name by reference, supporting seamless and safe self-recursive closure calls.
-- **Expression Expansion**: Restored full support for Comma Expressions and adjusted related parsing priorities to be compatible with the new scope modifiers.
+### Math Engine & Matrix Operations
+- **Element-wise Broadcasting**: Replaced implicit scalar broadcasting with a comprehensive suite of explicit element-wise operations (`addE`, `subE`, `mulE`, `divE`, `eqE`, `ltE`, `whereE`, etc.) supporting scalar-scalar, scalar-matrix, and matrix-matrix computations.
+- **Strict IEEE 754 Comparisons**: Removed fuzzy floating-point comparisons in favor of strict IEEE 754 standards. Added the `isapprox` function for tolerance-based comparisons.
+- **Forced Double-Precision Roots**: Added `sqrtD`, `cbrtD`, and `rootD` to bypass CAS symbolic promotion and directly compute numerical roots.
+- **Bitwise Operations**: Redefined bitwise NOT `~x` strictly as `-x-1` and removed implicit `BaseNum` conversions during bitwise operations.
 
-### Memory Safety & VM Engine Optimization
-- **Dedicated Global Modifier Instruction**: To support strict `ref` validation, the underlying VM introduces a new `OP_SET_GLOBAL_REF` opcode, completing variable existence checks and read/writes within O(1) single hash addressing complexity, achieving safety while maintaining zero performance overhead.
-- **Cyclic Reference Prevention**: Added object reference path detection for deep copy `clone()` and deep freeze `val()` to prevent stack overflows or memory exhaustion when operating on self-referencing containers (like self-contained dictionaries or lists).
-- **Streamlined Instruction Set**: Removed redundant function call opcodes from the underlying virtual machine, optimizing the instruction execution pipeline.
-
-### Command-Line Interface (CLI) & Toolchain
-- **New `jc` Alias**: When building via CMake, wrapper programs `jc` (Linux/macOS) and `jc.bat` (Windows) are automatically generated as minimalist aliases for the original `JunkCalculator2` command.
-- **Expanded CLI Startup Parameters**:
-  - Added `-e` / `--eval <code>` parameter, supporting direct evaluation of a single line of code passed via the command line, exiting immediately after.
-  - Added `-q` / `--quiet` silent startup mode, hiding the REPL banner and interactive prompt, facilitating seamless integration of JC2 with standard system pipelines for data stream processing.
-- **Refactored Help System**:
-  - Help documentation data has been fully migrated to an independent JSON file for backend driving.
-  - Supports querying specific subtopics directly in the system terminal (e.g., `jc --help scope`).
-  - The built-in REPL help query now includes fuzzy word matching based on Levenshtein distance.
-- **VS Code Extension Upgrade**: The extension now interfaces with the system's JSON API documentation parsing, providing complete intelligent auto-completion for native functions and keywords. Added **Signature Help (Parameter Hints)** that automatically pops up and highlights the active parameter as you type.
-
-### Math Engine (CAS) & Documentation
-- **CAS Evaluation Optimization**: Introduced `poly-exp` closed-form calculation shortcut rules in the symbolic computation engine to prevent crashes caused by excessive recursion depth during limit calculations, polynomial differentiation, or integration.
-- **Complete Documentation Coverage**: Updated the system's built-in documentation data structure, comprehensively supplementing standard specifications and example code for system constants, control functions, and class magic methods (e.g., `__str__`, `__add__`).
+### Type System & Tooling
+- **Duck Typing Contracts**: Enhanced runtime type assertions with behavioral contracts (`iterable`, `callable`, `indexable`, `hashable`) and new type annotations (`str`, `whole`, `exact`).
+- **Dynamic Compilation**: Added `compileFile()` and `compileCode()` to dynamically compile external scripts or strings into bytecode closures at runtime.
+- **System Stability**: Implemented a safe `Ctrl+C` thread interrupt mechanism. Embedded application icon and version metadata for Windows executables.
+- **VS Code Extension**: Upgraded the language server with hover providers, document symbol outlines, and code snippets.
 
 ---
 

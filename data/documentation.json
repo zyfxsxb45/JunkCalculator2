@@ -1,7 +1,7 @@
 {
   "topics": {
     "main": [
-      "=================== Junk Calculator 2.3.3.0 — Help ===================",
+      "=================== Junk Calculator 2.4.0.0 — Help ===================",
       "",
       "  Session Commands",
       "  ────────────────────────────────────────────────────────────────────",
@@ -5941,8 +5941,8 @@
       "examples": ["removeKey(d, \"a\")"]
     },
     "apply": {
-      "signature": "args.apply(f)",
-      "desc": "Calls function f with arguments unpacked from a list or array.",
+      "signature": "args.apply(f) / apply(f)",
+      "desc": "Calls function f with arguments unpacked from a list or array. Supports currying.",
       "examples": ["[1, 2, 3].apply(print)"]
     },
     "any": {
