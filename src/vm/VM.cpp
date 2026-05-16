@@ -21,7 +21,12 @@ namespace jc {
             exceptionHandlers.pop_back();
 
             // 剥除所有比 catch 更深的函数堆栈
-            frameCount = handler.frameIndex + 1;
+            while (frameCount > handler.frameIndex + 1) {
+                frames[frameCount - 1].selfContext = Value::none();
+                frames[frameCount - 1].classContext = Value::none();
+                frames[frameCount - 1].upvalues = nullptr;
+                frameCount--;
+            }
 
             // 回复当时的变量栈大小
             closeUpvalues(handler.stackSize);
@@ -382,7 +387,12 @@ namespace jc {
         mainFn->chunk = c;
         closeUpvalues(0);
         setStackSize(0);
-        frameCount = 0;
+        while (frameCount > 0) {
+            frames[frameCount - 1].selfContext = Value::none();
+            frames[frameCount - 1].classContext = Value::none();
+            frames[frameCount - 1].upvalues = nullptr;
+            frameCount--;
+        }
         exceptionHandlers.clear();
         CallFrame mainFrame;
         mainFrame.function = mainFn.get();
@@ -467,7 +477,12 @@ namespace jc {
         catch (const StackTracedException&) {
             currentTargetFrameDepth = savedTargetFrameDepth;
             pendingRefWritebacks = savedRefWritebacks;
-            frameCount = boundary;
+            while (frameCount > boundary) {
+                frames[frameCount - 1].selfContext = Value::none();
+                frames[frameCount - 1].classContext = Value::none();
+                frames[frameCount - 1].upvalues = nullptr;
+                frameCount--;
+            }
             closeUpvalues(newFrame.stackBase);
             setStackSize(newFrame.stackBase);
             throw;
@@ -475,7 +490,12 @@ namespace jc {
         catch (...) {
             currentTargetFrameDepth = savedTargetFrameDepth;
             pendingRefWritebacks = savedRefWritebacks;
-            frameCount = boundary;
+            while (frameCount > boundary) {
+                frames[frameCount - 1].selfContext = Value::none();
+                frames[frameCount - 1].classContext = Value::none();
+                frames[frameCount - 1].upvalues = nullptr;
+                frameCount--;
+            }
             closeUpvalues(newFrame.stackBase);
             setStackSize(newFrame.stackBase);
             throw;
@@ -4152,6 +4172,9 @@ namespace jc {
             exceptionHandlers.pop_back();
         }
 
+        frames[frameCount - 1].selfContext = Value::none();
+        frames[frameCount - 1].classContext = Value::none();
+        frames[frameCount - 1].upvalues = nullptr;
         frameCount--;
 
         // ★ 退出判定
