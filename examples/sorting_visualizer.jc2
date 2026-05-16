@@ -27,8 +27,8 @@ class VisualSorter {
         self.bar_w = double(W) / N
         self.data = list()
         self.im = image.img(W, H, "#111118")
-        self.win = none()
-        self.stream_sock = none()
+        self.win = none
+        self.stream_sock = none
         self.frame_count = 0
         self.active_indices = set() 
     }
@@ -46,21 +46,21 @@ class VisualSorter {
             self.stream_sock = socket.connect("127.0.0.1", port)
         } catch (e) {
             print(f"  [Warning] FFmpeg stream on port {port} not found. Skipping video export.")
-            self.stream_sock = none()
+            self.stream_sock = none
         }
     }
 
     disconnect() = {
-        if (self.stream_sock != none()) {
+        if (self.stream_sock != none) {
             self.stream_sock.close()
-            self.stream_sock = none()
+            self.stream_sock = none
         }
         try { deleteFile("stream_buffer.bmp") } catch(e) {}
     }
 
     // Abstracted rendering layer (invoked directly by algorithms)
     render_frame() = {
-        if (self.win != none() && !self.win.isOpen()) { return false }
+        if (self.win != none && !self.win.isOpen()) { return false }
         self.im.clear("#111118")
         for (k in range(self.N)) {
             val = self.data[k]
@@ -68,8 +68,8 @@ class VisualSorter {
             color = (double(k) in self.active_indices) ? "#FFFFFF" : val_to_rgb(val, self.N)
             self.im.fillRect(int(k * self.bar_w), self.H - bar_h, int(self.bar_w), bar_h, color)
         }
-        if (self.win != none()) { self.win.show(self.im) }
-        if (self.stream_sock != none()) {
+        if (self.win != none) { self.win.show(self.im) }
+        if (self.stream_sock != none) {
             // ★ Defense Net: Silently ignore I/O locking errors caused by FFmpeg stream pulling.
             // This guarantees the GUI remains 100% responsive even if the disk lags behind.
             try {
@@ -133,7 +133,7 @@ insertion_sort(vis) = {
 quick_sort(vis) = {
     qs(low, high) = {
         if (low < high) {
-            if (!vis.win.isOpen()) { return none() }
+            if (!vis.win.isOpen()) { return none }
             pivot = vis.data[high]
             i = low - 1
             for (j = low; j < high; j += 1) {
@@ -169,7 +169,7 @@ merge_sort(vis) = {
         
         i = 0; j = 0; k = l
         while (i < n1 && j < n2) {
-             if (!vis.win.isOpen()) { return none() }
+             if (!vis.win.isOpen()) { return none }
              if (L[i] <= R[j]) {
                  vis.data[k] = L[i]
                  i += 1
@@ -188,7 +188,7 @@ merge_sort(vis) = {
     
     ms(l, r) = {
         if (l < r) {
-            if (!vis.win.isOpen()) { return none() }
+            if (!vis.win.isOpen()) { return none }
             m = l + int((r - l) / 2)
             ms(l, m)
             ms(m + 1, r)
