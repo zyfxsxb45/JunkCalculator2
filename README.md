@@ -78,6 +78,7 @@ Version 2.4.0.0 introduces significant architectural improvements, including a N
 - **Lazy Allocation**: Built-in closures are now lazily allocated and cached, significantly reducing Garbage Collector pressure during startup.
 
 ### Language Features & Syntax
+- **Complex Destructuring**: Destructuring assignments now support complex l-values, allowing direct assignment to array indices and object properties (e.g., `[a[1], b.prop] = [1, 2]`).
 - **Uniform Function Call Syntax (UFCS)**: Functions can now be called using method syntax (e.g., `data.map(f)` is equivalent to `map(data, f)`), enhancing functional chaining with the pipe operator.
 - **Namespaces**: Introduced the `namespace` keyword for modular encapsulation. Namespaces are compiled as IIFEs returning a dictionary, supporting upvalue-backed fields and `const` exports.
 - **Block-Scoped Variables**: Added the `local` keyword to explicitly declare variables bound to the current block (`{}`, `if`, `for`), preventing function-scope pollution.
