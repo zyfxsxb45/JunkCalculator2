@@ -103,6 +103,12 @@ Version 2.4.0.0 introduces significant architectural improvements, including a N
 - **System Stability**: Implemented a safe `Ctrl+C` thread interrupt mechanism. Embedded application icon and version metadata for Windows executables.
 - **VS Code Extension**: Upgraded the language server with hover providers, document symbol outlines, and code snippets.
 
+### Breaking Changes
+- **True Boolean Type**: Introduced a native `bool` type. Predicate functions now return `bool` (`true`/`false`) instead of double-precision floats (`1.0`/`0.0`).
+- **Element-wise Function Renaming**: The old `*S` series scalar broadcasting functions (e.g., `addS`, `mulS`) have been upgraded and renamed to the `*E` series (e.g., `addE`, `mulE`).
+- **`none` Keyword**: Removed the `none()` built-in function; `none` is now a native language keyword.
+- **Higher-Order Function Signatures**: To adapt to Uniform Function Call Syntax (UFCS), the parameter order for higher-order functions like `map` and `filter` has been adjusted. The function parameter now comes after the container parameter (e.g., `map(data, func)`).
+
 ---
 
 ## Building

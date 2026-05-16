@@ -126,7 +126,7 @@
       "    d.a = 99                       dictionary dot operator",
       "    f(x, y = 0) = x + y            function with default parameter",
       "    f(a, ...rest) = sum(rest)      variadic (rest) parameters",
-      "    apply(f, [1, 2, 3])            unpack arguments (spread)",
+      "    apply([1, 2, 3], f)            unpack arguments (spread)",
       "    (x) => x^2                     lambda expression",
       "    math_func(_, 10)               partial application (auto-currying)",
       "    class Dog extends Animal {...} inheritance",
