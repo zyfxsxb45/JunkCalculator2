@@ -61,6 +61,7 @@ set(JC2_SOURCES
     "src/frontend/Lexer.cpp" "src/frontend/Parser.cpp" "src/frontend/Compiler.cpp"
     "src/vm/VM.cpp" "src/vm/BuiltinRegistry.cpp" "src/main.cpp"
     "src/cas/Symbolic.cpp" "src/cas/Integration.cpp" "src/cas/Factorization.cpp" "src/cas/Groebner.cpp"
+    "src/resource.rc"
 )
 
 add_executable(JunkCalculator2 ${JC2_HEADERS} ${JC2_SOURCES})
