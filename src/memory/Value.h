@@ -1326,9 +1326,6 @@ namespace jc {
         if (lhs.isInt32() && rhs.isInt32()) return lhs.asInt32() == rhs.asInt32();
         if (lhs.isNumber() && rhs.isNumber()) return lhs.asNumber() == rhs.asNumber();
         if (lhs.isNone() || rhs.isNone()) return false;
-        if (lhs.isBool() && rhs.isBool()) return lhs.asBool() == rhs.asBool();
-        if (lhs.isBool() && rhs.isNumber()) return (lhs.asBool() ? 1.0 : 0.0) == rhs.asNumber();
-        if (rhs.isBool() && lhs.isNumber()) return (rhs.asBool() ? 1.0 : 0.0) == lhs.asNumber();
 
         // 同类型快速通道
         if (lhs.isObj() && rhs.isObj() && lhs.asObj()->type == rhs.asObj()->type) {
