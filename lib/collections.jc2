@@ -264,7 +264,7 @@ class BST {
     _inorderTraversal(node: any, res: list) = {
         if (node != none) {
             self._inorderTraversal(node.left, res)
-            push(res, node.val)
+            res.push(node.val)
             self._inorderTraversal(node.right, res)
         }
     }

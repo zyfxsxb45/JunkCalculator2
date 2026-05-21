@@ -101,7 +101,7 @@ http_get(url: string) -> HttpResponse = {
     t_port = target["port"]
     t_path = target["path"]
 
-    client = TcpSocket(t_host, t_port).connect()
+    client = net.TcpSocket(t_host, t_port).connect()
 
     req = f"GET {t_path} HTTP/1.1\r\n"
     req += f"Host: {t_host}\r\n"
