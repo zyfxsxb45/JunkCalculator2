@@ -4050,7 +4050,7 @@ namespace jc {
 
         if (needle.isString() && haystack.isString()) {
             bool found = haystack.asString().find(needle.asString()) != std::string::npos;
-            push(Value(found ? 1.0 : 0.0));
+            push(Value(found));
             return;
         }
         if (haystack.isString()) {
@@ -4062,11 +4062,11 @@ namespace jc {
             const auto& m = static_cast<ObjRealMatrix*>(haystack.asObj())->mat;
             double target;
             try { target = needle.asDouble(); }
-            catch (...) { push(Value(0.0)); return; }
+            catch (...) { push(Value(false)); return; }
             for (const auto& v : m.rawData()) {
-                if (v == target) { push(Value(1.0)); return; }
+                if (v == target) { push(Value(true)); return; }
             }
-            push(Value(0.0));
+            push(Value(false));
             return;
         }
 
@@ -4074,11 +4074,11 @@ namespace jc {
             const auto& m = static_cast<ObjComplexMatrix*>(haystack.asObj())->mat;
             Complex target;
             try { target = needle.asComplex(); }
-            catch (...) { push(Value(0.0)); return; }
+            catch (...) { push(Value(false)); return; }
             for (const auto& v : m.rawData()) {
-                if (v == target) { push(Value(1.0)); return; }
+                if (v == target) { push(Value(true)); return; }
             }
-            push(Value(0.0));
+            push(Value(false));
             return;
         }
 
@@ -4089,9 +4089,9 @@ namespace jc {
             const auto& m = static_cast<ObjStringMatrix*>(haystack.asObj())->mat;
             const auto& target = needle.asString();
             for (const auto& v : m.rawData()) {
-                if (v == target) { push(Value(1.0)); return; }
+                if (v == target) { push(Value(true)); return; }
             }
-            push(Value(0.0));
+            push(Value(false));
             return;
         }
 
@@ -4100,42 +4100,42 @@ namespace jc {
             for (const auto& e : L) {
                 try {
                     if (Value::equals(needle, e)) {
-                        push(Value(1.0));
+                        push(Value(true));
                         return;
                     }
                 }
                 catch (...) {}
             }
-            push(Value(0.0));
+            push(Value(false));
             return;
         }
 
         if (haystack.isObjType(ObjType::DICT)) {
             auto d = static_cast<ObjDict*>(haystack.asObj());
-            push(Value(d->keyMap.find(needle) != d->keyMap.end() ? 1.0 : 0.0));
+            push(Value(d->keyMap.find(needle) != d->keyMap.end()));
             return;
         }
 
         if (haystack.isObjType(ObjType::NAMESPACE)) {
             auto ns = static_cast<ObjNamespace*>(haystack.asObj());
             if (!needle.isString()) {
-                push(Value(0.0));
+                push(Value(false));
                 return;
             }
-            push(Value(ns->fields.find(needle.asString()) != ns->fields.end() ? 1.0 : 0.0));
+            push(Value(ns->fields.find(needle.asString()) != ns->fields.end()));
             return;
         }
 
         if (haystack.isObjType(ObjType::SET)) {
             auto s = static_cast<ObjSet*>(haystack.asObj());
-            push(Value(s->keys.find(needle) != s->keys.end() ? 1.0 : 0.0));
+            push(Value(s->keys.find(needle) != s->keys.end()));
             return;
         }
 
         if (haystack.isInstance()) {
             auto method = findDunder(haystack, DUNDER_CONTAINS);
             if (method) {
-                push(Value(callDunder(haystack, DUNDER_CONTAINS, { needle }).truthy() ? 1.0 : 0.0));
+                push(Value(callDunder(haystack, DUNDER_CONTAINS, { needle }).truthy()));
                 return;
             }
         }
