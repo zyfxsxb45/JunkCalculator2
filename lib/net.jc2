@@ -11,7 +11,7 @@ class TcpSocket {
     init(host: string, port: int) = {
         self.host = host
         self.port = port
-        self.sock = none()
+        self.sock = none
     }
 
     connect() -> TcpSocket = {
@@ -22,7 +22,7 @@ class TcpSocket {
     close() = {
         if (!self.sock.isnone()) {
             self.sock.close()
-            self.sock = none()
+            self.sock = none
         }
     }
 
@@ -46,7 +46,7 @@ class TcpServer {
     init(host: string, port: int) = {
         self.host = host
         self.port = port
-        self.sock = none()
+        self.sock = none
     }
 
     bind() -> TcpServer = {
@@ -66,7 +66,7 @@ class TcpServer {
     close() = {
         if (!self.sock.isnone()) {
             self.sock.close()
-            self.sock = none()
+            self.sock = none
         }
     }
 }

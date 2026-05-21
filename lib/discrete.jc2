@@ -104,6 +104,8 @@ class Prop {
     isSatisfiable() -> bool       = return !self.isContradiction()
     equiv(other: Prop) -> bool    = return self.iff(other).isTautology()
 
+    __call__(env: dict) -> int    = return self.eval(env)
+
     table() -> list = {
         varList = self.vars().toList().sort(); n = varList.len()
         total = 2 ^ n
@@ -202,6 +204,7 @@ class Relation {
     }
     
     hasPair(a: any, b: any) -> bool = return self._mp(a, b) in self.R
+    __call__(a: any, b: any) -> bool = return self.hasPair(a, b)
 
     // ── Property Tests ──
     isReflexive() -> bool = {
@@ -408,11 +411,13 @@ class Graph {
         return false
     }
     
+    __call__(u: any, v: any) -> bool = return self.hasEdge(u, v)
+
     getWeight(u: any, v: any) -> any = {
         if (self.adj.hasKey(u)) {
             for (e in self.adj[u]) { if (e[0] == v) return e[1] }
         }
-        return none()
+        return none
     }
 
     neighbors(v: any) -> list = {
@@ -674,7 +679,7 @@ if (isfunction(__register_help)) {
     A & B  /  A | B  /  -A     AND, OR, NOT (operator overloading)
     A.implies(B) / A.iff(B)    Material implication and Biconditional
 
-    p.eval(env)                Evaluate with a variable binding Dict
+    p.eval(env) / p(env)       Evaluate with a variable binding Dict (Callable)
     p.vars()                   Collect all variables (Set)
     p.table()                  Return full truth table data
     p.printTable()             Print formatted truth table
@@ -693,7 +698,7 @@ if (isfunction(__register_help)) {
     r = Relation(set(1,2))     Create relation over base Set S
     r.addPair(a, b)            Add relation (checks bounds in S)
     r.removePair(a, b)         Remove relation securely
-    r.hasPair(a, b)            Presence query
+    r.hasPair(a, b) / r(a, b)  Presence query (Callable)
     r.clearPairs()             Delete all relations
 
     r.isReflexive()            r.isSymmetric()      r.isTransitive()
@@ -718,7 +723,7 @@ if (isfunction(__register_help)) {
     g.edges()                  Return all edges (List)
     g.neighbors(v)             Return all adjacent vertices (List)
     g.hasVertex(v)             Vertex presence check
-    g.hasEdge(u, v)            Edge presence check
+    g.hasEdge(u, v) / g(u, v)  Edge presence check (Callable)
     g.getWeight(u, v)          Edge weight retrieval
     g.inDegree(v)              g.outDegree(v)
     

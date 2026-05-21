@@ -176,7 +176,7 @@ class PriorityQueue {
 
     _siftUp(idx: int) = {
         while (idx > 0) {
-            parent = int((idx - 1) / 2)
+            parent = idiv(idx - 1, 2)
             if (self.cmp(self.data[idx], self.data[parent])) {
                 tmp = self.data[idx]
                 self.data[idx] = self.data[parent]

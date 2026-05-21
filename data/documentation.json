@@ -4267,7 +4267,7 @@
       ]
     },
     "map": {
-      "signature": "v.map(f) / map(f)",
+      "signature": "v.map(f) / map(v, f) / map(f)",
       "desc": "Applies function f to each element of v. If only f is provided, returns a curried function.",
       "examples": [
         "[1, 2, 3].map((x) => x^2)",
@@ -4275,21 +4275,21 @@
       ]
     },
     "filter": {
-      "signature": "v.filter(f) / filter(f)",
+      "signature": "v.filter(f) / filter(v, f) / filter(f)",
       "desc": "Keeps elements of v for which function f returns a truthy value. Supports currying.",
       "examples": [
         "[-1, 0, 1].filter((x) => x > 0)"
       ]
     },
     "reduce": {
-      "signature": "v.reduce(f, [init]) / reduce(f, [init])",
+      "signature": "v.reduce(f, [init]) / reduce(v, f, [init]) / reduce(f, [init])",
       "desc": "Reduces v to a single value using a left fold with function f. Supports currying.",
       "examples": [
         "[1, 2, 3].reduce((a, b) => a + b)"
       ]
     },
     "sort": {
-      "signature": "v.sort([cmp]) / sort(cmp)",
+      "signature": "v.sort([cmp]) / sort(v, [cmp]) / sort(cmp)",
       "desc": "Stably sorts a list or array using natural ordering. Optionally accepts a custom comparator function. Supports currying.",
       "examples": [
         "[3, 1, 2].sort()"
@@ -5944,23 +5944,23 @@
       "examples": ["removeKey(d, \"a\")"]
     },
     "apply": {
-      "signature": "args.apply(f) / apply(f)",
+      "signature": "args.apply(f) / apply(args, f) / apply(f)",
       "desc": "Calls function f with arguments unpacked from a list or array. Supports currying.",
       "examples": ["[1, 2, 3].apply(print)"]
     },
     "any": {
-      "signature": "v.any(f)",
-      "desc": "Returns true if any element in v satisfies function f.",
+      "signature": "v.any(f) / any(v, f) / any(f)",
+      "desc": "Returns true if any element in v satisfies function f. Supports currying.",
       "examples": ["[-1, 1].any((x) => x > 0)"]
     },
     "all": {
-      "signature": "v.all(f)",
-      "desc": "Returns true if all elements in v satisfy function f.",
+      "signature": "v.all(f) / all(v, f) / all(f)",
+      "desc": "Returns true if all elements in v satisfy function f. Supports currying.",
       "examples": ["[1, 2].all((x) => x > 0)"]
     },
     "countIf": {
-      "signature": "v.countIf(f)",
-      "desc": "Counts the number of elements in v that satisfy function f.",
+      "signature": "v.countIf(f) / countIf(v, f) / countIf(f)",
+      "desc": "Counts the number of elements in v that satisfy function f. Supports currying.",
       "examples": ["[-1, 1, 2].countIf((x) => x > 0)"]
     },
     "solveE": {
@@ -6584,7 +6584,7 @@
     "true": {
       "signature": "true",
       "desc": [
-        "Boolean constant, equal to 1.0.",
+        "Native boolean constant, acts as 1.0 in math.",
         "It is a language keyword and cannot be overwritten or deleted.",
         "See also: /help scope, /help control"
       ],
@@ -6595,7 +6595,7 @@
     "false": {
       "signature": "false",
       "desc": [
-        "Boolean constant, equal to 0.0.",
+        "Native boolean constant, acts as 0.0 in math.",
         "It is a language keyword and cannot be overwritten or deleted.",
         "See also: /help scope, /help control"
       ],

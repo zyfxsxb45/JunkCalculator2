@@ -365,6 +365,8 @@ class Regex {
         return res
     }
 
+    __call__(text: string) = return self.search(text)
+
     __str__() = f"Regex(r\"{self.pattern}\")"
 }
 
@@ -399,6 +401,7 @@ if (isfunction(__register_help)) {
     r = Regex(r"(\w+) (\d+)")      // Instantiate Regex object
     r.test("Alice 30")             // → true
     m = r.search("Bob 25")         // Returns a ReMatch object
+    r("Bob 25")                    // Callable syntax sugar for search()
     m.matched                      // → "Bob 25"
     m.groups[0]                    // → "Bob"
     m.start, m.end                 // → Matching span indices

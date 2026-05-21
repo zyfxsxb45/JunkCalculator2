@@ -87,14 +87,12 @@ class ByteBuffer {
     save(path: string) = self.buf.writeFile(path)
 }
 
-// ─── Global Factory API (Singleton Class) ─────────────────────
+// ─── Global Factory API (Namespace) ───────────────────────────
 
-class BufferFactory {
+namespace Buffer {
     alloc(size: int) -> ByteBuffer        = return ByteBuffer(bytes.alloc(size))
     fromFile(path: string) -> ByteBuffer  = return ByteBuffer(bytes.readFile(path))
 }
-
-Buffer = BufferFactory()
 
 // ─── Dynamic Help Registry ────────────────────────────────────
 
