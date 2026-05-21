@@ -11,6 +11,8 @@
 
 namespace jc {
 
+    class Value;
+
     enum class ObjType {
         STRING, BIGINT, FRACTION, COMPLEX, BASENUM,
         REAL_MATRIX, COMPLEX_MATRIX, STRING_MATRIX,
@@ -89,11 +91,35 @@ namespace jc {
         size_t threshold() const { return gcThreshold_; }
         size_t allocsSinceGc() const { return allocsSinceGc_; }
 
+        void pushTempRoot(Obj* obj) { tempObjRoots_.push_back(obj); }
+        void popTempRoot() { tempObjRoots_.pop_back(); }
+        const std::vector<Obj*>& getTempObjRoots() const { return tempObjRoots_; }
+
+        void pushTempValueRoot(Value* val) { tempValueRoots_.push_back(val); }
+        void popTempValueRoot() { tempValueRoots_.pop_back(); }
+        const std::vector<Value*>& getTempValueRoots() const { return tempValueRoots_; }
+
     private:
         GcHeap() = default;
+        std::vector<Obj*> tempObjRoots_;
+        std::vector<Value*> tempValueRoots_;
         Obj* objects_ = nullptr;
         size_t allocsSinceGc_ = 0;
         size_t gcThreshold_ = 256;
+    };
+
+    struct GcObjGuard {
+        GcObjGuard(Obj* obj) { GcHeap::get().pushTempRoot(obj); }
+        ~GcObjGuard() { GcHeap::get().popTempRoot(); }
+        GcObjGuard(const GcObjGuard&) = delete;
+        GcObjGuard& operator=(const GcObjGuard&) = delete;
+    };
+
+    struct GcValueGuard {
+        GcValueGuard(Value& val) { GcHeap::get().pushTempValueRoot(&val); }
+        ~GcValueGuard() { GcHeap::get().popTempValueRoot(); }
+        GcValueGuard(const GcValueGuard&) = delete;
+        GcValueGuard& operator=(const GcValueGuard&) = delete;
     };
 
 } // namespace jc

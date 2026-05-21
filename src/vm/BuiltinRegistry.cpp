@@ -2501,6 +2501,7 @@ void BuiltinRegistry::registerArrayFunctions() {
         Value arg = args[0];
         if (arg.isObjType(ObjType::LIST)) {
             ObjList* result = GcHeap::get().allocate<ObjList>();
+            GcObjGuard guard(result);
             for (const auto& e : static_cast<ObjList*>(arg.asObj())->vec) {
                 bool found = false;
                 for (const auto& r : result->vec) {
@@ -2741,7 +2742,16 @@ void BuiltinRegistry::registerStringMatrix() {
 // [19] Dict / Instance 属性大一统透视 API
 // =================================================================
 void BuiltinRegistry::registerDictFunctions() {
-    reg("dict", {}, [](const std::vector<Value>& args) -> Value { ObjDict* d = GcHeap::get().allocate<ObjDict>(); if (args.size() % 2 != 0) throw std::runtime_error("Runtime Error: dict() expects even number of arguments."); for (size_t i = 0; i < args.size(); i += 2) { d->keyMap[args[i]] = d->elements.size(); d->elements.push_back({args[i], args[i + 1]}); } return Value(d); });
+    reg("dict", {}, [](const std::vector<Value>& args) -> Value { 
+        if (args.size() % 2 != 0) throw std::runtime_error("Runtime Error: dict() expects even number of arguments."); 
+        ObjDict* d = GcHeap::get().allocate<ObjDict>();
+        GcObjGuard guard(d);
+        for (size_t i = 0; i < args.size(); i += 2) { 
+            d->keyMap[args[i]] = d->elements.size(); 
+            d->elements.push_back({args[i], args[i + 1]}); 
+        } 
+        return Value(d); 
+    });
 
     reg("keys", { 1 }, [](const std::vector<Value>& args) -> Value {
         if (args[0].isObjType(ObjType::NAMESPACE)) {
@@ -3149,14 +3159,17 @@ void BuiltinRegistry::registerFormatType() {
     reg("format", {}, [](const std::vector<Value>& args) -> Value {
         if (args.size() < 1) throw std::runtime_error("Runtime Error: format() expects at least 1 argument.");
         if (!args[0].isString()) throw std::runtime_error("Type Error: format() first argument must be a format string.");
-        std::vector<Value> pa = args;
-        for (size_t i = 1; i < pa.size(); ++i) {
-            if (pa[i].isInstance()) {
-                auto inst = pa[i].asInstance();
+        ObjList* paList = GcHeap::get().allocate<ObjList>();
+        GcObjGuard guard(paList);
+        paList->vec = args;
+        for (size_t i = 1; i < paList->vec.size(); ++i) {
+            if (paList->vec[i].isInstance()) {
+                auto inst = paList->vec[i].asInstance();
                 auto [found, result] = tryCallDunder(inst, "__str__");
-                if (found) pa[i] = result;
+                if (found) paList->vec[i] = result;
             }
         }
+        std::vector<Value>& pa = paList->vec;
         std::string fmt = pa[0].asString(); std::string result; size_t argIdx = 1;
         for (size_t i = 0; i < fmt.size(); ++i) {
             if (fmt[i] == '{' && i + 1 < fmt.size() && fmt[i + 1] == '}') { if (argIdx >= pa.size()) throw std::runtime_error("Runtime Error: format() too few arguments."); std::ostringstream oss; oss << pa[argIdx++]; result += oss.str(); i += 1; }
@@ -3178,27 +3191,30 @@ void BuiltinRegistry::registerFormatType() {
 void BuiltinRegistry::registerHigherOrder() {
 
     auto applyCore = [](const Value& argList, ObjClosure* cl) -> Value {
-        std::vector<Value> unpackedArgs;
+        ObjList* unpackedList = GcHeap::get().allocate<ObjList>();
+        GcObjGuard guard(unpackedList);
+        
         if (argList.isObjType(ObjType::LIST)) {
-            for (const auto& e : static_cast<ObjList*>(argList.asObj())->vec) unpackedArgs.push_back(e);
+            for (const auto& e : static_cast<ObjList*>(argList.asObj())->vec) unpackedList->vec.push_back(e);
         } else if (argList.isObjType(ObjType::REAL_MATRIX)) {
             auto& m = static_cast<ObjRealMatrix*>(argList.asObj())->mat;
             if (m.getRows() != 1 && m.getCols() != 1) throw std::runtime_error("Type Error: apply() expects 1D vector.");
-            for (const auto& d : m.rawData()) unpackedArgs.push_back(Value(d));
+            for (const auto& d : m.rawData()) unpackedList->vec.push_back(Value(d));
         } else if (argList.isObjType(ObjType::COMPLEX_MATRIX)) {
             auto& m = static_cast<ObjComplexMatrix*>(argList.asObj())->mat;
             if (m.getRows() != 1 && m.getCols() != 1) throw std::runtime_error("Type Error: apply() expects 1D vector.");
-            for (const auto& d : m.rawData()) unpackedArgs.push_back(Value(d));
+            for (const auto& d : m.rawData()) unpackedList->vec.push_back(Value(d));
         } else if (argList.isObjType(ObjType::STRING_MATRIX)) {
             auto& m = static_cast<ObjStringMatrix*>(argList.asObj())->mat;
             if (m.getRows() != 1 && m.getCols() != 1) throw std::runtime_error("Type Error: apply() expects 1D vector.");
-            for (const auto& d : m.rawData()) unpackedArgs.push_back(Value(d));
+            for (const auto& d : m.rawData()) unpackedList->vec.push_back(Value(d));
         } else if (argList.isString()) {
-            for (char c : argList.asString()) unpackedArgs.push_back(Value(std::string(1, c)));
+            for (char c : argList.asString()) unpackedList->vec.push_back(Value(std::string(1, c)));
         } else {
             throw std::runtime_error("Type Error: apply() expects a function and an iterable argument list/vector.");
         }
-        return safeCallFunction(cl, unpackedArgs);
+        
+        return safeCallFunction(cl, unpackedList->vec);
     };
 
     reg("apply", { 1, 2 }, [applyCore](const std::vector<Value>& args) -> Value {
@@ -3220,6 +3236,7 @@ void BuiltinRegistry::registerHigherOrder() {
 
         if (argList.isObjType(ObjType::LIST)) {
             ObjList* result = GcHeap::get().allocate<ObjList>();
+            GcObjGuard guard(result);
             for (const auto& e : static_cast<ObjList*>(argList.asObj())->vec) {
                 jc::checkInterrupt();
                 result->vec.push_back(safeCallFunction(cl, { e }));
@@ -3243,6 +3260,7 @@ void BuiltinRegistry::registerHigherOrder() {
             }
 
             ObjList* fallback = GcHeap::get().allocate<ObjList>();
+            GcObjGuard guard(fallback);
             bool typeConflict = false;
             bool hasString = false, hasComp = false;
             std::vector<double> rd; std::vector<Complex> rc; std::vector<std::string> rs;
@@ -3273,12 +3291,13 @@ void BuiltinRegistry::registerHigherOrder() {
                 }
             }
 
-            if (typeConflict) {
-                for (size_t i = fallback->vec.size(); i < flatVals.size(); ++i) {
-                    jc::checkInterrupt();
-                    fallback->vec.push_back(safeCallFunction(cl, { flatVals[i] }));
+                if (typeConflict) {
+                    for (size_t i = fallback->vec.size(); i < flatVals.size(); ++i) {
+                        jc::checkInterrupt();
+                        fallback->vec.push_back(safeCallFunction(cl, { flatVals[i] }));
+                    }
+                    return Value(fallback);
                 }
-                return Value(fallback);
             }
             if (hasString) return Value(StringMatrix(rows, cols, rs));
             if (hasComp) return Value(ComplexMatrix(rows, cols, rc));
@@ -3306,6 +3325,7 @@ void BuiltinRegistry::registerHigherOrder() {
 
         if (argList.isObjType(ObjType::LIST)) {
             ObjList* result = GcHeap::get().allocate<ObjList>();
+            GcObjGuard guard(result);
             for (const auto& e : static_cast<ObjList*>(argList.asObj())->vec) {
                 jc::checkInterrupt();
                 if (safeCallFunction(cl, { e }).truthy()) result->vec.push_back(e);
@@ -3364,7 +3384,11 @@ void BuiltinRegistry::registerHigherOrder() {
             Value acc; size_t startIdx = 0;
             if (!initVal.isNone()) { acc = initVal; }
             else { if (l->vec.empty()) throw std::runtime_error("Runtime Error: reduce() on empty."); acc = l->vec[0]; startIdx = 1; }
-            for (size_t i = startIdx; i < l->vec.size(); ++i) { jc::checkInterrupt(); acc = safeCallFunction(cl, { acc, l->vec[i] }); }
+            GcValueGuard guard(acc);
+            for (size_t i = startIdx; i < l->vec.size(); ++i) { 
+                jc::checkInterrupt(); 
+                acc = safeCallFunction(cl, { acc, l->vec[i] }); 
+            }
             return acc;
         } else if (argList.isObjType(ObjType::REAL_MATRIX) || argList.isObjType(ObjType::COMPLEX_MATRIX) || argList.isObjType(ObjType::STRING_MATRIX)) {
             std::vector<Value> flatVals;
@@ -3378,7 +3402,11 @@ void BuiltinRegistry::registerHigherOrder() {
             Value acc; size_t startIdx = 0;
             if (!initVal.isNone()) { acc = initVal; }
             else { if (flatVals.empty()) throw std::runtime_error("Runtime Error: reduce() on empty."); acc = flatVals[0]; startIdx = 1; }
-            for (size_t i = startIdx; i < flatVals.size(); ++i) { jc::checkInterrupt(); acc = safeCallFunction(cl, { acc, flatVals[i] }); }
+            GcValueGuard guard(acc);
+            for (size_t i = startIdx; i < flatVals.size(); ++i) { 
+                jc::checkInterrupt(); 
+                acc = safeCallFunction(cl, { acc, flatVals[i] }); 
+            }
             return acc;
         }
         throw std::runtime_error("Type Error: reduce() expects a vector/matrix/list.");
@@ -3502,6 +3530,7 @@ void BuiltinRegistry::registerHigherOrder() {
             if (!cmp->acceptsArgCount(2)) throw std::runtime_error("Runtime Error: sort() comparator must be a 2-parameter function.");
             if (arg.isObjType(ObjType::LIST)) {
                 ObjList* L = GcHeap::get().allocate<ObjList>();
+                GcObjGuard guard(L);
                 L->vec = static_cast<ObjList*>(arg.asObj())->vec;
                 std::stable_sort(L->vec.begin(), L->vec.end(), [&](const Value& a, const Value& b) {
                     return safeCallFunction(cmp, { a, b }).truthy();
@@ -3530,6 +3559,7 @@ void BuiltinRegistry::registerHigherOrder() {
                 std::sort(f.begin(), f.end()); return Value(StringMatrix(1, static_cast<int>(f.size()), f));
             } else if (arg.isObjType(ObjType::LIST)) {
                 ObjList* L = GcHeap::get().allocate<ObjList>();
+                GcObjGuard guard(L);
                 L->vec = static_cast<ObjList*>(arg.asObj())->vec;
                 std::stable_sort(L->vec.begin(), L->vec.end(), [](const Value& a, const Value& b) {
                     return helpers::checkLess(a, b);
@@ -4509,6 +4539,7 @@ void BuiltinRegistry::registerSetFunctions() {
     // ═══ 构造 ═══
     reg("set", {}, [](const std::vector<Value>& args) -> Value {
         ObjSet* s = GcHeap::get().allocate<ObjSet>();
+        GcObjGuard guard(s);
         for (const auto& a : args) {
             if (s->keys.find(a) == s->keys.end()) {
                 s->keys.insert(a);
@@ -4519,8 +4550,9 @@ void BuiltinRegistry::registerSetFunctions() {
         });
 
     reg("toSet", { 1 }, [](const std::vector<Value>& args) -> Value {
-        ObjSet* s = GcHeap::get().allocate<ObjSet>();
         if (args[0].isObjType(ObjType::SET)) return args[0];
+        ObjSet* s = GcHeap::get().allocate<ObjSet>();
+        GcObjGuard guard(s);
         if (args[0].isObjType(ObjType::LIST)) {
             for (const auto& v : static_cast<ObjList*>(args[0].asObj())->vec) {
                 if (s->keys.find(v) == s->keys.end()) { s->keys.insert(v); s->elements.push_back(v); }
@@ -4597,6 +4629,7 @@ void BuiltinRegistry::registerSetFunctions() {
         auto a = static_cast<ObjSet*>(args[0].asObj());
         auto b = static_cast<ObjSet*>(args[1].asObj());
         ObjSet* result = GcHeap::get().allocate<ObjSet>();
+        GcObjGuard guard(result);
         for (const auto& val : a->elements) { result->keys.insert(val); result->elements.push_back(val); }
         for (const auto& val : b->elements) {
             if (result->keys.find(val) == result->keys.end()) {
@@ -4613,6 +4646,7 @@ void BuiltinRegistry::registerSetFunctions() {
         auto a = static_cast<ObjSet*>(args[0].asObj());
         auto b = static_cast<ObjSet*>(args[1].asObj());
         ObjSet* result = GcHeap::get().allocate<ObjSet>();
+        GcObjGuard guard(result);
         for (const auto& val : a->elements) {
             if (b->keys.find(val) != b->keys.end()) {
                 result->keys.insert(val);
@@ -4628,6 +4662,7 @@ void BuiltinRegistry::registerSetFunctions() {
         auto a = static_cast<ObjSet*>(args[0].asObj());
         auto b = static_cast<ObjSet*>(args[1].asObj());
         ObjSet* result = GcHeap::get().allocate<ObjSet>();
+        GcObjGuard guard(result);
         for (const auto& val : a->elements) {
             if (b->keys.find(val) == b->keys.end()) {
                 result->keys.insert(val);
@@ -4643,6 +4678,7 @@ void BuiltinRegistry::registerSetFunctions() {
         auto a = static_cast<ObjSet*>(args[0].asObj());
         auto b = static_cast<ObjSet*>(args[1].asObj());
         ObjSet* result = GcHeap::get().allocate<ObjSet>();
+        GcObjGuard guard(result);
         for (const auto& val : a->elements) {
             if (b->keys.find(val) == b->keys.end()) {
                 result->keys.insert(val);
@@ -4711,6 +4747,7 @@ void BuiltinRegistry::registerSetFunctions() {
             throw std::runtime_error("Math Error: Set size too large for powerset (max 20 elements).");
 
         ObjSet* result = GcHeap::get().allocate<ObjSet>();
+        GcObjGuard guard(result);
         int limit = 1 << n;  // 2^n
         const auto& raw = s->elements;
 

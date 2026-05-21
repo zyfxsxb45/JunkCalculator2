@@ -2358,6 +2358,10 @@ namespace jc {
         for (const auto& val : helpers::nativeSelfStack) markValue(val);
         for (const auto& val : helpers::nativeClassStack) markValue(val);
 
+        // 根集合 6: C++ 层 RAII 临时保护的 GC 根
+        for (Obj* obj : GcHeap::get().getTempObjRoots()) markObject(obj);
+        for (Value* val : GcHeap::get().getTempValueRoots()) markValue(*val);
+
         traceReferences();
 
         // ═══ Phase 2: SWEEP ═══
@@ -2391,6 +2395,9 @@ namespace jc {
         // ★ C++ 原生堆栈手动同步
         for (const auto& val : helpers::nativeSelfStack) markValue(val);
         for (const auto& val : helpers::nativeClassStack) markValue(val);
+
+        for (Obj* obj : GcHeap::get().getTempObjRoots()) markObject(obj);
+        for (Value* val : GcHeap::get().getTempValueRoots()) markValue(*val);
 
         traceReferences();
 
