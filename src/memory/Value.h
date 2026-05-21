@@ -1949,17 +1949,19 @@ inline size_t ValueHasher::operator()(const Value& v) const {
         case ObjType::SYMBOLIC: return std::hash<std::string>{}(static_cast<ObjSym*>(obj)->sym.toString());
         case ObjType::LIST: {
             auto l = static_cast<ObjList*>(obj);
-            if (l->is_frozen && l->has_cached_hash) return l->cached_hash;
+            if (!l->is_frozen) throw std::runtime_error("TypeError: unhashable type.");
+            if (l->has_cached_hash) return l->cached_hash;
             size_t seed = 0;
             for (const auto& e : l->vec) {
                 seed ^= ValueHasher{}(e) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
             }
-            if (l->is_frozen) { l->cached_hash = seed; l->has_cached_hash = true; }
+            l->cached_hash = seed; l->has_cached_hash = true;
             return seed;
         }
         case ObjType::DICT: {
             auto d = static_cast<ObjDict*>(obj);
-            if (d->is_frozen && d->has_cached_hash) return d->cached_hash;
+            if (!d->is_frozen) throw std::runtime_error("TypeError: unhashable type.");
+            if (d->has_cached_hash) return d->cached_hash;
             size_t seed = 0;
             for (const auto& [k, val] : d->elements) {
                 size_t k_hash = ValueHasher{}(k);
@@ -1967,17 +1969,18 @@ inline size_t ValueHasher::operator()(const Value& v) const {
                 size_t kv_hash = k_hash ^ (v_hash + 0x9e3779b9 + (k_hash << 6) + (k_hash >> 2));
                 seed += kv_hash; // 无序容器使用满足交换律的累加
             }
-            if (d->is_frozen) { d->cached_hash = seed; d->has_cached_hash = true; }
+            d->cached_hash = seed; d->has_cached_hash = true;
             return seed;
         }
         case ObjType::SET: {
             auto s = static_cast<ObjSet*>(obj);
-            if (s->is_frozen && s->has_cached_hash) return s->cached_hash;
+            if (!s->is_frozen) throw std::runtime_error("TypeError: unhashable type.");
+            if (s->has_cached_hash) return s->cached_hash;
             size_t seed = 0;
             for (const auto& e : s->elements) {
                 seed += ValueHasher{}(e); // 无序容器使用满足交换律的累加
             }
-            if (s->is_frozen) { s->cached_hash = seed; s->has_cached_hash = true; }
+            s->cached_hash = seed; s->has_cached_hash = true;
             return seed;
         }
         case ObjType::INSTANCE: {
