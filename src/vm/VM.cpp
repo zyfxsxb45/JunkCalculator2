@@ -535,12 +535,20 @@ namespace jc {
     Value VM::run(int targetFrameDepth) {
         currentTargetFrameDepth = targetFrameDepth;
 
+        CallFrame* currentFrame = &frames[frameCount - 1];
+        const Chunk* chunk = &currentFrame->function->chunk;
+        const uint8_t* codeData = chunk->code.data();
+        int codeSize = static_cast<int>(chunk->code.size());
+
+        #define UPDATE_FRAME() \
+            do { \
+                currentFrame = &frames[frameCount - 1]; \
+                chunk = &currentFrame->function->chunk; \
+                codeData = chunk->code.data(); \
+                codeSize = static_cast<int>(chunk->code.size()); \
+            } while(false)
+
         while (true) {
-            CallFrame* currentFrame = &frames[frameCount - 1];
-            const Chunk* chunk = &currentFrame->function->chunk;
-            const uint8_t* codeData = chunk->code.data();
-            int codeSize = static_cast<int>(chunk->code.size());
-            
             // ═══ GC 自动触发探针与中断探针 ═══
             if (++gcInstructionCounter_ >= 2048) {
                 gcInstructionCounter_ = 0;
@@ -993,6 +1001,7 @@ namespace jc {
                 case OpCode::OP_CALL: {
                     uint8_t argc = readByte();
                     execCall(argc);
+                    UPDATE_FRAME();
                     break;
                 }
 
@@ -1018,6 +1027,7 @@ namespace jc {
                     uint16_t nameIdx = readShort();
                     uint8_t argc = readByte();
                     execSuperInvoke(nameIdx, argc);
+                    UPDATE_FRAME();
                     break;
                 }
 
@@ -1127,6 +1137,7 @@ namespace jc {
                     bool shouldExit = false;
                     Value result = execReturn(shouldExit);
                     if (shouldExit) return result;
+                    UPDATE_FRAME();
                     break;
                 }
 
@@ -1463,12 +1474,14 @@ namespace jc {
                 case OpCode::OP_INDEX_GET: {
                     uint8_t dims = readByte();
                     execIndexGet(dims);
+                    UPDATE_FRAME();
                     break;
                 }
 
                 case OpCode::OP_INDEX_SET: {
                     uint8_t dims = readByte();
                     execIndexSet(dims);
+                    UPDATE_FRAME();
                     break;
                 }
 
@@ -2052,6 +2065,7 @@ namespace jc {
                     uint16_t nameIdx = readShort();
                     uint8_t argc = readByte();
                     execInvoke(nameIdx, argc);
+                    UPDATE_FRAME();
                     break;
                 }
 
@@ -2075,25 +2089,26 @@ namespace jc {
             }
             catch (const StackTracedException& ex) {
                 std::string msg = ex.rawMessage;
-                if (handleExceptionUnwind(msg)) continue;
+                if (handleExceptionUnwind(msg)) { UPDATE_FRAME(); continue; }
                 throw;
             }
             catch (const ErrorSignal& sig) {
                 std::string msg = sig.message;
-                if (handleExceptionUnwind(msg)) continue;
+                if (handleExceptionUnwind(msg)) { UPDATE_FRAME(); continue; }
                 throw StackTracedException(msg, buildStackTrace(msg));
             }
             catch (const std::exception& ex) {
                 std::string msg = ex.what();
-                if (handleExceptionUnwind(msg)) continue;
+                if (handleExceptionUnwind(msg)) { UPDATE_FRAME(); continue; }
                 throw StackTracedException(msg, buildStackTrace(msg));
             }
             catch (...) {
                 std::string msg = "Unknown VM Error";
-                if (handleExceptionUnwind(msg)) continue;
+                if (handleExceptionUnwind(msg)) { UPDATE_FRAME(); continue; }
                 throw StackTracedException(msg, buildStackTrace(msg));
             }
         }
+        #undef UPDATE_FRAME
     }
 
     void VM::debugPrompt() {
