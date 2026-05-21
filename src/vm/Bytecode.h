@@ -48,6 +48,7 @@ namespace jc {
         OP_SET_GLOBAL,      // [name_idx:16bit]
         OP_SET_GLOBAL_REF,  // [name_idx:16bit] ★ 新增
         OP_DEFINE_GLOBAL,   // [name_idx:16bit]
+        OP_IS_UNINIT,       // 检查栈顶是否为 UNINIT，返回 bool
 
         // 局部变量
         OP_GET_LOCAL,       // [slot:16bit]
@@ -170,6 +171,7 @@ namespace jc {
         case OpCode::OP_SET_GLOBAL: return "OP_SET_GLOBAL";
         case OpCode::OP_SET_GLOBAL_REF: return "OP_SET_GLOBAL_REF";
         case OpCode::OP_DEFINE_GLOBAL: return "OP_DEFINE_GLOBAL";
+        case OpCode::OP_IS_UNINIT: return "OP_IS_UNINIT";
         case OpCode::OP_GET_LOCAL: return "OP_GET_LOCAL";
         case OpCode::OP_SET_LOCAL: return "OP_SET_LOCAL";
         case OpCode::OP_JUMP: return "OP_JUMP";
@@ -340,6 +342,7 @@ namespace jc {
             case OpCode::OP_THROW: case OpCode::OP_LIST_INIT: case OpCode::OP_INHERIT:
             case OpCode::OP_IMPORT: case OpCode::OP_BIT_AND: case OpCode::OP_BIT_OR:
             case OpCode::OP_GET_SELF: case OpCode::OP_LIST_COMP_END:
+            case OpCode::OP_IS_UNINIT:
                 std::cout << std::endl;
                 return offset + 1;
 

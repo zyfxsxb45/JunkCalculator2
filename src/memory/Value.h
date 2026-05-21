@@ -62,6 +62,7 @@ namespace jc {
     #define TAG_NONE 1
     #define TAG_FALSE 2
     #define TAG_TRUE 3
+    #define TAG_UNINIT 4
     #define INT32_MASK (QNAN | 0x0000000100000000ULL)
 
     // =======================================================
@@ -190,6 +191,7 @@ namespace jc {
         bool isNumber() const { return isDouble() || isInt32() || isBool(); }
         bool isObj() const { return (as_bits & (QNAN | SIGN_BIT)) == (QNAN | SIGN_BIT); }
         bool isNone() const { return as_bits == (QNAN | TAG_NONE); }
+        bool isUninit() const { return as_bits == (QNAN | TAG_UNINIT); }
         bool isBool() const { return as_bits == (QNAN | TAG_FALSE) || as_bits == (QNAN | TAG_TRUE); }
         bool asBool() const { return as_bits == (QNAN | TAG_TRUE); }
         
@@ -401,6 +403,7 @@ namespace jc {
         }
 
         static Value none() { return Value(); }
+        static Value uninit() { Value v; v.as_bits = QNAN | TAG_UNINIT; return v; }
 
         double asDouble() const {
             if (isNumber()) return asNumber();
@@ -1017,6 +1020,7 @@ namespace jc {
     inline std::string Value::toJC2Expression() const {
         static thread_local std::vector<const void*> visited;
         if (isNone()) return "none()";
+        if (isUninit()) return "uninit()";
         if (isBool()) return asBool() ? "true" : "false";
         if (isInt32()) return std::to_string(asInt32());
         if (isDouble()) {
@@ -1199,7 +1203,7 @@ namespace jc {
 
     inline bool Value::isHashable() const {
         static thread_local std::vector<const void*> visited;
-        if (isNumber() || isBool() || isNone()) return true;
+        if (isNumber() || isBool() || isNone() || isUninit()) return true;
         Obj* obj = asObj();
         switch (obj->type) {
             case ObjType::STRING:
@@ -1282,6 +1286,7 @@ namespace jc {
 
     inline bool Value::truthy() const {
         if (isNone()) return false;
+        if (isUninit()) return false;
         if (isBool()) return asBool();
         if (isInt32()) return asInt32() != 0;
         if (isDouble()) {
@@ -1326,6 +1331,7 @@ namespace jc {
         if (lhs.isInt32() && rhs.isInt32()) return lhs.asInt32() == rhs.asInt32();
         if (lhs.isNumber() && rhs.isNumber()) return lhs.asNumber() == rhs.asNumber();
         if (lhs.isNone() || rhs.isNone()) return false;
+        if (lhs.isUninit() || rhs.isUninit()) return false;
 
         // 同类型快速通道
         if (lhs.isObj() && rhs.isObj() && lhs.asObj()->type == rhs.asObj()->type) {
@@ -1511,6 +1517,7 @@ namespace jc {
 
     inline std::string Value::typeName() const {
         if (isNone()) return "none";
+        if (isUninit()) return "uninit";
         if (isBool()) return "bool";
         if (isInt32()) return "int";
         if (isDouble()) return "double";
@@ -1768,10 +1775,12 @@ inline std::ostream& operator<<(std::ostream& os, const Value& val) {
     static thread_local std::vector<const void*> visited;
     auto printNested = [&os](const Value& v) {
         if (v.isNone()) os << "none";
+        else if (v.isUninit()) os << "<uninit>";
         else os << v;
     };
 
     if (val.isNone()) return os;
+    if (val.isUninit()) { os << "<uninit>"; return os; }
     if (val.isBool()) { os << (val.asBool() ? "true" : "false"); return os; }
     if (val.isInt32()) { os << val.asInt32(); return os; }
     if (val.isDouble()) {
@@ -1883,6 +1892,7 @@ inline size_t ValueHasher::operator()(const Value& v) const {
     }
     if (v.isBool()) return std::hash<double>{}(v.asBool() ? 1.0 : 0.0);
     if (v.isNone()) return 0;
+    if (v.isUninit()) return 1;
     
     Obj* obj = v.asObj();
     switch (obj->type) {

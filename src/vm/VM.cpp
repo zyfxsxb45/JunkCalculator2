@@ -325,6 +325,7 @@ namespace jc {
                 throw std::runtime_error("Runtime Error: Undefined variable '" + name + "'.");
             globals.erase(it);
             constGlobals.erase(name);  // 同步清除 const 标记
+            
             return Value::none();
             }, { 1 });
     }
@@ -612,6 +613,12 @@ namespace jc {
                 case OpCode::OP_TRUE:  push(Value(true)); break;
                 case OpCode::OP_FALSE: push(Value(false)); break;
                 case OpCode::OP_POP:   pop(); break;
+
+                case OpCode::OP_IS_UNINIT: {
+                    Value res = Value(peek(0).isUninit());
+                    peek(0) = res;
+                    break;
+                }
 
                 case OpCode::OP_GET_SELF: {
                     if (currentFrame->selfContext.isNone()) throw std::runtime_error("VM Error: 'self' accessed outside of context.");
@@ -903,7 +910,7 @@ namespace jc {
                                 if (uv.isGlobal) {
                                     auto it = globals.find(uv.name);
                                     if (it != globals.end()) dummy->closed = it->second;
-                                    else dummy->closed = Value::none();
+                                    else dummy->closed = Value::uninit();
                                 } else if (uv.isLocal) {
                                     int captureIdx = currentFrame->stackBase + uv.index;
                                     dummy->closed = stack[captureIdx];

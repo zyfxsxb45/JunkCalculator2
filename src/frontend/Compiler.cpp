@@ -351,7 +351,6 @@ namespace jc {
         } else if (expr->isState) {
             if (current().refNames.count(name) > 0) throw std::runtime_error("Compiler Error: Cannot declare variable as both 'ref' and 'state'.");
             current().stateNames.insert(name);
-            current().stateNames.insert("<init>_" + name); // ★ 注册隐藏的初始化标志，使用非法字符防止用户修改
         }
 
         // ★ Pre-declare local variable if RHS is a Lambda, to support local recursion
@@ -364,16 +363,13 @@ namespace jc {
             }
         }
 
-        // ★ State initialization: only assign if the upvalue is currently 'none'
+        // ★ State initialization: only assign if the upvalue is currently UNINIT
         if (expr->isState) {
-            std::string initFlagName = "<init>_" + name;
-            int flagUpvalue = resolveUpvalue(initFlagName);
             int upvalue = resolveUpvalue(name);
-            if (flagUpvalue != -1 && upvalue != -1) {
+            if (upvalue != -1) {
                 emit(OpCode::OP_GET_UPVALUE, expr->name.line);
-                emit16(static_cast<uint16_t>(flagUpvalue), expr->name.line);
-                emit(OpCode::OP_NONE, expr->name.line);
-                emit(OpCode::OP_EQUAL, expr->name.line);
+                emit16(static_cast<uint16_t>(upvalue), expr->name.line);
+                emit(OpCode::OP_IS_UNINIT, expr->name.line);
                 
                 int skipJump = chunk()->emitJump(OpCode::OP_JUMP_IF_FALSE, expr->name.line);
                 emit(OpCode::OP_POP, expr->name.line); // pop boolean
@@ -381,11 +377,6 @@ namespace jc {
                 compileNode(expr->value.get());
                 emit(OpCode::OP_SET_UPVALUE, expr->name.line);
                 emit16(static_cast<uint16_t>(upvalue), expr->name.line);
-                
-                chunk()->emitConstant(Value(true), expr->name.line);
-                emit(OpCode::OP_SET_UPVALUE, expr->name.line);
-                emit16(static_cast<uint16_t>(flagUpvalue), expr->name.line);
-                emit(OpCode::OP_POP, expr->name.line); // pop true
                 
                 int endJump = chunk()->emitJump(OpCode::OP_JUMP, expr->name.line);
                 
@@ -1059,7 +1050,6 @@ namespace jc {
             } else if (expr->isState) {
                 if (current().refNames.count(name) > 0) throw std::runtime_error("Compiler Error: Cannot declare variable as both 'ref' and 'state'.");
                 current().stateNames.insert(name);
-                current().stateNames.insert("<init>_" + name); // ★ 注册隐藏的初始化标志
                 upvalue = resolveUpvalue(name);
             }
 
@@ -1491,7 +1481,6 @@ namespace jc {
                 else if (isState) {
                     if (current().refNames.count(name) > 0) throw std::runtime_error("Compiler Error: Cannot declare variable as both 'ref' and 'state'.");
                         current().stateNames.insert(name);
-                    current().stateNames.insert("<init>_" + name); // ★ 注册隐藏的初始化标志
                 }
             }
         }
@@ -1555,24 +1544,16 @@ namespace jc {
                 Variable v(Token(TokenType::IDENTIFIER, name, 0));
                 if (isState) {
                     int upvalue = resolveUpvalue(name);
-                    std::string initFlagName = "<init>_" + name;
-                    int flagUpvalue = resolveUpvalue(initFlagName);
-                    if (flagUpvalue != -1 && upvalue != -1) {
+                    if (upvalue != -1) {
                         emit(OpCode::OP_GET_UPVALUE, lastLine);
-                        emit16(static_cast<uint16_t>(flagUpvalue), lastLine);
-                        emit(OpCode::OP_NONE, lastLine);
-                        emit(OpCode::OP_EQUAL, lastLine);
+                        emit16(static_cast<uint16_t>(upvalue), lastLine);
+                        emit(OpCode::OP_IS_UNINIT, lastLine);
                         
                         int skipJump = chunk()->emitJump(OpCode::OP_JUMP_IF_FALSE, lastLine);
                         emit(OpCode::OP_POP, lastLine); // pop boolean
                         
                         emit(OpCode::OP_SET_UPVALUE, lastLine);
                         emit16(static_cast<uint16_t>(upvalue), lastLine);
-                        
-                        chunk()->emitConstant(Value(true), lastLine);
-                        emit(OpCode::OP_SET_UPVALUE, lastLine);
-                        emit16(static_cast<uint16_t>(flagUpvalue), lastLine);
-                        emit(OpCode::OP_POP, lastLine); // pop true
                         
                         int endJump = chunk()->emitJump(OpCode::OP_JUMP, lastLine);
                         
@@ -1729,7 +1710,6 @@ namespace jc {
         }
         int upvalue = resolveUpvalue(name);
         current().stateNames.insert(name);
-        current().stateNames.insert("<init>_" + name); // ★ 注册隐藏的初始化标志
         
         if (upvalue != -1) {
             emit(OpCode::OP_GET_UPVALUE, lastLine);
@@ -2149,7 +2129,6 @@ namespace jc {
                 } else if (isState) {
                     if (current().refNames.count(name) > 0) throw std::runtime_error("Compiler Error: Cannot declare variable as both 'ref' and 'state'.");
                     current().stateNames.insert(name);
-                    current().stateNames.insert("<init>_" + name); // ★ 注册隐藏的初始化标志
                 }
             }
         }
@@ -2215,24 +2194,16 @@ namespace jc {
                 Variable v(Token(TokenType::IDENTIFIER, name, 0));
                 if (isState) {
                     int upvalue = resolveUpvalue(name);
-                    std::string initFlagName = "<init>_" + name;
-                    int flagUpvalue = resolveUpvalue(initFlagName);
-                    if (flagUpvalue != -1 && upvalue != -1) {
+                    if (upvalue != -1) {
                         emit(OpCode::OP_GET_UPVALUE, lastLine);
-                        emit16(static_cast<uint16_t>(flagUpvalue), lastLine);
-                        emit(OpCode::OP_NONE, lastLine);
-                        emit(OpCode::OP_EQUAL, lastLine);
+                        emit16(static_cast<uint16_t>(upvalue), lastLine);
+                        emit(OpCode::OP_IS_UNINIT, lastLine);
 
                         int skipJump = chunk()->emitJump(OpCode::OP_JUMP_IF_FALSE, lastLine);
                         emit(OpCode::OP_POP, lastLine); // pop boolean
 
                         emit(OpCode::OP_SET_UPVALUE, lastLine);
                         emit16(static_cast<uint16_t>(upvalue), lastLine);
-
-                        chunk()->emitConstant(Value(true), lastLine);
-                        emit(OpCode::OP_SET_UPVALUE, lastLine);
-                        emit16(static_cast<uint16_t>(flagUpvalue), lastLine);
-                        emit(OpCode::OP_POP, lastLine); // pop true
 
                         int endJump = chunk()->emitJump(OpCode::OP_JUMP, lastLine);
 
