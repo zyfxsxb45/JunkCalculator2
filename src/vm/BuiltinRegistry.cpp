@@ -3291,13 +3291,12 @@ void BuiltinRegistry::registerHigherOrder() {
                 }
             }
 
-                if (typeConflict) {
-                    for (size_t i = fallback->vec.size(); i < flatVals.size(); ++i) {
-                        jc::checkInterrupt();
-                        fallback->vec.push_back(safeCallFunction(cl, { flatVals[i] }));
-                    }
-                    return Value(fallback);
+            if (typeConflict) {
+                for (size_t i = fallback->vec.size(); i < flatVals.size(); ++i) {
+                    jc::checkInterrupt();
+                    fallback->vec.push_back(safeCallFunction(cl, { flatVals[i] }));
                 }
+                return Value(fallback);
             }
             if (hasString) return Value(StringMatrix(rows, cols, rs));
             if (hasComp) return Value(ComplexMatrix(rows, cols, rc));
