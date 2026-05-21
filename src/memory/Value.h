@@ -1983,6 +1983,12 @@ inline size_t ValueHasher::operator()(const Value& v) const {
             s->cached_hash = seed; s->has_cached_hash = true;
             return seed;
         }
+        case ObjType::SUPER_PROXY: {
+            auto sp = static_cast<ObjSuper*>(obj);
+            size_t h1 = std::hash<const void*>{}(sp->instance);
+            size_t h2 = std::hash<const void*>{}(sp->parentClass);
+            return h1 ^ (h2 + 0x9e3779b9 + (h1 << 6) + (h1 >> 2));
+        }
         case ObjType::INSTANCE: {
             auto inst = static_cast<ObjInstance*>(obj);
             auto [found, res] = invokeDunder(inst, "__hash__");
