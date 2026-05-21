@@ -523,25 +523,25 @@ namespace jc {
                 case TokenType::BIT_AND:       return (*leftVal) & (*rightVal);
                 case TokenType::BIT_OR:        return (*leftVal) | (*rightVal);
                 case TokenType::LESS: {
-                    if ((leftVal->isBigInt() || leftVal->isInt32()) && (rightVal->isBigInt() || rightVal->isInt32())) return Value(leftVal->asBigInt() < rightVal->asBigInt());
+                    if ((leftVal->isBigInt() || leftVal->isInt32() || leftVal->isBool()) && (rightVal->isBigInt() || rightVal->isInt32() || rightVal->isBool())) return Value(leftVal->asBigInt() < rightVal->asBigInt());
                     if (leftVal->isObjType(ObjType::FRACTION) && rightVal->isObjType(ObjType::FRACTION)) return Value(static_cast<ObjFraction*>(leftVal->asObj())->frac < static_cast<ObjFraction*>(rightVal->asObj())->frac);
                     if (leftVal->isString() && rightVal->isString()) return Value(leftVal->asString() < rightVal->asString());
                     return Value(leftVal->asDouble() < rightVal->asDouble());
                 }
                 case TokenType::LESS_EQUAL: {
-                    if ((leftVal->isBigInt() || leftVal->isInt32()) && (rightVal->isBigInt() || rightVal->isInt32())) return Value(leftVal->asBigInt() <= rightVal->asBigInt());
+                    if ((leftVal->isBigInt() || leftVal->isInt32() || leftVal->isBool()) && (rightVal->isBigInt() || rightVal->isInt32() || rightVal->isBool())) return Value(leftVal->asBigInt() <= rightVal->asBigInt());
                     if (leftVal->isObjType(ObjType::FRACTION) && rightVal->isObjType(ObjType::FRACTION)) return Value(static_cast<ObjFraction*>(leftVal->asObj())->frac <= static_cast<ObjFraction*>(rightVal->asObj())->frac);
                     if (leftVal->isString() && rightVal->isString()) return Value(leftVal->asString() <= rightVal->asString());
                     return Value(leftVal->asDouble() <= rightVal->asDouble());
                 }
                 case TokenType::GREATER: {
-                    if ((leftVal->isBigInt() || leftVal->isInt32()) && (rightVal->isBigInt() || rightVal->isInt32())) return Value(leftVal->asBigInt() > rightVal->asBigInt());
+                    if ((leftVal->isBigInt() || leftVal->isInt32() || leftVal->isBool()) && (rightVal->isBigInt() || rightVal->isInt32() || rightVal->isBool())) return Value(leftVal->asBigInt() > rightVal->asBigInt());
                     if (leftVal->isObjType(ObjType::FRACTION) && rightVal->isObjType(ObjType::FRACTION)) return Value(static_cast<ObjFraction*>(leftVal->asObj())->frac > static_cast<ObjFraction*>(rightVal->asObj())->frac);
                     if (leftVal->isString() && rightVal->isString()) return Value(leftVal->asString() > rightVal->asString());
                     return Value(leftVal->asDouble() > rightVal->asDouble());
                 }
                 case TokenType::GREATER_EQUAL: {
-                    if ((leftVal->isBigInt() || leftVal->isInt32()) && (rightVal->isBigInt() || rightVal->isInt32())) return Value(leftVal->asBigInt() >= rightVal->asBigInt());
+                    if ((leftVal->isBigInt() || leftVal->isInt32() || leftVal->isBool()) && (rightVal->isBigInt() || rightVal->isInt32() || rightVal->isBool())) return Value(leftVal->asBigInt() >= rightVal->asBigInt());
                     if (leftVal->isObjType(ObjType::FRACTION) && rightVal->isObjType(ObjType::FRACTION)) return Value(static_cast<ObjFraction*>(leftVal->asObj())->frac >= static_cast<ObjFraction*>(rightVal->asObj())->frac);
                     if (leftVal->isString() && rightVal->isString()) return Value(leftVal->asString() >= rightVal->asString());
                     return Value(leftVal->asDouble() >= rightVal->asDouble());

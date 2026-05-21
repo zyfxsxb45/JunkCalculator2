@@ -187,14 +187,18 @@ namespace jc {
 
         bool isDouble() const { return (as_bits & QNAN) != QNAN; }
         bool isInt32() const { return (as_bits & 0xFFFFFFFF00000000ULL) == INT32_MASK; }
-        bool isNumber() const { return isDouble() || isInt32(); }
+        bool isNumber() const { return isDouble() || isInt32() || isBool(); }
         bool isObj() const { return (as_bits & (QNAN | SIGN_BIT)) == (QNAN | SIGN_BIT); }
         bool isNone() const { return as_bits == (QNAN | TAG_NONE); }
         bool isBool() const { return as_bits == (QNAN | TAG_FALSE) || as_bits == (QNAN | TAG_TRUE); }
         bool asBool() const { return as_bits == (QNAN | TAG_TRUE); }
         
         int32_t asInt32() const { return static_cast<int32_t>(as_bits & 0xFFFFFFFFULL); }
-        double asNumber() const { return isInt32() ? static_cast<double>(asInt32()) : asDoubleRaw(); }
+        double asNumber() const { 
+            if (isInt32()) return static_cast<double>(asInt32());
+            if (isBool()) return asBool() ? 1.0 : 0.0;
+            return asDoubleRaw(); 
+        }
 
         Obj* asObj() const { return reinterpret_cast<Obj*>(as_bits & ~(SIGN_BIT | QNAN)); }
         bool isObjType(ObjType type) const { return isObj() && asObj()->type == type; }
@@ -417,6 +421,7 @@ namespace jc {
 
         BigInt asBigInt() const {
             if (isInt32()) return BigInt(asInt32());
+            if (isBool()) return BigInt(asBool() ? 1 : 0);
             if (isObjType(ObjType::BIGINT)) return static_cast<ObjBigInt*>(asObj())->num;
             if (isDouble()) {
                 double val = asDoubleRaw();
@@ -967,10 +972,12 @@ namespace jc {
         
         if (lhs.isInt32() && rhs.isInt32()) return Value::fromInt32(lhs.asInt32() & rhs.asInt32());
         
-        bool lhsIsInt = lhs.isInt32() || lhs.isBigInt();
-        bool rhsIsInt = rhs.isInt32() || rhs.isBigInt();
+        bool lhsIsInt = lhs.isInt32() || lhs.isBigInt() || lhs.isBool();
+        bool rhsIsInt = rhs.isInt32() || rhs.isBigInt() || rhs.isBool();
         if (lhsIsInt && rhsIsInt) {
-            BigInt res = BaseNum(lhs.asBigInt(), 2).bitAnd(BaseNum(rhs.asBigInt(), 2)).getValue();
+            BigInt lVal = lhs.isBool() ? BigInt(lhs.asBool() ? 1 : 0) : lhs.asBigInt();
+            BigInt rVal = rhs.isBool() ? BigInt(rhs.asBool() ? 1 : 0) : rhs.asBigInt();
+            BigInt res = BaseNum(lVal, 2).bitAnd(BaseNum(rVal, 2)).getValue();
             return Value(res);
         }
         throw std::runtime_error("Type Error: Bitwise/Set AND '&' not supported for these types.");
@@ -996,10 +1003,12 @@ namespace jc {
         
         if (lhs.isInt32() && rhs.isInt32()) return Value::fromInt32(lhs.asInt32() | rhs.asInt32());
         
-        bool lhsIsInt = lhs.isInt32() || lhs.isBigInt();
-        bool rhsIsInt = rhs.isInt32() || rhs.isBigInt();
+        bool lhsIsInt = lhs.isInt32() || lhs.isBigInt() || lhs.isBool();
+        bool rhsIsInt = rhs.isInt32() || rhs.isBigInt() || rhs.isBool();
         if (lhsIsInt && rhsIsInt) {
-            BigInt res = BaseNum(lhs.asBigInt(), 2).bitOr(BaseNum(rhs.asBigInt(), 2)).getValue();
+            BigInt lVal = lhs.isBool() ? BigInt(lhs.asBool() ? 1 : 0) : lhs.asBigInt();
+            BigInt rVal = rhs.isBool() ? BigInt(rhs.asBool() ? 1 : 0) : rhs.asBigInt();
+            BigInt res = BaseNum(lVal, 2).bitOr(BaseNum(rVal, 2)).getValue();
             return Value(res);
         }
         throw std::runtime_error("Type Error: Bitwise/Set OR '|' not supported for these types.");
@@ -1536,6 +1545,7 @@ namespace jc {
 
     inline Value Value::operator~() const {
         if (isInt32()) return Value::fromInt32(~asInt32());
+        if (isBool()) return Value::fromInt32(~(asBool() ? 1 : 0));
         if (isObjType(ObjType::BASENUM)) {
             auto& base = static_cast<ObjBaseNum*>(asObj())->base;
             return Value(BaseNum(-base.getValue() - BigInt(1), base.getRadix()));
@@ -1551,6 +1561,7 @@ namespace jc {
             return Value::fromInt32(-v);
         }
         if (isDouble()) return Value(-asDoubleRaw());
+        if (isBool()) return Value(asBool() ? -1.0 : -0.0);
         if (isObj()) {
             Obj* obj = asObj();
             switch (obj->type) {
