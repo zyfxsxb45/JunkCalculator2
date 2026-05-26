@@ -74,8 +74,7 @@ namespace jc_latex {
     // ====================================================================
     class ExprNode {
     public:
-        // ★ 将原本的 double 返回值升级为 std::complex<double>
-        virtual cplx eval(const std::unordered_map<std::string, cplx>& env) const = 0;
+        virtual Value eval(const std::unordered_map<std::string, Value>& env) const = 0;
         virtual ~ExprNode() = default;
     };
     using ExprPtr = std::shared_ptr<ExprNode>;
@@ -84,21 +83,24 @@ namespace jc_latex {
         double val;
     public:
         NumNode(double v) : val(v) {}
-        cplx eval(const std::unordered_map<std::string, cplx>&) const override { return cplx(val, 0.0); }
+        Value eval(const std::unordered_map<std::string, Value>&) const override { return Value(val); }
     };
 
     class VarNode : public ExprNode {
         std::string name;
     public:
         VarNode(std::string n) : name(n) {}
-        cplx eval(const std::unordered_map<std::string, cplx>& env) const override {
-            if (name == "\\pi" || name == "pi") return cplx(3.1415926535897932, 0.0);
-            if (name == "e") return cplx(2.718281828459045, 0.0);
-            // ★ 神来之笔：原生支持复数单位 i 和 j
-            if (name == "i" || name == "j") return cplx(0.0, 1.0);
+        Value eval(const std::unordered_map<std::string, Value>& env) const override {
+            if (name == "\\pi" || name == "pi") return Value(3.1415926535897932);
+            if (name == "e") return Value(2.718281828459045);
+            if (name == "i" || name == "j") return Value(Complex(0.0, 1.0));
 
             auto it = env.find(name);
-            if (it == env.end()) throw std::runtime_error("LaTeX Math Error: Unknown variable '" + name + "'");
+            if (it == env.end()) {
+                std::string symName = name;
+                if (!symName.empty() && symName[0] == '\\') symName = symName.substr(1);
+                return Value(SymExpr::makeVar(symName));
+            }
             return it->second;
         }
     };
@@ -107,14 +109,13 @@ namespace jc_latex {
         char op; ExprPtr left, right;
     public:
         BinOpNode(char o, ExprPtr l, ExprPtr r) : op(o), left(l), right(r) {}
-        cplx eval(const std::unordered_map<std::string, cplx>& env) const override {
-            cplx l = left->eval(env), r = right->eval(env);
-            // ★ \complex 完全支持基础算术与复数次幂！
+        Value eval(const std::unordered_map<std::string, Value>& env) const override {
+            Value l = left->eval(env), r = right->eval(env);
             switch (op) {
             case '+': return l + r; case '-': return l - r;
             case '*': return l * r; case '/': return l / r;
-            case '^': return std::pow(l, r);
-            default: return cplx(0, 0);
+            case '^': return l ^ r;
+            default: return Value(0.0);
             }
         }
     };
@@ -123,15 +124,73 @@ namespace jc_latex {
         std::string func; ExprPtr arg;
     public:
         FuncNode(std::string f, ExprPtr a) : func(f), arg(a) {}
-        cplx eval(const std::unordered_map<std::string, cplx>& env) const override {
-            cplx a = arg->eval(env);
-            // ★ cmath 全部拥有复数同名方法重载，天然平替！
-            if (func == "\\sin") return std::sin(a); if (func == "\\cos") return std::cos(a);
-            if (func == "\\tan") return std::tan(a); if (func == "\\sqrt") return std::sqrt(a);
-            if (func == "\\ln") return std::log(a);  if (func == "\\log") return std::log10(a); // log10 兼容降级
-            if (func == "\\exp") return std::exp(a);
-            if (func == "\\abs") return cplx(std::abs(a), 0); // abs 返回模长
-            throw std::runtime_error("LaTeX Math Error: Unsupported function '" + func + "'");
+        Value eval(const std::unordered_map<std::string, Value>& env) const override {
+            Value a = arg->eval(env);
+            std::string fname = func;
+            if (!fname.empty() && fname[0] == '\\') fname = fname.substr(1);
+            if (fname == "ln") fname = "log";
+
+            if (a.isSymbolic()) {
+                return Value(SymExpr(std::make_shared<SymFunc>(fname, std::vector<std::shared_ptr<SymNode>>{a.asSymbolic().ptr})));
+            }
+
+            if (a.isComplex() || a.isNumber()) {
+                Complex c = a.asComplex();
+                if (fname == "sin") return Value(sin(c));
+                if (fname == "cos") return Value(cos(c));
+                if (fname == "tan") return Value(tan(c));
+                if (fname == "sqrt") return Value(sqrt(c));
+                if (fname == "log") return Value(log(c));
+                if (fname == "exp") return Value(exp(c));
+                if (fname == "abs") return Value(std::hypot(c.real, c.imag));
+            }
+            
+            throw std::runtime_error("LaTeX Math Error: Unsupported function '" + func + "' for the given argument type.");
+        }
+    };
+
+    class MatrixNode : public ExprNode {
+        std::vector<std::vector<ExprPtr>> rows;
+    public:
+        MatrixNode(std::vector<std::vector<ExprPtr>> r) : rows(r) {}
+        Value eval(const std::unordered_map<std::string, Value>& env) const override {
+            int r = static_cast<int>(rows.size());
+            int c = r > 0 ? static_cast<int>(rows[0].size()) : 0;
+            bool isComplex = false;
+            bool isSym = false;
+            std::vector<std::vector<Value>> vals(r, std::vector<Value>(c));
+            for (int i = 0; i < r; ++i) {
+                if (static_cast<int>(rows[i].size()) != c) throw std::runtime_error("LaTeX Math Error: Matrix rows must have the same number of columns");
+                for (int j = 0; j < c; ++j) {
+                    vals[i][j] = rows[i][j]->eval(env);
+                    if (vals[i][j].isComplex()) isComplex = true;
+                    if (vals[i][j].isSymbolic()) isSym = true;
+                }
+            }
+            if (isSym) {
+                ObjList* list = GcHeap::get().allocate<ObjList>();
+                for (int i = 0; i < r; ++i) {
+                    ObjList* rowList = GcHeap::get().allocate<ObjList>();
+                    for (int j = 0; j < c; ++j) {
+                        rowList->vec.push_back(vals[i][j]);
+                    }
+                    list->vec.push_back(Value(rowList));
+                }
+                return Value(list);
+            }
+            if (isComplex) {
+                std::vector<Complex> flat(r * c);
+                for (int i = 0; i < r; ++i)
+                    for (int j = 0; j < c; ++j)
+                        flat[i * c + j] = vals[i][j].asComplex();
+                return Value(ComplexMatrix(r, c, flat));
+            } else {
+                std::vector<double> flat(r * c);
+                for (int i = 0; i < r; ++i)
+                    for (int j = 0; j < c; ++j)
+                        flat[i * c + j] = vals[i][j].asDouble();
+                return Value(RealMatrix(r, c, flat));
+            }
         }
     };
 
@@ -148,6 +207,7 @@ namespace jc_latex {
             skipSpace();
             if (pos < src.size() && src[pos] == '\\') {
                 size_t p = pos + 1;
+                if (p < src.size() && src[p] == '\\') return "\\\\";
                 while (p < src.size() && std::isalpha(src[p])) p++;
                 return src.substr(pos, p - pos);
             }
@@ -159,8 +219,52 @@ namespace jc_latex {
             return false;
         }
 
+        ExprPtr parseMatrix() {
+            std::string envName;
+            if (matchCmd("\\begin")) {
+                if (!match('{')) throw std::runtime_error("Expected '{' after \\begin");
+                size_t start = pos;
+                while (pos < src.size() && src[pos] != '}') pos++;
+                envName = src.substr(start, pos - start);
+                if (!match('}')) throw std::runtime_error("Expected '}' after \\begin{...");
+            } else {
+                return nullptr;
+            }
+
+            std::vector<std::vector<ExprPtr>> rows;
+            std::vector<ExprPtr> currentRow;
+
+            while (pos < src.size()) {
+                skipSpace();
+                if (matchCmd("\\end")) {
+                    if (!match('{')) throw std::runtime_error("Expected '{' after \\end");
+                    size_t start = pos;
+                    while (pos < src.size() && src[pos] != '}') pos++;
+                    std::string endName = src.substr(start, pos - start);
+                    if (!match('}')) throw std::runtime_error("Expected '}' after \\end{...");
+                    if (endName != envName) throw std::runtime_error("Mismatched \\begin{" + envName + "} and \\end{" + endName + "}");
+                    if (!currentRow.empty()) rows.push_back(currentRow);
+                    break;
+                }
+                if (matchCmd("\\\\")) {
+                    rows.push_back(currentRow);
+                    currentRow.clear();
+                    continue;
+                }
+                if (match('&')) {
+                    continue;
+                }
+                currentRow.push_back(parseExpr());
+            }
+
+            return std::make_shared<MatrixNode>(rows);
+        }
+
         ExprPtr parseFactor() {
             skipSpace();
+            if (peekCmd() == "\\begin") {
+                return parseMatrix();
+            }
             if (matchCmd("\\frac")) {
                 if (!match('{')) throw std::runtime_error("Expected '{' after \\frac");
                 auto num = parseExpr();
@@ -245,7 +349,12 @@ namespace jc_latex {
                     left = std::make_shared<BinOpNode>('/', left, parsePower());
                 }
                 else {
-                    if (pos < src.size() && (src[pos] == '(' || src[pos] == '\\' || std::isalpha(src[pos]))) {
+                    if (pos < src.size() && (src[pos] == '(' || std::isalpha(src[pos]))) {
+                        left = std::make_shared<BinOpNode>('*', left, parsePower());
+                    }
+                    else if (pos < src.size() && src[pos] == '\\') {
+                        std::string cmd = peekCmd();
+                        if (cmd == "\\\\" || cmd == "\\end") break;
                         left = std::make_shared<BinOpNode>('*', left, parsePower());
                     }
                     else break;
@@ -310,10 +419,9 @@ JC2_MODULE(latex) {
         LatexParser parser;
         auto ast = parser.compile(args[0].asString());
 
-        // ★ 核心收尾：C++ 的 complex 落回到 JC2 的类型系统中
-        cplx res = ast->eval({});
-        if (res.imag() == 0.0) return Value(res.real()); // 纯虚部为 0 降级为 double
-        return Value(Complex(res.real(), res.imag()));           // 否则以复数形式返还！
+        Value res = ast->eval({});
+        if (res.isComplex() && res.asComplex().imag == 0.0) return Value(res.asComplex().real);
+        return res;
         }));
 
     R.set("compile", (*makeNativeFn)("compile", 2, [makeNativeFn](const std::vector<Value>& args) -> Value {
@@ -343,21 +451,14 @@ JC2_MODULE(latex) {
             if (call_args.size() != varNames.size())
                 throw std::runtime_error("LaTeX Func '" + latex_str + "' expects " + std::to_string(varNames.size()) + " arguments.");
 
-            // ★ 新的参数拆包逻辑：兼容用户传入 JC2_Complex 或者 JC2_Double
-            std::unordered_map<std::string, cplx> env;
+            std::unordered_map<std::string, Value> env;
             for (size_t i = 0; i < varNames.size(); ++i) {
-                if (call_args[i].isObjType(ObjType::COMPLEX)) {
-                    auto c = static_cast<ObjComplex*>(call_args[i].asObj())->comp;
-                    env[varNames[i]] = cplx(c.real, c.imag);
-                }
-                else {
-                    env[varNames[i]] = cplx(call_args[i].asDouble(), 0.0);
-                }
+                env[varNames[i]] = call_args[i];
             }
 
-            cplx res = ast->eval(env);
-            if (res.imag() == 0.0) return Value(res.real());
-            return Value(Complex(res.real(), res.imag()));
+            Value res = ast->eval(env);
+            if (res.isComplex() && res.asComplex().imag == 0.0) return Value(res.asComplex().real);
+            return res;
             };
         return (*makeNativeFn)("latex_lambda", static_cast<int>(varNames.size()), jc_caller);
         }));
