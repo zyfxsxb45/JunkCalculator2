@@ -10,7 +10,7 @@ import bytes
 class ByteBuffer {
     init(native_buf: any) = {
         self.buf = native_buf
-        self.size = native_buf.len()
+        self.size = int(native_buf.len())
         self.pos = 0
     }
 
@@ -67,19 +67,19 @@ class ByteBuffer {
     readU8() -> int = { 
         v = self.buf.get(self.pos, "u8")
         self.pos = self.pos + 1
-        return v 
+        return int(v) 
     }
 
     readI16() -> int = { 
         v = self.buf.get(self.pos, "i16")
         self.pos = self.pos + 2
-        return v 
+        return int(v) 
     }
 
     readI32() -> int = { 
         v = self.buf.get(self.pos, "i32")
         self.pos = self.pos + 4
-        return v 
+        return int(v) 
     }
 
     // ─── I/O Operations ───
@@ -87,12 +87,10 @@ class ByteBuffer {
     save(path: string) = self.buf.writeFile(path)
 }
 
-// ─── Global Factory API (Namespace) ───────────────────────────
+// ─── Global Factory API ───────────────────────────────────────
 
-namespace Buffer {
-    alloc(size: int) -> ByteBuffer        = return ByteBuffer(bytes.alloc(size))
-    fromFile(path: string) -> ByteBuffer  = return ByteBuffer(bytes.readFile(path))
-}
+alloc(size: int) -> ByteBuffer        = return ByteBuffer(bytes.alloc(size))
+fromFile(path: string) -> ByteBuffer  = return ByteBuffer(bytes.readFile(path))
 
 // ─── Dynamic Help Registry ────────────────────────────────────
 
@@ -108,8 +106,8 @@ if (isfunction(__register_help)) {
 
   Buffer Initialization
   ──────────────────────
-    buf = Buffer.alloc(1024)       // Allocate 1KB of zeroed memory
-    img = Buffer.fromFile("a.png") // Memory-map an entire file
+    buf = buffer.alloc(1024)       // Allocate 1KB of zeroed memory
+    img = buffer.fromFile("a.png") // Memory-map an entire file
 
   Cursor & State Control
   ──────────────────────
