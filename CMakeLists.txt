@@ -55,9 +55,11 @@ set(JC2_HEADERS
     "src/modules/socket_module.h"
     "src/modules/window_module.h"
     "src/modules/latex_module.h"
+    "src/modules/ffi_module.h"
 )
 
 set(JC2_SOURCES
+    "src/modules/ffi_module.cpp"
     "src/frontend/Lexer.cpp" "src/frontend/Parser.cpp" "src/frontend/Compiler.cpp"
     "src/vm/VM.cpp" "src/vm/BuiltinRegistry.cpp" "src/main.cpp"
     "src/cas/Symbolic.cpp" "src/cas/Integration.cpp" "src/cas/Factorization.cpp" "src/cas/Groebner.cpp"
