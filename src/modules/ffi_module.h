@@ -7,6 +7,8 @@
 #include <vector>
 #include <string>
 #include <cstring>
+#include <cstdint>
+#include <any>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -111,6 +113,29 @@ JC2_MODULE(ffi) {
                     } else if (t == "f64") {
                         double d = cArgs[i].asDouble();
                         std::memcpy(&args[i], &d, sizeof(double));
+                    } else if (t == "pointer") {
+                        if (cArgs[i].isInstance()) {
+                            auto inst = cArgs[i].asInstance();
+                            Value bytesVal = cArgs[i];
+                            // 如果是 ByteBuffer 实例，自动提取其内部的 buf 字段
+                            if (inst->classDef && inst->classDef->name == "ByteBuffer" && inst->fields) {
+                                auto it = inst->fields->keyMap.find(Value("buf"));
+                                if (it != inst->fields->keyMap.end()) {
+                                    bytesVal = inst->fields->elements[it->second].second;
+                                }
+                            }
+                            // 尝试从 Bytes 实例中提取底层 C++ 内存指针
+                            if (bytesVal.isInstance()) {
+                                auto bInst = bytesVal.asInstance();
+                                if (bInst->nativeData.has_value() && bInst->nativeData.type() == typeid(std::shared_ptr<std::vector<uint8_t>>)) {
+                                    auto vecPtr = std::any_cast<std::shared_ptr<std::vector<uint8_t>>>(bInst->nativeData);
+                                    args[i] = (uint64_t)vecPtr->data();
+                                    continue;
+                                }
+                            }
+                        }
+                        // 如果不是 Buffer，回退到普通的整数指针转换
+                        args[i] = (uint64_t)cArgs[i].asBigInt().toInt64();
                     } else {
                         args[i] = (uint64_t)cArgs[i].asBigInt().toInt64();
                     }

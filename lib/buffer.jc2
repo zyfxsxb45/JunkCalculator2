@@ -49,6 +49,18 @@ class ByteBuffer {
         self.pos = self.pos + 4
         return self 
     }
+
+    writeI64(v: int) -> ByteBuffer = { 
+        self.buf.set(self.pos, v, "i64")
+        self.pos = self.pos + 8
+        return self 
+    }
+
+    writeU64(v: int) -> ByteBuffer = { 
+        self.buf.set(self.pos, v, "u64")
+        self.pos = self.pos + 8
+        return self 
+    }
     
     writePcmArray(arr: any) -> ByteBuffer = {
         self.buf.write_arr(self.pos, arr, "i16")
@@ -79,6 +91,18 @@ class ByteBuffer {
     readI32() -> int = { 
         v = self.buf.get(self.pos, "i32")
         self.pos = self.pos + 4
+        return int(v) 
+    }
+
+    readI64() -> int = { 
+        v = self.buf.get(self.pos, "i64")
+        self.pos = self.pos + 8
+        return int(v) 
+    }
+
+    readU64() -> int = { 
+        v = self.buf.get(self.pos, "u64")
+        self.pos = self.pos + 8
         return int(v) 
     }
 
@@ -120,6 +144,7 @@ if (isfunction(__register_help)) {
   Chainable Writers (Cursor Auto-Advances)
   ──────────────────────
     (buf.writeStr("RIFF")              Writes text bytes.
+       .writeI64(9000000000)           Writes 64-bit integer (8 bytes).
        .writeI32(1024)                 Writes 32-bit integer (4 bytes).
        .writeI16(-2)                   Writes 16-bit integer (2 bytes).
        .writeU8(255)                   Writes 8-bit unsigned integer (1 byte).
@@ -130,6 +155,7 @@ if (isfunction(__register_help)) {
   ──────────────────────
     str = buf.readStr(4)               Reads 4 bytes into a String.
     my_int = buf.readI32()             Reads consecutive 4 bytes.
+    big_int = buf.readI64()            Reads consecutive 8 bytes.
 
   File I/O
   ──────────────────────

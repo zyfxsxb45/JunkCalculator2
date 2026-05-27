@@ -121,6 +121,10 @@ namespace jc {
                 std::string s = args[1].isString() ? args[1].asString() : args[1].toString();
                 writeMem(s.data(), s.size());
             }
+            else if (type == "i64" || type == "u64") {
+                int64_t v = args[1].asBigInt().toInt64();
+                writeMem(&v, 8);
+            }
             else {
                 double val = args[1].asDouble();
                 if (type == "u8") { uint8_t  v = static_cast<uint8_t>(val);  writeMem(&v, 1); }
@@ -186,6 +190,8 @@ namespace jc {
             else if (type == "i16") { int16_t  v; readMem(&v, 2); return Value(static_cast<double>(v)); }
             else if (type == "u32") { uint32_t v; readMem(&v, 4); return Value(static_cast<double>(v)); }
             else if (type == "i32") { int32_t  v; readMem(&v, 4); return Value(static_cast<double>(v)); }
+            else if (type == "i64") { int64_t  v; readMem(&v, 8); return Value(BigInt(v)); }
+            else if (type == "u64") { uint64_t v; readMem(&v, 8); return Value(BigInt(std::to_string(v))); }
             else if (type == "f32") { float    v; readMem(&v, 4); return Value(static_cast<double>(v)); }
             else if (type == "f64") { double   v; readMem(&v, 8); return Value(v); }
             else throw std::runtime_error("Buffer Error: Unknown format type '" + type + "'.");
