@@ -434,5 +434,3 @@ if (isfunction(__register_help)) {
     |             Alternation (OR)
 )DOC")
 }
-
-print("[System] regex.jc2 loaded successfully.")

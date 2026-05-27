@@ -120,5 +120,3 @@ if (isfunction(__register_help)) {
     self.quit()                Safely terminates the game loop.
 )DOC")
 }
-
-print("[System] engine.jc2 loaded successfully. (Game Framework Ready)")

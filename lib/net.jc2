@@ -110,5 +110,3 @@ if (isfunction(__register_help)) {
         if the remote server closed the connection.
 )DOC")
 }
-
-print("[System] net.jc2 loaded successfully.")

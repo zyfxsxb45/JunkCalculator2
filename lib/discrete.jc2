@@ -737,5 +737,3 @@ if (isfunction(__register_help)) {
     g.components()             Connected components (undirected only)
 )DOC")
 }
-
-print("[System] discrete.jc2 loaded successfully.")

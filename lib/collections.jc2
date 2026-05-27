@@ -311,5 +311,3 @@ if (isfunction(__register_help)) {
                               Methods: insert(x), contains(x), size(), inorder()
 )DOC")
 }
-
-print("[System] collections.jc2 loaded successfully.")

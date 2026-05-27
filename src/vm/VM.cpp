@@ -1716,7 +1716,6 @@ namespace jc {
 
                         it->second.loader(tempGlobals, tempNatives, tempArity);
                         importedModules.insert(name);
-                        std::cout << "[System] Native module '" << name << "' loaded." << std::endl;
 
                         for (const auto& kv : tempGlobals) {
                             auto uv = std::make_shared<UpVal>();

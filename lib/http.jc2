@@ -151,5 +151,3 @@ if (isfunction(__register_help)) {
     print(response.status)
 )DOC")
 }
-
-print("[System] http.jc2 loaded successfully.")
