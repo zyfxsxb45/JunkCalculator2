@@ -614,7 +614,7 @@ namespace jc {
                 case OpCode::OP_NONE:  push(Value::none()); break;
                 case OpCode::OP_TRUE:  push(Value(true)); break;
                 case OpCode::OP_FALSE: push(Value(false)); break;
-                case OpCode::OP_POP:   pop(); break;
+                case OpCode::OP_POP:   pop(); stack[getStackSize()] = Value::none(); break;
 
                 case OpCode::OP_IS_UNINIT: {
                     Value res = Value(peek(0).isUninit());
@@ -3033,9 +3033,9 @@ namespace jc {
             }
         }
         else if (dims == 2) {
-            Value col = pop();
-            Value row = pop();
-            Value obj = pop();
+            Value col = pop(); stack[getStackSize()] = Value::none();
+            Value row = pop(); stack[getStackSize()] = Value::none();
+            Value obj = pop(); stack[getStackSize()] = Value::none();
             int r = static_cast<int>(std::round(row.asDouble()));
             int c = static_cast<int>(std::round(col.asDouble()));
 
@@ -3067,11 +3067,11 @@ namespace jc {
     }
 
     void VM::execIndexSet(uint8_t dims) {
-        Value val = pop();
+        Value val = pop(); stack[getStackSize()] = Value::none();
 
         if (dims == 1) {
-            Value idx = pop();
-            Value obj = pop();
+            Value idx = pop(); stack[getStackSize()] = Value::none();
+            Value obj = pop(); stack[getStackSize()] = Value::none();
 
             if (obj.isObjType(ObjType::DICT)) {
                 auto d = static_cast<ObjDict*>(obj.asObj());
@@ -3358,7 +3358,7 @@ namespace jc {
 
     void VM::execSliceGet(uint8_t dims) {
         auto readOptionalInt = [this]() -> std::pair<bool, int> {
-            Value v = pop();
+            Value v = pop(); stack[getStackSize()] = Value::none();
             if (v.isNone()) return { false, 0 };
             return { true, static_cast<int>(std::round(v.asDouble())) };
             };
@@ -3606,11 +3606,11 @@ namespace jc {
             };
 
         if (dims == 1) {
-            Value val = pop();
+            Value val = pop(); stack[getStackSize()] = Value::none();
             auto step = readOptionalInt();
             auto end = readOptionalInt();
             auto start = readOptionalInt();
-            Value obj = pop();
+            Value obj = pop(); stack[getStackSize()] = Value::none();
 
             if (obj.isObjType(ObjType::REAL_MATRIX)) {
                 if (obj.asObj()->refCount > 2) obj = Value(RealMatrix(static_cast<ObjRealMatrix*>(obj.asObj())->mat));
@@ -3782,14 +3782,14 @@ namespace jc {
             push(obj);
         }
         else if (dims == 2) {
-            Value val = pop();
+            Value val = pop(); stack[getStackSize()] = Value::none();
             auto cStep = readOptionalInt();
             auto cEnd = readOptionalInt();
             auto cStart = readOptionalInt();
             auto rStep = readOptionalInt();
             auto rEnd = readOptionalInt();
             auto rStart = readOptionalInt();
-            Value obj = pop();
+            Value obj = pop(); stack[getStackSize()] = Value::none();
 
             auto processMatSliceSet = [&](auto& m) {
                 auto rIds = buildSliceIndices(m.getRows(), rStart, rEnd, rStep);
