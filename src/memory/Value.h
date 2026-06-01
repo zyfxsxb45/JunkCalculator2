@@ -637,8 +637,7 @@ namespace jc {
         }
         if (lhs.isNumber() && rhs.isNumber()) return Value(lhs.asNumber() * rhs.asNumber());
         
-        try {
-            if (lhs.isObjType(ObjType::REAL_MATRIX) && rhs.isObjType(ObjType::REAL_MATRIX)) return Value(static_cast<ObjRealMatrix*>(lhs.asObj())->mat * static_cast<ObjRealMatrix*>(rhs.asObj())->mat);
+        if (lhs.isObjType(ObjType::REAL_MATRIX) && rhs.isObjType(ObjType::REAL_MATRIX)) return Value(static_cast<ObjRealMatrix*>(lhs.asObj())->mat * static_cast<ObjRealMatrix*>(rhs.asObj())->mat);
             if (lhs.isObjType(ObjType::COMPLEX_MATRIX) && rhs.isObjType(ObjType::COMPLEX_MATRIX)) return Value(static_cast<ObjComplexMatrix*>(lhs.asObj())->mat * static_cast<ObjComplexMatrix*>(rhs.asObj())->mat);
             if (lhs.isObjType(ObjType::REAL_MATRIX) && rhs.isObjType(ObjType::COMPLEX_MATRIX)) return Value(lhs.asComplexMatrix() * rhs.asComplexMatrix());
             if (lhs.isObjType(ObjType::COMPLEX_MATRIX) && rhs.isObjType(ObjType::REAL_MATRIX)) return Value(lhs.asComplexMatrix() * rhs.asComplexMatrix());
@@ -713,7 +712,6 @@ namespace jc {
             if (lhsIsExactInt && rhs.isObjType(ObjType::FRACTION)) return Value::fromFraction(Fraction(lhs.asBigInt()) * static_cast<ObjFraction*>(rhs.asObj())->frac);
             
             if (lhs.isDouble() || rhs.isDouble()) return Value(lhs.asDouble() * rhs.asDouble());
-        } catch (...) {}
         
         throw std::runtime_error("Type Error: Multiplication not supported for these types.");
     }
@@ -734,8 +732,10 @@ namespace jc {
             return Value(lhs.asNumber() / b);
         }
         
-        try {
-            if (rhs.isObjType(ObjType::REAL_MATRIX) || rhs.isObjType(ObjType::COMPLEX_MATRIX)) {
+        if (rhs.isObjType(ObjType::REAL_MATRIX)) {
+                return lhs * Value(rhs.asRealMatrix().inverse());
+            }
+            if (rhs.isObjType(ObjType::COMPLEX_MATRIX)) {
                 return lhs * Value(rhs.asComplexMatrix().inverse());
             }
 
@@ -784,7 +784,6 @@ namespace jc {
                 if (b == 0.0) throw std::runtime_error("Math Error: Division by zero.");
                 return Value(lhs.asDouble() / b);
             }
-        } catch (...) {}
         
         throw std::runtime_error("Type Error: Division not supported for these types.");
     }
@@ -792,8 +791,7 @@ namespace jc {
     inline Value operator^(const Value& lhs, const Value& rhs) {
         if (lhs.isSymbolic() || rhs.isSymbolic()) return Value(lhs.asSymbolic() ^ rhs.asSymbolic());
         
-        try {
-            if (lhs.isObjType(ObjType::COMPLEX) || rhs.isObjType(ObjType::COMPLEX)) return Value(lhs.asComplex() ^ rhs.asComplex());
+        if (lhs.isObjType(ObjType::COMPLEX) || rhs.isObjType(ObjType::COMPLEX)) return Value(lhs.asComplex() ^ rhs.asComplex());
 
             if (lhs.isObjType(ObjType::REAL_MATRIX) || lhs.isObjType(ObjType::COMPLEX_MATRIX)) {
                 bool rhsIsScalar = rhs.isNumber() || rhs.isBigInt() || rhs.isObjType(ObjType::FRACTION) || rhs.isComplex();
@@ -900,8 +898,6 @@ namespace jc {
             if (Tol::isEq(res, rounded, 1e5) && std::abs(rounded) < 9e15) return Value(BigInt(static_cast<int64_t>(rounded)));
             return Value(res);
 
-        } catch (...) {}
-        
         throw std::runtime_error("Type Error: Power operation not supported for these types.");
     }
 
@@ -918,8 +914,7 @@ namespace jc {
             return Value(std::fmod(lhs.asNumber(), b));
         }
         
-        try {
-            bool rhsIsRealScalar = rhs.isNumber() || rhs.isBigInt() || rhs.isObjType(ObjType::FRACTION);
+        bool rhsIsRealScalar = rhs.isNumber() || rhs.isBigInt() || rhs.isObjType(ObjType::FRACTION);
             if (lhs.isObjType(ObjType::REAL_MATRIX) && rhsIsRealScalar) {
                 double b = rhs.asDouble();
                 if (b == 0.0) throw std::runtime_error("Math Error: Modulo by zero.");
@@ -951,7 +946,6 @@ namespace jc {
             if (lhs.isObjType(ObjType::FRACTION) && rhs.isObjType(ObjType::FRACTION)) return Value::fromFraction(static_cast<ObjFraction*>(lhs.asObj())->frac % static_cast<ObjFraction*>(rhs.asObj())->frac);
             if (lhs.isObjType(ObjType::FRACTION) && rhsIsExactInt) return Value::fromFraction(static_cast<ObjFraction*>(lhs.asObj())->frac % Fraction(rhs.asBigInt()));
             if (lhsIsExactInt && rhs.isObjType(ObjType::FRACTION)) return Value::fromFraction(Fraction(lhs.asBigInt()) % static_cast<ObjFraction*>(rhs.asObj())->frac);
-        } catch (...) {}
         
         throw std::runtime_error("Type Error: Modulo not supported for these types.");
     }
@@ -1120,7 +1114,10 @@ namespace jc {
     }
 
     inline Value ldivide(const Value& lhs, const Value& rhs) {
-        if (lhs.isObjType(ObjType::REAL_MATRIX) || lhs.isObjType(ObjType::COMPLEX_MATRIX)) {
+        if (lhs.isObjType(ObjType::REAL_MATRIX)) {
+            return Value(lhs.asRealMatrix().inverse()) * rhs;
+        }
+        if (lhs.isObjType(ObjType::COMPLEX_MATRIX)) {
             return Value(lhs.asComplexMatrix().inverse()) * rhs;
         }
         return rhs / lhs;
@@ -1602,8 +1599,7 @@ namespace jc {
             return Value(res);
         }
         
-        try {
-            if (lhs.isObjType(ObjType::REAL_MATRIX) && rhs.isObjType(ObjType::REAL_MATRIX)) return Value(static_cast<ObjRealMatrix*>(lhs.asObj())->mat + static_cast<ObjRealMatrix*>(rhs.asObj())->mat);
+        if (lhs.isObjType(ObjType::REAL_MATRIX) && rhs.isObjType(ObjType::REAL_MATRIX)) return Value(static_cast<ObjRealMatrix*>(lhs.asObj())->mat + static_cast<ObjRealMatrix*>(rhs.asObj())->mat);
             if (lhs.isObjType(ObjType::COMPLEX_MATRIX) && rhs.isObjType(ObjType::COMPLEX_MATRIX)) return Value(static_cast<ObjComplexMatrix*>(lhs.asObj())->mat + static_cast<ObjComplexMatrix*>(rhs.asObj())->mat);
             if (lhs.isObjType(ObjType::REAL_MATRIX) && rhs.isObjType(ObjType::COMPLEX_MATRIX)) return Value(lhs.asComplexMatrix() + rhs.asComplexMatrix());
             if (lhs.isObjType(ObjType::COMPLEX_MATRIX) && rhs.isObjType(ObjType::REAL_MATRIX)) return Value(lhs.asComplexMatrix() + rhs.asComplexMatrix());
@@ -1669,7 +1665,6 @@ namespace jc {
             if (lhsIsExactInt && rhs.isObjType(ObjType::FRACTION)) return Value::fromFraction(Fraction(lhs.asBigInt()) + static_cast<ObjFraction*>(rhs.asObj())->frac);
             
             if (lhs.isDouble() || rhs.isDouble()) return Value(lhs.asDouble() + rhs.asDouble());
-        } catch (...) {}
         
         throw std::runtime_error("Type Error: Cannot add these types.");
     }
@@ -1682,8 +1677,7 @@ namespace jc {
         }
         if (lhs.isNumber() && rhs.isNumber()) return Value(lhs.asNumber() - rhs.asNumber());
         
-        try {
-            if (lhs.isObjType(ObjType::REAL_MATRIX) && rhs.isObjType(ObjType::REAL_MATRIX)) return Value(static_cast<ObjRealMatrix*>(lhs.asObj())->mat - static_cast<ObjRealMatrix*>(rhs.asObj())->mat);
+        if (lhs.isObjType(ObjType::REAL_MATRIX) && rhs.isObjType(ObjType::REAL_MATRIX)) return Value(static_cast<ObjRealMatrix*>(lhs.asObj())->mat - static_cast<ObjRealMatrix*>(rhs.asObj())->mat);
             if (lhs.isObjType(ObjType::COMPLEX_MATRIX) && rhs.isObjType(ObjType::COMPLEX_MATRIX)) return Value(static_cast<ObjComplexMatrix*>(lhs.asObj())->mat - static_cast<ObjComplexMatrix*>(rhs.asObj())->mat);
             if (lhs.isObjType(ObjType::REAL_MATRIX) && rhs.isObjType(ObjType::COMPLEX_MATRIX)) return Value(lhs.asComplexMatrix() - rhs.asComplexMatrix());
             if (lhs.isObjType(ObjType::COMPLEX_MATRIX) && rhs.isObjType(ObjType::REAL_MATRIX)) return Value(lhs.asComplexMatrix() - rhs.asComplexMatrix());
@@ -1761,7 +1755,6 @@ namespace jc {
             if (lhsIsExactInt && rhs.isObjType(ObjType::FRACTION)) return Value::fromFraction(Fraction(lhs.asBigInt()) - static_cast<ObjFraction*>(rhs.asObj())->frac);
             
             if (lhs.isDouble() || rhs.isDouble()) return Value(lhs.asDouble() - rhs.asDouble());
-        } catch (...) {}
         
         throw std::runtime_error("Type Error: Subtraction not supported for these types.");
     }

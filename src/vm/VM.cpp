@@ -656,7 +656,7 @@ namespace jc {
                     Value& b = peek(0); Value& a = peek(1);
                     if (a.isInstance() && findDunder(a, DUNDER_LDIV)) { Value res = callDunder(a, DUNDER_LDIV, { b }); pop(); peek(0) = res; break; }
                     if (b.isInstance() && findDunder(b, DUNDER_RLDIV)) { Value res = callDunder(b, DUNDER_RLDIV, { a }); pop(); peek(0) = res; break; }
-                    Value res = b / a; pop(); peek(0) = res; break;
+                    Value res = ldivide(a, b); pop(); peek(0) = res; break;
                 }
                 case OpCode::OP_MODULO: {
                     Value& b = peek(0); Value& a = peek(1);

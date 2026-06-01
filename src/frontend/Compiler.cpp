@@ -1213,6 +1213,7 @@ namespace jc {
                 
                 emitStoreTarget(chain[0]->object.get());
                 emit(OpCode::OP_POP, lastLine);
+                emit(OpCode::OP_POP, lastLine); // pop val
             } else {
                 emit(OpCode::OP_NONE, lastLine);
                 addLocal("", current().scopeDepth);
@@ -1248,6 +1249,7 @@ namespace jc {
                 }
                 emitStoreTarget(chain[0]->object.get());
                 emit(OpCode::OP_POP, lastLine);
+                emit(OpCode::OP_POP, lastLine); // pop chainTmpIdx
                 
                 current().locals.pop_back();
             }
@@ -1578,7 +1580,7 @@ namespace jc {
             
             emitStoreRoot();
             emit(OpCode::OP_POP, lastLine); // pop root_new
-            // 栈顶现在是 val
+            emit(OpCode::OP_POP, lastLine); // pop val
         } else {
             int depth = static_cast<int>(expr->indexChain.size());
             if (depth == 1) {
@@ -1590,7 +1592,7 @@ namespace jc {
                 
                 emitStoreRoot();
                 emit(OpCode::OP_POP, lastLine); // pop root_new
-                // 栈顶现在是 val
+                emit(OpCode::OP_POP, lastLine); // pop val
             }
             else {
                 emit(OpCode::OP_NONE, lastLine);
@@ -1627,7 +1629,7 @@ namespace jc {
                 }
                 emitStoreRoot();
                 emit(OpCode::OP_POP, lastLine); // pop root_new
-                // 栈顶现在是 val
+                emit(OpCode::OP_POP, lastLine); // pop chainTmpIdx
                 
                 current().locals.pop_back(); // untrack chainTmpIdx
             }
