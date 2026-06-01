@@ -612,6 +612,7 @@ namespace jc {
         case TokenType::SLASH:         emit(OpCode::OP_DIVIDE, line); break;
         case TokenType::PERCENT:       emit(OpCode::OP_MODULO, line); break;
         case TokenType::CARET:         emit(OpCode::OP_POWER, line); break;
+        case TokenType::BACKSLASH:     emit(OpCode::OP_LEFT_DIVIDE, line); break;
         case TokenType::EQUAL:         emit(OpCode::OP_EQUAL, line); break;
         case TokenType::BANG_EQUAL:    emit(OpCode::OP_NOT_EQUAL, line); break;
         case TokenType::LESS:          emit(OpCode::OP_LESS, line); break;
@@ -1017,6 +1018,7 @@ namespace jc {
             case TokenType::SLASH:   emit(OpCode::OP_DIVIDE, lastLine); break;
             case TokenType::PERCENT: emit(OpCode::OP_MODULO, lastLine); break;
             case TokenType::CARET:   emit(OpCode::OP_POWER, lastLine); break;
+            case TokenType::BACKSLASH: emit(OpCode::OP_LEFT_DIVIDE, lastLine); break;
             case TokenType::BIT_AND: emit(OpCode::OP_BIT_AND, lastLine); break; // ★
             case TokenType::BIT_OR:  emit(OpCode::OP_BIT_OR, lastLine); break;  // ★
             default: throw std::runtime_error("Compiler Error: Unknown compound operator.");

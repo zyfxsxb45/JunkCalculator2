@@ -283,6 +283,7 @@ namespace jc {
         if (match({ TokenType::PLUS_ASSIGN, TokenType::MINUS_ASSIGN,
                     TokenType::STAR_ASSIGN, TokenType::SLASH_ASSIGN,
                     TokenType::PERCENT_ASSIGN, TokenType::CARET_ASSIGN,
+                    TokenType::BACKSLASH_ASSIGN,
                     TokenType::BIT_AND_ASSIGN, TokenType::BIT_OR_ASSIGN })) {
             if (isConst) throw std::runtime_error("Parser Error: 'const' cannot be applied to compound assignment.");
             Token compOp = previous();
@@ -295,6 +296,7 @@ namespace jc {
             case TokenType::SLASH_ASSIGN:   baseOp = TokenType::SLASH; break;
             case TokenType::PERCENT_ASSIGN: baseOp = TokenType::PERCENT; break;
             case TokenType::CARET_ASSIGN:   baseOp = TokenType::CARET; break;
+            case TokenType::BACKSLASH_ASSIGN: baseOp = TokenType::BACKSLASH; break;
             case TokenType::BIT_AND_ASSIGN: baseOp = TokenType::BIT_AND; break;
             case TokenType::BIT_OR_ASSIGN:  baseOp = TokenType::BIT_OR; break;
             default: baseOp = TokenType::PLUS; break;

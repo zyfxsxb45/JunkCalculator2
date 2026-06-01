@@ -29,6 +29,7 @@ namespace jc {
         OP_DIVIDE,
         OP_MODULO,
         OP_POWER,
+        OP_LEFT_DIVIDE,     // ★ \ 左除
         OP_NEGATE,          // 一元取负
         OP_NOT,             // 逻辑取反
         OP_BIT_NOT,         // ★ ~ 按位取反
@@ -158,6 +159,7 @@ namespace jc {
         case OpCode::OP_DIVIDE: return "OP_DIVIDE";
         case OpCode::OP_MODULO: return "OP_MODULO";
         case OpCode::OP_POWER: return "OP_POWER";
+        case OpCode::OP_LEFT_DIVIDE: return "OP_LEFT_DIVIDE";
         case OpCode::OP_NEGATE: return "OP_NEGATE";
         case OpCode::OP_NOT: return "OP_NOT";
         case OpCode::OP_BIT_NOT: return "OP_BIT_NOT";
@@ -332,7 +334,7 @@ namespace jc {
             case OpCode::OP_NONE: case OpCode::OP_TRUE: case OpCode::OP_FALSE:
             case OpCode::OP_POP: case OpCode::OP_ADD: case OpCode::OP_SUBTRACT:
             case OpCode::OP_MULTIPLY: case OpCode::OP_DIVIDE: case OpCode::OP_MODULO:
-            case OpCode::OP_POWER: case OpCode::OP_NEGATE: case OpCode::OP_NOT:
+            case OpCode::OP_POWER: case OpCode::OP_LEFT_DIVIDE: case OpCode::OP_NEGATE: case OpCode::OP_NOT:
             case OpCode::OP_BIT_NOT:
             case OpCode::OP_EQUAL: case OpCode::OP_NOT_EQUAL: case OpCode::OP_LESS:
             case OpCode::OP_LESS_EQUAL: case OpCode::OP_GREATER: case OpCode::OP_GREATER_EQUAL:

@@ -4182,7 +4182,7 @@ void BuiltinRegistry::registerTypeChecks() {
         if (val.isInstance()) {
             auto inst = val.asInstance();
             return Value(invokeDunder(inst, "__add__").first || invokeDunder(inst, "__mul__").first ||
-                         invokeDunder(inst, "__sub__").first || invokeDunder(inst, "__div__").first);
+                         invokeDunder(inst, "__sub__").first || invokeDunder(inst, "__div__").first || invokeDunder(inst, "__ldiv__").first);
         }
         return Value(false);
         });

@@ -116,6 +116,8 @@ namespace jc {
     static const std::string DUNDER_RMUL = "__rmul__";
     static const std::string DUNDER_DIV = "__div__";
     static const std::string DUNDER_RDIV = "__rdiv__";
+    static const std::string DUNDER_LDIV = "__ldiv__";
+    static const std::string DUNDER_RLDIV = "__rldiv__";
     static const std::string DUNDER_MOD = "__mod__";
     static const std::string DUNDER_RMOD = "__rmod__";
     static const std::string DUNDER_POW = "__pow__";
@@ -203,7 +205,7 @@ namespace jc {
             if (val.isNumber() || val.isObjType(ObjType::BIGINT) || val.isObjType(ObjType::FRACTION) ||
                 val.isObjType(ObjType::COMPLEX) || val.isObjType(ObjType::BASENUM)) return true;
             if (val.isInstance()) {
-                return findDunder(val, "__add__") || findDunder(val, "__mul__") || findDunder(val, "__sub__") || findDunder(val, "__div__");
+                return findDunder(val, "__add__") || findDunder(val, "__mul__") || findDunder(val, "__sub__") || findDunder(val, "__div__") || findDunder(val, "__ldiv__");
             }
             return false;
         }
@@ -649,6 +651,12 @@ namespace jc {
                     if (a.isInstance() && findDunder(a, DUNDER_DIV)) { Value res = callDunder(a, DUNDER_DIV, { b }); pop(); peek(0) = res; break; }
                     if (b.isInstance() && findDunder(b, DUNDER_RDIV)) { Value res = callDunder(b, DUNDER_RDIV, { a }); pop(); peek(0) = res; break; }
                     Value res = a / b; pop(); peek(0) = res; break;
+                }
+                case OpCode::OP_LEFT_DIVIDE: {
+                    Value& b = peek(0); Value& a = peek(1);
+                    if (a.isInstance() && findDunder(a, DUNDER_LDIV)) { Value res = callDunder(a, DUNDER_LDIV, { b }); pop(); peek(0) = res; break; }
+                    if (b.isInstance() && findDunder(b, DUNDER_RLDIV)) { Value res = callDunder(b, DUNDER_RLDIV, { a }); pop(); peek(0) = res; break; }
+                    Value res = b / a; pop(); peek(0) = res; break;
                 }
                 case OpCode::OP_MODULO: {
                     Value& b = peek(0); Value& a = peek(1);

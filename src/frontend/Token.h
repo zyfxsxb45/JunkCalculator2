@@ -25,6 +25,7 @@ namespace jc {
         SLASH_ASSIGN,        // ★ /=
         PERCENT_ASSIGN,      // ★ %=
         CARET_ASSIGN,        // ★ ^=
+        BACKSLASH_ASSIGN,    // ★ \=
         BIT_AND_ASSIGN,      // ★ &=
         BIT_OR_ASSIGN,       // ★ |=
 
@@ -108,6 +109,7 @@ namespace jc {
         case TokenType::SLASH_ASSIGN:   return "SLASH_ASSIGN(/=)";
         case TokenType::PERCENT_ASSIGN: return "PERCENT_ASSIGN(%=)";
         case TokenType::CARET_ASSIGN:   return "CARET_ASSIGN(^=)";
+        case TokenType::BACKSLASH_ASSIGN: return "BACKSLASH_ASSIGN(\\=)";
         case TokenType::BIT_AND_ASSIGN: return "BIT_AND_ASSIGN(&=)";   // ★
         case TokenType::BIT_OR_ASSIGN:  return "BIT_OR_ASSIGN(|=)";    // ★
         case TokenType::AND_AND:       return "AND_AND(&&)";    // ★

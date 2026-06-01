@@ -49,6 +49,7 @@ namespace jc {
         case TokenType::PLUS_ASSIGN: case TokenType::MINUS_ASSIGN:
         case TokenType::STAR_ASSIGN: case TokenType::SLASH_ASSIGN:
         case TokenType::PERCENT_ASSIGN: case TokenType::CARET_ASSIGN:
+        case TokenType::BACKSLASH_ASSIGN:
         case TokenType::BIT_AND_ASSIGN: case TokenType::BIT_OR_ASSIGN: // ★
             // 比较
         case TokenType::EQUAL: case TokenType::BANG_EQUAL:
@@ -167,7 +168,9 @@ namespace jc {
         case '^':
             addToken(match('=') ? TokenType::CARET_ASSIGN : TokenType::CARET);
             break;
-        case '\\': addToken(TokenType::BACKSLASH); break;
+        case '\\':
+            addToken(match('=') ? TokenType::BACKSLASH_ASSIGN : TokenType::BACKSLASH);
+            break;
         case '"':
             if (peek() == '"' && peekNext() == '"') {
                 advance(); advance();

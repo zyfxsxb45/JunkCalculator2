@@ -196,6 +196,7 @@ namespace jc {
             case TokenType::PLUS_ASSIGN: case TokenType::MINUS_ASSIGN:
             case TokenType::STAR_ASSIGN: case TokenType::SLASH_ASSIGN:
             case TokenType::PERCENT_ASSIGN: case TokenType::CARET_ASSIGN:
+            case TokenType::BACKSLASH_ASSIGN:
             case TokenType::BIT_AND_ASSIGN: case TokenType::BIT_OR_ASSIGN: // ★
             case TokenType::AND_AND: case TokenType::OR_OR: case TokenType::BANG:
             case TokenType::BIT_AND: case TokenType::BIT_OR:
