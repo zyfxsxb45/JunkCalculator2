@@ -198,8 +198,10 @@ namespace jc {
             case TokenType::PERCENT_ASSIGN: case TokenType::CARET_ASSIGN:
             case TokenType::BACKSLASH_ASSIGN:
             case TokenType::BIT_AND_ASSIGN: case TokenType::BIT_OR_ASSIGN: // ★
+            case TokenType::SHIFT_LEFT_ASSIGN: case TokenType::SHIFT_RIGHT_ASSIGN:
             case TokenType::AND_AND: case TokenType::OR_OR: case TokenType::BANG:
             case TokenType::BIT_AND: case TokenType::BIT_OR:
+            case TokenType::SHIFT_LEFT: case TokenType::SHIFT_RIGHT:
                 result += col(Ansi::CYAN) + srcText + col(Ansi::RESET);
                 break;
 

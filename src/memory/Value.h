@@ -499,6 +499,8 @@ namespace jc {
 
         friend Value operator&(const Value& lhs, const Value& rhs);
         friend Value operator|(const Value& lhs, const Value& rhs);
+        friend Value operator<<(const Value& lhs, const Value& rhs);
+        friend Value operator>>(const Value& lhs, const Value& rhs);
 
         std::string toJC2Expression() const;
 
@@ -978,6 +980,43 @@ namespace jc {
             return Value(res);
         }
         throw std::runtime_error("Type Error: Bitwise/Set AND '&' not supported for these types.");
+    }
+
+    inline Value operator<<(const Value& lhs, const Value& rhs) {
+        int shift = static_cast<int>(std::round(rhs.asDouble()));
+        if (shift < 0) throw std::runtime_error("Math Error: Negative shift count.");
+        if (lhs.isObjType(ObjType::BASENUM)) {
+            return Value(static_cast<ObjBaseNum*>(lhs.asObj())->base.shiftLeft(shift));
+        }
+        if (lhs.isInt32()) {
+            if (shift >= 32) return Value::fromInt32(0);
+            return Value::fromInt32(lhs.asInt32() << shift);
+        }
+        bool lhsIsInt = lhs.isInt32() || lhs.isBigInt() || lhs.isBool();
+        if (lhsIsInt) {
+            BigInt lVal = lhs.isBool() ? BigInt(lhs.asBool() ? 1 : 0) : lhs.asBigInt();
+            return Value(BaseNum(lVal, 2).shiftLeft(shift).getValue());
+        }
+        throw std::runtime_error("Type Error: Bitwise SHIFT LEFT '<<' not supported for these types.");
+    }
+
+    inline Value operator>>(const Value& lhs, const Value& rhs) {
+        int shift = static_cast<int>(std::round(rhs.asDouble()));
+        if (shift < 0) throw std::runtime_error("Math Error: Negative shift count.");
+        if (lhs.isObjType(ObjType::BASENUM)) {
+            return Value(static_cast<ObjBaseNum*>(lhs.asObj())->base.shiftRight(shift));
+        }
+        if (lhs.isInt32()) {
+            int32_t v = lhs.asInt32();
+            if (shift >= 32) return Value::fromInt32(v < 0 ? -1 : 0);
+            return Value::fromInt32(v >> shift);
+        }
+        bool lhsIsInt = lhs.isInt32() || lhs.isBigInt() || lhs.isBool();
+        if (lhsIsInt) {
+            BigInt lVal = lhs.isBool() ? BigInt(lhs.asBool() ? 1 : 0) : lhs.asBigInt();
+            return Value(BaseNum(lVal, 2).shiftRight(shift).getValue());
+        }
+        throw std::runtime_error("Type Error: Bitwise SHIFT RIGHT '>>' not supported for these types.");
     }
 
     inline Value operator|(const Value& lhs, const Value& rhs) {

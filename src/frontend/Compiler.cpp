@@ -517,6 +517,8 @@ namespace jc {
                 case TokenType::BANG_EQUAL:    return Value(!Value::equals(*leftVal, *rightVal));
                 case TokenType::BIT_AND:       return (*leftVal) & (*rightVal);
                 case TokenType::BIT_OR:        return (*leftVal) | (*rightVal);
+                case TokenType::SHIFT_LEFT:    return (*leftVal) << (*rightVal);
+                case TokenType::SHIFT_RIGHT:   return (*leftVal) >> (*rightVal);
                 case TokenType::LESS: {
                     if ((leftVal->isBigInt() || leftVal->isInt32() || leftVal->isBool()) && (rightVal->isBigInt() || rightVal->isInt32() || rightVal->isBool())) return Value(leftVal->asBigInt() < rightVal->asBigInt());
                     if (leftVal->isObjType(ObjType::FRACTION) && rightVal->isObjType(ObjType::FRACTION)) return Value(static_cast<ObjFraction*>(leftVal->asObj())->frac < static_cast<ObjFraction*>(rightVal->asObj())->frac);
@@ -626,6 +628,8 @@ namespace jc {
         case TokenType::IN:            emit(OpCode::OP_IN, line); break;
         case TokenType::BIT_AND:       emit(OpCode::OP_BIT_AND, line); break;  // ★
         case TokenType::BIT_OR:        emit(OpCode::OP_BIT_OR, line); break;   // ★
+        case TokenType::SHIFT_LEFT:    emit(OpCode::OP_BIT_SHIFT_LEFT, line); break;
+        case TokenType::SHIFT_RIGHT:   emit(OpCode::OP_BIT_SHIFT_RIGHT, line); break;
         default:
             throw std::runtime_error("Compiler Error: Unsupported binary operator '" +
                 expr->op.lexeme + "'.");
@@ -1025,6 +1029,8 @@ namespace jc {
             case TokenType::BACKSLASH: emit(OpCode::OP_LEFT_DIVIDE, lastLine); break;
             case TokenType::BIT_AND: emit(OpCode::OP_BIT_AND, lastLine); break; // ★
             case TokenType::BIT_OR:  emit(OpCode::OP_BIT_OR, lastLine); break;  // ★
+            case TokenType::SHIFT_LEFT: emit(OpCode::OP_BIT_SHIFT_LEFT, lastLine); break;
+            case TokenType::SHIFT_RIGHT: emit(OpCode::OP_BIT_SHIFT_RIGHT, lastLine); break;
             default: throw std::runtime_error("Compiler Error: Unknown compound operator.");
             }
             };

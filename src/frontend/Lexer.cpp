@@ -51,10 +51,12 @@ namespace jc {
         case TokenType::PERCENT_ASSIGN: case TokenType::CARET_ASSIGN:
         case TokenType::BACKSLASH_ASSIGN:
         case TokenType::BIT_AND_ASSIGN: case TokenType::BIT_OR_ASSIGN: // ★
+        case TokenType::SHIFT_LEFT_ASSIGN: case TokenType::SHIFT_RIGHT_ASSIGN:
             // 比较
         case TokenType::EQUAL: case TokenType::BANG_EQUAL:
         case TokenType::LESS: case TokenType::LESS_EQUAL:
         case TokenType::GREATER: case TokenType::GREATER_EQUAL:
+        case TokenType::SHIFT_LEFT: case TokenType::SHIFT_RIGHT:
             // 逻辑
         case TokenType::AND_AND: case TokenType::OR_OR:
         case TokenType::BIT_AND: case TokenType::BIT_OR:
@@ -208,10 +210,18 @@ namespace jc {
             else addToken(TokenType::BIT_OR);
             break;
         case '<':
-            addToken(match('=') ? TokenType::LESS_EQUAL : TokenType::LESS);
+            if (match('<')) {
+                addToken(match('=') ? TokenType::SHIFT_LEFT_ASSIGN : TokenType::SHIFT_LEFT);
+            } else {
+                addToken(match('=') ? TokenType::LESS_EQUAL : TokenType::LESS);
+            }
             break;
         case '>':
-            addToken(match('=') ? TokenType::GREATER_EQUAL : TokenType::GREATER);
+            if (match('>')) {
+                addToken(match('=') ? TokenType::SHIFT_RIGHT_ASSIGN : TokenType::SHIFT_RIGHT);
+            } else {
+                addToken(match('=') ? TokenType::GREATER_EQUAL : TokenType::GREATER);
+            }
             break;
         case ' ': case '\r': case '\t':
             break;

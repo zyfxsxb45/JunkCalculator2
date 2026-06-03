@@ -287,7 +287,8 @@ namespace jc {
                     TokenType::STAR_ASSIGN, TokenType::SLASH_ASSIGN,
                     TokenType::PERCENT_ASSIGN, TokenType::CARET_ASSIGN,
                     TokenType::BACKSLASH_ASSIGN,
-                    TokenType::BIT_AND_ASSIGN, TokenType::BIT_OR_ASSIGN })) {
+                    TokenType::BIT_AND_ASSIGN, TokenType::BIT_OR_ASSIGN,
+                    TokenType::SHIFT_LEFT_ASSIGN, TokenType::SHIFT_RIGHT_ASSIGN })) {
             if (isConst) throw std::runtime_error("Parser Error: 'const' cannot be applied to compound assignment.");
             Token compOp = previous();
 
@@ -302,6 +303,8 @@ namespace jc {
             case TokenType::BACKSLASH_ASSIGN: baseOp = TokenType::BACKSLASH; break;
             case TokenType::BIT_AND_ASSIGN: baseOp = TokenType::BIT_AND; break;
             case TokenType::BIT_OR_ASSIGN:  baseOp = TokenType::BIT_OR; break;
+            case TokenType::SHIFT_LEFT_ASSIGN: baseOp = TokenType::SHIFT_LEFT; break;
+            case TokenType::SHIFT_RIGHT_ASSIGN: baseOp = TokenType::SHIFT_RIGHT; break;
             default: baseOp = TokenType::PLUS; break;
             }
 
@@ -423,13 +426,13 @@ namespace jc {
     }
 
     std::unique_ptr<Expr> Parser::comparison() {
-        auto expr = addition();
+        auto expr = shift();
         if (match({ TokenType::EQUAL, TokenType::BANG_EQUAL,
                     TokenType::LESS, TokenType::LESS_EQUAL,
                     TokenType::GREATER, TokenType::GREATER_EQUAL,
                     TokenType::IN })) {
             Token op = previous();
-            auto right = addition();
+            auto right = shift();
             
             if (check(TokenType::EQUAL) || check(TokenType::BANG_EQUAL) ||
                 check(TokenType::LESS) || check(TokenType::LESS_EQUAL) ||
@@ -451,7 +454,7 @@ namespace jc {
                                TokenType::GREATER, TokenType::GREATER_EQUAL,
                                TokenType::IN })) {
                     Token nextOp = previous();
-                    auto nextRight = addition();
+                    auto nextRight = shift();
                     
                     if (check(TokenType::EQUAL) || check(TokenType::BANG_EQUAL) ||
                         check(TokenType::LESS) || check(TokenType::LESS_EQUAL) ||
@@ -481,6 +484,16 @@ namespace jc {
             } else {
                 return std::make_unique<Binary>(std::move(expr), op, std::move(right));
             }
+        }
+        return expr;
+    }
+
+    std::unique_ptr<Expr> Parser::shift() {
+        auto expr = addition();
+        while (match({ TokenType::SHIFT_LEFT, TokenType::SHIFT_RIGHT })) {
+            Token op = previous();
+            auto right = addition();
+            expr = std::make_unique<Binary>(std::move(expr), op, std::move(right));
         }
         return expr;
     }

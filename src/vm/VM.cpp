@@ -126,6 +126,10 @@ namespace jc {
     static const std::string DUNDER_BITNOT = "__bitnot__";
     static const std::string DUNDER_BITAND = "__bitand__";
     static const std::string DUNDER_BITOR = "__bitor__";
+    static const std::string DUNDER_LSHIFT = "__lshift__";
+    static const std::string DUNDER_RLSHIFT = "__rlshift__";
+    static const std::string DUNDER_RSHIFT = "__rshift__";
+    static const std::string DUNDER_RRSHIFT = "__rrshift__";
     static const std::string DUNDER_EQ = "__eq__";
     static const std::string DUNDER_NEQ = "__neq__";
     static const std::string DUNDER_LT = "__lt__";
@@ -693,6 +697,18 @@ namespace jc {
                     Value& b = peek(0); Value& a = peek(1);
                     if (a.isInstance() && findDunder(a, DUNDER_BITOR)) { Value res = callDunder(a, DUNDER_BITOR, { b }); pop(); peek(0) = res; break; }
                     Value res = a | b; pop(); peek(0) = res; break;
+                }
+                case OpCode::OP_BIT_SHIFT_LEFT: {
+                    Value& b = peek(0); Value& a = peek(1);
+                    if (a.isInstance() && findDunder(a, DUNDER_LSHIFT)) { Value res = callDunder(a, DUNDER_LSHIFT, { b }); pop(); peek(0) = res; break; }
+                    if (b.isInstance() && findDunder(b, DUNDER_RLSHIFT)) { Value res = callDunder(b, DUNDER_RLSHIFT, { a }); pop(); peek(0) = res; break; }
+                    Value res = a << b; pop(); peek(0) = res; break;
+                }
+                case OpCode::OP_BIT_SHIFT_RIGHT: {
+                    Value& b = peek(0); Value& a = peek(1);
+                    if (a.isInstance() && findDunder(a, DUNDER_RSHIFT)) { Value res = callDunder(a, DUNDER_RSHIFT, { b }); pop(); peek(0) = res; break; }
+                    if (b.isInstance() && findDunder(b, DUNDER_RRSHIFT)) { Value res = callDunder(b, DUNDER_RRSHIFT, { a }); pop(); peek(0) = res; break; }
+                    Value res = a >> b; pop(); peek(0) = res; break;
                 }
 
                 case OpCode::OP_EQUAL: {

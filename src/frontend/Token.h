@@ -17,6 +17,7 @@ namespace jc {
         ASSIGN, EQUAL, BANG_EQUAL, GREATER, GREATER_EQUAL, LESS, LESS_EQUAL, 
         
         ARROW, PIPE, RIGHT_ARROW,
+        SHIFT_LEFT, SHIFT_RIGHT,
 
         // --- 复合赋值运算符 ---     // ★ 新增
         PLUS_ASSIGN,         // ★ +=
@@ -28,6 +29,8 @@ namespace jc {
         BACKSLASH_ASSIGN,    // ★ \=
         BIT_AND_ASSIGN,      // ★ &=
         BIT_OR_ASSIGN,       // ★ |=
+        SHIFT_LEFT_ASSIGN,   // ★ <<=
+        SHIFT_RIGHT_ASSIGN,  // ★ >>=
 
         // --- 括号与标点符号 ---
         LPAREN, RPAREN, LBRACKET, RBRACKET,
@@ -112,12 +115,16 @@ namespace jc {
         case TokenType::BACKSLASH_ASSIGN: return "BACKSLASH_ASSIGN(\\=)";
         case TokenType::BIT_AND_ASSIGN: return "BIT_AND_ASSIGN(&=)";   // ★
         case TokenType::BIT_OR_ASSIGN:  return "BIT_OR_ASSIGN(|=)";    // ★
+        case TokenType::SHIFT_LEFT_ASSIGN: return "SHIFT_LEFT_ASSIGN(<<=)";
+        case TokenType::SHIFT_RIGHT_ASSIGN: return "SHIFT_RIGHT_ASSIGN(>>=)";
         case TokenType::AND_AND:       return "AND_AND(&&)";    // ★
         case TokenType::OR_OR:         return "OR_OR(||)";      // ★
         case TokenType::BANG:          return "BANG(!)";         // ★
         case TokenType::TILDE:         return "TILDE(~)";        // ★
         case TokenType::BIT_AND:       return "BIT_AND(&)";
         case TokenType::BIT_OR:        return "BIT_OR(|)";
+        case TokenType::SHIFT_LEFT:    return "SHIFT_LEFT(<<)";
+        case TokenType::SHIFT_RIGHT:   return "SHIFT_RIGHT(>>)";
         case TokenType::GREATER:       return "GREATER(>)";
         case TokenType::GREATER_EQUAL: return "GREATER_EQUAL(>=)";
         case TokenType::LESS:          return "LESS(<)";

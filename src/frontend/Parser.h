@@ -19,6 +19,7 @@ namespace jc {
         std::unique_ptr<Expr> expression();
         std::unique_ptr<Expr> assignment();
         std::unique_ptr<Expr> comparison();
+        std::unique_ptr<Expr> shift();
         std::unique_ptr<Expr> addition();
         std::unique_ptr<Expr> multiplication();
         std::unique_ptr<Expr> power();
