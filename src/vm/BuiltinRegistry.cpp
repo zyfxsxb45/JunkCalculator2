@@ -1284,16 +1284,35 @@ void BuiltinRegistry::registerBase() {
         if (a.isInt32()) {
             int32_t v = a.asInt32();
             if (shift > 0) {
-                if (shift >= 32) return Value::fromInt32(0);
-                return Value::fromInt32(v << shift);
+                if (v == 0) return Value::fromInt32(0);
+                if (shift < 31) {
+                    int64_t res = static_cast<int64_t>(v) << shift;
+                    if (res >= -2147483648LL && res <= 2147483647LL) {
+                        return Value::fromInt32(static_cast<int32_t>(res));
+                    }
+                }
             } else {
                 int rshift = -shift;
-                if (rshift >= 32) return Value::fromInt32(v < 0 ? -1 : 0);
-                return Value::fromInt32(v >> rshift);
+                if (rshift < 31) return Value::fromInt32(v >> rshift);
+                return Value::fromInt32(v < 0 ? -1 : 0);
             }
         }
-        BaseNum base(a.asBigInt(), 2);
-        return Value((shift > 0 ? base.shiftLeft(shift) : base.shiftRight(-shift)).getValue());
+        bool lhsIsInt = a.isInt32() || a.isBigInt() || a.isBool();
+        if (lhsIsInt) {
+            BigInt lVal = a.isBool() ? BigInt(a.asBool() ? 1 : 0) : a.asBigInt();
+            if (shift > 0) {
+                return Value(lVal * BigInt(2).pow(shift));
+            } else {
+                int rshift = -shift;
+                BigInt divisor = BigInt(2).pow(rshift);
+                BigInt res = lVal / divisor;
+                if (lVal.isNegative() && !(lVal % divisor).isZero()) {
+                    res = res - BigInt(1);
+                }
+                return Value(res);
+            }
+        }
+        throw std::runtime_error("Type Error: bitshift() not supported for these types.");
     });
 }
 

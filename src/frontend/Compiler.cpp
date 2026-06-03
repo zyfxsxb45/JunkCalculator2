@@ -298,11 +298,40 @@ namespace jc {
             chunk()->emitConstant(Value(expr->value), lastLine);
         }
         else if (expr->isImaginary) {
-            chunk()->emitConstant(Value(Complex(0.0, std::stod(expr->value))), lastLine);
+            const std::string& s = expr->value;
+            double imagPart = 0.0;
+            if (s.length() > 2 && s[0] == '0' && (s[1] == 'x' || s[1] == 'X' || s[1] == 'b' || s[1] == 'B' || s[1] == 'o' || s[1] == 'O')) {
+                int base = 10;
+                if (s[1] == 'x' || s[1] == 'X') base = 16;
+                else if (s[1] == 'b' || s[1] == 'B') base = 2;
+                else if (s[1] == 'o' || s[1] == 'O') base = 8;
+                std::string numPart = s.substr(2, s.length() - 3); // 剔除前缀和末尾的 'i'
+                try {
+                    imagPart = BaseNum::fromString(numPart, base).getValue().toDouble();
+                } catch (...) {
+                    throw std::runtime_error("Compiler Error: Invalid imaginary literal '" + s + "'.");
+                }
+            } else {
+                std::string numPart = s.substr(0, s.length() - 1); // 剔除末尾的 'i'
+                imagPart = std::stod(numPart);
+            }
+            chunk()->emitConstant(Value(Complex(0.0, imagPart)), lastLine);
         }
         else {
             const std::string& s = expr->value;
-            if (s.find('.') == std::string::npos &&
+            if (s.length() > 2 && s[0] == '0' && (s[1] == 'x' || s[1] == 'X' || s[1] == 'b' || s[1] == 'B' || s[1] == 'o' || s[1] == 'O')) {
+                int base = 10;
+                if (s[1] == 'x' || s[1] == 'X') base = 16;
+                else if (s[1] == 'b' || s[1] == 'B') base = 2;
+                else if (s[1] == 'o' || s[1] == 'O') base = 8;
+                std::string numPart = s.substr(2);
+                try {
+                    chunk()->emitConstant(Value(BaseNum::fromString(numPart, base).getValue()), lastLine);
+                } catch (...) {
+                    throw std::runtime_error("Compiler Error: Invalid integer literal '" + s + "'.");
+                }
+            }
+            else if (s.find('.') == std::string::npos &&
                 s.find('e') == std::string::npos &&
                 s.find('E') == std::string::npos) {
                 try { chunk()->emitConstant(Value(BigInt(s)), lastLine); }
@@ -452,11 +481,40 @@ namespace jc {
                 return Value(lit->value);
             }
             else if (lit->isImaginary) {
-                return Value(Complex(0.0, std::stod(lit->value)));
+                const std::string& s = lit->value;
+                double imagPart = 0.0;
+                if (s.length() > 2 && s[0] == '0' && (s[1] == 'x' || s[1] == 'X' || s[1] == 'b' || s[1] == 'B' || s[1] == 'o' || s[1] == 'O')) {
+                    int base = 10;
+                    if (s[1] == 'x' || s[1] == 'X') base = 16;
+                    else if (s[1] == 'b' || s[1] == 'B') base = 2;
+                    else if (s[1] == 'o' || s[1] == 'O') base = 8;
+                    std::string numPart = s.substr(2, s.length() - 3); // 剔除前缀和末尾的 'i'
+                    try {
+                        imagPart = BaseNum::fromString(numPart, base).getValue().toDouble();
+                    } catch (...) {
+                        return std::nullopt;
+                    }
+                } else {
+                    std::string numPart = s.substr(0, s.length() - 1); // 剔除末尾的 'i'
+                    imagPart = std::stod(numPart);
+                }
+                return Value(Complex(0.0, imagPart));
             }
             else {
                 const std::string& s = lit->value;
-                if (s.find('.') == std::string::npos &&
+                if (s.length() > 2 && s[0] == '0' && (s[1] == 'x' || s[1] == 'X' || s[1] == 'b' || s[1] == 'B' || s[1] == 'o' || s[1] == 'O')) {
+                    int base = 10;
+                    if (s[1] == 'x' || s[1] == 'X') base = 16;
+                    else if (s[1] == 'b' || s[1] == 'B') base = 2;
+                    else if (s[1] == 'o' || s[1] == 'O') base = 8;
+                    std::string numPart = s.substr(2);
+                    try {
+                        return Value(BaseNum::fromString(numPart, base).getValue());
+                    } catch (...) {
+                        return std::nullopt;
+                    }
+                }
+                else if (s.find('.') == std::string::npos &&
                     s.find('e') == std::string::npos &&
                     s.find('E') == std::string::npos) {
                     try { return Value(BigInt(s)); }

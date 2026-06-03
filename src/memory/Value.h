@@ -989,13 +989,19 @@ namespace jc {
             return Value(static_cast<ObjBaseNum*>(lhs.asObj())->base.shiftLeft(shift));
         }
         if (lhs.isInt32()) {
-            if (shift >= 32) return Value::fromInt32(0);
-            return Value::fromInt32(lhs.asInt32() << shift);
+            int32_t v = lhs.asInt32();
+            if (v == 0) return Value::fromInt32(0);
+            if (shift < 31) {
+                int64_t res = static_cast<int64_t>(v) << shift;
+                if (res >= -2147483648LL && res <= 2147483647LL) {
+                    return Value::fromInt32(static_cast<int32_t>(res));
+                }
+            }
         }
         bool lhsIsInt = lhs.isInt32() || lhs.isBigInt() || lhs.isBool();
         if (lhsIsInt) {
             BigInt lVal = lhs.isBool() ? BigInt(lhs.asBool() ? 1 : 0) : lhs.asBigInt();
-            return Value(BaseNum(lVal, 2).shiftLeft(shift).getValue());
+            return Value(lVal * BigInt(2).pow(shift));
         }
         throw std::runtime_error("Type Error: Bitwise SHIFT LEFT '<<' not supported for these types.");
     }
@@ -1008,13 +1014,18 @@ namespace jc {
         }
         if (lhs.isInt32()) {
             int32_t v = lhs.asInt32();
-            if (shift >= 32) return Value::fromInt32(v < 0 ? -1 : 0);
-            return Value::fromInt32(v >> shift);
+            if (shift < 31) return Value::fromInt32(v >> shift);
+            return Value::fromInt32(v < 0 ? -1 : 0);
         }
         bool lhsIsInt = lhs.isInt32() || lhs.isBigInt() || lhs.isBool();
         if (lhsIsInt) {
             BigInt lVal = lhs.isBool() ? BigInt(lhs.asBool() ? 1 : 0) : lhs.asBigInt();
-            return Value(BaseNum(lVal, 2).shiftRight(shift).getValue());
+            BigInt divisor = BigInt(2).pow(shift);
+            BigInt res = lVal / divisor;
+            if (lVal.isNegative() && !(lVal % divisor).isZero()) {
+                res = res - BigInt(1);
+            }
+            return Value(res);
         }
         throw std::runtime_error("Type Error: Bitwise SHIFT RIGHT '>>' not supported for these types.");
     }

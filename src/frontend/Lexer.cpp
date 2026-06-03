@@ -279,24 +279,49 @@ namespace jc {
     }
 
     void Lexer::number() {
-        while (std::isdigit(peek())) advance();
-        if (peek() == '.' && std::isdigit(peekNext())) {
-            advance();
-            while (std::isdigit(peek())) advance();
-        }
-        if (peek() == 'e' || peek() == 'E') {
-            char next = peekNext();
-            bool hasSign = (next == '+' || next == '-');
-            bool isValidScientific = false;
-            if (hasSign) { if (std::isdigit(peekNextNext())) isValidScientific = true; }
-            else if (std::isdigit(next)) isValidScientific = true;
-            if (isValidScientific) {
-                advance();
-                if (hasSign) advance();
-                while (std::isdigit(peek())) advance();
+        char firstDigit = source[current - 1];
+        bool isHexOctBin = false;
+        if (firstDigit == '0') {
+            char next = peek();
+            if (next == 'x' || next == 'X') {
+                advance(); // consume 'x'
+                if (!std::isxdigit(peek())) throwError("Invalid hex literal.");
+                while (std::isxdigit(peek())) advance();
+                isHexOctBin = true;
+            } else if (next == 'b' || next == 'B') {
+                advance(); // consume 'b'
+                if (peek() != '0' && peek() != '1') throwError("Invalid binary literal.");
+                while (peek() == '0' || peek() == '1') advance();
+                isHexOctBin = true;
+            } else if (next == 'o' || next == 'O') {
+                advance(); // consume 'o'
+                if (peek() < '0' || peek() > '7') throwError("Invalid octal literal.");
+                while (peek() >= '0' && peek() <= '7') advance();
+                isHexOctBin = true;
             }
         }
-        // ★ 虚数后缀: 3i, 3.14i, 1e3i
+
+        if (!isHexOctBin) {
+            while (std::isdigit(peek())) advance();
+            if (peek() == '.' && std::isdigit(peekNext())) {
+                advance();
+                while (std::isdigit(peek())) advance();
+            }
+            if (peek() == 'e' || peek() == 'E') {
+                char next = peekNext();
+                bool hasSign = (next == '+' || next == '-');
+                bool isValidScientific = false;
+                if (hasSign) { if (std::isdigit(peekNextNext())) isValidScientific = true; }
+                else if (std::isdigit(next)) isValidScientific = true;
+                if (isValidScientific) {
+                    advance();
+                    if (hasSign) advance();
+                    while (std::isdigit(peek())) advance();
+                }
+            }
+        }
+
+        // ★ 虚数后缀: 3i, 3.14i, 1e3i, 0x1Ai
         if (peek() == 'i') {
             char next = peekNext();
             // i 后面必须是"非标识符延续字符"
@@ -311,14 +336,15 @@ namespace jc {
             if (validEnd) {
                 advance(); // consume 'i'
                 addToken(TokenType::IMAGINARY);
-            }
-            else {
-                addToken(TokenType::NUMBER);
+                return;
             }
         }
-        else {
-            addToken(TokenType::NUMBER);
+        
+        if (std::isalnum(peek()) || peek() == '_') {
+            throwError("Invalid character '" + std::string(1, peek()) + "' in number literal.");
         }
+
+        addToken(TokenType::NUMBER);
     }
 
     bool Lexer::isAtEnd() const { return current >= (int)source.length(); }
