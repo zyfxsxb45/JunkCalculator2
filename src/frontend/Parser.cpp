@@ -77,6 +77,9 @@ namespace jc {
                 while (match({ TokenType::SEMICOLON, TokenType::NEWLINE })) {}  // ★
                 if (isAtEnd()) break;
                 stmts.push_back(expression());
+                if (!isAtEnd() && !check(TokenType::SEMICOLON) && !check(TokenType::NEWLINE)) {
+                    throw std::runtime_error("Parser Error: Expect newline or ';' after statement.");
+                }
                 while (match({ TokenType::SEMICOLON, TokenType::NEWLINE })) {}  // ★
             }
             if (stmts.empty()) return std::make_unique<Literal>("0");
@@ -686,6 +689,9 @@ namespace jc {
             while (match({ TokenType::SEMICOLON, TokenType::NEWLINE })) {}  // ★
             if (check(TokenType::RBRACE)) break;
             stmts.push_back(expression());
+            if (!check(TokenType::RBRACE) && !isAtEnd() && !check(TokenType::SEMICOLON) && !check(TokenType::NEWLINE)) {
+                throw std::runtime_error("Parser Error: Expect newline or ';' after statement.");
+            }
             while (match({ TokenType::SEMICOLON, TokenType::NEWLINE })) {}  // ★
         }
         consume(TokenType::RBRACE, "Parser Error: Expect '}' after block.");
@@ -1241,6 +1247,9 @@ namespace jc {
                     while (match({ TokenType::SEMICOLON, TokenType::NEWLINE })) {}
                     if (check(TokenType::CASE) || check(TokenType::DEFAULT) || check(TokenType::RBRACE)) break;
                     stmts.push_back(expression());
+                    if (!check(TokenType::CASE) && !check(TokenType::DEFAULT) && !check(TokenType::RBRACE) && !isAtEnd() && !check(TokenType::SEMICOLON) && !check(TokenType::NEWLINE)) {
+                        throw std::runtime_error("Parser Error: Expect newline or ';' after statement.");
+                    }
                     while (match({ TokenType::SEMICOLON, TokenType::NEWLINE })) {}
                 }
                 cases.push_back({ std::move(values), std::make_unique<Block>(std::move(stmts)) });
@@ -1252,6 +1261,9 @@ namespace jc {
                     while (match({ TokenType::SEMICOLON, TokenType::NEWLINE })) {}
                     if (check(TokenType::CASE) || check(TokenType::DEFAULT) || check(TokenType::RBRACE)) break;
                     stmts.push_back(expression());
+                    if (!check(TokenType::CASE) && !check(TokenType::DEFAULT) && !check(TokenType::RBRACE) && !isAtEnd() && !check(TokenType::SEMICOLON) && !check(TokenType::NEWLINE)) {
+                        throw std::runtime_error("Parser Error: Expect newline or ';' after statement.");
+                    }
                     while (match({ TokenType::SEMICOLON, TokenType::NEWLINE })) {}
                 }
                 defaultBody = std::make_unique<Block>(std::move(stmts));
@@ -1273,6 +1285,9 @@ namespace jc {
             while (match({ TokenType::SEMICOLON, TokenType::NEWLINE })) {}
             if (check(TokenType::RBRACE)) break;
             stmts.push_back(expression());
+            if (!check(TokenType::RBRACE) && !isAtEnd() && !check(TokenType::SEMICOLON) && !check(TokenType::NEWLINE)) {
+                throw std::runtime_error("Parser Error: Expect newline or ';' after statement.");
+            }
             while (match({ TokenType::SEMICOLON, TokenType::NEWLINE })) {}
         }
         consume(TokenType::RBRACE, "Parser Error: Expect '}' after namespace body.");
@@ -1375,6 +1390,9 @@ namespace jc {
                 std::shared_ptr<Expr>(body.release())
                 });
 
+            if (!check(TokenType::RBRACE) && !isAtEnd() && !check(TokenType::SEMICOLON) && !check(TokenType::NEWLINE)) {
+                throw std::runtime_error("Parser Error: Expect newline or ';' after method definition.");
+            }
             while (match({ TokenType::SEMICOLON, TokenType::NEWLINE })) {}
         }
         consume(TokenType::RBRACE, "Parser Error: Expect '}' after class body.");
