@@ -305,15 +305,14 @@ namespace jc {
                 if (s[1] == 'x' || s[1] == 'X') base = 16;
                 else if (s[1] == 'b' || s[1] == 'B') base = 2;
                 else if (s[1] == 'o' || s[1] == 'O') base = 8;
-                std::string numPart = s.substr(2, s.length() - 3); // 剔除前缀和末尾的 'i'
+                std::string numPart = s.substr(2); // 剔除前缀
                 try {
                     imagPart = BaseNum::fromString(numPart, base).getValue().toDouble();
                 } catch (...) {
                     throw std::runtime_error("Compiler Error: Invalid imaginary literal '" + s + "'.");
                 }
             } else {
-                std::string numPart = s.substr(0, s.length() - 1); // 剔除末尾的 'i'
-                imagPart = std::stod(numPart);
+                imagPart = std::stod(s);
             }
             chunk()->emitConstant(Value(Complex(0.0, imagPart)), lastLine);
         }
@@ -488,15 +487,14 @@ namespace jc {
                     if (s[1] == 'x' || s[1] == 'X') base = 16;
                     else if (s[1] == 'b' || s[1] == 'B') base = 2;
                     else if (s[1] == 'o' || s[1] == 'O') base = 8;
-                    std::string numPart = s.substr(2, s.length() - 3); // 剔除前缀和末尾的 'i'
+                    std::string numPart = s.substr(2); // 剔除前缀
                     try {
                         imagPart = BaseNum::fromString(numPart, base).getValue().toDouble();
                     } catch (...) {
                         return std::nullopt;
                     }
                 } else {
-                    std::string numPart = s.substr(0, s.length() - 1); // 剔除末尾的 'i'
-                    imagPart = std::stod(numPart);
+                    imagPart = std::stod(s);
                 }
                 return Value(Complex(0.0, imagPart));
             }
