@@ -134,10 +134,6 @@ jc::Value evalCode(const std::string& code, const std::string& sourceFile, bool 
     
     jc::Chunk chunk = compiler.compile(ast.get(), sourceFile); // ★
 
-    if (g_showDisasm) {
-        chunk.disassemble(isFile ? "Script Chunk" : "REPL Chunk");
-    }
-
     auto evalFn = std::make_shared<jc::CompiledFunction>();
     evalFn->name = isFile ? "<script>" : "<eval>";
     evalFn->arity = 0;
@@ -151,6 +147,18 @@ jc::Value evalCode(const std::string& code, const std::string& sourceFile, bool 
     int evalIdx = static_cast<int>(fns.size()) - 1;
     
     vm.setCompiledFunctions(fns);
+
+    if (g_showDisasm) {
+        for (size_t i = currentFns.size(); i < fns.size(); ++i) {
+            std::string chunkName = fns[i]->name;
+            if (chunkName == "<eval>" || chunkName == "<script>") {
+                chunkName = isFile ? "Script Chunk" : "REPL Chunk";
+            } else {
+                chunkName = "Function: " + chunkName;
+            }
+            fns[i]->chunk.disassemble(chunkName);
+        }
+    }
 
     if (g_autoDebug) {
         if (jc::VM::activeVM) {

@@ -580,7 +580,10 @@ void BuiltinRegistry::registerMath() {
     });
 
     regMath("sqrtD", { 1 }, [](const std::vector<Value>& args) -> Value {
-        return args[0] ^ Value(0.5);
+        Value x = args[0];
+        if (x.isObjType(ObjType::REAL_MATRIX) || x.isObjType(ObjType::COMPLEX_MATRIX)) return x ^ Value(0.5);
+        Value numX = x.isComplex() ? Value(x.asComplex()) : Value(x.asDouble());
+        return numX ^ Value(0.5);
     });
 
     regMath("cbrt", { 1 }, [](const std::vector<Value>& args) -> Value {
@@ -588,7 +591,10 @@ void BuiltinRegistry::registerMath() {
     });
 
     regMath("cbrtD", { 1 }, [](const std::vector<Value>& args) -> Value {
-        return args[0] ^ Value(1.0 / 3.0);
+        Value x = args[0];
+        if (x.isObjType(ObjType::REAL_MATRIX) || x.isObjType(ObjType::COMPLEX_MATRIX)) return x ^ Value(1.0 / 3.0);
+        Value numX = x.isComplex() ? Value(x.asComplex()) : Value(x.asDouble());
+        return numX ^ Value(1.0 / 3.0);
     });
 
     reg("matpow", { 2 }, [](const std::vector<Value>& args) -> Value {
@@ -723,9 +729,15 @@ void BuiltinRegistry::registerMath() {
     });
 
     regMath("rootD", { 2 }, [](const std::vector<Value>& args) -> Value {
+        Value x = args[0];
         Value y = args[1];
+        if (x.isObjType(ObjType::REAL_MATRIX) || x.isObjType(ObjType::COMPLEX_MATRIX)) {
+            Value numY = y.isComplex() ? Value(y.asComplex()) : Value(y.asDouble());
+            return x ^ (Value(1.0) / numY);
+        }
+        Value numX = x.isComplex() ? Value(x.asComplex()) : Value(x.asDouble());
         Value numY = y.isComplex() ? Value(y.asComplex()) : Value(y.asDouble());
-        return args[0] ^ (Value(1.0) / numY);
+        return numX ^ (Value(1.0) / numY);
     });
 
     // 通用取整分发器
@@ -4154,6 +4166,28 @@ void BuiltinRegistry::registerSystemShell() {
         });
     // 做个兼容别名
     reg("debugger", builtinArity["breakpoint"], builtins["breakpoint"]);
+
+    reg("disassemble", { 1 }, [](const std::vector<Value>& args) -> Value {
+        if (!args[0].isFunctionClosure()) {
+            throw std::runtime_error("Type Error: disassemble() expects a function.");
+        }
+        auto cl = args[0].asFunction();
+        if (cl->compiledFnIndex >= 0) {
+            if (VM::activeVM) {
+                auto fns = VM::activeVM->getCompiledFunctions();
+                if (cl->compiledFnIndex < static_cast<int>(fns.size())) {
+                    auto fn = fns[cl->compiledFnIndex];
+                    fn->chunk.disassemble(fn->name.empty() ? "Function" : fn->name);
+                } else {
+                    std::cout << "Invalid compiled function index." << std::endl;
+                }
+            }
+        } else {
+            std::cout << "Cannot disassemble native function: " << cl->rawBody << std::endl;
+        }
+        return Value::none();
+        });
+    reg("disasm", builtinArity["disassemble"], builtins["disassemble"]);
 }
 
 // =================================================================

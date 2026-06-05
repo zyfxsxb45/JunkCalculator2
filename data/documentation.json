@@ -1260,6 +1260,9 @@
       "                          Type `help` inside `(jc2-dbg)` to see commands ",
       "                          like `step`, `continue`, `stack`, and `p <var>`.",
       "                          ",
+      "    disassemble(f)        Print the bytecode disassembly of a function closure.",
+      "    disasm(f)             Alias for disassemble(f).",
+      "                          ",
       "    Profiler Mode         When `--profile on`, JC2 benchmarks every opcode ",
       "                          and function call, outputting a highly detailed ",
       "                          flame/time report upon execution completion.",
@@ -5264,6 +5267,12 @@
       "desc": "Suspends VM execution and opens the interactive step-debugger.",
       "aliases": ["debugger"],
       "examples": ["breakpoint()"]
+    },
+    "disassemble": {
+      "signature": "disassemble(f)",
+      "desc": "Prints the bytecode disassembly of a function closure.",
+      "aliases": ["disasm"],
+      "examples": ["disassemble(myFunc)"]
     },
     "buildIndex": {
       "signature": "buildIndex()",
