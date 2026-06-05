@@ -560,7 +560,7 @@ int main(int argc, char* argv[]) {
             }
             if (input == "/exit" || input == "/quit") break;
             if (input == "/help") { printHelp(); continue; }
-            if (input == "/version") { std::cout << "Junk Calculator 2.4.0.0\n"; continue; }
+            if (input == "/version") { std::cout << "Junk Calculator 2.4.1.0\n"; continue; }
             if (input.substr(0, 6) == "/help ") { printHelpTopic(input.substr(6)); continue; }
             if (input == "/clear") { vm.clearGlobals(); std::cout << "All variables cleared.\n"; continue; }
             if (input == "/cls") {
