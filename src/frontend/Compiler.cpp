@@ -2620,8 +2620,8 @@ namespace jc {
                         emit(OpCode::OP_POP, lastLine);
 
                         for (size_t i = 0; i < lp->elements.size(); ++i) {
-                            emit(OpCode::OP_CONSTANT, lastLine); emit16(makeConstant(Value(static_cast<double>(i))), lastLine);
                             emit(OpCode::OP_GET_LOCAL, lastLine); emit16(static_cast<uint16_t>(valSlot), lastLine);
+                            emit(OpCode::OP_CONSTANT, lastLine); emit16(makeConstant(Value(static_cast<double>(i))), lastLine);
                             emit(OpCode::OP_INDEX_GET, lastLine); emit(1, lastLine);
                             
                             addLocal("<pat_tmp>", current().scopeDepth);
@@ -2658,9 +2658,9 @@ namespace jc {
 
                         for (int r = 0; r < rows; ++r) {
                             for (int c = 0; c < cols; ++c) {
-                                emit(OpCode::OP_CONSTANT, lastLine); emit16(makeConstant(Value(static_cast<double>(c))), lastLine);
-                                emit(OpCode::OP_CONSTANT, lastLine); emit16(makeConstant(Value(static_cast<double>(r))), lastLine);
                                 emit(OpCode::OP_GET_LOCAL, lastLine); emit16(static_cast<uint16_t>(valSlot), lastLine);
+                                emit(OpCode::OP_CONSTANT, lastLine); emit16(makeConstant(Value(static_cast<double>(r))), lastLine);
+                                emit(OpCode::OP_CONSTANT, lastLine); emit16(makeConstant(Value(static_cast<double>(c))), lastLine);
                                 emit(OpCode::OP_INDEX_GET, lastLine); emit(2, lastLine);
                                 
                                 addLocal("<pat_tmp>", current().scopeDepth);
