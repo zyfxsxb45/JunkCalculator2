@@ -580,10 +580,9 @@ void BuiltinRegistry::registerMath() {
     });
 
     regMath("sqrtD", { 1 }, [](const std::vector<Value>& args) -> Value {
-        Value x = args[0];
-        if (x.isObjType(ObjType::REAL_MATRIX) || x.isObjType(ObjType::COMPLEX_MATRIX)) return x ^ Value(0.5);
-        Value numX = x.isComplex() ? Value(x.asComplex()) : Value(x.asDouble());
-        return numX ^ Value(0.5);
+        Value res = args[0] ^ Value(0.5);
+        if (res.isObjType(ObjType::REAL_MATRIX) || res.isObjType(ObjType::COMPLEX_MATRIX)) return res;
+        return res.isComplex() ? Value(res.asComplex()) : Value(res.asDouble());
     });
 
     regMath("cbrt", { 1 }, [](const std::vector<Value>& args) -> Value {
@@ -591,10 +590,9 @@ void BuiltinRegistry::registerMath() {
     });
 
     regMath("cbrtD", { 1 }, [](const std::vector<Value>& args) -> Value {
-        Value x = args[0];
-        if (x.isObjType(ObjType::REAL_MATRIX) || x.isObjType(ObjType::COMPLEX_MATRIX)) return x ^ Value(1.0 / 3.0);
-        Value numX = x.isComplex() ? Value(x.asComplex()) : Value(x.asDouble());
-        return numX ^ Value(1.0 / 3.0);
+        Value res = args[0] ^ Value(1.0 / 3.0);
+        if (res.isObjType(ObjType::REAL_MATRIX) || res.isObjType(ObjType::COMPLEX_MATRIX)) return res;
+        return res.isComplex() ? Value(res.asComplex()) : Value(res.asDouble());
     });
 
     reg("matpow", { 2 }, [](const std::vector<Value>& args) -> Value {
@@ -714,30 +712,17 @@ void BuiltinRegistry::registerMath() {
         });
 
     regMath("pow", { 2 }, [](const std::vector<Value>& args) -> Value {
-        Value x = args[0];
-        Value y = args[1];
-
-        // 强制把指数降为 double 或 complex，彻底切断精确方根逻辑
-        Value numY = y.isComplex() ? Value(y.asComplex()) : Value(y.asDouble());
-
-        // 把降维后的指数扔给底层的 operator^
-        return x ^ numY;
-        });
+        return args[0] ^ args[1];
+    });
 
     regMath("root", { 2 }, [](const std::vector<Value>& args) -> Value {
         return args[0] ^ (Value(BigInt(1)) / args[1]);
     });
 
     regMath("rootD", { 2 }, [](const std::vector<Value>& args) -> Value {
-        Value x = args[0];
-        Value y = args[1];
-        if (x.isObjType(ObjType::REAL_MATRIX) || x.isObjType(ObjType::COMPLEX_MATRIX)) {
-            Value numY = y.isComplex() ? Value(y.asComplex()) : Value(y.asDouble());
-            return x ^ (Value(1.0) / numY);
-        }
-        Value numX = x.isComplex() ? Value(x.asComplex()) : Value(x.asDouble());
-        Value numY = y.isComplex() ? Value(y.asComplex()) : Value(y.asDouble());
-        return numX ^ (Value(1.0) / numY);
+        Value res = args[0] ^ (Value(1.0) / args[1]);
+        if (res.isObjType(ObjType::REAL_MATRIX) || res.isObjType(ObjType::COMPLEX_MATRIX)) return res;
+        return res.isComplex() ? Value(res.asComplex()) : Value(res.asDouble());
     });
 
     // 通用取整分发器
