@@ -500,8 +500,8 @@ namespace jc {
             case OpCode::OP_MATCH_SHAPE: {
                 uint16_t r = read16(offset + 1);
                 uint16_t c = read16(offset + 3);
-                uint8_t exact = code[offset + 5];
-                std::cout << r << "x" << c << (exact ? " (exact)" : " (min)") << std::endl;
+                uint8_t exactMask = code[offset + 5];
+                std::cout << r << "x" << c << " (mask:" << static_cast<int>(exactMask) << ")" << std::endl;
                 return offset + 6;
             }
 

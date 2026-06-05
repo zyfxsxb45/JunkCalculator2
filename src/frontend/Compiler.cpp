@@ -2611,31 +2611,75 @@ namespace jc {
                             emit(OpCode::OP_POP, lastLine);
                         }
                     } else if (auto* lp = dynamic_cast<ListPattern*>(p)) {
+                        int minCols = 0;
+                        bool hasRest = lp->rest != nullptr;
+                        for (auto& e : lp->elements) {
+                            if (dynamic_cast<RestPattern*>(e.get())) hasRest = true;
+                            else minCols++;
+                        }
+                        uint8_t exactMask = hasRest ? 0 : 3; // 3 means both exact
+
                         emit(OpCode::OP_GET_LOCAL, lastLine); emit16(static_cast<uint16_t>(valSlot), lastLine);
                         emit(OpCode::OP_MATCH_SHAPE, lastLine);
                         emit16(1, lastLine);
-                        emit16(static_cast<uint16_t>(lp->elements.size()), lastLine);
-                        emit(lp->rest ? 0 : 1, lastLine);
+                        emit16(static_cast<uint16_t>(minCols), lastLine);
+                        emit(exactMask, lastLine);
                         failJumps.push_back(chunk()->emitJump(OpCode::OP_JUMP_IF_FALSE, lastLine));
                         emit(OpCode::OP_POP, lastLine);
 
+                        int c_idx = 0;
+                        bool afterRest = false;
+                        int rightOffset = 0;
                         for (size_t i = 0; i < lp->elements.size(); ++i) {
-                            emit(OpCode::OP_GET_LOCAL, lastLine); emit16(static_cast<uint16_t>(valSlot), lastLine);
-                            emit(OpCode::OP_CONSTANT, lastLine); emit16(makeConstant(Value(static_cast<double>(i))), lastLine);
-                            emit(OpCode::OP_INDEX_GET, lastLine); emit(1, lastLine);
-                            
-                            addLocal("<pat_tmp>", current().scopeDepth);
-                            int tmpSlot = static_cast<int>(current().locals.size()) - 1;
-                            emit(OpCode::OP_SET_LOCAL, lastLine); emit16(static_cast<uint16_t>(tmpSlot), lastLine);
-                            emit(OpCode::OP_POP, lastLine);
-                            
-                            compilePat(lp->elements[i].get(), tmpSlot);
-                            current().locals.pop_back();
+                            if (dynamic_cast<RestPattern*>(lp->elements[i].get())) afterRest = true;
+                            else if (afterRest) rightOffset++;
+                        }
+                        
+                        afterRest = false;
+                        int currentRightOffset = rightOffset;
+
+                        for (size_t i = 0; i < lp->elements.size(); ++i) {
+                            if (auto* restPat = dynamic_cast<RestPattern*>(lp->elements[i].get())) {
+                                afterRest = true;
+                                if (restPat->name.lexeme != "_") {
+                                    emit(OpCode::OP_GET_LOCAL, lastLine); emit16(static_cast<uint16_t>(valSlot), lastLine);
+                                    emit(OpCode::OP_CONSTANT, lastLine); emit16(makeConstant(Value(static_cast<double>(c_idx))), lastLine);
+                                    if (rightOffset > 0) {
+                                        emit(OpCode::OP_CONSTANT, lastLine); emit16(makeConstant(Value(static_cast<double>(-rightOffset))), lastLine);
+                                    } else {
+                                        emit(OpCode::OP_NONE, lastLine);
+                                    }
+                                    emit(OpCode::OP_NONE, lastLine);
+                                    emit(OpCode::OP_SLICE_GET, lastLine); emit(1, lastLine);
+                                    
+                                    int slot = resolveLocal(restPat->name.lexeme);
+                                    emit(OpCode::OP_SET_LOCAL, lastLine); emit16(static_cast<uint16_t>(slot), lastLine);
+                                    emit(OpCode::OP_POP, lastLine);
+                                }
+                            } else {
+                                emit(OpCode::OP_GET_LOCAL, lastLine); emit16(static_cast<uint16_t>(valSlot), lastLine);
+                                if (afterRest) {
+                                    emit(OpCode::OP_CONSTANT, lastLine); emit16(makeConstant(Value(static_cast<double>(-currentRightOffset))), lastLine);
+                                    currentRightOffset--;
+                                } else {
+                                    emit(OpCode::OP_CONSTANT, lastLine); emit16(makeConstant(Value(static_cast<double>(c_idx))), lastLine);
+                                    c_idx++;
+                                }
+                                emit(OpCode::OP_INDEX_GET, lastLine); emit(1, lastLine);
+                                
+                                addLocal("<pat_tmp>", current().scopeDepth);
+                                int tmpSlot = static_cast<int>(current().locals.size()) - 1;
+                                emit(OpCode::OP_SET_LOCAL, lastLine); emit16(static_cast<uint16_t>(tmpSlot), lastLine);
+                                emit(OpCode::OP_POP, lastLine);
+                                
+                                compilePat(lp->elements[i].get(), tmpSlot);
+                                current().locals.pop_back();
+                            }
                         }
 
                         if (lp->rest && lp->rest->name.lexeme != "_") {
                             emit(OpCode::OP_GET_LOCAL, lastLine); emit16(static_cast<uint16_t>(valSlot), lastLine);
-                            emit(OpCode::OP_CONSTANT, lastLine); emit16(makeConstant(Value(static_cast<double>(lp->elements.size()))), lastLine);
+                            emit(OpCode::OP_CONSTANT, lastLine); emit16(makeConstant(Value(static_cast<double>(c_idx))), lastLine);
                             emit(OpCode::OP_NONE, lastLine);
                             emit(OpCode::OP_NONE, lastLine);
                             emit(OpCode::OP_SLICE_GET, lastLine); emit(1, lastLine);
@@ -2646,30 +2690,88 @@ namespace jc {
                         }
                     } else if (auto* mp = dynamic_cast<MatrixPattern*>(p)) {
                         int rows = static_cast<int>(mp->rows.size());
-                        int cols = rows > 0 ? static_cast<int>(mp->rows[0].size()) : 0;
+                        int minCols = 0;
+                        bool exactCols = false;
+                        bool anyRowNoRest = false;
+                        for (const auto& row : mp->rows) {
+                            bool hasRest = false;
+                            int fixed = 0;
+                            for (const auto& e : row) {
+                                if (dynamic_cast<RestPattern*>(e.get())) hasRest = true;
+                                else fixed++;
+                            }
+                            if (fixed > minCols) minCols = fixed;
+                            if (!hasRest) anyRowNoRest = true;
+                        }
+                        if (anyRowNoRest) exactCols = true;
+                        if (mp->rows.empty() && !mp->restRow) exactCols = true;
+
+                        uint8_t exactMask = 0;
+                        if (!mp->restRow) exactMask |= 1; // exactRows
+                        if (exactCols) exactMask |= 2;    // exactCols
                         
                         emit(OpCode::OP_GET_LOCAL, lastLine); emit16(static_cast<uint16_t>(valSlot), lastLine);
                         emit(OpCode::OP_MATCH_SHAPE, lastLine);
                         emit16(static_cast<uint16_t>(rows), lastLine);
-                        emit16(static_cast<uint16_t>(cols), lastLine);
-                        emit(mp->restRow ? 0 : 1, lastLine);
+                        emit16(static_cast<uint16_t>(minCols), lastLine);
+                        emit(exactMask, lastLine);
                         failJumps.push_back(chunk()->emitJump(OpCode::OP_JUMP_IF_FALSE, lastLine));
                         emit(OpCode::OP_POP, lastLine);
 
                         for (int r = 0; r < rows; ++r) {
-                            for (int c = 0; c < cols; ++c) {
-                                emit(OpCode::OP_GET_LOCAL, lastLine); emit16(static_cast<uint16_t>(valSlot), lastLine);
-                                emit(OpCode::OP_CONSTANT, lastLine); emit16(makeConstant(Value(static_cast<double>(r))), lastLine);
-                                emit(OpCode::OP_CONSTANT, lastLine); emit16(makeConstant(Value(static_cast<double>(c))), lastLine);
-                                emit(OpCode::OP_INDEX_GET, lastLine); emit(2, lastLine);
-                                
-                                addLocal("<pat_tmp>", current().scopeDepth);
-                                int tmpSlot = static_cast<int>(current().locals.size()) - 1;
-                                emit(OpCode::OP_SET_LOCAL, lastLine); emit16(static_cast<uint16_t>(tmpSlot), lastLine);
-                                emit(OpCode::OP_POP, lastLine);
-                                
-                                compilePat(mp->rows[r][c].get(), tmpSlot);
-                                current().locals.pop_back();
+                            int c_idx = 0;
+                            bool afterRest = false;
+                            int rightOffset = 0;
+                            for (size_t i = 0; i < mp->rows[r].size(); ++i) {
+                                if (dynamic_cast<RestPattern*>(mp->rows[r][i].get())) afterRest = true;
+                                else if (afterRest) rightOffset++;
+                            }
+                            
+                            afterRest = false;
+                            int currentRightOffset = rightOffset;
+
+                            for (size_t i = 0; i < mp->rows[r].size(); ++i) {
+                                auto& e = mp->rows[r][i];
+                                if (auto* restPat = dynamic_cast<RestPattern*>(e.get())) {
+                                    afterRest = true;
+                                    if (restPat->name.lexeme != "_") {
+                                        emit(OpCode::OP_GET_LOCAL, lastLine); emit16(static_cast<uint16_t>(valSlot), lastLine);
+                                        emit(OpCode::OP_CONSTANT, lastLine); emit16(makeConstant(Value(static_cast<double>(r))), lastLine);
+                                        emit(OpCode::OP_CONSTANT, lastLine); emit16(makeConstant(Value(static_cast<double>(r + 1))), lastLine);
+                                        emit(OpCode::OP_NONE, lastLine);
+                                        emit(OpCode::OP_CONSTANT, lastLine); emit16(makeConstant(Value(static_cast<double>(c_idx))), lastLine);
+                                        if (rightOffset > 0) {
+                                            emit(OpCode::OP_CONSTANT, lastLine); emit16(makeConstant(Value(static_cast<double>(-rightOffset))), lastLine);
+                                        } else {
+                                            emit(OpCode::OP_NONE, lastLine);
+                                        }
+                                        emit(OpCode::OP_NONE, lastLine);
+                                        emit(OpCode::OP_SLICE_GET, lastLine); emit(2, lastLine);
+                                        
+                                        int slot = resolveLocal(restPat->name.lexeme);
+                                        emit(OpCode::OP_SET_LOCAL, lastLine); emit16(static_cast<uint16_t>(slot), lastLine);
+                                        emit(OpCode::OP_POP, lastLine);
+                                    }
+                                } else {
+                                    emit(OpCode::OP_GET_LOCAL, lastLine); emit16(static_cast<uint16_t>(valSlot), lastLine);
+                                    emit(OpCode::OP_CONSTANT, lastLine); emit16(makeConstant(Value(static_cast<double>(r))), lastLine);
+                                    if (afterRest) {
+                                        emit(OpCode::OP_CONSTANT, lastLine); emit16(makeConstant(Value(static_cast<double>(-currentRightOffset))), lastLine);
+                                        currentRightOffset--;
+                                    } else {
+                                        emit(OpCode::OP_CONSTANT, lastLine); emit16(makeConstant(Value(static_cast<double>(c_idx))), lastLine);
+                                        c_idx++;
+                                    }
+                                    emit(OpCode::OP_INDEX_GET, lastLine); emit(2, lastLine);
+                                    
+                                    addLocal("<pat_tmp>", current().scopeDepth);
+                                    int tmpSlot = static_cast<int>(current().locals.size()) - 1;
+                                    emit(OpCode::OP_SET_LOCAL, lastLine); emit16(static_cast<uint16_t>(tmpSlot), lastLine);
+                                    emit(OpCode::OP_POP, lastLine);
+                                    
+                                    compilePat(e.get(), tmpSlot);
+                                    current().locals.pop_back();
+                                }
                             }
                         }
 

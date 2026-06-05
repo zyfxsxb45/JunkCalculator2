@@ -1314,24 +1314,43 @@ namespace jc {
 
                 if (match({TokenType::SEMICOLON})) {
                     isMatrix = true;
+                    if (restCol) {
+                        currentRow.push_back(std::move(restCol));
+                        restCol = nullptr;
+                    }
                     rows.push_back(std::move(currentRow));
                     currentRow.clear();
-                    restCol = nullptr;
                     continue;
                 }
                 if (match({TokenType::ELLIPSIS})) {
                     Token name = consume(TokenType::IDENTIFIER, "Parser Error: Expect variable name or '_' after '...'.");
+                    
+                    bool hasRest = false;
+                    for (const auto& pat : currentRow) {
+                        if (dynamic_cast<RestPattern*>(pat.get())) {
+                            hasRest = true;
+                            break;
+                        }
+                    }
+                    if (hasRest) {
+                        throw std::runtime_error("Parser Error: Multiple rest patterns ('...') are not allowed in a single row.");
+                    }
+
                     if (check(TokenType::SEMICOLON) || check(TokenType::RBRACKET)) {
-                        if (currentRow.empty() && !rows.empty()) {
+                        if (check(TokenType::RBRACKET) && currentRow.empty() && !rows.empty()) {
                             restRow = std::make_unique<RestPattern>(name);
                             isMatrix = true;
                         } else {
                             restCol = std::make_unique<RestPattern>(name);
                         }
+                        continue;
                     } else {
-                        throw std::runtime_error("Parser Error: Rest pattern must be at the end of a row or matrix.");
+                        currentRow.push_back(std::make_unique<RestPattern>(name));
+                        if (!match({TokenType::COMMA})) {
+                            throw std::runtime_error("Parser Error: Expect ',' after pattern.");
+                        }
+                        continue;
                     }
-                    continue;
                 }
                 
                 currentRow.push_back(parsePattern());
@@ -1345,6 +1364,10 @@ namespace jc {
                 }
             }
             if (!currentRow.empty() || restCol) {
+                if (isMatrix && restCol) {
+                    currentRow.push_back(std::move(restCol));
+                    restCol = nullptr;
+                }
                 rows.push_back(std::move(currentRow));
             }
             consume(TokenType::RBRACKET, "Parser Error: Expect ']' after pattern.");

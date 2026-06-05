@@ -788,29 +788,35 @@ namespace jc {
                 case OpCode::OP_MATCH_SHAPE: {
                     uint16_t rows = readShort();
                     uint16_t cols = readShort();
-                    uint8_t exact = readByte();
+                    uint8_t exactMask = readByte();
                     Value val = pop();
                     bool matched = false;
                     
+                    bool exactRows = (exactMask & 1) != 0;
+                    bool exactCols = (exactMask & 2) != 0;
+
                     if (val.isObjType(ObjType::LIST)) {
                         int len = static_cast<int>(static_cast<ObjList*>(val.asObj())->vec.size());
                         if (rows == 1) {
-                            matched = exact ? (len == cols) : (len >= cols);
+                            matched = exactCols ? (len == cols) : (len >= cols);
                         } else if (cols == 1) {
-                            matched = exact ? (len == rows) : (len >= rows);
+                            matched = exactRows ? (len == rows) : (len >= rows);
                         }
                     } else if (val.isObjType(ObjType::REAL_MATRIX)) {
                         const auto& m = static_cast<ObjRealMatrix*>(val.asObj())->mat;
-                        if (exact) matched = (m.getRows() == rows && m.getCols() == cols);
-                        else matched = (m.getRows() >= rows && m.getCols() >= cols);
+                        bool rMatch = exactRows ? (m.getRows() == rows) : (m.getRows() >= rows);
+                        bool cMatch = exactCols ? (m.getCols() == cols) : (m.getCols() >= cols);
+                        matched = rMatch && cMatch;
                     } else if (val.isObjType(ObjType::COMPLEX_MATRIX)) {
                         const auto& m = static_cast<ObjComplexMatrix*>(val.asObj())->mat;
-                        if (exact) matched = (m.getRows() == rows && m.getCols() == cols);
-                        else matched = (m.getRows() >= rows && m.getCols() >= cols);
+                        bool rMatch = exactRows ? (m.getRows() == rows) : (m.getRows() >= rows);
+                        bool cMatch = exactCols ? (m.getCols() == cols) : (m.getCols() >= cols);
+                        matched = rMatch && cMatch;
                     } else if (val.isObjType(ObjType::STRING_MATRIX)) {
                         const auto& m = static_cast<ObjStringMatrix*>(val.asObj())->mat;
-                        if (exact) matched = (m.getRows() == rows && m.getCols() == cols);
-                        else matched = (m.getRows() >= rows && m.getCols() >= cols);
+                        bool rMatch = exactRows ? (m.getRows() == rows) : (m.getRows() >= rows);
+                        bool cMatch = exactCols ? (m.getCols() == cols) : (m.getCols() >= cols);
+                        matched = rMatch && cMatch;
                     }
                     
                     push(Value(matched));
