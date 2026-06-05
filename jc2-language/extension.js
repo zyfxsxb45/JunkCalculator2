@@ -94,7 +94,7 @@ function activate(context) {
             // 添加关键字补全
             const keywords = [
                 'if', 'else', 'while', 'for', 'in', 'break', 'continue', 'return',
-                'switch', 'case', 'default', 'throw', 'try', 'catch',
+                'switch', 'case', 'default', 'throw', 'try', 'catch', 'match',
                 'class', 'extends', 'const', 'state', 'delete', 'ref', 'import', 'local', 'namespace',
                 'true', 'false', 'none', 'PI', 'E', 'ANS', 'self', 'super'
             ];
@@ -111,7 +111,8 @@ function activate(context) {
                 { label: 'ifelse', detail: 'if..else statement', insertText: 'if (${1:condition}) {\n\t$2\n} else {\n\t$0\n}' },
                 { label: 'class', detail: 'class definition', insertText: 'class ${1:ClassName} {\n\tinit() {\n\t\t$0\n\t}\n}' },
                 { label: 'namespace', detail: 'namespace definition', insertText: 'namespace ${1:Name} {\n\t$0\n}' },
-                { label: 'func', detail: 'function definition', insertText: '${1:functionName}(${2:args}) = {\n\t$0\n}' }
+                { label: 'func', detail: 'function definition', insertText: '${1:functionName}(${2:args}) = {\n\t$0\n}' },
+                { label: 'match', detail: 'match expression', insertText: 'match (${1:expr}) {\n\t${2:pattern} => ${3:body},\n\t_ => ${0:fallback}\n}' }
             ];
             for (const snip of snippets) {
                 const item = new vscode.CompletionItem(snip.label, vscode.CompletionItemKind.Snippet);

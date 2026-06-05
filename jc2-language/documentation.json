@@ -484,16 +484,16 @@
       "signature": "pop(v)"
     },
     "map": {
-      "signature": "v.map(f) / map(f)"
+      "signature": "v.map(f) / map(v, f) / map(f)"
     },
     "filter": {
-      "signature": "v.filter(f) / filter(f)"
+      "signature": "v.filter(f) / filter(v, f) / filter(f)"
     },
     "reduce": {
-      "signature": "v.reduce(f, [init]) / reduce(f, [init])"
+      "signature": "v.reduce(f, [init]) / reduce(v, f, [init]) / reduce(f, [init])"
     },
     "sort": {
-      "signature": "v.sort([cmp]) / sort(cmp)"
+      "signature": "v.sort([cmp]) / sort(v, [cmp]) / sort(cmp)"
     },
     "keys": {
       "signature": "keys(d)"
@@ -944,6 +944,9 @@
     },
     "breakpoint": {
       "signature": "breakpoint()"
+    },
+    "disassemble": {
+      "signature": "disassemble(f)"
     },
     "buildIndex": {
       "signature": "buildIndex()"
@@ -1405,16 +1408,16 @@
       "signature": "removeKey(d, key)"
     },
     "apply": {
-      "signature": "args.apply(f) / apply(f)"
+      "signature": "args.apply(f) / apply(args, f) / apply(f)"
     },
     "any": {
-      "signature": "v.any(f)"
+      "signature": "v.any(f) / any(v, f) / any(f)"
     },
     "all": {
-      "signature": "v.all(f)"
+      "signature": "v.all(f) / all(v, f) / all(f)"
     },
     "countIf": {
-      "signature": "v.countIf(f)"
+      "signature": "v.countIf(f) / countIf(v, f) / countIf(f)"
     },
     "solveE": {
       "signature": "solveE(f, x0)"
@@ -1527,6 +1530,12 @@
     "__call__": {
       "signature": "__call__(...)"
     },
+    "ffi.load": {
+      "signature": "ffi.load(path)"
+    },
+    "bind": {
+      "signature": "lib.bind(name, retType, argTypes)"
+    },
     "ln": {
       "signature": "ln(x) / ln(base, x)"
     },
@@ -1565,6 +1574,9 @@
     },
     "debugger": {
       "signature": "debugger()"
+    },
+    "disasm": {
+      "signature": "disasm(f)"
     },
     "loadPrimes": {
       "signature": "loadPrimes()"
@@ -1615,6 +1627,9 @@
     },
     "return": {
       "signature": "return [expr]"
+    },
+    "match": {
+      "signature": "match (expr) { pattern => body, ... }"
     },
     "switch": {
       "signature": "switch (expr) { case val: body ... [default: body] }"
