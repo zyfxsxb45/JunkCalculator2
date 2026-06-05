@@ -88,7 +88,7 @@ namespace jc {
         static const std::set<std::string> keywords = {
             "if", "else", "while", "for", "in", "break", "continue", "return",
             "class", "extends", "super", "const", "delete", "global", "ref",
-            "throw", "try", "catch", "import", "switch", "case", "default"
+            "throw", "try", "catch", "import", "switch", "case", "default", "match"
         };
         static const std::set<std::string> constants = {
             "PI", "E", "true", "false", "i", "I", "self", "none", "ANS"
@@ -168,6 +168,7 @@ namespace jc {
             case TokenType::REF: case TokenType::THROW: case TokenType::TRY:
             case TokenType::CATCH: case TokenType::IMPORT: case TokenType::SWITCH:
             case TokenType::CASE: case TokenType::DEFAULT: case TokenType::SUPER:
+            case TokenType::MATCH:
                 result += col(Ansi::BRIGHT_MAGENTA) + srcText + col(Ansi::RESET);
                 break;
 

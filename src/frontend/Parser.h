@@ -40,6 +40,9 @@ namespace jc {
         std::unique_ptr<Expr> forExpr();
         std::unique_ptr<Expr> forInExpr(Token varName);
         std::unique_ptr<Expr> switchExpr();
+        std::unique_ptr<Expr> matchExpr();     // ★
+        std::unique_ptr<Pattern> parsePattern(); // ★
+        std::unique_ptr<Expr> parseMatchBody();  // ★
         std::unique_ptr<Expr> classDefExpr();  // ★
         std::unique_ptr<Expr> namespaceExpr(); // ★ 新增
         std::unique_ptr<Expr> parseFString(const std::string& raw);  // ★

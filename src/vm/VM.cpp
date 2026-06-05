@@ -777,6 +777,46 @@ namespace jc {
                     break;
                 }
 
+                case OpCode::OP_MATCH_TYPE: {
+                    uint16_t typeIdx = readShort();
+                    const std::string& typeStr = chunk->constants[typeIdx].asString();
+                    Value val = pop();
+                    push(Value(checkValueType(val, typeStr)));
+                    break;
+                }
+
+                case OpCode::OP_MATCH_SHAPE: {
+                    uint16_t rows = readShort();
+                    uint16_t cols = readShort();
+                    uint8_t exact = readByte();
+                    Value val = pop();
+                    bool matched = false;
+                    
+                    if (val.isObjType(ObjType::LIST)) {
+                        int len = static_cast<int>(static_cast<ObjList*>(val.asObj())->vec.size());
+                        if (rows == 1) {
+                            matched = exact ? (len == cols) : (len >= cols);
+                        } else if (cols == 1) {
+                            matched = exact ? (len == rows) : (len >= rows);
+                        }
+                    } else if (val.isObjType(ObjType::REAL_MATRIX)) {
+                        const auto& m = static_cast<ObjRealMatrix*>(val.asObj())->mat;
+                        if (exact) matched = (m.getRows() == rows && m.getCols() == cols);
+                        else matched = (m.getRows() >= rows && m.getCols() >= cols);
+                    } else if (val.isObjType(ObjType::COMPLEX_MATRIX)) {
+                        const auto& m = static_cast<ObjComplexMatrix*>(val.asObj())->mat;
+                        if (exact) matched = (m.getRows() == rows && m.getCols() == cols);
+                        else matched = (m.getRows() >= rows && m.getCols() >= cols);
+                    } else if (val.isObjType(ObjType::STRING_MATRIX)) {
+                        const auto& m = static_cast<ObjStringMatrix*>(val.asObj())->mat;
+                        if (exact) matched = (m.getRows() == rows && m.getCols() == cols);
+                        else matched = (m.getRows() >= rows && m.getCols() >= cols);
+                    }
+                    
+                    push(Value(matched));
+                    break;
+                }
+
                 case OpCode::OP_GET_GLOBAL: {
                     uint16_t idx = readShort();
                     const std::string& name = chunk->constants[idx].asString();

@@ -142,6 +142,9 @@ namespace jc {
 
         OP_ASSERT_PARAM_TYPE,   // 参数断言：[type_idx:16bit, name_idx:16bit]
         OP_ASSERT_RETURN_TYPE,  // 返回值断言：[type_idx:16bit]
+
+        OP_MATCH_TYPE,          // [type_idx:16bit] 检查栈顶类型，返回 bool
+        OP_MATCH_SHAPE,         // [rows:16bit, cols:16bit, exact:8bit] 检查栈顶形状，返回 bool
     };
 
     // =================================================================
@@ -229,6 +232,8 @@ namespace jc {
         case OpCode::OP_BIT_SHIFT_RIGHT: return "OP_BIT_SHIFT_RIGHT";
         case OpCode::OP_ASSERT_PARAM_TYPE: return "OP_ASSERT_PARAM_TYPE";
         case OpCode::OP_ASSERT_RETURN_TYPE: return "OP_ASSERT_RETURN_TYPE";
+        case OpCode::OP_MATCH_TYPE: return "OP_MATCH_TYPE";
+        case OpCode::OP_MATCH_SHAPE: return "OP_MATCH_SHAPE";
         default: return "UNKNOWN_OP";
         }
     }
@@ -393,7 +398,8 @@ namespace jc {
             case OpCode::OP_GET_PROPERTY:
             case OpCode::OP_SET_PROPERTY:
             case OpCode::OP_GET_SUPER: 
-            case OpCode::OP_ASSERT_RETURN_TYPE: {
+            case OpCode::OP_ASSERT_RETURN_TYPE:
+            case OpCode::OP_MATCH_TYPE: {
                 uint16_t idx = read16(offset + 1);
                 std::cout << idx << " (";
                 if (idx < constants.size()) {
@@ -490,6 +496,13 @@ namespace jc {
                 uint16_t nameIdx = read16(offset + 3);
                 std::cout << "typeConst: " << typeIdx << ", nameConst: " << nameIdx << std::endl;
                 return offset + 5;
+            }
+            case OpCode::OP_MATCH_SHAPE: {
+                uint16_t r = read16(offset + 1);
+                uint16_t c = read16(offset + 3);
+                uint8_t exact = code[offset + 5];
+                std::cout << r << "x" << c << (exact ? " (exact)" : " (min)") << std::endl;
+                return offset + 6;
             }
 
             // ============================================

@@ -28,6 +28,7 @@ namespace jc {
         {"switch",   TokenType::SWITCH},       // ★
         {"case",     TokenType::CASE},         // ★
         {"default",  TokenType::DEFAULT},      // ★
+        {"match",    TokenType::MATCH},        // ★
         {"class",    TokenType::CLASS},
         {"namespace",TokenType::NAMESPACE},
         {"super",    TokenType::SUPER},

@@ -54,6 +54,7 @@ namespace jc {
         SWITCH,              // ★
         CASE,                // ★
         DEFAULT,             // ★
+        MATCH,               // ★ 新增
         CLASS,
         NAMESPACE,           // ★ 新增
         SUPER,
@@ -159,6 +160,7 @@ namespace jc {
         case TokenType::SWITCH:        return "SWITCH";
         case TokenType::CASE:          return "CASE";
         case TokenType::DEFAULT:       return "DEFAULT";
+        case TokenType::MATCH:         return "MATCH";
         case TokenType::LOCAL:         return "LOCAL";
         case TokenType::IMPORT:        return "IMPORT";
         case TokenType::REF:           return "REF";

@@ -918,6 +918,7 @@ namespace jc {
                 t == TokenType::STATE ||                          // ★
                 t == TokenType::IMPORT || t == TokenType::SWITCH ||  // ★
                 t == TokenType::CASE || t == TokenType::DEFAULT ||
+                t == TokenType::MATCH ||
                 t == TokenType::SUPER || t == TokenType::CLASS || t == TokenType::SELF ||
                 t == TokenType::TRUE_KW || t == TokenType::FALSE_KW || t == TokenType::NONE_KW ||
                 t == TokenType::NAMESPACE; // ★ 新增
@@ -988,6 +989,7 @@ namespace jc {
             }
         }
         if (match({ TokenType::SWITCH })) return switchExpr();
+        if (match({ TokenType::MATCH })) return matchExpr();
         if (match({ TokenType::DELETE })) {
             std::vector<Token> names;
             names.push_back(consume(TokenType::IDENTIFIER, "Parser Error: Expect variable name after 'delete'."));
@@ -1288,6 +1290,163 @@ namespace jc {
         consume(TokenType::RBRACE, "Parser Error: Expect '}' to close switch body.");
 
         return std::make_unique<SwitchExpr>(std::move(subject), std::move(cases), std::move(defaultBody));
+    }
+
+    std::unique_ptr<Pattern> Parser::parsePattern() {
+        if (match({TokenType::ELLIPSIS})) {
+            Token name = consume(TokenType::IDENTIFIER, "Parser Error: Expect variable name or '_' after '...'.");
+            return std::make_unique<RestPattern>(name);
+        }
+        if (check(TokenType::IDENTIFIER)) {
+            Token name = advance();
+            return std::make_unique<VariablePattern>(name);
+        }
+        if (match({TokenType::LBRACKET})) {
+            std::vector<std::vector<std::unique_ptr<Pattern>>> rows;
+            std::vector<std::unique_ptr<Pattern>> currentRow;
+            std::unique_ptr<RestPattern> restCol = nullptr;
+            std::unique_ptr<RestPattern> restRow = nullptr;
+            bool isMatrix = false;
+
+            while (!check(TokenType::RBRACKET) && !isAtEnd()) {
+                while (match({TokenType::NEWLINE})) {}
+                if (check(TokenType::RBRACKET)) break;
+
+                if (match({TokenType::SEMICOLON})) {
+                    isMatrix = true;
+                    rows.push_back(std::move(currentRow));
+                    currentRow.clear();
+                    restCol = nullptr;
+                    continue;
+                }
+                if (match({TokenType::ELLIPSIS})) {
+                    Token name = consume(TokenType::IDENTIFIER, "Parser Error: Expect variable name or '_' after '...'.");
+                    if (check(TokenType::SEMICOLON) || check(TokenType::RBRACKET)) {
+                        if (currentRow.empty() && !rows.empty()) {
+                            restRow = std::make_unique<RestPattern>(name);
+                            isMatrix = true;
+                        } else {
+                            restCol = std::make_unique<RestPattern>(name);
+                        }
+                    } else {
+                        throw std::runtime_error("Parser Error: Rest pattern must be at the end of a row or matrix.");
+                    }
+                    continue;
+                }
+                
+                currentRow.push_back(parsePattern());
+                
+                if (!match({TokenType::COMMA})) {
+                    if (check(TokenType::SEMICOLON) || check(TokenType::RBRACKET)) {
+                        // fine
+                    } else {
+                        throw std::runtime_error("Parser Error: Expect ',' or ';' or ']' in pattern.");
+                    }
+                }
+            }
+            if (!currentRow.empty() || restCol) {
+                rows.push_back(std::move(currentRow));
+            }
+            consume(TokenType::RBRACKET, "Parser Error: Expect ']' after pattern.");
+
+            if (!isMatrix && rows.size() <= 1) {
+                auto elements = rows.empty() ? std::vector<std::unique_ptr<Pattern>>() : std::move(rows[0]);
+                return std::make_unique<ListPattern>(std::move(elements), std::move(restCol));
+            } else {
+                return std::make_unique<MatrixPattern>(std::move(rows), std::move(restRow));
+            }
+        }
+        if (match({TokenType::LBRACE})) {
+            std::vector<std::pair<std::string, std::unique_ptr<Pattern>>> entries;
+            std::unique_ptr<RestPattern> rest = nullptr;
+            
+            while (!check(TokenType::RBRACE) && !isAtEnd()) {
+                while (match({TokenType::NEWLINE})) {}
+                if (check(TokenType::RBRACE)) break;
+
+                if (match({TokenType::ELLIPSIS})) {
+                    Token name = consume(TokenType::IDENTIFIER, "Parser Error: Expect variable name or '_' after '...'.");
+                    rest = std::make_unique<RestPattern>(name);
+                    break; // Rest must be last
+                }
+                
+                std::string keyStr;
+                Token keyTok = peek();
+                if (match({TokenType::IDENTIFIER})) {
+                    keyStr = previous().lexeme;
+                } else if (match({TokenType::STRING})) {
+                    keyStr = previous().lexeme;
+                } else {
+                    throw std::runtime_error("Parser Error: Expect identifier or string as dict pattern key.");
+                }
+                
+                if (match({TokenType::COLON})) {
+                    entries.push_back({keyStr, parsePattern()});
+                } else {
+                    entries.push_back({keyStr, std::make_unique<VariablePattern>(keyTok)});
+                }
+
+                if (!match({TokenType::COMMA})) {
+                    while (match({TokenType::NEWLINE})) {}
+                    break;
+                }
+            }
+            while (match({TokenType::NEWLINE})) {}
+            consume(TokenType::RBRACE, "Parser Error: Expect '}' after dict pattern.");
+            return std::make_unique<DictPattern>(std::move(entries), std::move(rest));
+        }
+        
+        auto expr = primary();
+        return std::make_unique<LiteralPattern>(std::move(expr));
+    }
+
+    std::unique_ptr<Expr> Parser::parseMatchBody() {
+        while (match({TokenType::NEWLINE})) {}
+        if (check(TokenType::LBRACE)) {
+            return parseBlock();
+        }
+        auto expr = assignment();
+        std::vector<std::unique_ptr<Expr>> stmts;
+        stmts.push_back(std::move(expr));
+        return std::make_unique<Block>(std::move(stmts));
+    }
+
+    std::unique_ptr<Expr> Parser::matchExpr() {
+        consume(TokenType::LPAREN, "Parser Error: Expect '(' after 'match'.");
+        auto subject = expression();
+        consume(TokenType::RPAREN, "Parser Error: Expect ')' after match subject.");
+        while (match({TokenType::NEWLINE})) {}
+        consume(TokenType::LBRACE, "Parser Error: Expect '{' to open match body.");
+
+        std::vector<MatchBranch> branches;
+
+        while (!check(TokenType::RBRACE) && !isAtEnd()) {
+            while (match({TokenType::NEWLINE, TokenType::SEMICOLON})) {}
+            if (check(TokenType::RBRACE)) break;
+
+            MatchBranch branch;
+            
+            do {
+                branch.patterns.push_back(parsePattern());
+            } while (match({TokenType::COMMA}));
+
+            if (match({TokenType::IF})) {
+                consume(TokenType::LPAREN, "Parser Error: Expect '(' after 'if' guard.");
+                branch.guard = expression();
+                consume(TokenType::RPAREN, "Parser Error: Expect ')' after 'if' guard.");
+            }
+
+            consume(TokenType::ARROW, "Parser Error: Expect '=>' after match pattern.");
+
+            branch.body = parseMatchBody();
+            
+            branches.push_back(std::move(branch));
+
+            match({TokenType::COMMA});
+        }
+        consume(TokenType::RBRACE, "Parser Error: Expect '}' to close match body.");
+
+        return std::make_unique<MatchExpr>(std::move(subject), std::move(branches));
     }
 
     std::unique_ptr<Expr> Parser::namespaceExpr() {

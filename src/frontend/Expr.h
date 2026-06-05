@@ -10,6 +10,8 @@
 
 namespace jc {
 
+    struct Expr;
+
     // 前向声明所有节点
     struct Binary;
     struct Unary;
@@ -55,6 +57,53 @@ namespace jc {
     struct SliceExpr;        // ★ 新增
     struct DictDestructAssign;
     struct SequenceExpr;
+    struct MatchExpr;
+
+    struct Pattern {
+        virtual ~Pattern() = default;
+    };
+
+    struct LiteralPattern : public Pattern {
+        std::unique_ptr<Expr> literal;
+        explicit LiteralPattern(std::unique_ptr<Expr> literal) : literal(std::move(literal)) {}
+    };
+
+    struct VariablePattern : public Pattern {
+        Token name;
+        explicit VariablePattern(Token name) : name(std::move(name)) {}
+    };
+
+    struct RestPattern : public Pattern {
+        Token name;
+        explicit RestPattern(Token name) : name(std::move(name)) {}
+    };
+
+    struct ListPattern : public Pattern {
+        std::vector<std::unique_ptr<Pattern>> elements;
+        std::unique_ptr<RestPattern> rest;
+        ListPattern(std::vector<std::unique_ptr<Pattern>> elements, std::unique_ptr<RestPattern> rest)
+            : elements(std::move(elements)), rest(std::move(rest)) {}
+    };
+
+    struct MatrixPattern : public Pattern {
+        std::vector<std::vector<std::unique_ptr<Pattern>>> rows;
+        std::unique_ptr<RestPattern> restRow;
+        MatrixPattern(std::vector<std::vector<std::unique_ptr<Pattern>>> rows, std::unique_ptr<RestPattern> restRow)
+            : rows(std::move(rows)), restRow(std::move(restRow)) {}
+    };
+
+    struct DictPattern : public Pattern {
+        std::vector<std::pair<std::string, std::unique_ptr<Pattern>>> entries;
+        std::unique_ptr<RestPattern> rest;
+        DictPattern(std::vector<std::pair<std::string, std::unique_ptr<Pattern>>> entries, std::unique_ptr<RestPattern> rest)
+            : entries(std::move(entries)), rest(std::move(rest)) {}
+    };
+
+    struct MatchBranch {
+        std::vector<std::unique_ptr<Pattern>> patterns;
+        std::unique_ptr<Expr> guard;
+        std::unique_ptr<Expr> body;
+    };
 
     class ExprVisitor {
     public:
@@ -103,6 +152,7 @@ namespace jc {
         virtual std::any visitSliceExpr(SliceExpr* expr) = 0;  // ★ 新增
         virtual std::any visitDictDestructAssign(DictDestructAssign* expr) = 0;
         virtual std::any visitSequenceExpr(SequenceExpr* expr) = 0;
+        virtual std::any visitMatchExpr(MatchExpr* expr) = 0;
     };
 
     struct Expr {
@@ -596,6 +646,14 @@ namespace jc {
             : expressions(std::move(expressions)) {
         }
         std::any accept(ExprVisitor& visitor) override { return visitor.visitSequenceExpr(this); }
+    };
+
+    struct MatchExpr : public Expr {
+        std::unique_ptr<Expr> subject;
+        std::vector<MatchBranch> branches;
+        MatchExpr(std::unique_ptr<Expr> subject, std::vector<MatchBranch> branches)
+            : subject(std::move(subject)), branches(std::move(branches)) {}
+        std::any accept(ExprVisitor& visitor) override { return visitor.visitMatchExpr(this); }
     };
 
 } // namespace jc

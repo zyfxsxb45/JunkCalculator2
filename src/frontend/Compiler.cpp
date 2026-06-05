@@ -2547,4 +2547,246 @@ namespace jc {
         return {};
     }
 
+    std::any Compiler::visitMatchExpr(MatchExpr* expr) {
+        compileNode(expr->subject.get());
+        
+        addLocal("<match_subject>", current().scopeDepth);
+        int subjectSlot = static_cast<int>(current().locals.size()) - 1;
+        emit(OpCode::OP_SET_LOCAL, lastLine);
+        emit16(static_cast<uint16_t>(subjectSlot), lastLine);
+        emit(OpCode::OP_POP, lastLine);
+
+        std::vector<int> endJumps;
+
+        for (auto& branch : expr->branches) {
+            beginScope();
+
+            std::vector<std::string> boundVars;
+            std::function<void(Pattern*)> collectVars = [&](Pattern* pat) {
+                if (auto* vp = dynamic_cast<VariablePattern*>(pat)) {
+                    if (vp->name.lexeme != "_") boundVars.push_back(vp->name.lexeme);
+                } else if (auto* rp = dynamic_cast<RestPattern*>(pat)) {
+                    if (rp->name.lexeme != "_") boundVars.push_back(rp->name.lexeme);
+                } else if (auto* lp = dynamic_cast<ListPattern*>(pat)) {
+                    for (auto& e : lp->elements) collectVars(e.get());
+                    if (lp->rest) collectVars(lp->rest.get());
+                } else if (auto* mp = dynamic_cast<MatrixPattern*>(pat)) {
+                    for (auto& row : mp->rows) {
+                        for (auto& e : row) collectVars(e.get());
+                    }
+                    if (mp->restRow) collectVars(mp->restRow.get());
+                } else if (auto* dp = dynamic_cast<DictPattern*>(pat)) {
+                    for (auto& e : dp->entries) collectVars(e.second.get());
+                    if (dp->rest) collectVars(dp->rest.get());
+                }
+            };
+            for (auto& pat : branch.patterns) collectVars(pat.get());
+
+            for (const auto& var : boundVars) {
+                int slot = resolveLocal(var);
+                if (slot == -1 || current().locals[slot].depth < current().scopeDepth) {
+                    addLocal(var, current().scopeDepth);
+                }
+            }
+
+            int nextBranchJump = -1;
+            std::vector<int> bodyJumps;
+
+            for (size_t pi = 0; pi < branch.patterns.size(); ++pi) {
+                auto& pat = branch.patterns[pi];
+                std::vector<int> failJumps;
+
+                std::function<void(Pattern*, int)> compilePat = [&](Pattern* p, int valSlot) {
+                    if (auto* lit = dynamic_cast<LiteralPattern*>(p)) {
+                        compileNode(lit->literal.get());
+                        emit(OpCode::OP_GET_LOCAL, lastLine); emit16(static_cast<uint16_t>(valSlot), lastLine);
+                        emit(OpCode::OP_EQUAL, lastLine);
+                        failJumps.push_back(chunk()->emitJump(OpCode::OP_JUMP_IF_FALSE, lastLine));
+                        emit(OpCode::OP_POP, lastLine);
+                    } else if (auto* var = dynamic_cast<VariablePattern*>(p)) {
+                        if (var->name.lexeme != "_") {
+                            int slot = resolveLocal(var->name.lexeme);
+                            emit(OpCode::OP_GET_LOCAL, lastLine); emit16(static_cast<uint16_t>(valSlot), lastLine);
+                            emit(OpCode::OP_SET_LOCAL, lastLine); emit16(static_cast<uint16_t>(slot), lastLine);
+                            emit(OpCode::OP_POP, lastLine);
+                        }
+                    } else if (auto* lp = dynamic_cast<ListPattern*>(p)) {
+                        emit(OpCode::OP_GET_LOCAL, lastLine); emit16(static_cast<uint16_t>(valSlot), lastLine);
+                        emit(OpCode::OP_MATCH_SHAPE, lastLine);
+                        emit16(1, lastLine);
+                        emit16(static_cast<uint16_t>(lp->elements.size()), lastLine);
+                        emit(lp->rest ? 0 : 1, lastLine);
+                        failJumps.push_back(chunk()->emitJump(OpCode::OP_JUMP_IF_FALSE, lastLine));
+                        emit(OpCode::OP_POP, lastLine);
+
+                        for (size_t i = 0; i < lp->elements.size(); ++i) {
+                            emit(OpCode::OP_CONSTANT, lastLine); emit16(makeConstant(Value(static_cast<double>(i))), lastLine);
+                            emit(OpCode::OP_GET_LOCAL, lastLine); emit16(static_cast<uint16_t>(valSlot), lastLine);
+                            emit(OpCode::OP_INDEX_GET, lastLine); emit(1, lastLine);
+                            
+                            addLocal("<pat_tmp>", current().scopeDepth);
+                            int tmpSlot = static_cast<int>(current().locals.size()) - 1;
+                            emit(OpCode::OP_SET_LOCAL, lastLine); emit16(static_cast<uint16_t>(tmpSlot), lastLine);
+                            emit(OpCode::OP_POP, lastLine);
+                            
+                            compilePat(lp->elements[i].get(), tmpSlot);
+                            current().locals.pop_back();
+                        }
+
+                        if (lp->rest && lp->rest->name.lexeme != "_") {
+                            emit(OpCode::OP_GET_LOCAL, lastLine); emit16(static_cast<uint16_t>(valSlot), lastLine);
+                            emit(OpCode::OP_CONSTANT, lastLine); emit16(makeConstant(Value(static_cast<double>(lp->elements.size()))), lastLine);
+                            emit(OpCode::OP_NONE, lastLine);
+                            emit(OpCode::OP_NONE, lastLine);
+                            emit(OpCode::OP_SLICE_GET, lastLine); emit(1, lastLine);
+                            
+                            int slot = resolveLocal(lp->rest->name.lexeme);
+                            emit(OpCode::OP_SET_LOCAL, lastLine); emit16(static_cast<uint16_t>(slot), lastLine);
+                            emit(OpCode::OP_POP, lastLine);
+                        }
+                    } else if (auto* mp = dynamic_cast<MatrixPattern*>(p)) {
+                        int rows = static_cast<int>(mp->rows.size());
+                        int cols = rows > 0 ? static_cast<int>(mp->rows[0].size()) : 0;
+                        
+                        emit(OpCode::OP_GET_LOCAL, lastLine); emit16(static_cast<uint16_t>(valSlot), lastLine);
+                        emit(OpCode::OP_MATCH_SHAPE, lastLine);
+                        emit16(static_cast<uint16_t>(rows), lastLine);
+                        emit16(static_cast<uint16_t>(cols), lastLine);
+                        emit(mp->restRow ? 0 : 1, lastLine);
+                        failJumps.push_back(chunk()->emitJump(OpCode::OP_JUMP_IF_FALSE, lastLine));
+                        emit(OpCode::OP_POP, lastLine);
+
+                        for (int r = 0; r < rows; ++r) {
+                            for (int c = 0; c < cols; ++c) {
+                                emit(OpCode::OP_CONSTANT, lastLine); emit16(makeConstant(Value(static_cast<double>(c))), lastLine);
+                                emit(OpCode::OP_CONSTANT, lastLine); emit16(makeConstant(Value(static_cast<double>(r))), lastLine);
+                                emit(OpCode::OP_GET_LOCAL, lastLine); emit16(static_cast<uint16_t>(valSlot), lastLine);
+                                emit(OpCode::OP_INDEX_GET, lastLine); emit(2, lastLine);
+                                
+                                addLocal("<pat_tmp>", current().scopeDepth);
+                                int tmpSlot = static_cast<int>(current().locals.size()) - 1;
+                                emit(OpCode::OP_SET_LOCAL, lastLine); emit16(static_cast<uint16_t>(tmpSlot), lastLine);
+                                emit(OpCode::OP_POP, lastLine);
+                                
+                                compilePat(mp->rows[r][c].get(), tmpSlot);
+                                current().locals.pop_back();
+                            }
+                        }
+
+                        if (mp->restRow && mp->restRow->name.lexeme != "_") {
+                            emit(OpCode::OP_GET_LOCAL, lastLine); emit16(static_cast<uint16_t>(valSlot), lastLine);
+                            emit(OpCode::OP_CONSTANT, lastLine); emit16(makeConstant(Value(static_cast<double>(rows))), lastLine);
+                            emit(OpCode::OP_NONE, lastLine);
+                            emit(OpCode::OP_NONE, lastLine);
+                            emit(OpCode::OP_NONE, lastLine);
+                            emit(OpCode::OP_NONE, lastLine);
+                            emit(OpCode::OP_NONE, lastLine);
+                            emit(OpCode::OP_SLICE_GET, lastLine); emit(2, lastLine);
+                            
+                            int slot = resolveLocal(mp->restRow->name.lexeme);
+                            emit(OpCode::OP_SET_LOCAL, lastLine); emit16(static_cast<uint16_t>(slot), lastLine);
+                            emit(OpCode::OP_POP, lastLine);
+                        }
+                    } else if (auto* dp = dynamic_cast<DictPattern*>(p)) {
+                        emit(OpCode::OP_GET_LOCAL, lastLine); emit16(static_cast<uint16_t>(valSlot), lastLine);
+                        emit(OpCode::OP_MATCH_TYPE, lastLine); emit16(identifierConstant("dict"), lastLine);
+                        
+                        emit(OpCode::OP_GET_LOCAL, lastLine); emit16(static_cast<uint16_t>(valSlot), lastLine);
+                        emit(OpCode::OP_MATCH_TYPE, lastLine); emit16(identifierConstant("instance"), lastLine);
+                        
+                        emit(OpCode::OP_BIT_OR, lastLine);
+                        failJumps.push_back(chunk()->emitJump(OpCode::OP_JUMP_IF_FALSE, lastLine));
+                        emit(OpCode::OP_POP, lastLine);
+
+                        for (auto& entry : dp->entries) {
+                            emit(OpCode::OP_CONSTANT, lastLine); emit16(makeConstant(Value(entry.first)), lastLine);
+                            emit(OpCode::OP_GET_LOCAL, lastLine); emit16(static_cast<uint16_t>(valSlot), lastLine);
+                            emit(OpCode::OP_IN, lastLine);
+                            failJumps.push_back(chunk()->emitJump(OpCode::OP_JUMP_IF_FALSE, lastLine));
+                            emit(OpCode::OP_POP, lastLine);
+
+                            emit(OpCode::OP_GET_LOCAL, lastLine); emit16(static_cast<uint16_t>(valSlot), lastLine);
+                            emit(OpCode::OP_GET_PROPERTY, lastLine); emit16(identifierConstant(entry.first), lastLine);
+                            
+                            addLocal("<pat_tmp>", current().scopeDepth);
+                            int tmpSlot = static_cast<int>(current().locals.size()) - 1;
+                            emit(OpCode::OP_SET_LOCAL, lastLine); emit16(static_cast<uint16_t>(tmpSlot), lastLine);
+                            emit(OpCode::OP_POP, lastLine);
+                            
+                            compilePat(entry.second.get(), tmpSlot);
+                            current().locals.pop_back();
+                        }
+
+                        if (dp->rest && dp->rest->name.lexeme != "_") {
+                            emit(OpCode::OP_GET_GLOBAL, lastLine); emit16(identifierConstant("clone"), lastLine);
+                            emit(OpCode::OP_GET_LOCAL, lastLine); emit16(static_cast<uint16_t>(valSlot), lastLine);
+                            emit(OpCode::OP_CALL, lastLine); emit(1, lastLine);
+                            
+                            int restSlot = resolveLocal(dp->rest->name.lexeme);
+                            emit(OpCode::OP_SET_LOCAL, lastLine); emit16(static_cast<uint16_t>(restSlot), lastLine);
+                            emit(OpCode::OP_POP, lastLine);
+
+                            for (auto& entry : dp->entries) {
+                                emit(OpCode::OP_GET_GLOBAL, lastLine); emit16(identifierConstant("remove"), lastLine);
+                                emit(OpCode::OP_GET_LOCAL, lastLine); emit16(static_cast<uint16_t>(restSlot), lastLine);
+                                emit(OpCode::OP_CONSTANT, lastLine); emit16(makeConstant(Value(entry.first)), lastLine);
+                                emit(OpCode::OP_CALL, lastLine); emit(2, lastLine);
+                                emit(OpCode::OP_POP, lastLine);
+                            }
+                        }
+                    }
+                };
+
+                compilePat(pat.get(), subjectSlot);
+
+                bodyJumps.push_back(chunk()->emitJump(OpCode::OP_JUMP, lastLine));
+
+                for (int fj : failJumps) {
+                    chunk()->patchJump(fj);
+                }
+                if (!failJumps.empty()) {
+                    emit(OpCode::OP_POP, lastLine);
+                }
+            }
+
+            nextBranchJump = chunk()->emitJump(OpCode::OP_JUMP, lastLine);
+
+            for (int bj : bodyJumps) {
+                chunk()->patchJump(bj);
+            }
+
+            if (branch.guard) {
+                compileNode(branch.guard.get());
+                int guardFailJump = chunk()->emitJump(OpCode::OP_JUMP_IF_FALSE, lastLine);
+                emit(OpCode::OP_POP, lastLine);
+                
+                compileNode(branch.body.get());
+                endJumps.push_back(chunk()->emitJump(OpCode::OP_JUMP, lastLine));
+
+                chunk()->patchJump(guardFailJump);
+                emit(OpCode::OP_POP, lastLine);
+                
+                int guardToNextBranch = chunk()->emitJump(OpCode::OP_JUMP, lastLine);
+                chunk()->patchJump(nextBranchJump);
+                chunk()->patchJump(guardToNextBranch);
+            } else {
+                compileNode(branch.body.get());
+                endJumps.push_back(chunk()->emitJump(OpCode::OP_JUMP, lastLine));
+                chunk()->patchJump(nextBranchJump);
+            }
+
+            endScope();
+        }
+
+        emit(OpCode::OP_NONE, lastLine);
+
+        for (int ej : endJumps) {
+            chunk()->patchJump(ej);
+        }
+
+        current().locals.pop_back();
+
+        return {};
+    }
+
 }
