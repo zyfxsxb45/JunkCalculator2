@@ -2,9 +2,9 @@
   <strong>English</strong> | <a href="README_zh-CN.md">简体中文</a>
 </div>
 
-# Junk Calculator 2.4.0.0
+# Junk Calculator 2.4.1.0
 
-![Version](https://img.shields.io/badge/Version-v2.4.0.0-orange.svg?style=flat-square)
+![Version](https://img.shields.io/badge/Version-v2.4.1.0-orange.svg?style=flat-square)
 ![C++20](https://img.shields.io/badge/C%2B%2B-20-00599C.svg?style=flat-square&logo=c%2B%2B)
 ![Zero Dependencies](https://img.shields.io/badge/Dependencies-0-brightgreen.svg?style=flat-square)
 ![CMake](https://img.shields.io/badge/CMake-3.15+-064F8C.svg?style=flat-square&logo=cmake)
@@ -55,6 +55,7 @@ Native C++ extensions exposed to the execution context:
 - `bytes`: Memory buffering and low-level binary I/O operations.
 - `window`: Native GUI window rendering engine. Supports Mouse-Look pointer capturing and independent IME toggling (Win32).
 - `latex`: Bi-directional LaTeX engine. Serializes JC2 objects to LaTeX, and parses raw LaTeX formulas into executable closures.
+- `ffi` (experimental): Zero-dependency Foreign Function Interface. Supports dynamic loading of shared libraries (DLL/SO), direct C ABI function invocation, and raw memory/pointer manipulation.
 
 JC2 standard libraries loaded via `import`:
 - `collections`: Data structures including `Stack`, `Queue`, `Deque`, `PriorityQueue` (Heap), and Search Trees.
@@ -67,47 +68,29 @@ JC2 standard libraries loaded via `import`:
 
 ---
 
-## What's New in v2.4.0.0
+## What's New in v2.4.1.0
 
-Version 2.4.0.0 introduces significant architectural improvements, including a NaN-Boxing memory model and a raw pointer evaluation stack, resulting in substantial performance gains. The language syntax has been expanded with Uniform Function Call Syntax (UFCS), native namespaces, block-scoped variables, and element-wise matrix operations.
+Version 2.4.1.0 introduces a powerful pattern matching mechanism, adds zero-dependency FFI (Foreign Function Interface) support, and brings various optimizations and fixes to the math engine, virtual machine performance, and memory management.
 
-### Core Architecture & Performance
-- **NaN-Boxing Memory Model**: Replaced `std::variant` with a NaN-Boxing implementation for the dynamic `Value` type system, reducing memory footprint and improving dispatch speed. Introduced a dedicated boolean type (`ObjType::BOOL`).
-- **Raw Pointer Stack**: Replaced the `std::vector`-based evaluation stack in the VM with a raw pointer array, eliminating dynamic reallocation overhead.
-- **Compiler Optimizations**: Implemented constant folding and dead code elimination.
-- **Lazy Allocation**: Built-in closures are now lazily allocated and cached, significantly reducing Garbage Collector pressure during startup.
+### Core Syntax & Frontend
+- **Pattern Matching**: Introduced a powerful `match` expression supporting deep destructuring, pattern guards, and middle rest patterns (`...`) in list/matrix destructuring.
+- **Radix Literals**: Added support for hexadecimal (`0x`), binary (`0b`), and octal (`0o`) integer literals.
+- **Syntax Strictness**: Enforced statement terminators in the parser to prevent ambiguous parsing.
 
-### Language Features & Syntax
-- **Complex Destructuring**: Destructuring assignments now support complex l-values, allowing direct assignment to array indices and object properties (e.g., `[a[1], b.prop] = [1, 2]`).
-- **Uniform Function Call Syntax (UFCS)**: Functions can now be called using method syntax (e.g., `data.map(f)` is equivalent to `map(data, f)`), enhancing functional chaining with the pipe operator.
-- **Namespaces**: Introduced the `namespace` keyword for modular encapsulation. Namespaces are compiled as IIFEs returning a dictionary, supporting upvalue-backed fields and `const` exports.
-- **Block-Scoped Variables**: Added the `local` keyword to explicitly declare variables bound to the current block (`{}`, `if`, `for`), preventing function-scope pollution.
-- **Multi-line Strings**: Added support for triple-quoted strings (`"""` or `'''`), fully compatible with `f` (interpolation) and `r` (raw) prefixes.
-- **Lambda Enhancements**: Anonymous functions now support `ref` parameter binding and variadic arguments (`...`).
-- **Callable Instances**: Added the `__call__` magic method, allowing class instances to be invoked like functions.
+### Math & Operators
+- **Left Division & Bitwise Shift**: Added the left division operator `\` and its compound assignment `\=`; implemented bitwise left shift `<<` and right shift `>>` operators with single-evaluation compound assignment.
+- **Math Functions**: Refactored `sqrtD`, `cbrtD`, and `rootD` implementations via power operations, casting results to double/complex types.
 
-### Memory & Object Model
-- **Value-Based Container Equality**: Refactored equality and hashing logic for containers (`List`, `Dict`, `Set`) to support deep, value-based comparisons.
-- **O(1) Hash Caching**: Introduced a lazy hash cache for frozen containers, reducing the time complexity of using them as dictionary keys or set elements from O(N) to O(1).
-- **Deep Cloning**: Added the `copy()` built-in function for deep cloning objects while perfectly preserving their frozen/unfrozen states.
+### Virtual Machine & Memory Management
+- **Performance**: Cached current frame, chunk, and code pointers in the VM dispatch loop to boost execution performance.
+- **GC & Memory Safety**: Introduced RAII temporary root guards for enhanced GC protection; cleared popped stack slots to prevent lingering references from affecting Copy-On-Write (COW).
+- **Hashing & Types**: Rejected hash computation for non-frozen containers; treated `true`/`false` as `1.0`/`0.0` in numeric contexts; fixed the `in` operator to return boolean values.
 
-### Math Engine & Matrix Operations
-- **Element-wise Broadcasting**: Replaced implicit scalar broadcasting with a comprehensive suite of explicit element-wise operations (`addE`, `subE`, `mulE`, `divE`, `eqE`, `ltE`, `whereE`, etc.) supporting scalar-scalar, scalar-matrix, and matrix-matrix computations.
-- **Strict IEEE 754 Comparisons**: Removed fuzzy floating-point comparisons in favor of strict IEEE 754 standards. Added the `isapprox` function for tolerance-based comparisons.
-- **Forced Double-Precision Roots**: Added `sqrtD`, `cbrtD`, and `rootD` to bypass CAS symbolic promotion and directly compute numerical roots.
-- **Bitwise Operations**: Redefined bitwise NOT `~x` strictly as `-x-1` and removed implicit `BaseNum` conversions during bitwise operations.
-
-### Type System & Tooling
-- **Duck Typing Contracts**: Enhanced runtime type assertions with behavioral contracts (`iterable`, `callable`, `indexable`, `hashable`) and new type annotations (`str`, `whole`, `exact`).
-- **Dynamic Compilation**: Added `compileFile()` and `compileCode()` to dynamically compile external scripts or strings into bytecode closures at runtime.
-- **System Stability**: Implemented a safe `Ctrl+C` thread interrupt mechanism. Embedded application icon and version metadata for Windows executables.
-- **VS Code Extension**: Upgraded the language server with hover providers, document symbol outlines, and code snippets.
-
-### Breaking Changes
-- **True Boolean Type**: Introduced a native `bool` type. Predicate functions now return `bool` (`true`/`false`) instead of double-precision floats (`1.0`/`0.0`).
-- **Element-wise Function Renaming**: The old `*S` series scalar broadcasting functions (e.g., `addS`, `mulS`) have been upgraded and renamed to the `*E` series (e.g., `addE`, `mulE`).
-- **`none` Keyword**: Removed the `none()` built-in function; `none` is now a native language keyword.
-- **Higher-Order Function Signatures**: To adapt to Uniform Function Call Syntax (UFCS), the parameter order for higher-order functions like `map` and `filter` has been adjusted. The function parameter now comes after the container parameter (e.g., `map(data, func)`).
+### Modules, FFI & Toolchain
+- **FFI Enhancements**: Added zero-dependency FFI support (excluding f32) with ByteBuffer pointer auto-unpacking and 64-bit memory access.
+- **LaTeX Parser**: Upgraded the LaTeX parser with symbolic computation and multi-row matrix support.
+- **Disassembly & Debugging**: Enhanced disassembly to include all functions and added the `disassemble()` built-in function.
+- **VS Code Extension**: Added syntax highlighting, completion, and snippets for the `match` keyword.
 
 ---
 
